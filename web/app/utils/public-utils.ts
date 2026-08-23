@@ -72,5 +72,6 @@ export function toRawItem(item: PublicContentItem): RawItem {
     region: regionOf(item.platform),
     title: item.title || item.external_id,
     publishedAt: fmtTime(item.published_at || item.collected_at),
+    keywords: item.matched_keywords ?? [],
   }
 }

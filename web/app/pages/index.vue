@@ -40,6 +40,14 @@ const { data: feed, status: feedStatus } = await useAsyncData(
   { watch: [tab, page] },
 )
 const { data: stats } = await useAsyncData('home-stats', () => api<PublicStats>('/api/stats'))
+const { data: hotData } = await useAsyncData('home-hot', () =>
+  api<PublicContentList>('/api/contents', { query: { sort: 'hot', limit: 12 } }),
+)
+const communityPulse = computed(() =>
+  (hotData.value?.items ?? [])
+    .filter((i) => !['official', 'seeded'].includes(i.identity))
+    .slice(0, 5),
+)
 
 const isBriefing = computed(() => tab.value === 'briefing')
 const totalPages = computed(() =>
@@ -75,6 +83,16 @@ useSeoMeta({ title: '今日情报' })
       <p v-if="!eventList.length" class="px-4 py-10 text-center text-sm text-slate-400">
         事件整理中；引擎会随采集持续聚合官方公告与商品履约变化。
       </p>
+      <!-- 社区动向：命中监控关键词的热门用户内容 -->
+      <div v-if="communityPulse.length" class="border-t border-slate-200/70 px-4 py-3 dark:border-zinc-800/60">
+        <p class="text-xs font-medium text-slate-500 dark:text-zinc-400">社区动向 · 用户热议</p>
+        <div class="mt-1.5 space-y-1">
+          <NuxtLink v-for="i in communityPulse" :key="i.id" :to="`/contents/${i.id}`" class="flex items-baseline justify-between gap-3 text-[13px] leading-relaxed">
+            <span class="min-w-0 truncate text-slate-600 transition-colors hover:text-blue-600 dark:text-zinc-300 dark:hover:text-blue-300">{{ i.title }}</span>
+            <span class="mono shrink-0 text-xs text-slate-400">{{ ((i.metrics || {}).view ?? 0).toLocaleString() }} 播放</span>
+          </NuxtLink>
+        </div>
+      </div>
       <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
         <span>共 {{ eventsData?.total ?? 0 }} 条</span>
         <div class="flex items-center gap-3">

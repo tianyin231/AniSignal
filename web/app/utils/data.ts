@@ -120,5 +120,6 @@ export interface RawItem {
   publishedAt: string
   translated?: boolean
   mergedInto?: string
+  keywords?: string[]
 }
 

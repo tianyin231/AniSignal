@@ -29,6 +29,12 @@ defineProps<{ item: RawItem }>()
           <span aria-hidden="true">·</span>
           <NuxtLink :to="`/events/${item.mergedInto}`" class="link">已并入事件 ↗</NuxtLink>
         </template>
+        <template v-if="item.keywords?.length">
+          <span aria-hidden="true">·</span>
+          <span class="inline-flex flex-wrap gap-1">
+            <span v-for="k in item.keywords" :key="k" class="rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-700 dark:text-blue-300">{{ k }}</span>
+          </span>
+        </template>
         <span v-else class="text-slate-300 dark:text-zinc-600">· 独立内容</span>
       </div>
     </div>

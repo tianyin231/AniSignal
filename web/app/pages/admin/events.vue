@@ -52,6 +52,19 @@ async function save() {
   }
 }
 
+async function togglePin(event: ApiEvent) {
+  busy.value = true
+  try {
+    await api(`/api/admin/events/${event.id}`, { method: 'PUT', body: { importance: !event.importance } })
+    toast.ok(event.importance ? '已取消置顶' : '已置顶（排在要闻最前）')
+    await refresh()
+  } catch (exc: any) {
+    toast.err(`操作失败：${exc?.data?.detail ?? exc?.message}`)
+  } finally {
+    busy.value = false
+  }
+}
+
 async function toggleLock(event: ApiEvent) {
   busy.value = true
   try {
@@ -142,6 +155,9 @@ async function merge() {
               </td>
               <td class="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-zinc-300">{{ categoryMeta[event.category]?.label ?? event.category }}</td>
               <td class="px-3 py-2.5">
+                <button class="mr-1 rounded px-1.5 py-0.5 text-xs hover:underline" :class="event.importance ? 'text-red-500 dark:text-red-400' : 'text-slate-400'" :disabled="busy" :title="event.importance ? '点击取消置顶' : '置顶到要闻最前'" @click.stop="togglePin(event)">
+                  {{ event.importance ? '★ 已置顶' : '☆ 置顶' }}
+                </button>
                 <span class="chip" :class="{ 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400': event.confidence === 'high', 'bg-sky-500/10 text-sky-600 dark:text-sky-400': event.confidence === 'medium', 'bg-amber-500/10 text-amber-600 dark:text-amber-400': event.confidence === 'low' }">
                   {{ event.confidence }}
                 </span>

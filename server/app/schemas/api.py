@@ -2,7 +2,11 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _none_to_list(v):
+    return v if v is not None else []
 
 from app.models.enums import Platform, TargetType
 
@@ -38,6 +42,11 @@ class CollectTargetOut(BaseModel):
     co_terms: list[str] = []
     min_views: int = 0
     next_run_at: datetime | None
+
+    @field_validator("co_terms", mode="before")
+    @classmethod
+    def _co(cls, v):
+        return v or []
     last_run_at: datetime | None
     last_success_at: datetime | None
     consecutive_failures: int
@@ -94,6 +103,7 @@ class PublicContentItem(BaseModel):
     identity: str
     metrics: dict | None
     cover: str | None
+    matched_keywords: list[str] = []
 
 
 class PublicContentList(BaseModel):
@@ -126,6 +136,7 @@ class ContentDetailOut(BaseModel):
     metrics_history: list[ContentMetricPoint] = []
     event: dict | None = None
     translation: dict | None = None
+    matched_keywords: list[str] = []
     version: int | None = None
 
 
