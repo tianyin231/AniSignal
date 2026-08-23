@@ -72,3 +72,44 @@ class ContentItemOut(BaseModel):
 class ContentListOut(BaseModel):
     items: list[ContentItemOut]
     total: int
+
+
+class PublicContentItem(BaseModel):
+    id: int
+    platform: Platform
+    content_type: str
+    external_id: str
+    url: str | None
+    title: str | None
+    text_excerpt: str | None
+    published_at: datetime | None
+    collected_at: datetime
+    source_name: str | None
+    identity: str
+    metrics: dict | None
+    cover: str | None
+
+
+class PublicContentList(BaseModel):
+    items: list[PublicContentItem]
+    total: int
+
+
+class PublicSource(BaseModel):
+    name: str
+    platform: Platform
+    target_type: str
+    enabled: bool
+    last_success_at: datetime | None
+    consecutive_failures: int
+
+
+class PublicSourceList(BaseModel):
+    items: list[PublicSource]
+
+
+class PublicStats(BaseModel):
+    total_contents: int
+    by_platform: dict[str, int]
+    official_contents: int
+    latest_collected_at: datetime | None

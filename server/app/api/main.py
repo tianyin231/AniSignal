@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin import router as admin_router
+from app.api.public import router as public_router
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ app.add_middleware(
 )
 
 app.include_router(admin_router)
+app.include_router(public_router)
 
 
 @app.get("/api/healthz")

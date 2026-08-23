@@ -139,7 +139,12 @@ async def _ingest_one(
 async def _upsert_source(session: AsyncSession, normalized: NormalizedContent) -> int | None:
     author = normalized.author
     if not author or not author.external_id:
-        return None
+        # 账号体系外的官方来源（如库洛官网公告）：用平台级伪 ID 建一条 Source，
+        # 保证身份过滤与统计可依赖统一的 sources.identity
+        if author and author.name and author.identity == Identity.OFFICIAL:
+            author = author.model_copy(update={"external_id": f"official-{normalized.platform}"})
+        else:
+            return None
     identity = Identity.OFFICIAL if author.official_title else author.identity
     existing = await session.scalar(
         select(Source).where(
