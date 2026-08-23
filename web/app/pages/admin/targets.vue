@@ -9,6 +9,7 @@ const { api } = useAdminApi()
 const targets = ref<CollectTarget[]>([])
 const error = ref<string | null>(null)
 const busyId = ref<number | null>(null)
+const toast = useAdminToast()
 
 // 与后端能力对齐的可选组合（platform → 支持的 target_type）
 const combos: Record<string, string[]> = {
@@ -79,6 +80,7 @@ async function toggle(target: CollectTarget) {
       method: 'PUT',
       body: { enabled: !target.enabled },
     })
+    toast.ok(target.enabled ? '已停用' : '已启用')
     await refresh()
   } finally {
     busyId.value = null
@@ -89,6 +91,7 @@ async function runNow(target: CollectTarget) {
   busyId.value = target.id
   try {
     await api(`/api/admin/collect-targets/${target.id}/run`, { method: 'POST' })
+    toast.info(`「${target.display_name || target.target_value}」已加入采集队列`)
   } catch (exc: any) {
     error.value = `触发失败：${exc?.message ?? exc}`
   } finally {
@@ -101,6 +104,7 @@ async function remove(target: CollectTarget) {
   busyId.value = target.id
   try {
     await api(`/api/admin/collect-targets/${target.id}`, { method: 'DELETE' })
+    toast.ok('目标已删除')
     await refresh()
   } finally {
     busyId.value = null

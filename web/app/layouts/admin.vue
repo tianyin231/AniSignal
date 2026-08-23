@@ -57,5 +57,6 @@ const showingLogin = computed(() => route.path === '/admin/login')
     <main class="mx-auto max-w-5xl px-6 py-8">
       <slot />
     </main>
+    <AdminToasts />
   </div>
 </template>

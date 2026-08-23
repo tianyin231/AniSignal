@@ -10,6 +10,7 @@ const events = ref<ApiEvent[]>([])
 const total = ref(0)
 const error = ref<string | null>(null)
 const busy = ref(false)
+const toast = useAdminToast()
 
 const selected = ref<ApiEvent | null>(null)
 const edit = reactive({ title: '', conclusion: '', status_label: '', importance: false, confidence: 'medium' })
@@ -40,6 +41,7 @@ async function save() {
   busy.value = true
   try {
     await api(`/api/admin/events/${selected.value.id}`, { method: 'PUT', body: { ...edit, conclusion: edit.conclusion || null, status_label: edit.status_label || null } })
+    toast.ok('事件已保存并锁定')
     await refresh()
     const updated = events.value.find((e) => e.id === selected.value!.id)
     if (updated) pick(updated)
@@ -54,6 +56,7 @@ async function toggleLock(event: ApiEvent) {
   busy.value = true
   try {
     await api(`/api/admin/events/${event.id}/lock`, { method: 'POST', query: { locked: !event.manual_locked } })
+    toast.ok(event.manual_locked ? '已解锁，恢复引擎维护' : '已锁定')
     await refresh()
     const updated = events.value.find((e) => e.id === event.id)
     if (updated && selected.value?.id === event.id) pick(updated)
@@ -68,8 +71,9 @@ async function recompute() {
   busy.value = true
   error.value = null
   try {
+    toast.info('事件重算执行中…')
     const result = await api('/api/admin/events/recompute', { method: 'POST' })
-    alert(`重算完成：新建 ${result.events_created} / 证据 +${result.evidences_added} / 修订 +${result.revisions_written}`)
+    toast.ok(`重算完成：新建 ${result.events_created} · 证据 +${result.evidences_added} · 修订 +${result.revisions_written}`)
     await refresh()
   } catch (exc: any) {
     error.value = `重算失败：${exc?.message}`
@@ -85,6 +89,7 @@ async function merge() {
   busy.value = true
   try {
     await api('/api/admin/events/merge', { method: 'POST', body: { source_id: sourceId, target_id: selected.value.id } })
+    toast.ok(`事件 #${sourceId} 已合并进来`)
     mergeSource.value = ''
     await refresh()
   } catch (exc: any) {
@@ -104,7 +109,7 @@ async function merge() {
           引擎自动聚合，人工复核后编辑会自动锁定（引擎不再覆盖）。共 {{ total }} 条。
         </p>
       </div>
-      <button class="btn-primary px-4 py-2" :disabled="busy" @click="recompute">重算事件</button>
+      <button class="btn-primary px-4 py-2" :disabled="busy" @click="recompute">{{ busy ? '重算中…' : '重算事件' }}</button>
     </div>
 
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>

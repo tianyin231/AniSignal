@@ -9,6 +9,7 @@ const { api } = useAdminApi()
 const products = ref<ApiProduct[]>([])
 const error = ref<string | null>(null)
 const busy = ref(false)
+const toast = useAdminToast()
 
 const form = reactive({
   slug: '',
@@ -69,6 +70,7 @@ async function submit() {
     } else {
       await api('/api/admin/products', { method: 'POST', body: { slug: form.slug.trim(), ...body } })
     }
+    toast.ok(editing.value ? '商品已更新' : '商品已创建')
     editing.value = null
     form.slug = form.name = form.publisher = form.skus = form.price_note = ''
     form.presale_at = form.balance_window = form.original_ship_at = form.ship_note = form.watch_terms = ''
@@ -85,6 +87,7 @@ async function remove(product: ApiProduct) {
   busy.value = true
   try {
     await api(`/api/admin/products/${product.id}`, { method: 'DELETE' })
+    toast.ok(`商品「${product.name}」已删除`)
     await refresh()
   } finally {
     busy.value = false

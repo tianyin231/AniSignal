@@ -15,6 +15,7 @@ const { api } = useAdminApi()
 const rules = ref<Rule[]>([])
 const error = ref<string | null>(null)
 const busy = ref(false)
+const toast = useAdminToast()
 
 const categories = [
   'presale', 'balance', 'delay', 'unboxing', 'quality', 'review',
@@ -42,6 +43,7 @@ async function create() {
   busy.value = true
   try {
     await api('/api/admin/classification-rules', { method: 'POST', body: { ...form, pattern: form.pattern.trim() } })
+    toast.ok('规则已新增；点击「全量重算」生效')
     form.pattern = ''
     await refresh()
   } catch (exc: any) {
@@ -58,6 +60,7 @@ async function toggle(rule: Rule) {
       method: 'PUT',
       body: { category: rule.category, pattern: rule.pattern, platform: rule.platform, priority: rule.priority, enabled: !rule.enabled },
     })
+    toast.ok(rule.enabled ? '已停用' : '已启用')
     await refresh()
   } finally {
     busy.value = false
@@ -68,6 +71,7 @@ async function remove(rule: Rule) {
   busy.value = true
   try {
     await api(`/api/admin/classification-rules/${rule.id}`, { method: 'DELETE' })
+    toast.ok('规则已删除')
     await refresh()
   } finally {
     busy.value = false
@@ -78,8 +82,9 @@ async function reparseAll() {
   if (!confirm('用当前词典与解析器重算全部内容与事件？（原始数据不变，可能产生新版本与事件）')) return
   busy.value = true
   try {
+    toast.info('全量重算执行中（可能需要数十秒）…')
     const result = await api('/api/admin/reparse', { method: 'POST' })
-    alert(`重算完成：检查 ${result.checked} / 更新 ${result.updated}`)
+    toast.ok(`重算完成：检查 ${result.checked} 条，更新 ${result.updated} 条`)
     await refresh()
   } catch (exc: any) {
     error.value = `重算失败：${exc?.message}`
@@ -98,7 +103,7 @@ async function reparseAll() {
           标题/正文命中的关键词 → 类目；数字越小优先级越高。修改后需「全量重算」生效。
         </p>
       </div>
-      <button class="btn-primary px-4 py-2" :disabled="busy" @click="reparseAll">全量重算</button>
+      <button class="btn-primary px-4 py-2" :disabled="busy" @click="reparseAll">{{ busy ? '重算中…' : '全量重算' }}</button>
     </div>
 
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>

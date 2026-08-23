@@ -11,6 +11,16 @@
   html {
     scroll-behavior: smooth;
   }
+  /* Tailwind v4 preflight 不给 button 手型；操作型元素统一手型与禁用态 */
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role='button']:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
   body {
     background: var(--color-slate-100);
     color: var(--color-slate-900);

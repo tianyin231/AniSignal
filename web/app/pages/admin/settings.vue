@@ -6,6 +6,11 @@ useSeoMeta({ title: '站点设置 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
 const busy = ref(false)
+const busyWhat = ref('')
+const startBusy = (name: string) => { busy.value = true; busyWhat.value = name }
+const endBusy = () => { busy.value = false; busyWhat.value = '' }
+const toast = useAdminToast()
+const stamp = () => new Date().toLocaleTimeString('zh-CN', { hour12: false })
 const error = ref('')
 const notice = ref('')
 
@@ -60,100 +65,106 @@ async function refresh() {
 onMounted(refresh)
 
 async function saveSmtp() {
-  busy.value = true
+  startBusy('saveSmtp')
   error.value = notice.value = ''
   try {
     smtpInfo.value = await api<SmtpView>('/api/admin/settings/smtp', { method: 'PUT', body: smtp })
     smtp.password = ''
-    notice.value = 'SMTP 已保存'
+    toast.ok('SMTP 配置已保存')
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '保存失败'
+    toast.err('保存失败，请检查输入')
   } finally {
-    busy.value = false
+    endBusy()
   }
 }
 
 async function sendTest() {
   if (!testTo.value.trim() || busy.value) return
-  busy.value = true
+  startBusy('sendTest')
   testResult.value = ''
   try {
     const result = await api<{ sent: boolean; message: string }>('/api/admin/settings/smtp/test', {
       method: 'POST',
       body: { to: testTo.value.trim() },
     })
-    testResult.value = result.message
+    testResult.value = `${stamp()} · ${result.message}`
+    result.sent ? toast.ok('测试邮件已发出') : toast.err('测试邮件未发出，详见结果与日志')
   } catch (exc: any) {
-    testResult.value = exc?.data?.detail ?? '发送失败'
+    testResult.value = `${stamp()} · ${exc?.data?.detail ?? '发送失败'}`
+    toast.err('测试发送失败')
   } finally {
-    busy.value = false
+    endBusy()
   }
 }
 
 async function saveAi() {
-  busy.value = true
+  startBusy('saveAi')
   error.value = notice.value = ''
   try {
     await api('/api/admin/settings/ai', { method: 'PUT', body: ai })
     ai.api_key = ''
-    notice.value = 'LLM 配置已保存'
+    toast.ok('LLM 配置已保存')
     await refresh()
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '保存失败'
   } finally {
-    busy.value = false
+    endBusy()
   }
 }
 
 async function testAi() {
-  busy.value = true
+  if (busy.value) return
+  startBusy('testAi')
   aiTestResult.value = ''
   try {
     const r = await api<{ ok: boolean; message: string }>('/api/admin/settings/ai/test', { method: 'POST' })
-    aiTestResult.value = r.message
+    aiTestResult.value = `${stamp()} · ${r.message}`
+    r.ok ? toast.ok('LLM 连通正常') : toast.err('LLM 连通失败')
   } catch (exc: any) {
-    aiTestResult.value = exc?.data?.detail ?? '测试失败'
+    aiTestResult.value = `${stamp()} · ${exc?.data?.detail ?? '测试失败'}`
+    toast.err('LLM 测试请求失败')
   } finally {
-    busy.value = false
+    endBusy()
   }
 }
 
 async function summarizeAll() {
   if (!confirm('为缺少摘要的事件批量生成 AI 摘要？')) return
-  busy.value = true
+  startBusy('summarizeAll')
   try {
     const r = await api<{ attempted: number; ok: number; skipped: number }>('/api/admin/settings/ai/summarize-all', { method: 'POST' })
-    notice.value = `AI 摘要：处理 ${r.attempted} 个事件，成功 ${r.ok}，跳过 ${r.skipped}`
+    toast.ok(`AI 摘要完成：处理 ${r.attempted}，成功 ${r.ok}，跳过 ${r.skipped}`)
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '执行失败'
   } finally {
-    busy.value = false
+    endBusy()
   }
 }
 
 async function saveAnnouncement() {
-  busy.value = true
+  startBusy('saveAnnouncement')
   error.value = notice.value = ''
   try {
     await api('/api/admin/settings/announcement', { method: 'PUT', body: announcement })
-    notice.value = '公告已保存' + (announcement.enabled ? '并启用' : '（当前关闭）')
+    toast.ok('公告已保存' + (announcement.enabled ? '并启用' : '（当前关闭）'))
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '保存失败'
   } finally {
-    busy.value = false
+    endBusy()
   }
 }
 
 async function saveTexts() {
-  busy.value = true
+  startBusy('saveTexts')
   error.value = notice.value = ''
   try {
     texts.value = await api('/api/admin/settings/texts', { method: 'PUT', body: texts.value })
-    notice.value = '文案已保存并全站生效'
+    toast.ok('文案已保存并全站生效')
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '保存失败'
   } finally {
-    busy.value = false
+    endBusy()
   }
 }
 </script>
@@ -206,11 +217,11 @@ async function saveTexts() {
       </label>
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <button class="btn-primary inline-flex items-center gap-1.5 px-4 py-2" :disabled="busy" @click="saveSmtp">
-          <Save :size="14" /> 保存 SMTP
+          <Save :size="14" /> {{ busyWhat === 'saveSmtp' ? '保存中…' : '保存 SMTP' }}
         </button>
         <input v-model="testTo" type="email" placeholder="测试收件邮箱" class="w-52 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
         <button class="inline-flex items-center gap-1.5 rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy || !testTo.trim()" @click="sendTest">
-          <Send :size="14" /> 发送测试邮件
+          <Send :size="14" /> {{ busyWhat === 'sendTest' ? '发送中…' : '发送测试邮件' }}
         </button>
         <span v-if="testResult" class="text-xs" :class="testResult.includes('失败') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ testResult }}</span>
       </div>
@@ -238,9 +249,9 @@ async function saveTexts() {
         </div>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
-        <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveAi">保存 LLM 配置</button>
-        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="testAi">连通测试</button>
-        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="summarizeAll">批量补事件摘要</button>
+        <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveAi">{{ busyWhat === 'saveAi' ? '保存中…' : '保存 LLM 配置' }}</button>
+        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="testAi">{{ busyWhat === 'testAi' ? '测试中…' : '连通测试' }}</button>
+        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="summarizeAll">{{ busyWhat === 'summarizeAll' ? '执行中…' : '批量补事件摘要' }}</button>
         <span v-if="aiTestResult" class="text-xs" :class="aiTestResult.includes('失败') || aiTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ aiTestResult }}</span>
       </div>
     </section>
@@ -268,7 +279,7 @@ async function saveTexts() {
         <textarea v-model="announcement.text" rows="2" maxlength="500" placeholder="公告内容，如：今晚 22:00-23:00 系统维护，期间采集可能暂停。"
           class="w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" />
       </div>
-      <button class="btn-primary mt-3 px-4 py-2" :disabled="busy" @click="saveAnnouncement">保存公告</button>
+      <button class="btn-primary mt-3 px-4 py-2" :disabled="busy" @click="saveAnnouncement">{{ busyWhat === 'saveAnnouncement' ? '保存中…' : '保存公告' }}</button>
     </section>
 
     <!-- 文案区域 -->
@@ -283,7 +294,7 @@ async function saveTexts() {
           <textarea v-model="texts[key]" rows="2" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" />
         </div>
       </div>
-      <button class="btn-primary mt-4 px-4 py-2" :disabled="busy" @click="saveTexts">保存文案</button>
+      <button class="btn-primary mt-4 px-4 py-2" :disabled="busy" @click="saveTexts">{{ busyWhat === 'saveTexts' ? '保存中…' : '保存文案' }}</button>
     </section>
   </div>
 </template>
