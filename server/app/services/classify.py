@@ -39,23 +39,44 @@ DEFAULT_RULES: list[tuple[str, str, int]] = [
     ("version_update", "版本", 90),
     ("version_update", "维护公告", 91),
     ("version_update", "更新", 92),
+    # 闲聊/杂谈（负向类目：默认流隐藏，只留在证据池）
+    ("chat", "二创", 5),
+    ("chat", "同人", 6),
+    ("chat", "手书", 7),
+    ("chat", "杂谈", 8),
+    ("chat", "整活", 9),
+    ("chat", "玩梗", 12),
+    ("chat", "搞笑", 13),
+    ("chat", "剧情", 14),
+    ("chat", "cos", 15),
 ]
+
+# 默认不进入公开内容流的类目（管理端与搜索仍可查）
+HIDDEN_CATEGORIES = {"chat", "other"}
 
 # 官方身份 + 这些平台的内容未命中词典时按官方公告归类
 _OFFICIAL_FALLBACK_PLATFORMS = {"kuro_cn", "kuro_global"}
 
 
 async def seed_defaults(session: AsyncSession) -> int:
-    """词典为空时播种默认规则；返回播种条数。"""
-    count = len((await session.execute(select(ClassificationRule.id))).all())
-    if count:
+    """播种默认规则；已存在的 (category, pattern) 跳过（补充式，老库也能长出新词典）。"""
+    existing = {
+        (rule.category, rule.pattern)
+        for rule in (await session.execute(select(ClassificationRule))).scalars()
+    }
+    missing = [
+        (category, pattern, priority)
+        for category, pattern, priority in DEFAULT_RULES
+        if (category, pattern) not in existing
+    ]
+    if not missing:
         return 0
     session.add_all(
         ClassificationRule(category=category, pattern=pattern, priority=priority)
-        for category, pattern, priority in DEFAULT_RULES
+        for category, pattern, priority in missing
     )
     await session.commit()
-    return len(DEFAULT_RULES)
+    return len(missing)
 
 
 async def load_rules(session: AsyncSession) -> list[ClassificationRule]:

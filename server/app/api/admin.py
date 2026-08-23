@@ -100,6 +100,8 @@ async def create_target(
         display_name=body.display_name,
         interval_minutes=body.interval_minutes,
         enabled=body.enabled,
+        co_terms=body.co_terms,
+        min_views=body.min_views,
         next_run_at=utcnow() if body.enabled else None,
     )
     session.add(target)

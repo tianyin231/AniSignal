@@ -45,6 +45,8 @@ class Event(Base):
     confidence_reason: Mapped[str | None] = mapped_column(Text)
     conclusion: Mapped[str | None] = mapped_column(Text)
     status_label: Mapped[str | None] = mapped_column(String(64))
+    # 关键事实（结构化 [{label, value}]）：引擎模板生成，AI 摘要可覆盖
+    facts: Mapped[list] = mapped_column(JSON, default=list)
     regions: Mapped[list] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     manual_locked: Mapped[bool] = mapped_column(Boolean, default=False)

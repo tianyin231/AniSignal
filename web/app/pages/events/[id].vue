@@ -48,10 +48,23 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
       </div>
     </section>
 
+    <section v-if="detail.facts?.length" class="panel p-4 sm:p-5">
+      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">关键事实</h2>
+      <dl class="mt-3 grid grid-cols-2 gap-x-6 gap-y-2.5 sm:grid-cols-3">
+        <div v-for="f in detail.facts" :key="f.label">
+          <dt class="text-xs text-slate-400 dark:text-zinc-500">{{ f.label }}</dt>
+          <dd class="mt-0.5 text-sm text-slate-700 dark:text-zinc-200">{{ f.value }}</dd>
+        </div>
+      </dl>
+    </section>
+
     <section class="panel p-4 sm:p-5">
       <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">当前结论</h2>
+      <p v-if="detail.summary" class="mt-2 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
+        {{ detail.summary }}
+      </p>
       <p class="mt-2 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
-        {{ event.conclusion || event.summary || '结论整理中' }}
+        {{ event.conclusion || '结论整理中' }}
       </p>
       <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
         <span class="chip" :class="confidenceClass[event.confidence]">可信度 {{ event.confidence }}</span>

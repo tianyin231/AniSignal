@@ -14,6 +14,8 @@ class CollectTargetCreate(BaseModel):
     display_name: str | None = Field(default=None, max_length=255)
     interval_minutes: int = Field(default=30, ge=5, le=1440)
     enabled: bool = True
+    co_terms: list[str] = Field(default_factory=list)
+    min_views: int = Field(default=0, ge=0, le=10_000_000)
 
 
 class CollectTargetUpdate(BaseModel):
@@ -21,6 +23,8 @@ class CollectTargetUpdate(BaseModel):
     interval_minutes: int | None = Field(default=None, ge=5, le=1440)
     enabled: bool | None = None
     target_value: str | None = Field(default=None, min_length=1, max_length=255)
+    co_terms: list[str] | None = None
+    min_views: int | None = Field(default=None, ge=0, le=10_000_000)
 
 
 class CollectTargetOut(BaseModel):
@@ -31,6 +35,8 @@ class CollectTargetOut(BaseModel):
     display_name: str | None
     interval_minutes: int
     enabled: bool
+    co_terms: list[str] = []
+    min_views: int = 0
     next_run_at: datetime | None
     last_run_at: datetime | None
     last_success_at: datetime | None
@@ -119,6 +125,7 @@ class ContentDetailOut(BaseModel):
     metrics: dict | None = None
     metrics_history: list[ContentMetricPoint] = []
     event: dict | None = None
+    translation: dict | None = None
     version: int | None = None
 
 
@@ -171,6 +178,7 @@ class EventOut(BaseModel):
     confidence_reason: str | None
     conclusion: str | None
     status_label: str | None
+    facts: list[dict] = []
     regions: list[str]
     evidence_count: int
     sources: list[EventSourceOut]

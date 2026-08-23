@@ -56,6 +56,7 @@ export function toAppEvent(e: ApiEvent): AppEvent {
     confidenceReason: e.confidence_reason ?? '',
     conclusion: e.conclusion ?? '',
     statusChange: e.status_label ?? undefined,
+    facts: e.facts ?? [],
     corrections: (e.corrections ?? []).map((c) => ({
       at: fmtTime(c.at),
       note: `${c.actor === 'admin' ? '人工' : '引擎'}：${c.note}`,

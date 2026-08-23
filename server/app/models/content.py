@@ -90,3 +90,18 @@ class MetricSnapshot(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     raw_content: Mapped[RawContent] = relationship(back_populates="snapshots")
+
+
+class ContentTranslation(Base):
+    """内容的机翻结果（AI 层产物，可重算；一条内容一个目标语言）。"""
+
+    __tablename__ = "content_translations"
+
+    raw_content_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_contents.id", name="fk_content_translations_raw_content_id_raw_contents", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    lang: Mapped[str] = mapped_column(String(8), default="zh-CN")
+    text: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

@@ -103,6 +103,7 @@ async def events_to_out(
                 confidence_reason=event.confidence_reason,
                 conclusion=event.conclusion,
                 status_label=event.status_label,
+                facts=(event.facts or []),
                 regions=(event.regions or []),
                 evidence_count=len(sources) + len(conflicts),
                 sources=sources,
