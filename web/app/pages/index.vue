@@ -18,6 +18,7 @@ const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
 
 const { api } = usePublicApi()
+const { t } = useSiteConfig()
 const { data: feed, status } = await useAsyncData(
   () => `home-feed-${tab.value}-${page.value}`,
   () =>
@@ -62,6 +63,7 @@ useSeoMeta({ title: '今日情报' })
       <span>官方 <span class="mono text-slate-500 dark:text-zinc-400">{{ stats.official_contents }}</span> 条</span>
       <span v-if="stats.latest_collected_at">最近采集 {{ fmtTime(stats.latest_collected_at) }}</span>
     </section>
+    <p class="mb-3 px-1 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">{{ t('home_intro') }}</p>
 
     <section v-if="status === 'pending' || importantStatus === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…

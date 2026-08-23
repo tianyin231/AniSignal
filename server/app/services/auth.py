@@ -111,11 +111,14 @@ async def issue_code(session: AsyncSession, user: User, purpose: str) -> bool:
     await session.flush()
 
     action = "注册验证" if purpose == "register" else "密码重置"
+    from app.services.settings import get_effective_smtp
+
     sent = await send_email(
         user.email,
         f"AniSignal {action}验证码",
         f"你的验证码是：{code}\n{action}码 {_CODE_TTL_MINUTES} 分钟内有效。\n"
         f"如果这不是你本人的操作，请忽略本邮件。",
+        smtp=await get_effective_smtp(session),
     )
     if not sent:
         row.code_plain = code  # SMTP 未配置/失败：管理端排查通道

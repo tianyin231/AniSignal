@@ -1,6 +1,7 @@
 <template>
   <div class="min-h-screen">
     <div class="aurora-bg pointer-events-none fixed inset-0 -z-10" aria-hidden="true" />
+    <AnnouncementBanner />
     <AppTopBar />
     <div class="mx-auto max-w-[1280px] px-4 lg:px-6">
       <div class="grid gap-6 py-6 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_300px]">

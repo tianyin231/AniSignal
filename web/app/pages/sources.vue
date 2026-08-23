@@ -6,6 +6,7 @@ import type { PublicSource } from '~/composables/usePublicApi'
 useSeoMeta({ title: '来源健康' })
 
 const { api } = usePublicApi()
+const { t } = useSiteConfig()
 const { data } = await useAsyncData('public-sources', () => api<{ items: PublicSource[] }>('/api/sources'))
 
 const regionOf: Record<string, Region> = {
@@ -30,8 +31,7 @@ const targetTypeLabels: Record<string, string> = {
     <section class="panel p-4 sm:p-5">
       <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">来源健康</h1>
       <p class="mt-1.5 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
-        本页公开展示已接入来源、最近成功采集时间与不可用状态。全站任何「未发现」均指「在已接入来源中未发现」，
-        不宣传全网覆盖。必须登录或持续触发风控的来源不纳入可靠性承诺。
+        {{ t('sources_note') }}
       </p>
     </section>
 

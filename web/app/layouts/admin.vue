@@ -14,6 +14,7 @@ const nav = [
   { to: '/admin/events', label: '事件审核' },
   { to: '/admin/products', label: '商品管理' },
   { to: '/admin/rules', label: '分类词典' },
+  { to: '/admin/settings', label: '站点设置' },
   { to: '/admin/contents', label: '内容浏览' },
 ]
 

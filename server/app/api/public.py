@@ -239,6 +239,17 @@ async def get_product(slug: str, session: AsyncSession = Depends(get_session)):
     return await product_to_out(session, product)
 
 
+@router.get("/site-config")
+async def site_config(session: AsyncSession = Depends(get_session)):
+    """公开站点配置：全服公告与文案区域（不含任何 SMTP 信息）。"""
+    from app.services import settings as settings_service
+
+    return {
+        "announcement": await settings_service.get_announcement(session),
+        "texts": await settings_service.get_texts(session),
+    }
+
+
 @router.get("/stats", response_model=PublicStats)
 async def stats(session: AsyncSession = Depends(get_session)):
     by_platform_rows = await session.execute(

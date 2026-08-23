@@ -12,7 +12,8 @@ async function handleLogout() {
 
 <template>
   <div class="aurora-bg min-h-screen">
-    <header class="glass sticky top-0 z-20">
+    <AnnouncementBanner />
+  <header class="glass sticky top-0 z-20">
       <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
         <NuxtLink to="/" class="flex items-center gap-2">
           <span class="grid size-7 place-items-center rounded-md bg-blue-600 text-white">
