@@ -75,8 +75,15 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
             v-html="d.text_html"
           />
           <p v-else-if="d.text" class="mt-3 whitespace-pre-wrap text-[14px] leading-relaxed text-slate-700 dark:text-zinc-300">{{ d.text }}</p>
+          <div v-else-if="d.url" class="mt-3 rounded-xl border border-dashed border-slate-900/15 p-4 dark:border-white/15">
+            <p class="text-sm leading-relaxed text-slate-500 dark:text-zinc-400">
+              该内容为平台侧不展开正文的类型（B 站部分图文动态的正文与图片无法通过公开接口提取），
+              站内已保留标题、时间与互动数据；完整内容请查看原文。
+            </p>
+            <a :href="d.url" target="_blank" rel="noopener" class="btn-primary mt-3 inline-block px-4 py-2 text-sm">查看原文 ↗</a>
+          </div>
           <p v-else class="mt-3 text-sm text-slate-400 dark:text-zinc-500">
-            该类内容暂无可解析的正文（如纯图文动态的部分类型）；可查看原文或等待解析器升级后重算。
+            暂无可解析的正文。
           </p>
         </section>
 
