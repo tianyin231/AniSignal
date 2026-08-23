@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"
 
 # 已知官方账号（身份判定用；账号 UID 由配置注入，此处仅做兜底）
 _OFFICIAL_MID = "1955897084"  # 鸣潮官方账号，见 data-sources.md
@@ -47,14 +47,16 @@ def parse_dynamic(raw: dict) -> NormalizedContent:
         "reply": _int(raw.get("stat_reply")),
         "forward": _int(raw.get("stat_forward")),
     }
+    # 已知限制：部分图文/文章动态 text 为空（data-sources.md），不能假设正文已展开
+    text = raw.get("text") or None
     return NormalizedContent(
         platform=Platform.BILIBILI,
         content_type=ContentType.DYNAMIC,
         external_id=dynamic_id,
         author=author,
-        title=None,
-        # 已知限制：部分图文/文章动态 text 为空（data-sources.md），不能假设正文已展开
-        text=raw.get("text") or None,
+        # 动态没有标题字段：从正文推导展示标题（跳过话题标签行），纯图动态标记为图文
+        title=_display_title(text) or ("图文动态" if raw.get("pics") else None),
+        text=text,
         url=f"https://t.bilibili.com/{dynamic_id}" if dynamic_id else None,
         published_at=_ts(raw.get("pub_ts")),
         media=[p for p in (raw.get("pics") or []) if isinstance(p, str)],
@@ -64,6 +66,18 @@ def parse_dynamic(raw: dict) -> NormalizedContent:
             "video_bvid": raw.get("video_bvid") or None,
         },
     )
+
+
+def _display_title(text: str | None) -> str | None:
+    """取正文中第一行有意义的内容作为动态标题（跳过空行与 #话题# 行）。"""
+    if not text:
+        return None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        return stripped[:60] + ("…" if len(stripped) > 60 else "")
+    return None
 
 
 def _author(mid, name) -> NormalizedAuthor:
