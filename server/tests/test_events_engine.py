@@ -260,6 +260,38 @@ def test_series_name_does_not_merge_different_topics():
     assert len(clusters) == 2
 
 
+def test_youtube_same_character_videos_require_semantic_match():
+    """同角色的不同栏目视频不能仅凭公共英文片段自动合并。"""
+    from datetime import datetime
+
+    from app.services.events import ContentRow
+
+    ts = datetime(2026, 8, 20, 8)
+
+    def row(raw_id: int, title: str) -> ContentRow:
+        return ContentRow(
+            raw_id=raw_id,
+            platform="youtube",
+            external_id=str(raw_id),
+            url=None,
+            published_at=ts,
+            collected_at=ts,
+            title=title,
+            text="",
+            category=None,
+            identity="official",
+            source_name="Wuthering Waves",
+            source_external_id="UCofficial",
+        )
+
+    rows = [
+        row(1, "Resonator Highlights | Qingxiao"),
+        row(2, "Wuthering Waves Resonator Combat Showcase | Qingxiao"),
+    ]
+    assert len(cluster_announcements(rows)) == 2
+    assert len(cluster_announcements(rows, {(1, 2)})) == 1
+
+
 async def test_different_topics_not_merged(session):
     """同类目但标题无共享片段的两条官方公告 → 各自成事件（修复回归）。"""
     await _seed_rules(session)

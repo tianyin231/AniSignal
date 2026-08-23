@@ -206,6 +206,8 @@ def _rule_clusters(items: list[ContentRow]) -> list[list[ContentRow]]:
             last = cluster[-1]
             if (
                 row.category == last.category
+                and row.platform != "youtube"
+                and all(item.platform != "youtube" for item in cluster)
                 and _sort_key(row) - _sort_key(last) <= _MERGE_WINDOW
                 and all(_shared_title(row.title, item.title) for item in cluster)
             ):
