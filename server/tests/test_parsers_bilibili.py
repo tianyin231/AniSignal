@@ -72,6 +72,27 @@ def test_parse_dynamic_official_author_and_empty_text():
     assert c.url == "https://t.bilibili.com/1235883715731652807"
 
 
+def test_parse_dynamic_derives_title_from_text():
+    raw = dict(
+        DYNAMIC_RAW,
+        type="DYNAMIC_TYPE_AV",
+        text="#鸣潮# #鸣潮3.6版本#\n《鸣潮》剧情动画 | 仙尘\n“今月曾经照古人。”",
+        video_bvid="BV1kp8z6REgg",
+    )
+    c = parse_dynamic(raw)
+    # 跳过话题标签行，取第一句正文作为展示标题
+    assert c.title == "《鸣潮》剧情动画 | 仙尘"
+    assert c.extra["video_bvid"] == "BV1kp8z6REgg"
+
+
+def test_parse_dynamic_image_only_gets_fallback_title():
+    raw = dict(DYNAMIC_RAW, text="", pics=["https://i0.hdslb.com/bfs/a.jpg"])
+    c = parse_dynamic(raw)
+    assert c.text is None
+    assert c.title == "图文动态"
+    assert c.media == ["https://i0.hdslb.com/bfs/a.jpg"]
+
+
 def test_parse_video_minimal_fields():
     c = parse_video({"bvid": "BV1abc", "owner_mid": 1, "owner_name": "x", "pubdate": 0})
     assert c.external_id == "BV1abc"
