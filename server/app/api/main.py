@@ -40,13 +40,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AniSignal API", version="0.1.0", lifespan=lifespan)
 
-# Nuxt dev server；生产同源部署时收紧
+# 跨域来源由 ANISIGNAL_CORS_ORIGINS 配置（本地 dev + 部署的 web 源）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=get_settings().cors_origin_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -35,6 +35,7 @@ services:
       ANISIGNAL_DATABASE_URL: mysql+asyncmy://root:${MYSQL_ROOT_PASSWORD:-anisignal}@mysql:3306/anisignal
       ANISIGNAL_REDIS_URL: redis://redis:6379/0
       ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:-change-me}
+      ANISIGNAL_CORS_ORIGINS: ${ANISIGNAL_CORS_ORIGINS:-http://localhost:3000,http://154.40.58.230:8090}
       TZ: Asia/Shanghai
     depends_on:
       mysql:
@@ -42,8 +43,19 @@ services:
       redis:
         condition: service_healthy
     ports:
-      # 只绑回环：管理 API 不直接暴露公网，测试走 SSH，公网访问等反代阶段
-      - "127.0.0.1:${API_PORT:-8000}:8000"
+      # 公网可达（web 前端从浏览器直连此 API）；上域名/HTTPS 后建议收回反代后
+      - "${API_PORT:-8000}:8000"
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    environment:
+      # 浏览器直连的 API 地址（不是容器内地址）
+      NUXT_PUBLIC_API_BASE: ${PUBLIC_API_BASE:-http://154.40.58.230:8000}
+    ports:
+      - "${WEB_PORT:-8090}:3000"
+    depends_on:
+      - api
 
   scheduler:
     build: ./server
