@@ -59,7 +59,7 @@ services:
   worker:
     build: ./server
     restart: unless-stopped
-    command: arq app.worker.settings.worker_settings
+    command: arq app.worker.settings.WorkerSettings
     environment: *app_env
     depends_on:
       mysql:
