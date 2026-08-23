@@ -19,6 +19,12 @@ from app.schemas.content import FetchResult
 logger = logging.getLogger(__name__)
 
 _DYNAMIC_DETAIL_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail"
+_DYNAMIC_DETAIL_PARAMS = {
+    "timezone_offset": -480,
+    "platform": "web",
+    "gaia_source": "main_web",
+    "features": "itemOpusStyle",
+}
 _DRAW_DETAIL_CACHE: dict[str, dict] = {}
 _DRAW_DETAIL_CACHE_LIMIT = 256
 
@@ -163,7 +169,10 @@ class BilibiliCollector:
             "Referer": f"https://t.bilibili.com/{dynamic_id}",
         }
         async with httpx.AsyncClient(timeout=self._timeout, headers=headers) as client:
-            response = await client.get(_DYNAMIC_DETAIL_URL, params={"id": dynamic_id})
+            response = await client.get(
+                _DYNAMIC_DETAIL_URL,
+                params={"id": dynamic_id, **_DYNAMIC_DETAIL_PARAMS},
+            )
             response.raise_for_status()
         payload = response.json()
         if payload.get("code") != 0:
@@ -195,17 +204,22 @@ def _loads(text: str) -> object:
 
 
 def _extract_dynamic_detail(payload: dict) -> dict:
-    """把 B 站公开动态详情中的描述和 DRAW 图片映射为项目采集字段。"""
+    """兼容 B 站旧 DRAW 与新版 OPUS 动态详情结构。"""
     item = ((payload.get("data") or {}).get("item") or {})
     dynamic = ((item.get("modules") or {}).get("module_dynamic") or {})
     desc = dynamic.get("desc") or {}
-    draw = ((dynamic.get("major") or {}).get("draw") or {})
+    major = dynamic.get("major") or {}
+    draw = major.get("draw") or {}
+    opus = major.get("opus") or {}
+    summary = opus.get("summary") or {}
     pics = []
-    for image in draw.get("items") or []:
-        src = image.get("src") if isinstance(image, dict) else None
+    for image in (opus.get("pics") or draw.get("items") or []):
+        src = (image.get("url") or image.get("src")) if isinstance(image, dict) else None
         if isinstance(src, str) and src:
             pics.append("https://" + src[7:] if src.startswith("http://") else src)
     text = desc.get("text") if isinstance(desc, dict) else None
+    if not text and isinstance(summary, dict):
+        text = summary.get("text")
     return {"text": text or "", "pics": pics}
 
 

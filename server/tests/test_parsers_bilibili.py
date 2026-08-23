@@ -130,6 +130,38 @@ def test_extract_anonymous_draw_detail_images_and_text():
     }
 
 
+def test_extract_anonymous_opus_detail_images_and_text():
+    payload = {
+        "code": 0,
+        "data": {
+            "item": {
+                "modules": {
+                    "module_dynamic": {
+                        "desc": None,
+                        "major": {
+                            "opus": {
+                                "summary": {"text": "#鸣潮#\n新版 OPUS 配文"},
+                                "pics": [
+                                    {"url": "http://i0.hdslb.com/opus-a.jpg"},
+                                    {"url": "https://i0.hdslb.com/opus-b.jpg"},
+                                ],
+                            }
+                        },
+                    }
+                }
+            }
+        },
+    }
+
+    assert _extract_dynamic_detail(payload) == {
+        "text": "#鸣潮#\n新版 OPUS 配文",
+        "pics": [
+            "https://i0.hdslb.com/opus-a.jpg",
+            "https://i0.hdslb.com/opus-b.jpg",
+        ],
+    }
+
+
 def test_parse_video_minimal_fields():
     c = parse_video({"bvid": "BV1abc", "owner_mid": 1, "owner_name": "x", "pubdate": 0})
     assert c.external_id == "BV1abc"
