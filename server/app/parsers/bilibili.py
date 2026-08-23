@@ -37,8 +37,8 @@ def parse_video(raw: dict) -> NormalizedContent:
     )
 
 
-# CLI 对部分动态类型（如 DRAW）不展开正文与图片字段（data-sources.md 已知限制），
-# 至少用类型标签作为展示标题；完整正文需要后续补充原始接口解析
+# CLI 对部分动态类型（如 DRAW）不展开正文与图片字段；采集器会用匿名公开详情补全，
+# 若平台临时拒绝详情请求，仍用类型标签作为可追溯的展示标题。
 _DYNAMIC_TYPE_LABELS = {
     "DYNAMIC_TYPE_DRAW": "图文动态",
     "DYNAMIC_TYPE_ARTICLE": "专栏动态",
@@ -57,7 +57,7 @@ def parse_dynamic(raw: dict) -> NormalizedContent:
         "reply": _int(raw.get("stat_reply")),
         "forward": _int(raw.get("stat_forward")),
     }
-    # 已知限制：部分图文/文章动态 text 为空（data-sources.md），不能假设正文已展开
+    # 公开详情也可能只含图片而无描述，不能假设正文一定存在。
     text = raw.get("text") or None
     return NormalizedContent(
         platform=Platform.BILIBILI,

@@ -22,8 +22,12 @@ from app.models import (
     ContentTranslation,
     ContentVersion,
     Event,
+    EventRevision,
     Evidence,
+    FULFILLMENT_STAGES,
+    Product,
     RawContent,
+    Source,
 )
 
 logger = logging.getLogger(__name__)
@@ -301,3 +305,161 @@ async def translate_content(session: AsyncSession, content_id: int) -> dict:
     existing.model = config["model"]
     await session.commit()
     return {"status": "ok", "chars": len(translated)}
+
+
+async def assess_product_stage(session: AsyncSession, product_id: int) -> dict:
+    """让模型审核商品履约证据；服务端再校验证据归属和独立账号数量。"""
+    product = await session.get(Product, product_id)
+    if product is None:
+        return {"status": "skipped", "reason": "product_not_found"}
+
+    config = await get_ai_config(session)
+    if not ai_available(config):
+        return {"status": "skipped", "reason": "ai_not_configured"}
+
+    latest_sq = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("version"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
+    rows = list(
+        await session.execute(
+            select(RawContent, ContentVersion, Event, Source)
+            .join(Evidence, Evidence.raw_content_id == RawContent.id)
+            .join(Event, Evidence.event_id == Event.id)
+            .join(latest_sq, latest_sq.c.rid == RawContent.id)
+            .join(
+                ContentVersion,
+                (ContentVersion.raw_content_id == latest_sq.c.rid)
+                & (ContentVersion.version == latest_sq.c.version),
+            )
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .where(
+                Event.product_id == product_id,
+                Event.is_active.is_(True),
+                Event.category.in_(["unboxing", "arrived"]),
+                Evidence.role != "excluded",
+            )
+            .order_by(RawContent.published_at.desc(), RawContent.id.desc())
+            .limit(30)
+        )
+    )
+
+    candidates: list[dict] = []
+    candidate_accounts: dict[int, str] = {}
+    seen_ids: set[int] = set()
+    for raw, version, event, source in rows:
+        if raw.id in seen_ids:
+            continue
+        seen_ids.add(raw.id)
+        account_key = source.external_id if source else f"{raw.platform}:{raw.external_id}"
+        candidate_accounts[raw.id] = account_key
+        candidates.append(
+            {
+                "id": raw.id,
+                "platform": raw.platform,
+                "account": source.name if source else None,
+                "account_id": account_key,
+                "identity_hint": source.identity if source else "unknown",
+                "category_hint": event.category,
+                "published_at": raw.published_at.isoformat() if raw.published_at else None,
+                "title": (version.title or raw.external_id)[:240],
+                "text": _plain_evidence(version.text or "")[:1800],
+            }
+        )
+    if not candidates:
+        return {"status": "skipped", "reason": "no_evidences"}
+
+    system = (
+        "你是商品履约证据审核员，只能使用输入证据判断，并只输出 JSON："
+        '{"stage":0,"reason":"中文理由","evidence_ids":[1]}。'
+        "阶段仅允许 0 到 3：0=证据不足；1=明确为送测/媒体样品；"
+        "2=至少一名独立普通购买者明确表示已收到、到货或开箱；"
+        "3=至少三名独立普通购买者满足阶段2。"
+        "商家展示、官方宣传、媒体送测、自费预览、仅提及商品或等待发货都不算普通用户到货。"
+        "必须核对内容确实对应目标商品；不要根据播放量或标题中的营销措辞推测身份。"
+        "evidence_ids 只能选输入中的 id；阶段大于0必须给证据，理由要说明账号性质和到货事实。"
+    )
+    user = (
+        f"目标商品：{product.name}\n匹配词：{json.dumps(product.watch_terms or [], ensure_ascii=False)}\n"
+        f"候选证据：\n{json.dumps(candidates, ensure_ascii=False)}"
+    )
+    started = time.monotonic()
+    try:
+        raw_out, usage = await chat(config, system, user, json_mode=True)
+        parsed = json.loads(raw_out)
+        stage = int(parsed.get("stage"))
+        reason = str(parsed.get("reason") or "").strip()[:1000]
+        evidence_ids = list(dict.fromkeys(int(item) for item in parsed.get("evidence_ids", [])))
+        available_ids = set(candidate_accounts)
+        selected = set(evidence_ids)
+        if stage not in range(4) or not reason:
+            raise ValueError("invalid stage or empty reason")
+        if not selected.issubset(available_ids):
+            raise ValueError("model selected unavailable evidence")
+        if stage > 0 and not selected:
+            raise ValueError("positive stage has no evidence")
+        if stage >= 2:
+            account_count = len({candidate_accounts[item] for item in selected})
+            required = 3 if stage == 3 else 1
+            if account_count < required:
+                raise ValueError(f"stage {stage} has only {account_count} accounts")
+    except Exception as exc:  # noqa: BLE001
+        await record_usage(
+            session,
+            task="assess_product",
+            config=config,
+            usage=locals().get("usage"),
+            duration_ms=int((time.monotonic() - started) * 1000),
+            ref_id=product_id,
+            status="failed",
+        )
+        logger.warning("assess_product_stage %s failed: %r", product_id, exc)
+        return {"status": "failed", "reason": "model_output_invalid"}
+
+    await record_usage(
+        session,
+        task="assess_product",
+        config=config,
+        usage=usage,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        ref_id=product_id,
+    )
+    product.stage_hint = stage
+    product.stage_hint_source = "ai"
+    product.stage_hint_reason = reason
+    product.stage_hint_evidence_ids = evidence_ids
+    product.stage_hint_updated_at = utcnow()
+    effective = max(product.computed_stage, stage)
+    label = FULFILLMENT_STAGES[effective]
+    events = list(
+        (
+            await session.execute(
+                select(Event).where(
+                    Event.product_id == product_id,
+                    Event.is_active.is_(True),
+                    Event.category.in_(["unboxing", "arrived"]),
+                )
+            )
+        ).scalars()
+    )
+    for event in events:
+        event.status_label = label
+        event.last_updated_at = utcnow()
+        session.add(
+            EventRevision(
+                event_id=event.id,
+                actor="ai",
+                note=f"AI 履约判断：{label}；绑定 {len(evidence_ids)} 条证据",
+            )
+        )
+    await session.commit()
+    return {
+        "status": "ok",
+        "stage": effective,
+        "stage_label": label,
+        "evidence_ids": evidence_ids,
+    }

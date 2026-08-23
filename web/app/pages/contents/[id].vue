@@ -72,8 +72,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
     </section>
 
     <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <div class="space-y-4">
-        <section v-if="biliPlayerUrl" class="panel overflow-hidden">
+        <section v-if="biliPlayerUrl" class="panel overflow-hidden lg:col-span-2">
           <div class="aspect-video bg-black">
             <iframe
               :src="biliPlayerUrl"
@@ -88,7 +87,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         </section>
 
         <!-- 正文（站内解析预览） -->
-        <section class="panel p-4 sm:p-5">
+        <section class="panel p-4 sm:p-5 lg:col-span-2">
           <h2 class="text-sm font-semibold">内容解析</h2>
           <div
             v-if="d.text_html"
@@ -98,8 +97,8 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
           <p v-else-if="d.text" class="mt-3 whitespace-pre-wrap text-[14px] leading-relaxed text-slate-700 dark:text-zinc-300">{{ d.text }}</p>
           <div v-else-if="d.preview_mode === 'external_only' && d.url" class="mt-3 rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 p-4">
             <p class="text-sm leading-relaxed text-slate-500 dark:text-zinc-400">
-              该内容为平台侧不展开正文的类型（B 站部分图文动态的正文与图片无法通过公开接口提取），
-              站内已保留标题、时间与互动数据；完整内容请查看原文。
+              本轮未能从平台公开详情取得可预览正文或图片，站内已保留标题、时间与互动数据；
+              可能是内容本身仅含平台组件，也可能是公开接口临时受限，完整内容请查看原文。
             </p>
             <a :href="d.url" target="_blank" rel="noopener" class="btn-primary mt-3 inline-block px-4 py-2 text-sm">查看原文 ↗</a>
           </div>
@@ -108,6 +107,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
           </p>
         </section>
 
+      <div class="space-y-4">
         <!-- 机翻（外语内容） -->
         <section v-if="d.translation" class="panel p-4 sm:p-5">
           <h2 class="flex items-center gap-2 text-sm font-semibold">机翻（简体中文）</h2>

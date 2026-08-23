@@ -535,7 +535,7 @@ def _product_conclusion(category: str, items: list[ContentRow], product: Product
 async def _advance_stage(
     session: AsyncSession, product: Product, contents: list[ContentRow], stats: AggStats
 ) -> None:
-    """按开箱/到货证据推进履约阶梯；stage_hint ≥ 0 时以管理端指定为准。"""
+    """按开箱/到货证据推进阶梯；人工可覆盖，AI 结论不可压低规则证据。"""
     unboxing = [
         row
         for row in contents
@@ -570,12 +570,26 @@ async def _advance_stage(
             )
         ).scalars()
     )
+    hint_source = product.stage_hint_source or (
+        "manual" if product.stage_hint >= 0 else None
+    )
     manual_valid = bool(
-        0 < product.stage_hint <= 3
+        hint_source == "manual"
+        and 0 < product.stage_hint <= 3
         and (product.stage_hint_reason or "").strip()
         and (product.stage_hint_evidence_ids or [])
     )
-    effective = product.stage_hint if manual_valid else stage
+    ai_valid = bool(
+        hint_source == "ai"
+        and 0 <= product.stage_hint <= 3
+        and (product.stage_hint_reason or "").strip()
+        and (product.stage_hint == 0 or product.stage_hint_evidence_ids or [])
+    )
+    effective = (
+        product.stage_hint
+        if manual_valid
+        else max(stage, product.stage_hint) if ai_valid else stage
+    )
     label = FULFILLMENT_STAGES[min(effective, len(FULFILLMENT_STAGES) - 1)]
     for event in events:
         event.last_updated_at = utcnow()

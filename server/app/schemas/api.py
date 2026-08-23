@@ -246,7 +246,7 @@ class ProductOut(BaseModel):
     stage_hint: int = -1
     current_stage: int
     stage_label: str
-    stage_source: str  # unverified / automatic / manual
+    stage_source: str  # unverified / automatic / ai / manual
     stage_reason: str
     stage_updated_at: datetime | None = None
     stage_evidence_ids: list[int] = []

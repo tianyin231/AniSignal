@@ -1,5 +1,6 @@
 """B 站解析器单测：样例字段来自 data-sources.md 的实测返回（2026-08-13）。"""
 
+from app.collectors.bilibili import _extract_dynamic_detail
 from app.parsers.bilibili import parse_dynamic, parse_video
 
 VIDEO_RAW = {
@@ -99,6 +100,34 @@ def test_parse_dynamic_draw_without_fields_gets_type_label():
     raw = dict(DYNAMIC_RAW, type="DYNAMIC_TYPE_DRAW", text="", pics=[])
     c = parse_dynamic(raw)
     assert c.title == "图文动态"
+
+
+def test_extract_anonymous_draw_detail_images_and_text():
+    payload = {
+        "code": 0,
+        "data": {
+            "item": {
+                "modules": {
+                    "module_dynamic": {
+                        "desc": {"text": "动态说明"},
+                        "major": {
+                            "draw": {
+                                "items": [
+                                    {"src": "http://i0.hdslb.com/a.jpg"},
+                                    {"src": "https://i0.hdslb.com/b.jpg"},
+                                ]
+                            }
+                        },
+                    }
+                }
+            }
+        },
+    }
+
+    assert _extract_dynamic_detail(payload) == {
+        "text": "动态说明",
+        "pics": ["https://i0.hdslb.com/a.jpg", "https://i0.hdslb.com/b.jpg"],
+    }
 
 
 def test_parse_video_minimal_fields():
