@@ -15,10 +15,10 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 |---|---|---|
 | 产品设计文档 | `docs/superpowers/specs/` | 已定稿，评审通过 |
 | Web 前端 | `web/`（Nuxt 4 + Tailwind 4） | 原型可用；`/admin` 管理看板已接真实后端 |
-| 后端/采集/调度 | `server/`（FastAPI + arq + compose） | **首版骨架已落地（2026-08-22）**：四平台采集器、幂等入库、调度器、Admin API、24 个单测全过 |
+| 后端/采集/调度 | `server/`（FastAPI + arq + compose） | 采集闭环稳定运行中；**事件引擎 v1 已上线（2026-08-23）**：规则分类（词典可管理）→ 公告合并/商品履约聚合 → 事件+证据+修订落库，51 个单测全过 |
 | 部署 | 根目录 `Dockerfile` + `compose.yaml` | **4 容器形态（2026-08-23 定稿）**：mysql / redis / app（FastAPI+Nitro 同容器，对外仅 8090，`/api/**` 同源代理，管理接口在 `/api/admin/**`）/ collector（调度+worker 同容器，Redis 领导锁支持 `--scale collector=N`）。数据 bind mount 在 `./data/`（服务器 /www 盘）；单镜像含 bili+python+node |
 
-`server/` 关键路径：`app/collectors/`（平台采集器）、`app/parsers/`（统一 schema 解析）、`app/services/ingest.py`（幂等入库）、`app/services/collect.py`（编排+健康）、`app/services/queue.py`（BaseQueue：ArqQueue 生产 / LocalQueue 进程内）、`app/scheduler/loop.py`、`app/worker/settings.py`、`app/api/admin.py`、`app/local.py`（**本地测试入口：`uv run python -m app.local`，SQLite+进程内队列，免 Docker/MySQL/Redis**）。新平台接入 = collector + parser + 在 `ingest.PARSERS` 与 `collect._COLLECTORS` 各注册一行。
+`server/` 关键路径：`app/services/classify.py`（规则分类+词典种子）、`app/services/events.py`（聚合引擎：72h+标题公共子串聚类、履约阶梯、证据重叠合并——宁缺勿滥，不同主题不合并）、`app/services/views.py`（事件/商品 API 序列化）、`app/collectors/`（平台采集器）、`app/parsers/`（统一 schema 解析）、`app/services/ingest.py`（幂等入库）、`app/services/collect.py`（编排+健康）、`app/services/queue.py`（BaseQueue：ArqQueue 生产 / LocalQueue 进程内）、`app/scheduler/loop.py`、`app/worker/settings.py`、`app/api/admin.py`、`app/local.py`（**本地测试入口：`uv run python -m app.local`，SQLite+进程内队列，免 Docker/MySQL/Redis**）。新平台接入 = collector + parser + 在 `ingest.PARSERS` 与 `collect._COLLECTORS` 各注册一行。
 
 平台验证笔记原文在 `.worktrees/platform-probe/docs/platform-integration-notes.md`，但该目录不被 git 跟踪；**唯一持久副本是本 skill 的 `references/data-sources.md`**，引用时以后者为准。
 
