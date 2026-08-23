@@ -399,7 +399,11 @@ async def _ensure_event(
 async def _find_active_event(
     session: AsyncSession, category: str, product_id: int | None, raw_ids: set[int]
 ) -> Event | None:
-    """同类目同范围的活跃事件中，找证据有交集的那个；官方类唯一活跃事件可延续。"""
+    """同类目同范围的活跃事件中，找证据有交集的那个。
+
+    只按证据重叠合并：不同主题的公告即使同类目也各自成事件（宁缺勿滥）；
+    商品事件同类目本就单一，靠重叠即可延续。
+    """
     product_filter = (
         Event.product_id.is_(None) if product_id is None else Event.product_id == product_id
     )
@@ -422,8 +426,6 @@ async def _find_active_event(
         )
         if overlap:
             return event
-    if product_id is None and len(events) == 1:
-        return events[0]
     return None
 
 

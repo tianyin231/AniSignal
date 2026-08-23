@@ -185,3 +185,22 @@ def test_cluster_shared_title_logic():
     assert len(clusters) == 2
     assert len(clusters[0]) == 2  # a b 同主题
     assert len(clusters[1]) == 1  # c 独立
+
+
+async def test_different_topics_not_merged(session):
+    """同类目但标题无共享片段的两条官方公告 → 各自成事件（修复回归）。"""
+    await _seed_rules(session)
+    await ingest_items(
+        session,
+        "kuro_notices",
+        [
+            {"platform": "kuro_cn", "entry": {"id": "7001", "tabTitle": {"zh-Hans": "防沉迷系统机制说明"}}, "detail": None},
+            {"platform": "kuro_cn", "entry": {"id": "7002", "tabTitle": {"zh-Hans": "问题反馈渠道调整公告"}}, "detail": None},
+        ],
+    )
+    await run_aggregation(session)
+    await session.commit()
+    announces = list(
+        (await session.execute(select(Event).where(Event.category == "official_announce"))).scalars()
+    )
+    assert len(announces) == 2, "不同主题的公告不应合并"
