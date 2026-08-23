@@ -25,6 +25,8 @@ const form = reactive({
   target_value: '',
   display_name: '',
   interval_minutes: 30,
+  co_terms: '',
+  min_views: 0,
 })
 const creating = ref(false)
 const formError = ref<string | null>(null)
@@ -54,10 +56,14 @@ async function create() {
         target_value: form.target_value.trim(),
         display_name: form.display_name.trim() || null,
         interval_minutes: Number(form.interval_minutes) || 30,
+        co_terms: form.co_terms.split(/[,，]/).map((x: string) => x.trim()).filter(Boolean),
+        min_views: Number(form.min_views) || 0,
       },
     })
     form.target_value = ''
     form.display_name = ''
+    form.co_terms = ''
+    form.min_views = 0
     await refresh()
   } catch (exc: any) {
     formError.value = exc?.statusCode === 409 ? '该目标已存在' : `创建失败：${exc?.data?.detail ?? exc?.message ?? exc}`
@@ -124,6 +130,8 @@ async function remove(target: CollectTarget) {
         class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
       >
       <input v-model.number="form.interval_minutes" type="number" min="5" max="1440" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5">
+      <input v-model.number="form.min_views" type="number" min="0" placeholder="最低播放量（0 不过滤）" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
         {{ creating ? '创建中…' : '新增目标' }}
       </button>

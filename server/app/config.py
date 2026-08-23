@@ -64,6 +64,11 @@ class Settings(BaseSettings):
     # 账号会话有效期（天）
     session_days: int = 30
 
+    # AI 层（OpenAI 兼容接口；管理端 site_settings 优先于此处 env）
+    ai_base_url: str = ""
+    ai_api_key: str = ""
+    ai_model: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -18,11 +18,74 @@ router = APIRouter(prefix="/api/admin/settings", dependencies=[Depends(require_a
 @router.get("")
 async def get_all_settings(session: AsyncSession = Depends(get_session)):
     smtp = settings_service.smtp_public_view(await settings_service.get_effective_smtp(session))
+    from app.services.ai import _public_view, get_ai_config
+
     return {
         "smtp": smtp,
+        "ai": _public_view(await get_ai_config(session)),
         "announcement": await settings_service.get_announcement(session),
         "texts": await settings_service.get_texts(session),
     }
+
+
+@router.put("/ai")
+async def put_ai(body: dict, session: AsyncSession = Depends(get_session)):
+    """保存 LLM 配置（OpenAI 兼容）；api_key 留空保留旧值。"""
+    stored = (await settings_service.get_setting(session, "ai")) or {}
+    api_key = body.get("api_key")
+    if api_key is None or api_key == "":
+        api_key = stored.get("api_key") or ""
+    value = {
+        "base_url": str(body.get("base_url") or "").strip().rstrip("/"),
+        "api_key": api_key,
+        "model": str(body.get("model") or "").strip(),
+    }
+    await settings_service.set_setting(session, "ai", value)
+    from app.services.ai import _public_view, get_ai_config
+
+    return _public_view(await get_ai_config(session))
+
+
+@router.post("/ai/test")
+async def test_ai(session: AsyncSession = Depends(get_session)):
+    """向已配置模型发一次极小补全，验证连通与鉴权。"""
+    from app.services.ai import ai_available, chat, get_ai_config
+
+    config = await get_ai_config(session)
+    if not ai_available(config):
+        return {"ok": False, "message": "未配置完整（需要 base_url / api_key / model）"}
+    try:
+        reply = await chat(config, "你是连通性测试。", "回复两个字：正常")
+        return {"ok": True, "message": f"模型响应：{reply[:50]}"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "message": f"调用失败：{exc!r}"[:200]}
+
+
+@router.post("/ai/summarize-all")
+async def summarize_all_events(
+    only_missing: bool = True, session: AsyncSession = Depends(get_session)
+):
+    """为事件补 AI 摘要（only_missing=True 只处理还没有 AI 摘要的事件）。"""
+    from sqlalchemy import select as _select
+
+    from app.models import Event
+    from app.services.ai import summarize_event
+
+    query = _select(Event.id).where(Event.is_active.is_(True))
+    if only_missing:
+        query = query.where(Event.summary.is_(None))
+    ids = [row for row in await session.scalars(query)]
+    done = skipped = failed = 0
+    for event_id in ids[:200]:
+        result = await summarize_event(session, event_id)
+        status = result.get("status")
+        if status == "ok":
+            done += 1
+        elif status == "skipped":
+            skipped += 1
+        else:
+            failed += 1
+    return {"attempted": len(ids), "ok": done, "skipped": skipped, "failed": failed}
 
 
 @router.put("/smtp")

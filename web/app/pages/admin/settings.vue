@@ -24,6 +24,11 @@ const smtpInfo = ref<SmtpView | null>(null)
 const testTo = ref('')
 const testResult = ref('')
 
+// ---------- AI（LLM） ----------
+interface AiView { base_url: string; model: string; api_key_set: boolean }
+const ai = reactive({ base_url: '', model: '', api_key: '' })
+const aiTestResult = ref('')
+
 // ---------- 公告 ----------
 const announcement = reactive({ enabled: false, level: 'info', text: '', link: '' })
 
@@ -80,6 +85,47 @@ async function sendTest() {
     testResult.value = result.message
   } catch (exc: any) {
     testResult.value = exc?.data?.detail ?? '发送失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function saveAi() {
+  busy.value = true
+  error.value = notice.value = ''
+  try {
+    await api('/api/admin/settings/ai', { method: 'PUT', body: ai })
+    ai.api_key = ''
+    notice.value = 'LLM 配置已保存'
+    await refresh()
+  } catch (exc: any) {
+    error.value = exc?.data?.detail ?? '保存失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function testAi() {
+  busy.value = true
+  aiTestResult.value = ''
+  try {
+    const r = await api<{ ok: boolean; message: string }>('/api/admin/settings/ai/test', { method: 'POST' })
+    aiTestResult.value = r.message
+  } catch (exc: any) {
+    aiTestResult.value = exc?.data?.detail ?? '测试失败'
+  } finally {
+    busy.value = false
+  }
+}
+
+async function summarizeAll() {
+  if (!confirm('为缺少摘要的事件批量生成 AI 摘要？')) return
+  busy.value = true
+  try {
+    const r = await api<{ attempted: number; ok: number; skipped: number }>('/api/admin/settings/ai/summarize-all', { method: 'POST' })
+    notice.value = `AI 摘要：处理 ${r.attempted} 个事件，成功 ${r.ok}，跳过 ${r.skipped}`
+  } catch (exc: any) {
+    error.value = exc?.data?.detail ?? '执行失败'
   } finally {
     busy.value = false
   }
@@ -167,6 +213,35 @@ async function saveTexts() {
           <Send :size="14" /> 发送测试邮件
         </button>
         <span v-if="testResult" class="text-xs" :class="testResult.includes('失败') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ testResult }}</span>
+      </div>
+    </section>
+
+    <!-- AI / LLM -->
+    <section class="panel p-5">
+      <h2 class="text-sm font-semibold">AI 层（LLM）</h2>
+      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+        OpenAI 兼容接口。配置后自动为事件生成中文摘要与关键事实、翻译国际服公告；
+        未配置时这些任务安全跳过，不影响采集。
+      </p>
+      <div class="mt-4 grid gap-3 sm:grid-cols-2">
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">Base URL（如 https://api.deepseek.com/v1）</label>
+          <input v-model="ai.base_url" placeholder="https://api.example.com/v1" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">模型名（如 deepseek-chat）</label>
+          <input v-model="ai.model" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">API Key（留空 = 保留已存）</label>
+          <input v-model="ai.api_key" type="password" placeholder="sk-…" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+        </div>
+      </div>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveAi">保存 LLM 配置</button>
+        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="testAi">连通测试</button>
+        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="summarizeAll">批量补事件摘要</button>
+        <span v-if="aiTestResult" class="text-xs" :class="aiTestResult.includes('失败') || aiTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ aiTestResult }}</span>
       </div>
     </section>
 

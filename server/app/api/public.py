@@ -34,11 +34,14 @@ async def list_contents(
     platform: str | None = Query(default=None),
     content_type: str | None = Query(default=None),
     identity: str | None = Query(default=None, description="official/user/... 来源身份过滤"),
+    include_chat: bool = Query(default=False, description="包含闲聊/杂谈类（默认隐藏降噪）"),
     q: str | None = Query(default=None, max_length=100, description="标题关键词"),
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.services.classify import HIDDEN_CATEGORIES
+
     conditions = []
     if platform:
         conditions.append(RawContent.platform == platform)
@@ -46,6 +49,8 @@ async def list_contents(
         conditions.append(RawContent.content_type == content_type)
     if identity:
         conditions.append(Source.identity == identity)
+    if not include_chat:
+        conditions.append(ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None))
     if q:
         conditions.append(ContentVersion.title.like(f"%{q}%"))
 
@@ -89,20 +94,12 @@ async def list_contents(
     for item in items:
         item.metrics = metrics_map.get(item.id)
 
-    count_conditions = []
-    if platform:
-        count_conditions.append(RawContent.platform == platform)
-    if content_type:
-        count_conditions.append(RawContent.content_type == content_type)
-    if identity:
-        count_conditions.append(Source.identity == identity)
-    if q:
-        count_conditions.append(ContentVersion.title.like(f"%{q}%"))
+    count_conditions = list(conditions)
     count_sq = (
         select(func.count(func.distinct(RawContent.id)))
         .join(Source, RawContent.source_id == Source.id, isouter=True)
     )
-    if q:
+    if q or not include_chat:
         count_sq = count_sq.join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
     count_sq = count_sq.where(*count_conditions)
     total = await session.scalar(count_sq) or 0
@@ -177,6 +174,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
     """站内内容详情：解析后的正文/媒体/指标历史/关联事件；外链仅作参考出处。"""
     from fastapi import HTTPException
 
+    from app.models import ContentTranslation
     from app.models import Event as EventModel
     from app.models import Evidence, MetricSnapshot
     from app.schemas.api import ContentDetailOut, ContentMetricPoint
@@ -209,6 +207,15 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         for snap in history_rows.scalars()
     ]
     latest_metrics = history[0].metrics if history else None
+
+    translation = None
+    translation_row = await session.get(ContentTranslation, content_id)
+    if translation_row is not None:
+        translation = {
+            "lang": translation_row.lang,
+            "text": translation_row.text,
+            "model": translation_row.model,
+        }
 
     event_row = await session.execute(
         select(EventModel, Evidence)
@@ -246,6 +253,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         metrics=latest_metrics,
         metrics_history=list(reversed(history)),
         event=event,
+        translation=translation,
         version=version.version if version else None,
     )
 

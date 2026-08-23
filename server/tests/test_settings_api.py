@@ -79,3 +79,26 @@ async def test_texts_whitelist_and_defaults(client, admin_headers):
     texts = resp.json()["texts"]
     assert texts["footer_note"] == "自定义页脚 · AniSignal"
     assert "official_note" in texts  # 未改的用默认
+
+
+async def test_ai_settings_masked_and_test(client, admin_headers):
+    resp = await client.put(
+        "/api/admin/settings/ai",
+        json={"base_url": "https://api.example.com/v1", "model": "test-model", "api_key": "sk-secret"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["api_key_set"] is True
+    assert "sk-secret" not in str(body)
+
+    # key 留空保留旧值
+    resp = await client.put(
+        "/api/admin/settings/ai", json={"base_url": "https://api.example.com/v1", "model": "m2"}, headers=admin_headers
+    )
+    assert resp.json()["api_key_set"] is True
+
+    # 连通测试：配置的是假地址，应返回失败但不抛错
+    resp = await client.post("/api/admin/settings/ai/test", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is False

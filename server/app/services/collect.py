@@ -41,6 +41,39 @@ class CollectError(RuntimeError):
     pass
 
 
+def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict], int]:
+    """采集相关性过滤：共现词（标题/简介需至少命中一个）+ 热度门槛。
+
+    返回 (保留列表, 过滤数量)。官方账号类目标（notices/dynamics/videos）
+    不做过滤——官方内容本身就是信号。
+    """
+    if target.target_type in ("notices", "channel_rss"):
+        return items, 0
+    co_terms = [t for t in (target.co_terms or []) if t]
+    min_views = target.min_views or 0
+    kept: list[dict] = []
+    filtered = 0
+    for item in items:
+        haystack = " ".join(
+            str(item.get(k) or "") for k in ("title", "description", "text")
+        )
+        if co_terms and not any(term in haystack for term in co_terms):
+            filtered += 1
+            continue
+        if min_views > 0:
+            views = int(
+                item.get("view_count")
+                or item.get("view")
+                or (item.get("statistics") or {}).get("view")
+                or 0
+            )
+            if views < min_views:
+                filtered += 1
+                continue
+        kept.append(item)
+    return kept, filtered
+
+
 async def run_collection(redis, target_id: int) -> dict:
     """执行一次采集。redis 为 arq Redis 池（复用连接，也用于平台间隔）。"""
     settings = get_settings()
@@ -65,6 +98,12 @@ async def run_collection(redis, target_id: int) -> dict:
                 fetch_result = await collector_factory().fetch(
                     target.target_type, target.target_value, settings.collect_limit
                 )
+            fetch_result.items, filtered_out = filter_relevant(fetch_result.items, target)
+            if filtered_out:
+                logger.info(
+                    "target %s: %s items filtered by relevance rules",
+                    target.id, filtered_out,
+                )
             stats = await ingest_items(session, fetch_result.fetch_kind, fetch_result.items)
             if stats.items_new or stats.items_updated:
                 # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
@@ -76,6 +115,9 @@ async def run_collection(redis, target_id: int) -> dict:
                     "aggregation: events_created=%s evidences=%s revisions=%s stages=%s",
                     agg.events_created, agg.evidences_added, agg.revisions_written, agg.stage_advances,
                 )
+                if agg.touched_event_ids and hasattr(redis, "enqueue_job"):
+                    for event_id in agg.touched_event_ids:
+                        await redis.enqueue_job("summarize_event", event_id)
         except Exception as exc:  # noqa: BLE001 - 任何失败都落到健康状态里
             error_text = f"{type(exc).__name__}: {exc}"
             logger.error("collect target %s failed: %s", target_id, error_text)

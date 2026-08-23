@@ -70,6 +70,13 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
           </p>
         </section>
 
+        <!-- 机翻（外语内容） -->
+        <section v-if="d.translation" class="panel p-4 sm:p-5">
+          <h2 class="flex items-center gap-2 text-sm font-semibold">机翻（简体中文）</h2>
+          <p class="mt-2 text-xs text-slate-400 dark:text-zinc-500">模型 {{ d.translation.model }} 生成，仅供参考，以原文为准。</p>
+          <p class="mt-2 whitespace-pre-wrap text-[14px] leading-relaxed text-slate-700 dark:text-zinc-300">{{ d.translation.text }}</p>
+        </section>
+
         <!-- 媒体 -->
         <section v-if="d.media.length" class="panel p-4 sm:p-5">
           <h2 class="text-sm font-semibold">媒体（{{ d.media.length }}）</h2>

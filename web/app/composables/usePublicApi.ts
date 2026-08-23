@@ -67,6 +67,7 @@ export interface ApiEvent {
   confidence_reason: string | null
   conclusion: string | null
   status_label: string | null
+  facts: { label: string; value: string }[]
   regions: string[]
   evidence_count: number
   sources: ApiEventSource[]
@@ -137,6 +138,7 @@ export interface ContentDetail {
   metrics: Record<string, number> | null
   metrics_history: ContentMetricPoint[]
   event: { id: number; title: string; category: string; confidence: string } | null
+  translation: { lang: string; text: string; model: string | null } | null
   version: number | null
 }
 

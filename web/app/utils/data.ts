@@ -31,6 +31,7 @@ export interface AppEvent {
   confidenceReason: string
   conclusion: string
   statusChange?: string
+  facts?: { label: string; value: string }[]
   regionNote?: string
   conflicts?: string
   corrections?: { at: string; note: string }[]

@@ -20,9 +20,22 @@ async def collect_target(ctx, target_id: int) -> dict:
     return result
 
 
-async def ai_placeholder(ctx, raw_content_id: int) -> dict:
-    """AI 翻译/摘要/分类占位：本期不实现，接口先立住（设计约束：AI 异步、可重算、独立于采集链路）。"""
-    return {"status": "not_implemented", "raw_content_id": raw_content_id}
+async def summarize_event(ctx, event_id: int) -> dict:
+    """AI 事件摘要（未配置 LLM 时安全跳过）。"""
+    from app.db import SessionLocal
+    from app.services.ai import summarize_event as run
+
+    async with SessionLocal() as session:
+        return await run(session, event_id)
+
+
+async def translate_content(ctx, content_id: int) -> dict:
+    """AI 内容机翻（外语平台 → 简体中文）。"""
+    from app.db import SessionLocal
+    from app.services.ai import translate_content as run
+
+    async with SessionLocal() as session:
+        return await run(session, content_id)
 
 
 async def on_startup(ctx) -> None:
@@ -33,7 +46,7 @@ async def on_startup(ctx) -> None:
 
 
 class WorkerSettings:
-    functions = [collect_target, ai_placeholder]
+    functions = [collect_target, summarize_event, translate_content]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4
     job_timeout = 600

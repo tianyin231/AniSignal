@@ -70,6 +70,38 @@ class AggStats:
     revisions_written: int = 0
     stage_advances: int = 0
     skipped_locked: int = 0
+    touched_event_ids: list = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.touched_event_ids is None:
+            self.touched_event_ids = []
+
+
+CATEGORY_LABELS = {
+    "official_announce": "官方公告",
+    "version_update": "版本/活动",
+    "presale": "预售",
+    "balance": "尾款",
+    "delay": "延期",
+    "shipping": "发货",
+    "arrived": "到货",
+    "unboxing": "开箱",
+    "review": "评测",
+    "quality": "质量/售后",
+}
+
+
+def _build_facts(category: str, cluster: list, product=None) -> list:
+    """事件关键事实（结构化模板；AI 摘要可覆盖）。"""
+    first = sorted(cluster, key=_sort_key)[0]
+    facts = []
+    if product is not None:
+        facts.append({"label": "商品", "value": product.name})
+    facts.append({"label": "类目", "value": CATEGORY_LABELS.get(category, category)})
+    facts.append({"label": "首见时间", "value": (first.published_at or first.collected_at).strftime("%Y-%m-%d %H:%M")})
+    facts.append({"label": "证据数", "value": f"{len(cluster)} 条"})
+    facts.append({"label": "来源平台", "value": "、".join(sorted({r.platform for r in cluster}))})
+    return facts
 
 
 async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
@@ -227,6 +259,7 @@ async def _aggregate_product(
             product_id=product.id,
             cluster=items,
             stats=stats,
+            product=product,
             title=f"{product.name} · {_CATEGORY_CONCLUSION.get(category, category)}",
             identity=identity,
             confidence=confidence,
@@ -342,6 +375,7 @@ async def _ensure_event(
     cluster: list[ContentRow],
     stats: AggStats,
     title: str,
+    product=None,
     identity: str,
     confidence: str,
     confidence_reason: str,
@@ -362,6 +396,7 @@ async def _ensure_event(
             confidence_reason=confidence_reason,
             conclusion=conclusion,
             regions=sorted(_regions_of(cluster)),
+            facts=_build_facts(category, cluster, product),
             first_seen_at=first.published_at or first.collected_at,
             last_updated_at=utcnow(),
         )
@@ -370,6 +405,8 @@ async def _ensure_event(
         _add_revision(session, event, stats, "事件由聚合引擎创建")
         stats.events_created += 1
         created = True
+        if event.id not in stats.touched_event_ids:
+            stats.touched_event_ids.append(event.id)
     elif event.manual_locked:
         stats.skipped_locked += 1
         return
@@ -386,6 +423,8 @@ async def _ensure_event(
         session.add(Evidence(event_id=event.id, raw_content_id=row.raw_id))
     if new_rows:
         stats.evidences_added += len(new_rows)
+        if event.id not in stats.touched_event_ids:
+            stats.touched_event_ids.append(event.id)
         event.last_updated_at = utcnow()
         event.regions = sorted(set(event.regions or []) | _regions_of(new_rows))
         _add_revision(

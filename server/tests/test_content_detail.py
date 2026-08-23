@@ -82,3 +82,26 @@ async def test_detail_links_event(client, session):
 async def test_detail_404(client):
     resp = await client.get("/api/contents/99999")
     assert resp.status_code == 404
+
+
+async def test_chat_hidden_from_default_stream(client, session):
+    from app.services.classify import seed_defaults
+    from sqlalchemy import select
+    from app.models import ClassificationRule
+
+    await seed_defaults(session)
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [
+            dict(VIDEO_RAW, bvid="BVchat", title="爱弥斯同人二创小剧场", owner_mid=9, owner_name="画师"),
+            dict(VIDEO_RAW, bvid="BVreal", title="爱弥斯键盘到货开箱实录", owner_mid=8, owner_name="用户"),
+        ],
+    )
+    body = (await client.get("/api/contents")).json()
+    titles = [i["title"] for i in body["items"]]
+    assert "爱弥斯键盘到货开箱实录" in titles
+    assert "爱弥斯同人二创小剧场" not in titles  # 闲聊默认隐藏
+    # 显式包含时可查到
+    body = (await client.get("/api/contents", params={"include_chat": True})).json()
+    assert "爱弥斯同人二创小剧场" in [i["title"] for i in body["items"]]

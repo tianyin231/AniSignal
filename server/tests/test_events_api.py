@@ -147,3 +147,11 @@ async def test_admin_rules_crud_and_recompute(client, session, admin_headers):
         f"/api/admin/classification-rules/{rule_id}", headers=admin_headers
     )
     assert resp.status_code == 204
+
+
+async def test_event_has_facts(client, session):
+    await _prepare(session)
+    events = (await client.get("/api/events?limit=5")).json()["items"]
+    assert events
+    labels = {f["label"] for f in events[0]["facts"]}
+    assert "类目" in labels and "证据数" in labels

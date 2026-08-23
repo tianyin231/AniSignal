@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.clock import utcnow
@@ -22,6 +22,9 @@ class CollectTarget(Base):
     display_name: Mapped[str | None] = mapped_column(String(255))
     interval_minutes: Mapped[int] = mapped_column(Integer, default=30)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 相关性过滤：共现词（标题需至少含一个，空 = 不过滤）与热度门槛（0 = 不过滤）
+    co_terms: Mapped[list] = mapped_column(JSON, default=list)
+    min_views: Mapped[int] = mapped_column(Integer, default=0)
 
     # 调度字段（naive UTC）
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime)
