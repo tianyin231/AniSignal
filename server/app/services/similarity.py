@@ -90,7 +90,10 @@ async def match_official_contents(
                 prompt,
                 json_mode=True,
             )
-            decisions = _parse_decisions(raw_response, {pair.key for pair in batch})
+            allowed_pairs = {pair.key for pair in batch}
+            decisions = _complete_missing_decisions(
+                _parse_decisions(raw_response, allowed_pairs), allowed_pairs
+            )
         except Exception as exc:  # noqa: BLE001 - 匹配失败不阻断采集
             stats.failed_batches += 1
             logger.warning("official content match failed: %r", exc)
@@ -251,6 +254,19 @@ def _parse_decisions(
             "reason": str(item.get("reason") or "模型未提供理由"),
         }
     return result
+
+
+def _complete_missing_decisions(
+    decisions: dict[tuple[int, int], dict],
+    allowed_pairs: set[tuple[int, int]],
+) -> dict[tuple[int, int], dict]:
+    for key in allowed_pairs - decisions.keys():
+        decisions[key] = {
+            "same_event": False,
+            "confidence": 0.0,
+            "reason": "模型未返回该候选，按保守策略不合并",
+        }
+    return decisions
 
 
 def _plain(value: str) -> str:
