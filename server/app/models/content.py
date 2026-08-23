@@ -42,6 +42,8 @@ class RawContent(Base):
     raw_json: Mapped[dict | None] = mapped_column(JSON)
     # 标准化内容的稳定指纹（不含指标），变化才产生新 ContentVersion
     content_hash: Mapped[str | None] = mapped_column(String(64))
+    # 命中关键词溯源（采集目标关键词 + 命中的共现词，多个共同命中一起记录）
+    matched_keywords: Mapped[list] = mapped_column(JSON, default=list)
 
     versions: Mapped[list["ContentVersion"]] = relationship(
         back_populates="raw_content",

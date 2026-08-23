@@ -35,6 +35,7 @@ async def list_contents(
     content_type: str | None = Query(default=None),
     identity: str | None = Query(default=None, description="official/user/... 来源身份过滤"),
     include_chat: bool = Query(default=False, description="包含闲聊/杂谈类（默认隐藏降噪）"),
+    sort: str = Query(default="time", pattern="^(time|hot)$", description="hot=按最新播放量排序"),
     q: str | None = Query(default=None, max_length=100, description="标题关键词"),
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -74,19 +75,19 @@ async def list_contents(
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(*conditions)
         .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
-        .limit(limit)
-        .offset(offset)
+        .limit(200 if sort == "hot" else limit)
+        .offset(0 if sort == "hot" else offset)
     )
-    items: list[PublicContentItem] = []
+    candidates: list[PublicContentItem] = []
     seen: set[int] = set()
     for raw, source_name, source_identity, version in rows:
-        if raw.id in seen or len(items) >= limit:
+        if raw.id in seen:
             continue
         seen.add(raw.id)
         normalized = version.normalized_json if version else None
         text = (version.text if version else None) or str((normalized or {}).get("text") or "")
         media = (normalized or {}).get("media") or []
-        items.append(
+        candidates.append(
             PublicContentItem(
                 id=raw.id,
                 platform=raw.platform,
@@ -99,14 +100,22 @@ async def list_contents(
                 collected_at=raw.collected_at,
                 source_name=source_name,
                 identity=source_identity or "unknown",
-                metrics=None,  # 指标单独批量查，见下
+                metrics=None,
                 cover=media[0] if isinstance(media, list) and media else None,
+                matched_keywords=(raw.matched_keywords or []),
             )
         )
 
-    metrics_map = await _latest_metrics(session, [i.id for i in items])
-    for item in items:
+    metrics_map = await _latest_metrics(session, [i.id for i in candidates])
+    for item in candidates:
         item.metrics = metrics_map.get(item.id)
+    if sort == "hot":
+        candidates.sort(
+            key=lambda i: (i.metrics or {}).get("view", 0), reverse=True
+        )
+        items = candidates[offset : offset + limit]
+    else:
+        items = candidates
 
     count_sq = (
         select(func.count(func.distinct(RawContent.id)))
@@ -271,6 +280,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         metrics_history=list(reversed(history)),
         event=event,
         translation=translation,
+        matched_keywords=(raw.matched_keywords or []),
         version=version.version if version else None,
     )
 

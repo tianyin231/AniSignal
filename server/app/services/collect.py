@@ -57,7 +57,8 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
         haystack = " ".join(
             str(item.get(k) or "") for k in ("title", "description", "text")
         )
-        if co_terms and not any(term in haystack for term in co_terms):
+        hit_terms = [t for t in co_terms if t in haystack]
+        if co_terms and not hit_terms:
             filtered += 1
             continue
         if min_views > 0:
@@ -70,6 +71,11 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
             if views < min_views:
                 filtered += 1
                 continue
+        # 关键词溯源：目标关键词 + 命中的共现词（多词共同命中一起记录）
+        keywords = [target.target_value] if target.target_type == "keyword_search" else [
+            target.display_name or target.target_value
+        ]
+        item["_matched_keywords"] = sorted({*keywords, *hit_terms})
         kept.append(item)
     return kept, filtered
 
@@ -99,6 +105,14 @@ async def run_collection(redis, target_id: int) -> dict:
                     target.target_type, target.target_value, settings.collect_limit
                 )
             fetch_result.items, filtered_out = filter_relevant(fetch_result.items, target)
+            if not filtered_out and target.target_type in ("keyword_search", "account_videos", "account_dynamics"):
+                # 未配置过滤时也打关键词溯源标
+                label = (
+                    [target.target_value] if target.target_type == "keyword_search"
+                    else [target.display_name or target.target_value]
+                )
+                for item in fetch_result.items:
+                    item.setdefault("_matched_keywords", label)
             if filtered_out:
                 logger.info(
                     "target %s: %s items filtered by relevance rules",

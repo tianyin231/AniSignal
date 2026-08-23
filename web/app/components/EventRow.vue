@@ -8,6 +8,9 @@ const regionsText = computed(() => props.event.regions.map((r) => regionMeta[r])
 const platformsText = computed(() =>
   [...new Set(props.event.sources.map((s) => platformMeta[s.platform].label))].join('/'),
 )
+const multiPlatform = computed(
+  () => new Set(props.event.sources.map((s) => s.platform)).size > 1,
+)
 </script>
 
 <template>
@@ -27,14 +30,18 @@ const platformsText = computed(() =>
       <span class="font-medium" :class="identity.text">{{ identity.label }}</span>
       <span aria-hidden="true">·</span>
       <span>{{ event.category }}</span>
-      <span aria-hidden="true">·</span>
-      <span>{{ regionsText }}</span>
-      <span v-if="event.regionNote" class="text-amber-600 dark:text-amber-400">{{ event.regionNote }}</span>
-      <span aria-hidden="true">·</span>
-      <span class="mono">{{ event.evidenceCount }} 证据</span>
-      <template v-if="event.sources.length > 1">
+      <template v-if="event.regions.length > 1">
         <span aria-hidden="true">·</span>
-        <span class="mono">{{ platformsText }} ×{{ event.sources.length }}</span>
+        <span>{{ regionsText }}</span>
+      </template>
+      <span v-if="event.regionNote" class="text-amber-600 dark:text-amber-400">{{ event.regionNote }}</span>
+      <template v-if="event.evidenceCount > 1">
+        <span aria-hidden="true">·</span>
+        <span class="mono">{{ event.evidenceCount }} 证据</span>
+      </template>
+      <template v-if="multiPlatform">
+        <span aria-hidden="true">·</span>
+        <span>{{ platformsText }}</span>
       </template>
       <template v-if="event.statusChange">
         <span aria-hidden="true">·</span>

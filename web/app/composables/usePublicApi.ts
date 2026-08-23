@@ -16,6 +16,7 @@ export interface PublicContentItem {
   identity: string
   metrics: Record<string, number> | null
   cover: string | null
+  matched_keywords: string[]
 }
 
 export interface PublicContentList {
@@ -139,6 +140,7 @@ export interface ContentDetail {
   metrics_history: ContentMetricPoint[]
   event: { id: number; title: string; category: string; confidence: string } | null
   translation: { lang: string; text: string; model: string | null } | null
+  matched_keywords: string[]
   version: number | null
 }
 

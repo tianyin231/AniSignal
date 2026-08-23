@@ -82,6 +82,10 @@ async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]
     return stats
 
 
+def _matched_keywords(raw: dict) -> list[str]:
+    return [str(k) for k in (raw.get("_matched_keywords") or []) if k][:8]
+
+
 async def _ingest_one(
     session: AsyncSession,
     normalized: NormalizedContent,
@@ -111,6 +115,7 @@ async def _ingest_one(
             last_seen_at=utcnow(),
             raw_json=raw,
             content_hash=fingerprint,
+            matched_keywords=_matched_keywords(raw),
         )
         session.add(content)
         await session.flush()  # 拿到 id 供 version/snapshot 外键使用
@@ -124,6 +129,8 @@ async def _ingest_one(
         existing.source_id = source_id
     if normalized.url and not existing.url:
         existing.url = normalized.url
+    merged = sorted({*(existing.matched_keywords or []), *_matched_keywords(raw)})
+    existing.matched_keywords = merged
 
     changed = existing.content_hash != fingerprint
     if changed:

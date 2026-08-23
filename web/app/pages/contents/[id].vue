@@ -50,6 +50,10 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         <span v-if="d.version" class="mono ml-auto text-slate-400">v{{ d.version }}</span>
       </div>
       <h1 class="mt-2.5 text-lg font-semibold leading-snug">{{ d.title }}</h1>
+      <div v-if="d.matched_keywords?.length" class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+        <span class="text-slate-400 dark:text-zinc-500">命中关键词</span>
+        <span v-for="k in d.matched_keywords" :key="k" class="rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">{{ k }}</span>
+      </div>
       <p class="mono mt-2 text-xs text-slate-400 dark:text-zinc-500">
         {{ d.source_name ?? '—' }} · 发布 {{ fmtTime(d.published_at) }} · 采集 {{ fmtTime(d.collected_at) }}<template v-if="d.last_seen_at"> · 最近发现 {{ fmtTime(d.last_seen_at) }}</template>
       </p>
