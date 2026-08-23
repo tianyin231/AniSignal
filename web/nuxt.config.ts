@@ -15,8 +15,9 @@ export default defineNuxtConfig({
     },
   },
   routeRules: {
+    // 后端所有 HTTP API 都在 /api/** 下（含 /api/admin 管理接口）；
+    // /admin/** 是 Nuxt 页面路由，不代理
     '/api/**': { proxy: 'http://127.0.0.1:8000/api/**' },
-    '/admin/**': { proxy: 'http://127.0.0.1:8000/admin/**' },
   },
   vite: {
     plugins: [tailwindcss()],

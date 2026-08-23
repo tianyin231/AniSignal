@@ -20,7 +20,7 @@ async function refresh() {
   try {
     const query: Record<string, string | number> = { limit: pageSize, offset: (page.value - 1) * pageSize }
     if (platform.value) query.platform = platform.value
-    const data = await api<ContentList>('/admin/contents', { query })
+    const data = await api<ContentList>('/api/admin/contents', { query })
     items.value = data.items
     total.value = data.total
   } catch (exc: any) {

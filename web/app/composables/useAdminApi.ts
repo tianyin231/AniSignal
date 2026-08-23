@@ -14,7 +14,7 @@ export function useAdminApi() {
 
   async function login(candidate: string): Promise<boolean> {
     try {
-      await api('/admin/collect-targets')
+      await api('/api/admin/collect-targets')
     } catch {
       return false
     }
