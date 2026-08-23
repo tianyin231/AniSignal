@@ -68,6 +68,7 @@ def test_parse_dynamic_official_author_and_empty_text():
     assert c.author.identity == "official"  # 鸣潮官方 mid（配置兜底值）
     # 已知限制：部分动态 text 为空，不能假设正文已展开
     assert c.text is None
+    assert c.title == "专栏动态"  # 无正文时用类型标签
     assert c.metrics == {"like": 7110, "reply": 1714, "forward": 49}
     assert c.url == "https://t.bilibili.com/1235883715731652807"
 
@@ -86,11 +87,18 @@ def test_parse_dynamic_derives_title_from_text():
 
 
 def test_parse_dynamic_image_only_gets_fallback_title():
-    raw = dict(DYNAMIC_RAW, text="", pics=["https://i0.hdslb.com/bfs/a.jpg"])
+    raw = dict(DYNAMIC_RAW, type="DYNAMIC_TYPE_DRAW", text="", pics=["https://i0.hdslb.com/bfs/a.jpg"])
     c = parse_dynamic(raw)
     assert c.text is None
     assert c.title == "图文动态"
     assert c.media == ["https://i0.hdslb.com/bfs/a.jpg"]
+
+
+def test_parse_dynamic_draw_without_fields_gets_type_label():
+    # CLI 对 DRAW 类型不展开正文/图片时的最小兜底
+    raw = dict(DYNAMIC_RAW, type="DYNAMIC_TYPE_DRAW", text="", pics=[])
+    c = parse_dynamic(raw)
+    assert c.title == "图文动态"
 
 
 def test_parse_video_minimal_fields():

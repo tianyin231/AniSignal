@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
-PARSER_VERSION = "2"
+PARSER_VERSION = "3"
 
 # 已知官方账号（身份判定用；账号 UID 由配置注入，此处仅做兜底）
 _OFFICIAL_MID = "1955897084"  # 鸣潮官方账号，见 data-sources.md
@@ -37,6 +37,16 @@ def parse_video(raw: dict) -> NormalizedContent:
     )
 
 
+# CLI 对部分动态类型（如 DRAW）不展开正文与图片字段（data-sources.md 已知限制），
+# 至少用类型标签作为展示标题；完整正文需要后续补充原始接口解析
+_DYNAMIC_TYPE_LABELS = {
+    "DYNAMIC_TYPE_DRAW": "图文动态",
+    "DYNAMIC_TYPE_ARTICLE": "专栏动态",
+    "DYNAMIC_TYPE_AV": "视频动态",
+    "DYNAMIC_TYPE_FORWARD": "转发动态",
+}
+
+
 def parse_dynamic(raw: dict) -> NormalizedContent:
     dynamic_id = str(raw.get("id") or "")
     author = _author(raw.get("author_mid"), raw.get("author_name"))
@@ -54,8 +64,12 @@ def parse_dynamic(raw: dict) -> NormalizedContent:
         content_type=ContentType.DYNAMIC,
         external_id=dynamic_id,
         author=author,
-        # 动态没有标题字段：从正文推导展示标题（跳过话题标签行），纯图动态标记为图文
-        title=_display_title(text) or ("图文动态" if raw.get("pics") else None),
+        # 动态没有标题字段：正文推导 → 类型标签 → 兜底
+        title=(
+            _display_title(text)
+            or _DYNAMIC_TYPE_LABELS.get(raw.get("type") or "")
+            or ("图文动态" if raw.get("pics") else "动态")
+        ),
         text=text,
         url=f"https://t.bilibili.com/{dynamic_id}" if dynamic_id else None,
         published_at=_ts(raw.get("pub_ts")),

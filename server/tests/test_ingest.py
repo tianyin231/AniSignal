@@ -130,7 +130,9 @@ async def test_reparse_upgrades_versions(session):
     ).all()
     assert [v.version for v in versions] == [1, 2]
     assert versions[1].title == "剧情动画 | 仙尘"
-    assert versions[1].parser_version == "2"
+    from app.parsers.bilibili import PARSER_VERSION
+
+    assert versions[1].parser_version == PARSER_VERSION
     # 幂等：再次重算指纹不变
     result2 = await reparse_contents(session, "bilibili", "dynamic")
     assert result2["updated"] == 0
