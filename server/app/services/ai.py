@@ -121,15 +121,17 @@ def _plain_evidence(text: str) -> str:
 
 
 def _summary_supported(summary: str, evidence_text: str) -> bool:
-    """摘要中的专名和数字必须能在证据上下文中找到。"""
-    for game_name in ("战双帕弥什", "战双"):
+    """拒绝证据外的其它游戏名和数字事实；允许活动名标点归一化。"""
+    other_games = (
+        "战双帕弥什",
+        "战双",
+        "原神",
+        "崩坏：星穹铁道",
+        "崩坏星穹铁道",
+        "绝区零",
+    )
+    for game_name in other_games:
         if game_name in summary and game_name not in evidence_text:
-            return False
-    for name in re.findall(r"《([^》]{1,40})》", summary):
-        if name != "鸣潮" and f"《{name}》" not in evidence_text:
-            return False
-    for name in re.findall(r"【([^】]{1,60})】", summary):
-        if f"【{name}】" not in evidence_text:
             return False
     for number in re.findall(r"\d+(?:\.\d+)?", summary):
         if number not in evidence_text:

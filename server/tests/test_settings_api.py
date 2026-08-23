@@ -210,3 +210,4 @@ async def test_ai_summary_uses_latest_plain_evidence_and_rejects_unsupported_gam
     assert "<p>" not in captured["user"]
     assert "战双帕弥什" not in event.summary
     assert event.facts == deterministic_facts
+    assert ai_mod._summary_supported("《鸣潮》活动《先约电台》现已开启", "[先约电台]活动说明")
