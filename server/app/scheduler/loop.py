@@ -41,6 +41,33 @@ async def local_loop(queue) -> None:
         await asyncio.sleep(settings.scheduler_poll_seconds)
 
 
+_LEADER_KEY = "anisignal:scheduler-leader"
+_LEADER_TTL_MS = 90_000
+
+
+async def _is_leader(redis) -> bool:
+    """Redis 领导锁：collector 多副本时只有一个调度器投递，其余副本只跑采集。
+
+    锁 TTL 略大于两个轮询周期；持有者每轮续期，崩溃后锁自动过期被其他副本抢占。
+    """
+    import secrets
+
+    instance = getattr(redis, "_anisignal_sched_id", None)
+    if instance is None:
+        instance = secrets.token_hex(8)
+        redis._anisignal_sched_id = instance  # noqa: SLF001
+    got = await redis.set(_LEADER_KEY, instance, nx=True, px=_LEADER_TTL_MS)
+    if got:
+        return True
+    current = await redis.get(_LEADER_KEY)
+    if isinstance(current, bytes):
+        current = current.decode()
+    if current == instance:
+        await redis.pexpire(_LEADER_KEY, _LEADER_TTL_MS)
+        return True
+    return False
+
+
 async def main() -> None:
     settings = get_settings()
     logging.basicConfig(
@@ -52,6 +79,10 @@ async def main() -> None:
     try:
         while True:
             try:
+                if not await _is_leader(redis):
+                    logger.info("not scheduler leader this tick, standby")
+                    await asyncio.sleep(settings.scheduler_poll_seconds)
+                    continue
                 now = utcnow()
                 async with SessionLocal() as session:
                     due = await load_due_targets(session, now)

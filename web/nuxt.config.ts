@@ -7,10 +7,16 @@ export default defineNuxtConfig({
   telemetry: false,
   css: ['~/assets/css/main.css'],
   runtimeConfig: {
+    // SSR 服务端直连 FastAPI（app 容器内同网络命名空间）
+    apiSsrBase: 'http://127.0.0.1:8000',
     public: {
-      // 后端 FastAPI 地址；生产用 NUXT_PUBLIC_API_BASE 覆盖
-      apiBase: 'http://localhost:8000',
+      // 浏览器端走同源（默认空串），由 Nitro 代理到 FastAPI，不再暴露 API 端口
+      apiBase: '',
     },
+  },
+  routeRules: {
+    '/api/**': { proxy: 'http://127.0.0.1:8000/api/**' },
+    '/admin/**': { proxy: 'http://127.0.0.1:8000/admin/**' },
   },
   vite: {
     plugins: [tailwindcss()],

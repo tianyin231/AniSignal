@@ -1,0 +1,15 @@
+.git
+.worktrees
+.zcode
+.agents
+docs
+data
+server/.venv
+server/.env
+server/local.db
+server/.pytest_cache
+web/node_modules
+web/.nuxt
+web/.output
+web/.env
+.env
