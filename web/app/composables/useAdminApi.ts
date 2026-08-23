@@ -14,7 +14,10 @@ export function useAdminApi() {
 
   async function login(candidate: string): Promise<boolean> {
     try {
-      await api('/api/admin/collect-targets')
+      await $fetch('/api/admin/collect-targets', {
+        baseURL,
+        headers: { 'X-Admin-Token': candidate },
+      })
     } catch {
       return false
     }

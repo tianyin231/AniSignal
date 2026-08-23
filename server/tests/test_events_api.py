@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.clock import utcnow
 from app.models import Event, Evidence, Product, RawContent
@@ -38,6 +38,35 @@ async def _prepare(session):
                 "entry": {"id": "90001", "tabTitle": {"zh-Hans": "延期发货相关公告"}},
                 "detail": None,
             }
+        ],
+    )
+    await run_aggregation(session)
+    await session.commit()
+
+
+async def _prepare_review_event(session):
+    """生成一个确定含两条证据的官方事件，供人工审核操作测试。"""
+    from app.services.classify import seed_defaults
+
+    await seed_defaults(session)
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [
+            dict(
+                VIDEO_RAW,
+                bvid="BVreview1",
+                title="人工审核测试延期说明",
+                owner_mid=1955897084,
+                owner_name="鸣潮",
+            ),
+            dict(
+                VIDEO_RAW,
+                bvid="BVreview2",
+                title="人工审核测试延期公告更新",
+                owner_mid=1955897084,
+                owner_name="鸣潮",
+            ),
         ],
     )
     await run_aggregation(session)
@@ -110,6 +139,122 @@ async def test_admin_event_edit_locks_and_revisions(client, session, admin_heade
     event = await session.get(Event, event_id)
     assert event.manual_locked is True
     assert any(r["actor"] == "admin" for r in (await client.get(f"/api/events/{event_id}")).json()["corrections"])
+
+
+async def test_admin_split_event_moves_selected_evidence(client, session, admin_headers):
+    await _prepare_review_event(session)
+    items = (await client.get("/api/admin/events", headers=admin_headers)).json()["items"]
+    source = next(item for item in items if item["evidence_count"] >= 2)
+    content_id = source["sources"][0]["content_id"]
+
+    resp = await client.post(
+        f"/api/admin/events/{source['id']}/split",
+        json={"content_ids": [content_id]},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    created = resp.json()
+    assert created["id"] != source["id"]
+    assert created["evidence_count"] == 1
+    assert created["manual_locked"] is True
+    assert created["summary"] is None
+
+    items = (await client.get("/api/admin/events", headers=admin_headers)).json()["items"]
+    original = next(item for item in items if item["id"] == source["id"])
+    assert original["evidence_count"] == source["evidence_count"] - 1
+    assert original["manual_locked"] is True
+    assert original["summary"] is None
+
+
+async def test_admin_remove_evidence_is_persistent(client, session, admin_headers):
+    await _prepare_review_event(session)
+    items = (await client.get("/api/admin/events", headers=admin_headers)).json()["items"]
+    event = next(item for item in items if item["evidence_count"] >= 2)
+    content_id = event["sources"][0]["content_id"]
+
+    resp = await client.delete(
+        f"/api/admin/events/{event['id']}/evidences/{content_id}",
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["remaining_evidences"] == event["evidence_count"] - 1
+
+    evidence = await session.scalar(
+        select(Evidence).where(
+            Evidence.event_id == event["id"],
+            Evidence.raw_content_id == content_id,
+        )
+    )
+    await session.refresh(evidence)
+    assert evidence.role == "excluded"
+    stored = await session.get(Event, event["id"])
+    await session.refresh(stored)
+    assert stored.manual_locked is True
+    assert stored.summary is None
+
+    await client.post("/api/admin/events/recompute", headers=admin_headers)
+    visible_links = await session.scalar(
+        select(func.count(Evidence.id)).where(
+            Evidence.raw_content_id == content_id,
+            Evidence.role != "excluded",
+        )
+    )
+    assert visible_links == 0
+
+    resp = await client.post(
+        f"/api/admin/events/{event['id']}/summarize", headers=admin_headers
+    )
+    assert resp.status_code == 200
+    await session.refresh(stored)
+    assert f"{event['evidence_count'] - 1} 条来源证据" in stored.summary
+
+
+async def test_admin_can_regenerate_summary_for_locked_event(
+    client, session, admin_headers, monkeypatch
+):
+    from app.services import ai as ai_service
+    from app.services.settings import set_setting
+
+    await _prepare_review_event(session)
+    event = await session.scalar(select(Event))
+    event.manual_locked = True
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "m", "api_key": "sk-x"},
+    )
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        return '{"summary": "官方发布人工审核测试延期相关信息。"}', {}
+
+    monkeypatch.setattr(ai_service, "chat", fake_chat)
+    resp = await client.post(
+        f"/api/admin/events/{event.id}/summarize", headers=admin_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["summary_status"] == "ai"
+    await session.refresh(event)
+    assert event.summary_status == "ai"
+    assert event.summary_updated_at is not None
+    assert event.manual_locked is True
+
+
+async def test_admin_summary_uses_safe_fallback_without_ai_config(
+    client, session, admin_headers
+):
+    await _prepare_review_event(session)
+    event = await session.scalar(select(Event))
+
+    resp = await client.post(
+        f"/api/admin/events/{event.id}/summarize", headers=admin_headers
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["summary_status"] == "fallback"
+    await session.refresh(event)
+    assert event.summary_status == "fallback"
+    assert event.summary_updated_at is not None
+    assert "条来源证据" in event.summary
 
 
 async def test_admin_products_crud(client, session, admin_headers):

@@ -44,9 +44,11 @@ export interface PublicStats {
 export interface ApiEventSource {
   platform: string
   account: string | null
+  title: string | null
   region: string
   published_at: string | null
   url: string | null
+  content_id: number | null
 }
 
 export interface ApiEventCorrection {
@@ -59,6 +61,8 @@ export interface ApiEvent {
   id: number
   title: string
   summary: string | null
+  summary_status: string | null
+  summary_updated_at: string | null
   category: string
   product_id: number | null
   product_slug: string | null
