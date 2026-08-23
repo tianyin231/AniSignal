@@ -3,7 +3,15 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: false },
+  // 私有项目不需要遥测；同时避免首跑交互提示阻塞终端
+  telemetry: false,
   css: ['~/assets/css/main.css'],
+  runtimeConfig: {
+    public: {
+      // 后端 FastAPI 地址；生产用 NUXT_PUBLIC_API_BASE 覆盖
+      apiBase: 'http://localhost:8000',
+    },
+  },
   vite: {
     plugins: [tailwindcss()],
   },
