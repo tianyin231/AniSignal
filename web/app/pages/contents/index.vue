@@ -32,7 +32,6 @@ const { data, status } = await useAsyncData(
 )
 
 const list = computed(() => (data.value?.items ?? []).map(toRawItem))
-const urls = computed(() => new Map(data.value?.items.map((i) => [String(i.id), i.url]) ?? []))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 
 function applyQuery(patch: Record<string, string | undefined>) {
@@ -74,9 +73,7 @@ function applyQuery(patch: Record<string, string | undefined>) {
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
     <section v-else class="panel overflow-hidden">
-      <NuxtLink v-for="item in list" :key="item.id" :to="`/contents/${item.id}`" class="block">
-        <RawFeedRow :item="item" />
-      </NuxtLink>
+      <RawFeedRow v-for="item in list" :key="item.id" :item="item" />
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">没有匹配的内容。</p>
       <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
         <span>共 {{ data?.total ?? 0 }} 条</span>

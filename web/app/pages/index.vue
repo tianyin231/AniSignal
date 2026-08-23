@@ -3,10 +3,10 @@ import type { ApiEventList, PublicContentList, PublicStats } from '~/composables
 import { fmtTime } from '~/utils/admin-types'
 import { toAppEvent, toRawItem } from '~/utils/public-utils'
 
-// 三个分区互不混用：聚合结论、官方原文、非官方社区线索。
+// 三个分区互不混用：聚合结论、官方内容、非官方社区线索。
 const tabs = [
   { key: 'briefing', label: '近期结论' },
-  { key: 'official', label: '官方原文' },
+  { key: 'official', label: '官方内容' },
   { key: 'latest', label: '社区线索' },
 ]
 const validTabs = new Set(tabs.map((item) => item.key))
@@ -59,7 +59,7 @@ const list = computed(() => (feed.value?.items ?? []).map(toRawItem))
 const loading = computed(() => (isBriefing.value ? eventsStatus.value : feedStatus.value) === 'pending')
 const sectionHint = computed(() => ({
   briefing: '近 7 天内出现新证据的聚合事件；摘要受证据约束，点击可核对原文。',
-  official: '近 7 天官方账号与官网发布的原始内容，不与社区内容混排。',
+  official: '近 7 天官方账号与官网发布的内容；正文、图片与仅外链状态会明确标注。',
   latest: '近 72 小时非官方来源内容，仅作线索，不代表事实结论。',
 })[tab.value])
 
@@ -88,7 +88,7 @@ useSeoMeta({ title: '近期情报' })
     <section v-else-if="isBriefing" class="panel overflow-hidden">
       <EventRow v-for="e in eventList" :key="e.id" :event="e" />
       <p v-if="!eventList.length" class="px-4 py-10 text-center text-sm text-slate-400">
-        近 7 天暂无可核对的新事件；可到“官方原文”查看同期内容。
+        近 7 天暂无可核对的新事件；可到“官方内容”查看同期内容。
       </p>
       <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
         <span>共 {{ eventsData?.total ?? 0 }} 条</span>
@@ -100,13 +100,11 @@ useSeoMeta({ title: '近期情报' })
       </div>
     </section>
 
-    <!-- 官方原文 / 社区线索：严格按身份和发布时间拆分 -->
+    <!-- 官方内容 / 社区线索：严格按身份和发布时间拆分 -->
     <section v-else class="panel overflow-hidden">
-      <NuxtLink v-for="entry in list.map((row) => ({ row }))" :key="entry.row.id" :to="`/contents/${entry.row.id}`" class="block">
-        <RawFeedRow :item="entry.row" />
-      </NuxtLink>
+      <RawFeedRow v-for="row in list" :key="row.id" :item="row" />
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
-        {{ tab === 'official' ? '近 7 天暂无官方原文。' : '近 72 小时暂无社区线索。' }}
+        {{ tab === 'official' ? '近 7 天暂无官方内容。' : '近 72 小时暂无社区线索。' }}
       </p>
       <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
         <span>共 {{ feed?.total ?? 0 }} 条</span>

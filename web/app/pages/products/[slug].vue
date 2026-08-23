@@ -101,8 +101,24 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
     </div>
 
     <section v-if="view === 'overview'" class="space-y-4">
+      <div class="grid gap-3 sm:grid-cols-2">
+        <div class="panel p-4">
+          <p class="text-xs font-medium text-slate-500 dark:text-zinc-400">官方进度</p>
+          <p class="mt-1.5 text-sm text-slate-800 dark:text-zinc-200">{{ product.official_status }}</p>
+          <p class="mono mt-1 text-xs text-slate-400">{{ product.official_evidence_count }} 条官方证据</p>
+        </div>
+        <div class="panel p-4">
+          <p class="text-xs font-medium text-slate-500 dark:text-zinc-400">消费者样本</p>
+          <p class="mt-1.5 text-sm text-slate-800 dark:text-zinc-200">{{ product.consumer_status }}</p>
+          <p class="mono mt-1 text-xs text-slate-400">{{ product.consumer_evidence_count }} 个已核验账号</p>
+        </div>
+      </div>
       <div class="panel p-4 sm:p-5">
-        <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约阶段</h2>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约阶段</h2>
+          <span class="text-xs text-slate-400">{{ product.stage_source === 'manual' ? '人工审核' : product.stage_source === 'automatic' ? '证据自动计算' : '暂无结论' }}</span>
+        </div>
+        <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">{{ product.stage_reason }}</p>
         <div class="mt-4">
           <FulfillmentStepper :stages="stages" variant="full" />
         </div>

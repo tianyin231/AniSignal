@@ -104,6 +104,7 @@ class PublicContentItem(BaseModel):
     category: str | None = None
     metrics: dict | None
     cover: str | None
+    preview_mode: str  # full / partial / external_only
     matched_keywords: list[str] = []
 
 
@@ -139,6 +140,7 @@ class ContentDetailOut(BaseModel):
     translation: dict | None = None
     matched_keywords: list[str] = []
     version: int | None = None
+    preview_mode: str
 
 
 class PublicSource(BaseModel):
@@ -218,6 +220,17 @@ class ProductStageOut(BaseModel):
     note: str | None = None
 
 
+class ProductEvidenceOut(BaseModel):
+    content_id: int
+    title: str | None = None
+    platform: str
+    account: str | None = None
+    identity: str
+    category: str | None = None
+    published_at: datetime | None = None
+    url: str | None = None
+
+
 class ProductOut(BaseModel):
     id: int
     slug: str
@@ -233,6 +246,15 @@ class ProductOut(BaseModel):
     stage_hint: int = -1
     current_stage: int
     stage_label: str
+    stage_source: str  # unverified / automatic / manual
+    stage_reason: str
+    stage_updated_at: datetime | None = None
+    stage_evidence_ids: list[int] = []
+    official_status: str
+    official_evidence_count: int = 0
+    consumer_status: str
+    consumer_evidence_count: int = 0
+    evidences: list[ProductEvidenceOut] = []
     stages: list[ProductStageOut]
     updated_at: datetime | None
 
@@ -242,7 +264,7 @@ class ProductListOut(BaseModel):
 
 
 class ProductCreate(BaseModel):
-    slug: str = Field(min_length=1, max_length=64)
+    slug: str | None = Field(default=None, min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     publisher: str | None = Field(default=None, max_length=255)
     skus: list[str] = Field(default_factory=list)
@@ -252,7 +274,8 @@ class ProductCreate(BaseModel):
     original_ship_at: str | None = Field(default=None, max_length=64)
     ship_note: str | None = None
     watch_terms: list[str] = Field(default_factory=list)
-    stage_hint: int = Field(default=-1, ge=-1, le=5)
+    create_bilibili_target: bool = True
+    monitor_keyword: str | None = Field(default=None, max_length=255)
 
 
 class ProductUpdate(BaseModel):
@@ -266,6 +289,8 @@ class ProductUpdate(BaseModel):
     ship_note: str | None = None
     watch_terms: list[str] | None = None
     stage_hint: int | None = Field(default=None, ge=-1, le=5)
+    stage_hint_reason: str | None = None
+    stage_hint_evidence_ids: list[int] | None = None
 
 
 class RuleCreate(BaseModel):

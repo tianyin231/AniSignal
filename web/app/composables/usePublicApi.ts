@@ -17,6 +17,7 @@ export interface PublicContentItem {
   category: string | null
   metrics: Record<string, number> | null
   cover: string | null
+  preview_mode: 'full' | 'partial' | 'external_only'
   matched_keywords: string[]
 }
 
@@ -113,8 +114,28 @@ export interface ApiProduct {
   stage_hint: number
   current_stage: number
   stage_label: string
+  stage_source: 'unverified' | 'automatic' | 'manual'
+  stage_reason: string
+  stage_updated_at: string | null
+  stage_evidence_ids: number[]
+  official_status: string
+  official_evidence_count: number
+  consumer_status: string
+  consumer_evidence_count: number
+  evidences: ApiProductEvidence[]
   stages: ApiProductStage[]
   updated_at: string | null
+}
+
+export interface ApiProductEvidence {
+  content_id: number
+  title: string | null
+  platform: string
+  account: string | null
+  identity: string
+  category: string | null
+  published_at: string | null
+  url: string | null
 }
 
 export interface ApiProductList {
@@ -148,6 +169,7 @@ export interface ContentDetail {
   translation: { lang: string; text: string; model: string | null } | null
   matched_keywords: string[]
   version: number | null
+  preview_mode: 'full' | 'partial' | 'external_only'
 }
 
 export function usePublicApi() {

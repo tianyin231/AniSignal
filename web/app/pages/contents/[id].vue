@@ -17,6 +17,16 @@ if (error.value || !detail.value)
   throw createError({ statusCode: 404, statusMessage: '内容不存在', fatal: true })
 
 const d = computed(() => detail.value!)
+const biliPlayerUrl = computed(() =>
+  d.value.platform === 'bilibili' && d.value.content_type === 'video' && d.value.external_id.startsWith('BV')
+    ? `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(d.value.external_id)}&autoplay=0&danmaku=0`
+    : null,
+)
+const previewLabel = computed(() => ({
+  full: '正文可预览',
+  partial: '图片可预览',
+  external_only: '仅平台原文可读',
+})[d.value.preview_mode])
 
 const METRIC_LABELS: Record<string, string> = {
   view: '播放', like: '点赞', reply: '评论', favorite: '收藏', coin: '投币',
@@ -48,6 +58,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         </span>
         <span class="chip bg-slate-500/10 text-slate-500 dark:text-zinc-400">{{ contentTypeLabels[d.content_type] ?? d.content_type }}</span>
         <span :class="identityMeta[d.identity as Identity]?.text">{{ identityMeta[d.identity as Identity]?.label ?? d.identity }}</span>
+        <span class="chip" :class="d.preview_mode === 'external_only' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'">{{ previewLabel }}</span>
         <span v-if="d.version" class="mono ml-auto text-slate-400">v{{ d.version }}</span>
       </div>
       <h1 class="mt-2.5 text-lg font-semibold leading-snug">{{ d.title }}</h1>
@@ -62,6 +73,20 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
 
     <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
       <div class="space-y-4">
+        <section v-if="biliPlayerUrl" class="panel overflow-hidden">
+          <div class="aspect-video bg-black">
+            <iframe
+              :src="biliPlayerUrl"
+              title="B站视频预览"
+              class="size-full"
+              scrolling="no"
+              frameborder="0"
+              allowfullscreen
+            />
+          </div>
+          <p class="px-4 py-2.5 text-xs text-slate-400 dark:text-zinc-500">播放器由 B 站提供；若视频禁止外链播放，请使用原文链接。</p>
+        </section>
+
         <!-- 正文（站内解析预览） -->
         <section class="panel p-4 sm:p-5">
           <h2 class="text-sm font-semibold">内容解析</h2>
@@ -71,7 +96,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
             v-html="d.text_html"
           />
           <p v-else-if="d.text" class="mt-3 whitespace-pre-wrap text-[14px] leading-relaxed text-slate-700 dark:text-zinc-300">{{ d.text }}</p>
-          <div v-else-if="d.url" class="mt-3 rounded-xl border border-dashed border-slate-900/15 p-4 dark:border-white/15">
+          <div v-else-if="d.preview_mode === 'external_only' && d.url" class="mt-3 rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 p-4">
             <p class="text-sm leading-relaxed text-slate-500 dark:text-zinc-400">
               该内容为平台侧不展开正文的类型（B 站部分图文动态的正文与图片无法通过公开接口提取），
               站内已保留标题、时间与互动数据；完整内容请查看原文。
