@@ -30,6 +30,14 @@ router = APIRouter(prefix="/api")
 _EXCERPT_LEN = 140
 
 
+def _preview_mode(text: str | None, media: list, url: str | None) -> str:
+    if text and text.strip():
+        return "full"
+    if media:
+        return "partial"
+    return "external_only"
+
+
 @router.get("/contents", response_model=PublicContentList)
 async def list_contents(
     platform: str | None = Query(default=None),
@@ -112,6 +120,7 @@ async def list_contents(
                 category=version.category,
                 metrics=None,
                 cover=media[0] if isinstance(media, list) and media else None,
+                preview_mode=_preview_mode(text, media if isinstance(media, list) else [], raw.url),
                 matched_keywords=(raw.matched_keywords or []),
             )
         )
@@ -162,6 +171,10 @@ def _excerpt(text: str) -> str | None:
     text = (text or "").strip()
     if not text:
         return None
+    if "<" in text and ">" in text:
+        import bleach
+
+        text = bleach.clean(text, tags=[], strip=True).strip()
     return text[:_EXCERPT_LEN] + ("…" if len(text) > _EXCERPT_LEN else "")
 
 
@@ -292,6 +305,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         translation=translation,
         matched_keywords=(raw.matched_keywords or []),
         version=version.version if version else None,
+        preview_mode=_preview_mode(text, media, raw.url),
     )
 
 @router.get("/events", response_model=EventListOut)

@@ -5,7 +5,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 
 from app.clock import utcnow
-from app.models import Event, Evidence, Product, RawContent
+from app.models import CollectTarget, Event, Evidence, Product, RawContent, Source
 from app.services.events import run_aggregation
 from app.services.ingest import ingest_items
 
@@ -40,6 +40,8 @@ async def _prepare(session):
             }
         ],
     )
+    user_source = await session.scalar(select(Source).where(Source.external_id == "777"))
+    user_source.identity = "user"
     await run_aggregation(session)
     await session.commit()
 
@@ -112,9 +114,11 @@ async def test_public_products_with_stages(client, session):
     assert product["slug"] == "kb"
     assert product["current_stage"] == 2  # 1 个独立用户开箱 → 首位普通用户到货
     labels = [s["label"] for s in product["stages"]]
-    assert labels[0] == "尚未发货"
+    assert labels[0] == "暂无可靠到货证据"
     current = next(s for s in product["stages"] if s["state"] == "current")
     assert current["label"] == "首位普通用户到货"
+    assert product["consumer_evidence_count"] == 1
+    assert product["stage_source"] == "automatic"
 
     resp = await client.get("/api/products/kb")
     assert resp.status_code == 200
@@ -265,12 +269,58 @@ async def test_admin_products_crud(client, session, admin_headers):
     )
     assert resp.status_code == 201
     pid = resp.json()["id"]
+    target = await session.scalar(
+        select(CollectTarget).where(CollectTarget.target_value == "测试")
+    )
+    assert target is not None
     resp = await client.put(
         f"/api/admin/products/{pid}", json={"stage_hint": 3}, headers=admin_headers
     )
-    assert resp.json()["current_stage"] == 3
+    assert resp.status_code == 422
     resp = await client.delete(f"/api/admin/products/{pid}", headers=admin_headers)
     assert resp.status_code == 204
+
+
+async def test_admin_product_quick_create_generates_slug(client, session, admin_headers):
+    resp = await client.post(
+        "/api/admin/products",
+        json={"name": "快速创建商品", "watch_terms": ["快速商品"]},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["slug"].startswith("product-")
+    assert await session.scalar(
+        select(CollectTarget).where(CollectTarget.target_value == "快速商品")
+    )
+
+
+async def test_admin_stage_review_requires_reason_and_evidence(client, session, admin_headers):
+    await _prepare(session)
+    product = await session.scalar(select(Product))
+    event = await session.scalar(
+        select(Event).where(Event.product_id == product.id, Event.category == "unboxing")
+    )
+    evidence = await session.scalar(select(Evidence).where(Evidence.event_id == event.id))
+
+    resp = await client.put(
+        f"/api/admin/products/{product.id}",
+        json={"stage_hint": 2, "stage_hint_reason": "", "stage_hint_evidence_ids": [evidence.raw_content_id]},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 422
+
+    resp = await client.put(
+        f"/api/admin/products/{product.id}",
+        json={
+            "stage_hint": 2,
+            "stage_hint_reason": "已核对账号内容与商品实物一致",
+            "stage_hint_evidence_ids": [evidence.raw_content_id],
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["stage_source"] == "manual"
+    assert resp.json()["stage_evidence_ids"] == [evidence.raw_content_id]
 
 
 async def test_admin_rules_crud_and_recompute(client, session, admin_headers):

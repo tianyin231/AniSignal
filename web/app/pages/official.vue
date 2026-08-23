@@ -25,11 +25,8 @@ const { data, status } = await useAsyncData('official-feed', () =>
   api<PublicContentList>('/api/contents', { query: { identity: 'official', limit: 100 } }),
 )
 
-function toRow(item: PublicContentItem): { row: RawItem; url: string | null } {
-  return {
-    row: toRawItem(item),
-    url: item.url,
-  }
+function toRow(item: PublicContentItem): RawItem {
+  return toRawItem(item)
 }
 
 const list = computed(() => {
@@ -37,10 +34,10 @@ const list = computed(() => {
   const k = tab.value
   if (k === 'all') return rows
   if (k === 'cn' || k === 'global')
-    return rows.filter(({ row }) => row.region === (k as Region))
+    return rows.filter((row) => row.region === (k as Region))
   if (k === 'kuro')
-    return rows.filter(({ row }) => row.platform === 'kuro_cn' || row.platform === 'kuro_global')
-  return rows.filter(({ row }) => row.platform === (k as Platform))
+    return rows.filter((row) => row.platform === 'kuro_cn' || row.platform === 'kuro_global')
+  return rows.filter((row) => row.platform === (k as Platform))
 })
 
 useSeoMeta({ title: '官方动态' })
@@ -58,9 +55,7 @@ useSeoMeta({ title: '官方动态' })
       加载中…
     </section>
     <section v-else class="panel overflow-hidden">
-      <NuxtLink v-for="entry in list" :key="entry.row.id" :to="`/contents/${entry.row.id}`" class="block">
-        <RawFeedRow :item="entry.row" />
-      </NuxtLink>
+      <RawFeedRow v-for="row in list" :key="row.id" :item="row" />
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
         在已接入来源中暂无此筛选下的官方内容。
       </p>

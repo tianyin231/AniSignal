@@ -1,6 +1,7 @@
 """Admin API：采集目标、事件复核/编辑/锁定/合并/重算、商品 CRUD、分类词典 CRUD、内容浏览。"""
 
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
@@ -17,6 +18,7 @@ from app.models import (
     Event,
     EventRevision,
     Evidence,
+    FULFILLMENT_STAGES,
     MetricSnapshot,
     Product,
     RawContent,
@@ -489,11 +491,52 @@ async def list_products_admin(session: AsyncSession = Depends(get_session)):
 
 @router.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
 async def create_product(body: ProductCreate, session: AsyncSession = Depends(get_session)):
-    duplicate = await session.scalar(select(Product).where(Product.slug == body.slug))
+    from app.clock import utcnow
+    from app.services.events import run_aggregation
+
+    slug = (body.slug or "").strip() or f"product-{uuid.uuid4().hex[:8]}"
+    duplicate = await session.scalar(select(Product).where(Product.slug == slug))
     if duplicate is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "slug already exists")
-    product = Product(**body.model_dump())
+    watch_terms = list(dict.fromkeys(t.strip() for t in body.watch_terms if t.strip()))
+    if not watch_terms:
+        watch_terms = [body.name.strip()]
+    data = body.model_dump(
+        exclude={"slug", "create_bilibili_target", "monitor_keyword"}
+    )
+    data["watch_terms"] = watch_terms
+    product = Product(slug=slug, **data)
     session.add(product)
+    await session.flush()
+
+    if body.create_bilibili_target:
+        keyword = (body.monitor_keyword or "").strip() or watch_terms[0]
+        target = await session.scalar(
+            select(CollectTarget).where(
+                CollectTarget.platform == "bilibili",
+                CollectTarget.target_type == "keyword_search",
+                CollectTarget.target_value == keyword,
+            )
+        )
+        if target is None:
+            target = CollectTarget(
+                platform="bilibili",
+                target_type="keyword_search",
+                target_value=keyword,
+                display_name=f"B站搜索·{product.name}",
+                interval_minutes=30,
+                enabled=True,
+                co_terms=[],
+                min_views=0,
+                next_run_at=utcnow(),
+            )
+            session.add(target)
+        else:
+            target.enabled = True
+            target.next_run_at = target.next_run_at or utcnow()
+
+    # 新商品立即回看已入库内容；新监控位由调度器在下一轮执行。
+    await run_aggregation(session)
     await session.commit()
     await session.refresh(product)
     return await product_to_out(session, product)
@@ -506,11 +549,122 @@ async def update_product(
     product = await session.get(Product, product_id)
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "product not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    stage = changes.pop("stage_hint", None)
+    reason = changes.pop("stage_hint_reason", None)
+    evidence_ids = changes.pop("stage_hint_evidence_ids", None)
+    if stage is None and (reason is not None or evidence_ids is not None):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "stage_hint is required")
+    if stage is not None:
+        from app.clock import utcnow
+
+        previous_label = FULFILLMENT_STAGES[
+            min(product.stage_hint if product.stage_hint >= 0 else product.computed_stage, 5)
+        ]
+        if stage == -1:
+            product.stage_hint = -1
+            product.stage_hint_reason = None
+            product.stage_hint_evidence_ids = []
+            product.stage_hint_updated_at = utcnow()
+        else:
+            await _validate_stage_evidence(
+                session, product.id, stage, reason or "", evidence_ids or []
+            )
+            product.stage_hint = stage
+            product.stage_hint_reason = reason.strip()
+            product.stage_hint_evidence_ids = list(dict.fromkeys(evidence_ids))
+            product.stage_hint_updated_at = utcnow()
+        effective_stage = product.computed_stage if stage == -1 else stage
+        next_label = FULFILLMENT_STAGES[min(effective_stage, 5)]
+        events = list(
+            (
+                await session.execute(
+                    select(Event).where(
+                        Event.product_id == product.id,
+                        Event.is_active.is_(True),
+                        Event.category.in_(["unboxing", "arrived"]),
+                    )
+                )
+            ).scalars()
+        )
+        for event in events:
+            event.status_label = next_label
+            event.last_updated_at = utcnow()
+            session.add(
+                EventRevision(
+                    event_id=event.id,
+                    actor="admin",
+                    note=f"履约阶段审核：{previous_label} → {next_label}",
+                )
+            )
+    for field, value in changes.items():
         setattr(product, field, value)
+    if "watch_terms" in changes:
+        from app.services.events import run_aggregation
+
+        product.watch_terms = list(
+            dict.fromkeys(t.strip() for t in (product.watch_terms or []) if t.strip())
+        )
+        await session.flush()
+        await run_aggregation(session)
     await session.commit()
     await session.refresh(product)
     return await product_to_out(session, product)
+
+
+async def _validate_stage_evidence(
+    session: AsyncSession,
+    product_id: int,
+    stage: int,
+    reason: str,
+    evidence_ids: list[int],
+) -> None:
+    if stage == 0:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "不能用缺少证据证明未发货，请恢复自动状态",
+        )
+    if stage >= 4:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "阶段 4/5 需要购买时间样本，当前暂不可确认",
+        )
+    if not reason.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "请填写审核理由")
+    selected = set(evidence_ids)
+    if not selected:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "请选择原始内容证据")
+
+    rows = list(
+        await session.execute(
+            select(Evidence, Event, RawContent, Source)
+            .join(Event, Evidence.event_id == Event.id)
+            .join(RawContent, Evidence.raw_content_id == RawContent.id)
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .where(
+                Event.product_id == product_id,
+                Event.is_active.is_(True),
+                Event.category.in_(["unboxing", "arrived"]),
+                Evidence.role != "excluded",
+                RawContent.id.in_(selected),
+            )
+        )
+    )
+    found = {raw.id for _, _, raw, _ in rows}
+    if found != selected:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "所选证据不属于该商品的到货/开箱事件")
+    if stage >= 2:
+        accounts = {
+            source.external_id if source else f"{raw.platform}:{raw.external_id}"
+            for _, _, raw, source in rows
+            if (source.identity if source else "unknown") in ("user", "unknown")
+        }
+        required = 3 if stage == 3 else 1
+        if len(accounts) < required:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"该阶段至少需要 {required} 个独立普通账号证据",
+            )
 
 
 @router.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)

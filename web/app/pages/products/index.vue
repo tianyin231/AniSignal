@@ -34,6 +34,10 @@ const products = computed(() => data.value?.items ?? [])
           <span class="chip shrink-0 bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ p.stage_label }}</span>
         </div>
         <p v-if="p.price_note" class="mono mt-3 text-sm text-slate-600 dark:text-zinc-300">{{ p.price_note }}</p>
+        <div class="mt-3 grid gap-1.5 text-xs text-slate-500 dark:text-zinc-400">
+          <p><span class="text-slate-400">官方：</span>{{ p.official_status }}</p>
+          <p><span class="text-slate-400">消费者：</span>{{ p.consumer_status }}</p>
+        </div>
         <div class="mt-3">
           <FulfillmentStepper :stages="p.stages" variant="rail" />
         </div>

@@ -18,6 +18,7 @@ from app.schemas.api import (
     EventOut,
     EventSourceOut,
     ProductOut,
+    ProductEvidenceOut,
     ProductStageOut,
 )
 
@@ -143,43 +144,131 @@ _STAGE_NOTES = {
     1: "仅证明实物样品存在，不代表消费者订单发货",
     2: "单一账号证据，需人工复核身份与商品对应关系",
     3: "多个独立账号，转载未重复计数",
-    4: "等待相近购买时间段样本",
-    5: "多购买时间段样本同时到货",
+    4: "暂不可计算：尚未收集购买时间样本",
+    5: "暂不可计算：尚未收集购买时间样本",
+}
+
+_OFFICIAL_STATUS = {
+    "presale": "已发现官方预售信息",
+    "balance": "已发现官方尾款信息",
+    "delay": "已发现官方延期说明",
+    "shipping": "已发现官方发货说明",
 }
 
 
 async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
-    effective = (
-        product.computed_stage if product.stage_hint < 0 else product.stage_hint
-    )
-    effective = max(0, min(effective, len(FULFILLMENT_STAGES) - 1))
-
-    # 各阶段证据计数与最早日期（送测→阶段1；独立用户开箱→阶段2/3）
+    # 只使用有效事件与未排除证据；展示时重新从证据计算，避免历史阶段只升不降造成误导。
     rows = await session.execute(
-        select(Evidence, RawContent, Source)
+        select(Evidence, Event, RawContent, Source)
         .join(Event, Evidence.event_id == Event.id)
         .join(RawContent, Evidence.raw_content_id == RawContent.id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(
             Event.product_id == product.id,
-            Event.category.in_(["unboxing", "arrived"]),
+            Event.is_active.is_(True),
+            Evidence.role != "excluded",
         )
     )
+    evidence_rows = list(rows)
+    raw_ids = list({raw.id for _, _, raw, _ in evidence_rows})
+    titles: dict[int, str | None] = {}
+    if raw_ids:
+        versions = await session.execute(
+            select(ContentVersion)
+            .where(ContentVersion.raw_content_id.in_(raw_ids))
+            .order_by(ContentVersion.raw_content_id, ContentVersion.version.desc())
+        )
+        for version in versions.scalars():
+            titles.setdefault(version.raw_content_id, version.title)
+
     seeded_dates: list = []
     user_dates: list = []
-    user_count = 0
-    seeded_count = 0
-    for _, raw, source in rows:
+    seeded_raw_ids: set[int] = set()
+    user_sources: set[str] = set()
+    evidence_items: list[ProductEvidenceOut] = []
+    seen_raw_ids: set[int] = set()
+    official_rows: list[tuple] = []
+    for _, event, raw, source in evidence_rows:
         published = raw.published_at
         identity = source.identity if source else "unknown"
-        if identity == "seeded":
-            seeded_count += 1
+        if identity == "official" and event.category in _OFFICIAL_STATUS:
+            official_rows.append((event, raw))
+        if event.category in ("unboxing", "arrived") and identity == "seeded":
+            seeded_raw_ids.add(raw.id)
             if published:
                 seeded_dates.append(published)
-        elif identity not in ("official",):
-            user_count += 1
+        elif event.category in ("unboxing", "arrived") and identity == "user":
+            user_sources.add(
+                source.external_id if source else f"{raw.platform}:{raw.external_id}"
+            )
             if published:
                 user_dates.append(published)
+        if raw.id not in seen_raw_ids:
+            seen_raw_ids.add(raw.id)
+            evidence_items.append(
+                ProductEvidenceOut(
+                    content_id=raw.id,
+                    title=titles.get(raw.id) or raw.external_id,
+                    platform=raw.platform,
+                    account=(source.name if source else None),
+                    identity=identity,
+                    category=event.category,
+                    published_at=raw.published_at,
+                    url=raw.url,
+                )
+            )
+
+    seeded_count = len(seeded_raw_ids)
+    user_count = len(user_sources)
+    observed_stage = 0
+    if seeded_count:
+        observed_stage = 1
+    if user_count >= 1:
+        observed_stage = 2
+    if user_count >= 3:
+        observed_stage = 3
+
+    selected_ids = set(product.stage_hint_evidence_ids or [])
+    manual_valid = bool(
+        0 < product.stage_hint <= 3
+        and (product.stage_hint_reason or "").strip()
+        and selected_ids
+        and selected_ids.issubset(seen_raw_ids)
+    )
+    effective = product.stage_hint if manual_valid else observed_stage
+    reviewed_sources = {
+        source.external_id if source else f"{raw.platform}:{raw.external_id}"
+        for _, event, raw, source in evidence_rows
+        if manual_valid
+        and product.stage_hint >= 2
+        and raw.id in selected_ids
+        and event.category in ("unboxing", "arrived")
+        and (source.identity if source else "unknown") in ("user", "unknown")
+    }
+    stage_user_count = max(user_count, len(reviewed_sources))
+    stage_source = "manual" if manual_valid else ("automatic" if observed_stage else "unverified")
+    if manual_valid:
+        stage_reason = product.stage_hint_reason.strip()
+    elif observed_stage:
+        stage_reason = f"已核验 {seeded_count} 条送测证据、{user_count} 个普通用户账号"
+    else:
+        stage_reason = "尚未发现可核验的送测或普通用户到货证据"
+
+    if official_rows:
+        official_event, _ = max(
+            official_rows, key=lambda pair: pair[1].published_at or pair[1].collected_at
+        )
+        official_status = _OFFICIAL_STATUS[official_event.category]
+    else:
+        official_status = "未发现可核验的官方发货信息"
+    if reviewed_sources:
+        consumer_status = f"经人工审核确认 {len(reviewed_sources)} 个独立账号的到货/开箱证据"
+    elif user_count:
+        consumer_status = f"已核验 {user_count} 个普通用户账号的到货/开箱证据"
+    elif seeded_count:
+        consumer_status = "仅发现送测样品，尚无普通用户到货证据"
+    else:
+        consumer_status = "暂无已核验的普通用户到货证据"
 
     def _date(dates: list) -> str | None:
         return min(dates).strftime("%m-%d") if dates else None
@@ -192,8 +281,11 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         if index == 1:
             stage_evidence, stage_date = (seeded_count or None), _date(seeded_dates)
         elif index in (2, 3):
-            stage_evidence = user_count or None
+            stage_evidence = stage_user_count or None
             stage_date = _date(user_dates)
+        note = _STAGE_NOTES.get(index)
+        if manual_valid and index == effective:
+            note = f"人工审核已绑定 {len(selected_ids)} 条原始内容证据"
         stages.append(
             ProductStageOut(
                 label=label,
@@ -201,7 +293,7 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
                 tone=_STAGE_TONES.get(index),
                 date=stage_date if state != "pending" else None,
                 evidence=stage_evidence,
-                note=_STAGE_NOTES.get(index),
+                note=note,
             )
         )
 
@@ -220,6 +312,19 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         stage_hint=product.stage_hint,
         current_stage=effective,
         stage_label=FULFILLMENT_STAGES[effective],
+        stage_source=stage_source,
+        stage_reason=stage_reason,
+        stage_evidence_ids=sorted(selected_ids) if manual_valid else [],
+        stage_updated_at=(
+            product.stage_hint_updated_at
+            if manual_valid
+            else max([*seeded_dates, *user_dates], default=None)
+        ),
+        official_status=official_status,
+        official_evidence_count=len({raw.id for _, raw in official_rows}),
+        consumer_status=consumer_status,
+        consumer_evidence_count=stage_user_count,
+        evidences=evidence_items,
         stages=stages,
         updated_at=product.updated_at,
     )

@@ -124,5 +124,9 @@ export interface RawItem {
   translated?: boolean
   mergedInto?: string
   keywords?: string[]
+  excerpt?: string
+  cover?: string
+  originalUrl?: string
+  previewMode: 'full' | 'partial' | 'external_only'
 }
 

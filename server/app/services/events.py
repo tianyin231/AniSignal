@@ -59,6 +59,7 @@ class ContentRow:
     published_at: datetime | None
     collected_at: datetime
     title: str
+    text: str
     category: str | None
     identity: str
     source_name: str | None
@@ -139,6 +140,7 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
                 published_at=published,
                 collected_at=raw.collected_at,
                 title=(version.title or raw.external_id),
+                text=(version.text or ""),
                 category=version.category,
                 identity=(source.identity if source else "unknown"),
                 source_name=(source.name if source else None),
@@ -476,7 +478,8 @@ async def _aggregate_product(
 
 
 def _matches_product(row: ContentRow, product: Product) -> bool:
-    return any(term and term in row.title for term in (product.watch_terms or []))
+    haystack = f"{row.title}\n{row.text}"
+    return any(term and term in haystack for term in (product.watch_terms or []))
 
 
 def _distinct_user_sources(items: list[ContentRow]) -> list[str]:
@@ -484,7 +487,7 @@ def _distinct_user_sources(items: list[ContentRow]) -> list[str]:
         {
             row.source_external_id or f"{row.platform}:{row.external_id}"
             for row in items
-            if row.identity not in ("official", "seeded")
+            if row.identity == "user"
         }
     )
 
@@ -498,7 +501,18 @@ def _product_confidence(category: str, items: list[ContentRow]) -> tuple[str, st
             return "medium", f"{len(users)} 个独立账号的证据"
         if len(users) >= 1:
             return "low", "单一账号证据，需人工复核账号身份与商品对应关系（§9.2）"
-        return "low", "仅有送测样品证据，不代表消费者订单履约"
+        if any(row.identity == "seeded" for row in items):
+            return "low", "仅有送测样品证据，不代表消费者订单履约"
+        unknown_count = len(
+            {
+                row.source_external_id or f"{row.platform}:{row.external_id}"
+                for row in items
+                if row.identity == "unknown"
+            }
+        )
+        if unknown_count:
+            return "low", f"{unknown_count} 个账号身份待核验，暂不作为消费者到货结论"
+        return "low", "暂无可作为普通用户到货结论的证据"
     if len(items) >= 2:
         return "medium", f"{len(items)} 条相关内容"
     return "low", "单一来源，待更多证据"
@@ -537,13 +551,13 @@ async def _advance_stage(
     if len(users) >= 3:
         stage = max(stage, 3)
 
-    effective = stage if product.stage_hint < 0 else product.stage_hint
-    if effective <= product.computed_stage:
+    if stage == product.computed_stage:
         return
 
     previous_stage = min(product.computed_stage, len(FULFILLMENT_STAGES) - 1)
-    product.computed_stage = effective
-    stats.stage_advances += 1
+    product.computed_stage = stage
+    if stage > previous_stage:
+        stats.stage_advances += 1
 
     events = list(
         (
@@ -556,6 +570,12 @@ async def _advance_stage(
             )
         ).scalars()
     )
+    manual_valid = bool(
+        0 < product.stage_hint <= 3
+        and (product.stage_hint_reason or "").strip()
+        and (product.stage_hint_evidence_ids or [])
+    )
+    effective = product.stage_hint if manual_valid else stage
     label = FULFILLMENT_STAGES[min(effective, len(FULFILLMENT_STAGES) - 1)]
     for event in events:
         event.last_updated_at = utcnow()

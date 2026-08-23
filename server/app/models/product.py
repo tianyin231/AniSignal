@@ -10,7 +10,7 @@ from app.models.base import Base
 
 # 履约阶梯固定标签（设计文档 §9.2）；索引即阶段号
 FULFILLMENT_STAGES = [
-    "尚未发货",
+    "暂无可靠到货证据",
     "出现送测样品",
     "首位普通用户到货",
     "多名独立用户到货",
@@ -36,6 +36,10 @@ class Product(Base):
     watch_terms: Mapped[list] = mapped_column(JSON, default=list)
     # 管理端手动指定的当前阶段（-1 = 跟随引擎计算）
     stage_hint: Mapped[int] = mapped_column(Integer, default=-1)
+    # 人工阶段必须绑定原始内容证据并填写判断理由。
+    stage_hint_reason: Mapped[str | None] = mapped_column(Text)
+    stage_hint_evidence_ids: Mapped[list] = mapped_column(JSON, default=list)
+    stage_hint_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     # 引擎上次计算出的阶段（用于检测推进并写修订）
     computed_stage: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

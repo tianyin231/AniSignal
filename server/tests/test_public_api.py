@@ -8,7 +8,7 @@ from app.clock import utcnow
 from app.models import CollectTarget, RawContent
 from app.services.ingest import ingest_items
 
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.test_parsers_bilibili import DYNAMIC_RAW, VIDEO_RAW
 from tests.test_parsers_others import KURO_ITEM
 
 
@@ -55,16 +55,29 @@ async def test_public_contents_search_and_fields(client, session):
     assert body["total"] == 1
     item = body["items"][0]
     assert item["title"] == "Version Update Notice"
-    assert item["text_excerpt"].startswith("<p>html body")
+    assert item["text_excerpt"].startswith("html body")
     assert item["cover"] == "https://example.com/banner.png"
     assert item["source_name"] == "Kuro Games"
     assert item["identity"] == "official"
     assert item["category"] == "official_announce"
+    assert item["preview_mode"] == "full"
+    assert "<p>" not in item["text_excerpt"]
 
     # 平台过滤
     resp = await client.get("/api/contents", params={"platform": "bilibili"})
     assert resp.json()["total"] == 1
     assert resp.json()["items"][0]["metrics"]["view"] == 680
+
+
+async def test_public_content_marks_external_only_preview(client, session):
+    await ingest_items(session, "bilibili_dynamics", [DYNAMIC_RAW])
+    resp = await client.get("/api/contents", params={"identity": "official"})
+    item = resp.json()["items"][0]
+    assert item["preview_mode"] == "external_only"
+    assert item["text_excerpt"] is None
+    detail = (await client.get(f"/api/contents/{item['id']}")).json()
+    assert detail["preview_mode"] == "external_only"
+    assert detail["url"].startswith("https://t.bilibili.com/")
 
 
 async def test_public_sources_hide_internal_details(client, session):

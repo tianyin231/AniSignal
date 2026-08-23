@@ -201,6 +201,11 @@ async def my_feed(
                 identity=(source.identity if source else "unknown"),
                 metrics=None,
                 cover=media[0] if isinstance(media, list) and media else None,
+                preview_mode=(
+                    "full"
+                    if (version.text or str(normalized.get("text") or "")).strip()
+                    else ("partial" if media else "external_only")
+                ),
             )
         )
     return PublicContentList(items=items, total=total)
@@ -210,4 +215,8 @@ def _excerpt(text: str) -> str | None:
     text = (text or "").strip()
     if not text:
         return None
+    if "<" in text and ">" in text:
+        import bleach
+
+        text = bleach.clean(text, tags=[], strip=True).strip()
     return text[:140] + ("…" if len(text) > 140 else "")

@@ -101,21 +101,27 @@ async def test_product_fulfillment_ladder(session):
     )
     await session.commit()
 
-    # 送测开箱 1 条（official 送测身份）+ 独立用户开箱 3 条
+    # 送测开箱 1 条 + 已核验普通用户开箱 3 条
     seeded = dict(VIDEO_RAW, bvid="BVseed", title="爱弥斯键盘开箱：官方送测样品", owner_mid=500, owner_name="送测UP")
-    # ingest 的 source identity 默认 unknown；送测语义在聚合里按 identity 判定，
-    # 这里直接用 unknown 模拟普通用户
     users = [
         await _video("BVu1", "爱弥斯键盘开箱第一天", owner_mid=601, owner="用户甲"),
         await _video("BVu2", "爱弥斯键盘开箱，等了好久", owner_mid=602, owner="用户乙"),
         await _video("BVu3", "爱弥斯键盘终于开箱了！", owner_mid=603, owner="用户丙"),
     ]
     await ingest_items(session, "bilibili_search", [seeded, *users])
+    from app.models import Source
+
+    sources = list((await session.execute(select(Source))).scalars())
+    for source in sources:
+        if source.external_id == "500":
+            source.identity = "seeded"
+        elif source.external_id in {"601", "602", "603"}:
+            source.identity = "user"
     await run_aggregation(session)
     await session.commit()
 
     product = await session.scalar(select(Product))
-    # 3 个独立 unknown 账号 → 阶段 3（多名独立用户到货）
+    # 3 个已核验独立用户账号 → 阶段 3（多名独立用户到货）
     assert product.computed_stage == 3
 
     unboxing_events = list(
@@ -126,7 +132,7 @@ async def test_product_fulfillment_ladder(session):
     assert event.product_id == product.id
     assert event.status_label == "多名独立用户到货"
     assert event.importance is True
-    assert "4 个独立账号" in event.conclusion or "独立账号" in event.conclusion
+    assert "3 个独立账号" in event.conclusion or "独立账号" in event.conclusion
 
 
 async def test_manual_locked_event_skipped(session):
@@ -150,7 +156,7 @@ async def test_manual_locked_event_skipped(session):
     assert len(events) == 1
 
 
-async def test_stage_hint_overrides(session):
+async def test_unverified_accounts_do_not_advance_stage(session):
     await _seed_rules(session)
     product = Product(slug="p2", name="测试商品", watch_terms=["测试商品"], stage_hint=5)
     session.add(product)
@@ -161,8 +167,8 @@ async def test_stage_hint_overrides(session):
     await run_aggregation(session)
     await session.commit()
     await session.refresh(product)
-    # 手动指定阶段 5 生效
-    assert product.computed_stage == 5
+    # 未经身份核验的账号不能自动推进；人工展示值也不污染引擎计算值。
+    assert product.computed_stage == 0
 
 
 def test_cluster_shared_title_logic():
@@ -171,7 +177,7 @@ def test_cluster_shared_title_logic():
     def row(title: str, ts) -> ContentRow:
         return ContentRow(
             raw_id=1, platform="kuro_cn", external_id="x", url=None,
-            published_at=ts, collected_at=ts, title=title, category="delay",
+            published_at=ts, collected_at=ts, title=title, text="", category="delay",
             identity="official", source_name=None, source_external_id=None,
         )
 
@@ -204,6 +210,7 @@ def test_game_name_boilerplate_does_not_merge_topics():
             published_at=ts,
             collected_at=ts,
             title=title,
+            text="",
             category="official_announce",
             identity="official",
             source_name="鸣潮官网",
@@ -236,6 +243,7 @@ def test_series_name_does_not_merge_different_topics():
             published_at=ts,
             collected_at=ts,
             title=title,
+            text="",
             category="version_update",
             identity="official",
             source_name="鸣潮",

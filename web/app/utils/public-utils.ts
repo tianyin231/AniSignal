@@ -74,5 +74,9 @@ export function toRawItem(item: PublicContentItem): RawItem {
     identity: item.identity as Identity,
     category: item.category ? (categoryMeta[item.category]?.label ?? item.category) : undefined,
     keywords: item.matched_keywords ?? [],
+    excerpt: item.text_excerpt ?? undefined,
+    cover: item.cover ?? undefined,
+    originalUrl: item.url ?? undefined,
+    previewMode: item.preview_mode,
   }
 }
