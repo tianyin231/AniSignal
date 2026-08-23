@@ -1,3 +1,7 @@
+# AniSignal 全栈：4 容器形态
+#   mysql / redis：数据落在 /www 数据盘（DATA_DIR，默认 ./data）
+#   app：FastAPI + Nuxt SSR 同容器，对外仅 8090 一个端口（Nitro 同源代理 API）
+#   collector：调度器 + 采集 worker；扩容 --scale collector=N
 services:
   mysql:
     image: mysql:8.4
@@ -9,7 +13,7 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
     volumes:
-      - mysql_data:/var/lib/mysql
+      - ${DATA_DIR:-./data}/mysql:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-anisignal}"]
       interval: 5s
@@ -20,22 +24,21 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
-      - redis_data:/data
+      - ${DATA_DIR:-./data}/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 20
 
-  api:
-    build: ./server
+  app:
+    build: .
     restart: unless-stopped
-    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+    command: ["bash", "/app/deploy/start-app.sh"]
     environment: &app_env
       ANISIGNAL_DATABASE_URL: mysql+asyncmy://root:${MYSQL_ROOT_PASSWORD:-anisignal}@mysql:3306/anisignal
       ANISIGNAL_REDIS_URL: redis://redis:6379/0
       ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:-change-me}
-      ANISIGNAL_CORS_ORIGINS: ${ANISIGNAL_CORS_ORIGINS:-http://localhost:3000,http://154.40.58.230:8090}
       TZ: Asia/Shanghai
     depends_on:
       mysql:
@@ -43,42 +46,22 @@ services:
       redis:
         condition: service_healthy
     ports:
-      # 公网可达（web 前端从浏览器直连此 API）；上域名/HTTPS 后建议收回反代后
-      - "${API_PORT:-8000}:8000"
-
-  web:
-    build: ./web
-    restart: unless-stopped
-    environment:
-      # 浏览器直连的 API 地址（不是容器内地址）
-      NUXT_PUBLIC_API_BASE: ${PUBLIC_API_BASE:-http://154.40.58.230:8000}
-    ports:
       - "${WEB_PORT:-8090}:3000"
-    depends_on:
-      - api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
-  scheduler:
-    build: ./server
+  collector:
+    build: .
     restart: unless-stopped
-    command: python -m app.scheduler.loop
+    command: ["bash", "/app/deploy/start-collector.sh"]
     environment: *app_env
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
-
-  worker:
-    build: ./server
-    restart: unless-stopped
-    command: arq app.worker.settings.WorkerSettings
-    environment: *app_env
-    depends_on:
-      mysql:
+      app:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-
-volumes:
-  mysql_data:
-  redis_data:

@@ -41,6 +41,8 @@ export interface PublicStats {
 
 export function usePublicApi() {
   const config = useRuntimeConfig()
-  const api = $fetch.create({ baseURL: config.public.apiBase })
+  // SSR 直连 FastAPI；浏览器走同源（Nitro routeRules 代理）
+  const baseURL = import.meta.server ? config.apiSsrBase : config.public.apiBase
+  const api = $fetch.create({ baseURL })
   return { api }
 }
