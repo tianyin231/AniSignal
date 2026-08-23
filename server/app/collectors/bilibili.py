@@ -69,11 +69,22 @@ class BilibiliCollector:
             return FetchResult(platform=self.platform, fetch_kind="bilibili_dynamics", items=items)
         raise CollectorError(f"unsupported bilibili target_type: {target_type}")
 
+    async def _run_nonempty(self, *args: str) -> list[dict]:
+        """执行命令并提取列表；空结果重试一次（实测匿名链路存在间歇性空返回）。"""
+        import asyncio
+
+        payload = await self._run(*args)
+        items = extract_items(payload)
+        if items:
+            return items
+        await asyncio.sleep(3)
+        payload = await self._run(*args)
+        return extract_items(payload)
+
     async def search_videos(self, keyword: str, limit: int) -> list[dict]:
-        payload = await self._run(
+        results = await self._run_nonempty(
             "search", keyword, "--type", "video", "-n", str(limit), "-o", "json", "--no-cache"
         )
-        results = extract_items(payload)
         details: list[dict] = []
         for item in results[:limit]:
             bvid = item.get("bvid")
@@ -94,14 +105,16 @@ class BilibiliCollector:
         return details
 
     async def user_videos(self, mid: str, limit: int) -> list[dict]:
-        payload = await self._run(
+        items = await self._run_nonempty(
             "user", str(mid), "--videos", "-n", str(limit), "-o", "json", "--no-cache"
         )
-        return extract_items(payload)[:limit]
+        return items[:limit]
 
     async def user_dynamics(self, mid: str, limit: int) -> list[dict]:
-        payload = await self._run("dynamics", str(mid), "-n", str(limit), "-o", "json", "--no-cache")
-        return extract_items(payload)[:limit]
+        items = await self._run_nonempty(
+            "dynamics", str(mid), "-n", str(limit), "-o", "json", "--no-cache"
+        )
+        return items[:limit]
 
 
 def _loads(text: str) -> object:
