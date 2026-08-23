@@ -96,3 +96,44 @@ async def test_ingest_unknown_fetch_kind_rejected(session):
         assert "no parser" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+async def test_reparse_upgrades_versions(session):
+    """parser 升级回填：重算后指纹变化的内容获得新版本。"""
+    from sqlalchemy import func, select
+
+    from app.models import ContentVersion, RawContent
+    from app.services.ingest import reparse_contents
+
+    # 先用"无标题版"数据入库（模拟旧 parser 产物）
+    old_dynamic = dict(DYNAMIC_RAW, text="#鸣潮# #鸣潮3.6版本#\n剧情动画 | 仙尘\n正文第二行")
+    await ingest_items(session, "bilibili_dynamics", [old_dynamic])
+    raw = await session.scalar(
+        select(RawContent).where(RawContent.content_type == "dynamic")
+    )
+    v1 = await session.scalar(
+        select(ContentVersion).where(ContentVersion.raw_content_id == raw.id)
+    )
+    assert v1.version == 1
+    # 模拟旧 parser（v1，无标题推导）的指纹：手工改掉，重算后应产生 v2
+    raw.content_hash = "0" * 64
+    await session.commit()
+    result = await reparse_contents(session, "bilibili", "dynamic")
+    assert result["checked"] == 1
+    assert result["updated"] == 1
+    versions = (
+        await session.scalars(
+            select(ContentVersion)
+            .where(ContentVersion.raw_content_id == raw.id)
+            .order_by(ContentVersion.version)
+        )
+    ).all()
+    assert [v.version for v in versions] == [1, 2]
+    assert versions[1].title == "剧情动画 | 仙尘"
+    assert versions[1].parser_version == "2"
+    # 幂等：再次重算指纹不变
+    result2 = await reparse_contents(session, "bilibili", "dynamic")
+    assert result2["updated"] == 0
+    assert await session.scalar(
+        select(func.count(ContentVersion.id)).where(ContentVersion.raw_content_id == raw.id)
+    ) == 2

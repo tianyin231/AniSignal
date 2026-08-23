@@ -220,6 +220,19 @@ async def list_contents(
     return ContentListOut(items=items, total=total)
 
 
+@router.post("/reparse")
+async def reparse(
+    platform: str = Query(...),
+    content_type: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+):
+    """用当前 parser 重算已入库内容（parser 升级后的回填入口）。"""
+    from app.services.ingest import reparse_contents
+
+    result = await reparse_contents(session, platform, content_type)
+    return result
+
+
 @router.get("/runs")
 async def list_runs(
     target_id: int | None = Query(default=None),

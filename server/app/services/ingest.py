@@ -204,3 +204,53 @@ def _add_snapshot(
             captured_at=utcnow(),
         )
     )
+
+
+# content_type → 用于重算的解析入口（同一解析函数可能有多个 fetch_kind 别名）
+_REPARSE_KIND = {
+    "video": "bilibili_search",
+    "dynamic": "bilibili_dynamics",
+    "notice": "kuro_notices",
+    "post": "miyoushe_posts",
+    "rss_item": "youtube_rss",
+}
+
+
+async def reparse_contents(
+    session: AsyncSession, platform: str, content_type: str | None = None
+) -> dict:
+    """用当前 parser 重算已入库内容（原始数据不可覆盖、解析可重算）。
+
+    parser 升级后调用：指纹变化的内容追加新 ContentVersion，指标快照不动。
+    """
+    query = select(RawContent).where(RawContent.platform == platform)
+    if content_type:
+        query = query.where(RawContent.content_type == content_type)
+    rows = list((await session.execute(query)).scalars())
+    checked = updated = failed = 0
+    for content in rows:
+        kind = _REPARSE_KIND.get(content.content_type)
+        if kind is None or not content.raw_json:
+            continue
+        parse, parser_version = PARSERS[kind]
+        try:
+            normalized = parse(content.raw_json)
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            logger.warning("reparse failed for %s/%s: %r", platform, content.external_id, exc)
+            continue
+        checked += 1
+        fingerprint = content_fingerprint(normalized)
+        if fingerprint == content.content_hash:
+            continue
+        latest = await session.scalar(
+            select(ContentVersion.version)
+            .where(ContentVersion.raw_content_id == content.id)
+            .order_by(ContentVersion.version.desc())
+            .limit(1)
+        )
+        _add_version(session, content, (latest or 0) + 1, normalized, parser_version)
+        content.content_hash = fingerprint
+        updated += 1
+    await session.commit()
+    return {"checked": checked, "updated": updated, "failed": failed}
