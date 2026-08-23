@@ -3,7 +3,9 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -128,3 +130,27 @@ class AiUsage(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default="ok")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class ContentMatch(Base):
+    """LLM 对两条官方内容是否属于同一事件的可追溯判断。"""
+
+    __tablename__ = "content_matches"
+    __table_args__ = (
+        UniqueConstraint("left_raw_id", "right_raw_id", name="uq_content_match_pair"),
+        Index("ix_content_matches_same_confidence", "is_same_event", "confidence"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    left_raw_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_contents.id", ondelete="CASCADE"), index=True
+    )
+    right_raw_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_contents.id", ondelete="CASCADE"), index=True
+    )
+    is_same_event: Mapped[bool] = mapped_column(Boolean)
+    confidence: Mapped[float] = mapped_column(Float)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    model: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

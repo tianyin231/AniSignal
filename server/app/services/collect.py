@@ -119,7 +119,26 @@ async def run_collection(redis, target_id: int) -> dict:
                     target.id, filtered_out,
                 )
             stats = await ingest_items(session, fetch_result.fetch_kind, fetch_result.items)
-            if stats.items_new or stats.items_updated:
+            match_stats = None
+            if target.platform in ("bilibili", "youtube") and (
+                stats.touched_content_ids or target.platform == "youtube"
+            ):
+                from app.services.similarity import match_official_contents
+
+                try:
+                    match_stats = await match_official_contents(
+                        session, stats.touched_content_ids or None
+                    )
+                    logger.info(
+                        "official matching: candidates=%s decisions=%s positives=%s failed=%s",
+                        match_stats.candidates,
+                        match_stats.decisions,
+                        match_stats.positive,
+                        match_stats.failed_batches,
+                    )
+                except Exception:  # noqa: BLE001 - AI 匹配不得阻断采集主链路
+                    logger.exception("official content matching failed")
+            if stats.items_new or stats.items_updated or (match_stats and match_stats.decisions):
                 # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
                 from app.services.events import run_aggregation
 
@@ -132,6 +151,9 @@ async def run_collection(redis, target_id: int) -> dict:
                 if agg.touched_event_ids and hasattr(redis, "enqueue_job"):
                     for event_id in agg.touched_event_ids:
                         await redis.enqueue_job("summarize_event", event_id)
+                if target.platform == "youtube" and hasattr(redis, "enqueue_job"):
+                    for content_id in stats.touched_content_ids:
+                        await redis.enqueue_job("translate_content", content_id)
         except Exception as exc:  # noqa: BLE001 - 任何失败都落到健康状态里
             error_text = f"{type(exc).__name__}: {exc}"
             logger.error("collect target %s failed: %s", target_id, error_text)

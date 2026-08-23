@@ -2,10 +2,10 @@
 
 from datetime import datetime
 
-from app.models.enums import Platform
+from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"
 
 
 def parse_rss_item(raw: dict) -> NormalizedContent:
@@ -14,7 +14,12 @@ def parse_rss_item(raw: dict) -> NormalizedContent:
         platform=Platform.YOUTUBE,
         content_type=ContentType.RSS_ITEM,
         external_id=video_id,
-        author=NormalizedAuthor(name=raw.get("author") or None),
+        author=NormalizedAuthor(
+            external_id=raw.get("channel_id") or None,
+            name=raw.get("author") or None,
+            official_title="YouTube 官方频道",
+            identity=Identity.OFFICIAL,
+        ),
         title=raw.get("title") or None,
         text=raw.get("summary") or None,
         url=raw.get("link") or (f"https://www.youtube.com/watch?v={video_id}" if video_id else None),

@@ -54,18 +54,19 @@ class YoutubeRssCollector:
             video_id = (entry.findtext("yt:videoId", default="", namespaces=_NS) or "").strip()
             if not video_id:
                 continue
+            link = entry.find("atom:link", _NS)
+            thumbnail = entry.find("media:group/media:thumbnail", _NS)
             items.append(
                 {
                     "id": video_id,
+                    "channel_id": channel_id,
                     "title": entry.findtext("atom:title", default="", namespaces=_NS),
-                    "link": entry.findtext("atom:link", default="", namespaces=_NS)
+                    "link": (link.get("href") if link is not None else None)
                     or f"https://www.youtube.com/watch?v={video_id}",
                     "published": entry.findtext("atom:published", default="", namespaces=_NS),
                     "updated": entry.findtext("atom:updated", default="", namespaces=_NS),
                     "author": entry.findtext("atom:author/atom:name", default="", namespaces=_NS),
-                    "thumbnail": entry.findtext(
-                        "media:group/media:thumbnail", default="", namespaces=_NS
-                    ),
+                    "thumbnail": thumbnail.get("url") if thumbnail is not None else "",
                     "summary": entry.findtext(
                         "media:group/media:description", default="", namespaces=_NS
                     ),
