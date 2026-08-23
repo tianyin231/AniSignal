@@ -1,0 +1,75 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-anisignal}
+      MYSQL_DATABASE: anisignal
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-anisignal}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./server
+    restart: unless-stopped
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+    environment: &app_env
+      ANISIGNAL_DATABASE_URL: mysql+asyncmy://root:${MYSQL_ROOT_PASSWORD:-anisignal}@mysql:3306/anisignal
+      ANISIGNAL_REDIS_URL: redis://redis:6379/0
+      ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:-change-me}
+      TZ: Asia/Shanghai
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  scheduler:
+    build: ./server
+    restart: unless-stopped
+    command: python -m app.scheduler.loop
+    environment: *app_env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./server
+    restart: unless-stopped
+    command: arq app.worker.settings.worker_settings
+    environment: *app_env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  redis_data:
