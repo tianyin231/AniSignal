@@ -22,6 +22,7 @@ const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
 
 const { api } = usePublicApi()
+const { t } = useSiteConfig()
 const { data, status } = await useAsyncData(
   () => `events-${tab.value}-${page.value}`,
   () =>
@@ -48,6 +49,7 @@ useSeoMeta({ title: '事件库' })
 <template>
   <div>
     <TabNav v-model="tab" :tabs="tabs" />
+    <p class="mb-3 text-xs text-slate-400 dark:text-zinc-500">{{ t('events_note') }}</p>
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…

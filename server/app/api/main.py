@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.account import router as account_router
 from app.api.admin import router as admin_router
+from app.api.admin_settings import router as admin_settings_router
 from app.api.auth import router as auth_router
 from app.api.public import router as public_router
 from app.config import get_settings
@@ -55,6 +56,7 @@ app.include_router(admin_router)
 app.include_router(public_router)
 app.include_router(auth_router)
 app.include_router(account_router)
+app.include_router(admin_settings_router)
 
 
 @app.get("/api/healthz")

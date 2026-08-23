@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 订阅功能尚未上线：诚实说明规划，不用演示数据冒充
 useSeoMeta({ title: '订阅中心' })
+const { t } = useSiteConfig()
 
 const plans = [
   {
@@ -30,8 +31,7 @@ const plans = [
     <section class="panel p-4 sm:p-5">
       <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">订阅中心</h1>
       <p class="mt-1.5 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
-        邮件通知、早报与监控位正在开发中。上线前，本站全部信息免费开放，无需注册；
-        你可以随时查看事件库与商品时间线获取同样的信息。
+        {{ t('watch_intro') }}
       </p>
     </section>
 
