@@ -7,6 +7,12 @@ const password = ref('')
 const error = ref('')
 const busy = ref(false)
 const { login } = useAuth()
+const route = useRoute()
+const redirectTarget = () => {
+  const target = String(route.query.redirect || '/')
+  // 只允许站内路径，防开放跳转
+  return target.startsWith('/') && !target.startsWith('//') ? target : '/'
+}
 
 async function submit() {
   if (!email.value.trim() || busy.value) return
@@ -14,7 +20,7 @@ async function submit() {
   error.value = ''
   try {
     await login(email.value.trim(), password.value)
-    navigateTo('/account')
+    navigateTo(redirectTarget())
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '登录失败，请稍后再试'
   } finally {
