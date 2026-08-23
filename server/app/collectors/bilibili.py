@@ -114,7 +114,42 @@ class BilibiliCollector:
         items = await self._run_nonempty(
             "dynamics", str(mid), "-n", str(limit), "-o", "json", "--no-cache"
         )
-        return items[:limit]
+        return (await self._enrich_draw_dynamics(items))[:limit]
+
+    async def _enrich_draw_dynamics(self, items: list[dict], cap: int = 6) -> list[dict]:
+        """图文（DRAW）动态在列表接口里 text/pics 常为空；逐条取详情补全，每轮最多 cap 条。
+
+        已有正文或图片的条目跳过（历史内容入库后天然不会重复补）。
+        """
+        enriched = 0
+        for item in items:
+            if enriched >= cap:
+                break
+            if item.get("type") != "DYNAMIC_TYPE_DRAW":
+                continue
+            if (item.get("text") or "").strip() or item.get("pics"):
+                continue
+            dynamic_id = str(item.get("id") or "")
+            if not dynamic_id:
+                continue
+            try:
+                detail = await self._run("dynamic", dynamic_id, "-o", "json", "--no-cache")
+            except CollectorError:
+                continue
+            if isinstance(detail, dict):
+                detail = [detail]
+            else:
+                detail = extract_items(detail)
+            if not detail:
+                continue
+            rich = detail[0]
+            if (rich.get("text") or "").strip() or rich.get("pics"):
+                item["text"] = rich.get("text") or item.get("text")
+                item["pics"] = rich.get("pics") or item.get("pics")
+                enriched += 1
+        if enriched:
+            logger.info("enriched %s DRAW dynamics with per-dynamic detail", enriched)
+        return items
 
 
 def _loads(text: str) -> object:

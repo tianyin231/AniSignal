@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const lightbox = ref<string | null>(null)
+
 import { ArrowUpRight } from 'lucide-vue-next'
 import type { ContentDetail } from '~/composables/usePublicApi'
 import { contentTypeLabels } from '~/utils/admin-types'
@@ -50,7 +52,15 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
       <h1 class="mt-2.5 text-lg font-semibold leading-snug">{{ d.title }}</h1>
       <p class="mono mt-2 text-xs text-slate-400 dark:text-zinc-500">
         {{ d.source_name ?? '—' }} · 发布 {{ fmtTime(d.published_at) }} · 采集 {{ fmtTime(d.collected_at) }}
-        <template v-if="d.last_seen_at"> · 最近发现 {{ fmtTime(d.last_seen_at) }}</template>
+        <template v-if="d.last_seen_at"> · 最近发现 {{ fmtTime(d.last_seen_at) }}
+  <!-- 图片灯箱 -->
+  <div v-if="lightbox" class="fixed inset-0 z-50 grid place-items-center bg-black/80 p-6" @click="lightbox = null">
+    <img :src="lightbox" referrerpolicy="no-referrer" class="max-h-full max-w-full rounded-lg object-contain shadow-2xl" >
+    <button class="absolute right-5 top-5 rounded-full bg-white/10 px-3 py-1.5 text-sm text-white backdrop-blur hover:bg-white/20" @click.stop="lightbox = null">
+      关闭 ✕
+    </button>
+  </div>
+</template>
       </p>
     </section>
 
@@ -81,11 +91,11 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         <section v-if="d.media.length" class="panel p-4 sm:p-5">
           <h2 class="text-sm font-semibold">媒体（{{ d.media.length }}）</h2>
           <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <a v-for="m in d.media" :key="m" :href="m" target="_blank" rel="noopener" class="group relative overflow-hidden rounded-lg border border-slate-900/5 dark:border-white/10">
+            <button v-for="m in d.media" :key="m" type="button" class="group relative overflow-hidden rounded-lg border border-slate-900/5 dark:border-white/10" @click="lightbox = m">
               <img :src="m" referrerpolicy="no-referrer" loading="lazy" class="aspect-video w-full object-cover transition-opacity group-hover:opacity-90" >
-            </a>
+            </button>
           </div>
-          <p class="mt-2 text-xs text-slate-400 dark:text-zinc-500">图片直链自平台 CDN；若无法加载可点开原图。</p>
+          <p class="mt-2 text-xs text-slate-400 dark:text-zinc-500">点击图片站内放大预览；图片直链自平台 CDN。</p>
         </section>
 
         <!-- 指标历史 -->
