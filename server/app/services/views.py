@@ -310,7 +310,11 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         note = _STAGE_NOTES.get(index)
         if hint_applied and index == effective:
             reviewer = "AI 审核" if ai_applied else "人工审核"
-            note = f"{reviewer}已绑定 {len(selected_ids)} 条原始内容证据"
+            note = (
+                "AI 判断后未选定可确认到货的证据"
+                if ai_applied and effective == 0
+                else f"{reviewer}已绑定 {len(selected_ids)} 条原始内容证据"
+            )
         stages.append(
             ProductStageOut(
                 label=label,
