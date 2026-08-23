@@ -57,7 +57,7 @@ async function verify() {
       body: { email: email.value.trim(), code: code.value.trim() },
     })
     await fetchMe()
-    navigateTo('/')
+    navigateTo('/account')
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '验证失败'
   } finally {

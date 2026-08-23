@@ -73,7 +73,7 @@ async function handleLogout() {
           </button>
           <div v-if="menuOpen" class="popover absolute right-0 top-full z-50 mt-1.5 w-44 p-1.5">
             <NuxtLink to="/account" class="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-500/10 dark:text-zinc-200" @click="menuOpen = false">
-              账号设置
+              账号中心
             </NuxtLink>
             <NuxtLink to="/watch" class="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-500/10 dark:text-zinc-200" @click="menuOpen = false">
               订阅中心

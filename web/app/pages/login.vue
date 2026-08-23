@@ -11,7 +11,7 @@ const route = useRoute()
 const redirectTarget = () => {
   const target = String(route.query.redirect || '/')
   // 只允许站内路径，防开放跳转
-  return target.startsWith('/') && !target.startsWith('//') ? target : '/'
+  return target.startsWith('/') && !target.startsWith('//') ? target : '/account'
 }
 
 async function submit() {

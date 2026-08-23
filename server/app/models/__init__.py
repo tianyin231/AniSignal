@@ -16,7 +16,7 @@ from app.models.event import Event, EventRevision, Evidence
 from app.models.product import FULFILLMENT_STAGES, Product
 from app.models.run import CollectRun
 from app.models.source import Source
-from app.models.user import EmailCode, User, UserSession
+from app.models.user import EmailCode, User, UserKeyword, UserSession
 
 __all__ = [
     "Base",
@@ -25,6 +25,7 @@ __all__ = [
     "User",
     "EmailCode",
     "UserSession",
+    "UserKeyword",
     "Source",
     "RawContent",
     "ContentVersion",

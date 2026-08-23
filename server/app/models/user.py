@@ -46,6 +46,24 @@ class EmailCode(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class UserKeyword(Base):
+    """用户监控关键词（免费版关注流；通知上线后即监控位）。"""
+
+    __tablename__ = "user_keywords"
+    __table_args__ = (
+        UniqueConstraint("user_id", "keyword", name="uq_user_keyword"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", name="fk_user_keywords_user_id_users", ondelete="CASCADE"),
+        index=True,
+    )
+    keyword: Mapped[str] = mapped_column(String(64))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class UserSession(Base):
     __tablename__ = "user_sessions"
     __table_args__ = (
