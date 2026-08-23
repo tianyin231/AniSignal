@@ -11,6 +11,9 @@ function handleLogout() {
 const nav = [
   { to: '/admin', label: '总览' },
   { to: '/admin/targets', label: '采集目标' },
+  { to: '/admin/events', label: '事件审核' },
+  { to: '/admin/products', label: '商品管理' },
+  { to: '/admin/rules', label: '分类词典' },
   { to: '/admin/contents', label: '内容浏览' },
 ]
 

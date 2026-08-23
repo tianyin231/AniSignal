@@ -54,8 +54,7 @@ const boundaries = [
       <div class="mt-2.5 flex flex-wrap gap-4 text-sm">
         <NuxtLink to="/sources" class="link">已接入来源与健康状态</NuxtLink>
         <NuxtLink to="/watch" class="link">订阅中心</NuxtLink>
-        <a href="#" class="link" @click.prevent>权利人投诉</a>
-        <a href="#" class="link" @click.prevent>退订</a>
+        <a href="mailto:admin@anisignal.local" class="link">权利人投诉</a>
       </div>
     </section>
   </div>

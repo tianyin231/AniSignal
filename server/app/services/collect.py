@@ -66,6 +66,16 @@ async def run_collection(redis, target_id: int) -> dict:
                     target.target_type, target.target_value, settings.collect_limit
                 )
             stats = await ingest_items(session, fetch_result.fetch_kind, fetch_result.items)
+            if stats.items_new or stats.items_updated:
+                # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
+                from app.services.events import run_aggregation
+
+                agg = await run_aggregation(session)
+                await session.commit()
+                logger.info(
+                    "aggregation: events_created=%s evidences=%s revisions=%s stages=%s",
+                    agg.events_created, agg.evidences_added, agg.revisions_written, agg.stage_advances,
+                )
         except Exception as exc:  # noqa: BLE001 - 任何失败都落到健康状态里
             error_text = f"{type(exc).__name__}: {exc}"
             logger.error("collect target %s failed: %s", target_id, error_text)

@@ -43,3 +43,41 @@ class RunStatus(StrEnum):
     SUCCESS = "success"
     PARTIAL = "partial"
     FAILED = "failed"
+
+
+class Category(StrEnum):
+    """内容/事件类目（履约词典，设计文档 §8.1）；official_announce 为官方公告兜底类。"""
+
+    OFFICIAL_ANNOUNCE = "official_announce"
+    VERSION_UPDATE = "version_update"
+    PRESALE = "presale"
+    BALANCE = "balance"
+    DELAY = "delay"
+    SHIPPING = "shipping"
+    ARRIVED = "arrived"
+    UNBOXING = "unboxing"
+    REVIEW = "review"
+    QUALITY = "quality"
+    OTHER = "other"
+
+
+# 官方公告类（可跨平台合并的类目）
+ANNOUNCE_CATEGORIES = {
+    Category.OFFICIAL_ANNOUNCE,
+    Category.VERSION_UPDATE,
+    Category.PRESALE,
+    Category.BALANCE,
+    Category.DELAY,
+}
+
+# 商品履约类（挂到商品事件的类目）
+FULFILLMENT_CATEGORIES = {
+    Category.PRESALE,
+    Category.BALANCE,
+    Category.DELAY,
+    Category.SHIPPING,
+    Category.ARRIVED,
+    Category.UNBOXING,
+    Category.REVIEW,
+    Category.QUALITY,
+}

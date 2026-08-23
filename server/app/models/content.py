@@ -70,6 +70,8 @@ class ContentVersion(Base):
     text: Mapped[str | None] = mapped_column(Text)
     normalized_json: Mapped[dict | None] = mapped_column(JSON)
     parser_version: Mapped[str] = mapped_column(String(16), default="1")
+    # 规则分类结果（None = 未分类），随版本重算
+    category: Mapped[str | None] = mapped_column(String(32))
 
     raw_content: Mapped[RawContent] = relationship(back_populates="versions")
 

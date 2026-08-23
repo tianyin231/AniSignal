@@ -25,6 +25,7 @@ from app.parsers.miyoushe import parse_post
 from app.parsers.youtube import PARSER_VERSION as YOUTUBE_PARSER_VERSION
 from app.parsers.youtube import parse_rss_item
 from app.schemas.content import NormalizedContent
+from app.services.classify import classify_content, load_rules
 from app.services.fingerprint import content_fingerprint
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]
     if fetch_kind not in PARSERS:
         raise ValueError(f"no parser registered for fetch_kind={fetch_kind}")
     parse, parser_version = PARSERS[fetch_kind]
+    rules = await load_rules(session)
     stats = IngestStats(items_found=len(items))
     for raw in items:
         try:
@@ -65,7 +67,7 @@ async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]
             logger.warning("parse failed for %s item: %r", fetch_kind, exc)
             continue
         try:
-            is_new, changed = await _ingest_one(session, normalized, raw, parser_version)
+            is_new, changed = await _ingest_one(session, normalized, raw, parser_version, rules)
             stats.items_new += int(is_new)
             stats.items_updated += int(changed)
         except Exception as exc:  # noqa: BLE001
@@ -85,6 +87,7 @@ async def _ingest_one(
     normalized: NormalizedContent,
     raw: dict,
     parser_version: str,
+    rules: list,
 ) -> tuple[bool, bool]:
     """返回 (is_new, fingerprint_changed)。"""
     source_id = await _upsert_source(session, normalized)
@@ -111,7 +114,7 @@ async def _ingest_one(
         )
         session.add(content)
         await session.flush()  # 拿到 id 供 version/snapshot 外键使用
-        _add_version(session, content, 1, normalized, parser_version)
+        _add_version(session, content, 1, normalized, parser_version, rules)
         _add_snapshot(session, content, normalized)
         return True, False
 
@@ -130,7 +133,7 @@ async def _ingest_one(
             .order_by(ContentVersion.version.desc())
             .limit(1)
         )
-        _add_version(session, existing, (latest or 0) + 1, normalized, parser_version)
+        _add_version(session, existing, (latest or 0) + 1, normalized, parser_version, rules)
         existing.content_hash = fingerprint
     _add_snapshot(session, existing, normalized)
     return False, changed
@@ -183,6 +186,7 @@ def _add_version(
     version: int,
     normalized: NormalizedContent,
     parser_version: str,
+    rules: list,
 ) -> None:
     session.add(
         ContentVersion(
@@ -193,6 +197,7 @@ def _add_version(
             text=normalized.text,
             normalized_json=normalized.model_dump(mode="json"),
             parser_version=parser_version,
+            category=classify_content(normalized, rules),
         )
     )
 
@@ -224,14 +229,16 @@ _REPARSE_KIND = {
 async def reparse_contents(
     session: AsyncSession, platform: str, content_type: str | None = None
 ) -> dict:
-    """用当前 parser 重算已入库内容（原始数据不可覆盖、解析可重算）。
+    """用当前 parser + 分类词典重算已入库内容（原始数据不可覆盖、解析可重算）。
 
-    parser 升级后调用：指纹变化的内容追加新 ContentVersion，指标快照不动。
+    parser 升级或词典调整后调用：指纹或分类变化的内容追加新 ContentVersion，
+    指标快照不动。
     """
     query = select(RawContent).where(RawContent.platform == platform)
     if content_type:
         query = query.where(RawContent.content_type == content_type)
     rows = list((await session.execute(query)).scalars())
+    rules = await load_rules(session)
     checked = updated = failed = 0
     for content in rows:
         kind = _REPARSE_KIND.get(content.content_type)
@@ -245,16 +252,21 @@ async def reparse_contents(
             logger.warning("reparse failed for %s/%s: %r", platform, content.external_id, exc)
             continue
         checked += 1
-        fingerprint = content_fingerprint(normalized)
-        if fingerprint == content.content_hash:
-            continue
         latest = await session.scalar(
-            select(ContentVersion.version)
+            select(ContentVersion)
             .where(ContentVersion.raw_content_id == content.id)
             .order_by(ContentVersion.version.desc())
             .limit(1)
         )
-        _add_version(session, content, (latest or 0) + 1, normalized, parser_version)
+        category = classify_content(normalized, rules)
+        fingerprint = content_fingerprint(normalized)
+        if (
+            fingerprint == content.content_hash
+            and latest is not None
+            and latest.category == category
+        ):
+            continue
+        _add_version(session, content, ((latest.version if latest else 0) + 1), normalized, parser_version, rules)
         content.content_hash = fingerprint
         updated += 1
     await session.commit()

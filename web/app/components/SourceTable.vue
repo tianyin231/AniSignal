@@ -13,7 +13,6 @@ defineProps<{ sources: SourceRef[] }>()
           <th class="py-2 pr-3 font-medium">账号</th>
           <th class="py-2 pr-3 font-medium">区域</th>
           <th class="py-2 pr-3 font-medium">发布时间</th>
-          <th class="py-2 pr-3 font-medium">首次发现</th>
           <th class="py-2 pr-3 font-medium">译文</th>
           <th class="py-2 font-medium">原文</th>
         </tr>
@@ -32,13 +31,13 @@ defineProps<{ sources: SourceRef[] }>()
           <td class="py-2 pr-3 text-slate-600 dark:text-zinc-400">{{ s.account }}</td>
           <td class="py-2 pr-3 text-slate-600 dark:text-zinc-400">{{ regionMeta[s.region] }}</td>
           <td class="mono py-2 pr-3 text-slate-500 dark:text-zinc-400">{{ s.publishedAt }}</td>
-          <td class="mono py-2 pr-3 text-slate-400">{{ s.foundAt }}</td>
           <td class="py-2 pr-3">
             <span v-if="s.translated" class="chip bg-sky-500/10 text-sky-700 dark:text-sky-300">已译</span>
             <span v-else class="text-slate-300 dark:text-zinc-600">—</span>
           </td>
           <td class="py-2">
-            <a href="#" class="link" @click.prevent>打开 ↗</a>
+            <a v-if="s.url" :href="s.url" target="_blank" rel="noopener" class="link">打开 ↗</a>
+            <span v-else class="text-slate-300 dark:text-zinc-600">—</span>
           </td>
         </tr>
       </tbody>

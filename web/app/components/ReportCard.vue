@@ -1,28 +1,17 @@
 <script setup lang="ts">
-import { morningReport } from '~/utils/data'
-
-const headlines = morningReport.sections[0].items
+// 每日早报尚未上线：诚实占位，不用演示数据冒充
 </script>
 
 <template>
   <section class="panel-glass p-4">
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">今日早报</h2>
-      <NuxtLink to="/?tab=report" class="link text-xs">查看全文</NuxtLink>
+      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">每日早报</h2>
+      <span class="chip bg-slate-500/10 text-slate-500 dark:text-zinc-400">规划中</span>
     </div>
-    <p class="mono mt-1 text-xs text-slate-400 dark:text-zinc-500">{{ morningReport.date }} {{ morningReport.sentAt }} 已发送</p>
-    <ul class="mt-2.5 space-y-1.5">
-      <li
-        v-for="it in headlines"
-        :key="it.text"
-        class="flex gap-2 text-[13px] leading-snug text-slate-600 dark:text-zinc-300"
-      >
-        <span class="mt-1.5 size-1 shrink-0 rounded-full bg-blue-400" />
-        <NuxtLink v-if="it.eventId" :to="`/events/${it.eventId}`" class="transition-colors hover:text-blue-600 dark:hover:text-blue-300">
-          {{ it.text }}
-        </NuxtLink>
-        <span v-else>{{ it.text }}</span>
-      </li>
-    </ul>
+    <p class="mt-2 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+      每天 08:00（北京时间）汇总前一日官方动态与商品履约变化，重要状态变化不等待早报即时发送。
+      邮件通知与订阅功能上线前，可随时通过本站免费查看全部信息。
+    </p>
+    <NuxtLink to="/watch" class="link mt-2 inline-block text-xs">了解订阅规划 →</NuxtLink>
   </section>
 </template>
