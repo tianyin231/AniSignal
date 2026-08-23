@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { platformMeta, regionMeta, type SourceRef } from '~/utils/data'
 
-defineProps<{ sources: SourceRef[] }>()
+defineProps<{ sources: (SourceRef & { contentId?: number | null })[] }>()
 </script>
 
 <template>
@@ -14,6 +14,7 @@ defineProps<{ sources: SourceRef[] }>()
           <th class="py-2 pr-3 font-medium">区域</th>
           <th class="py-2 pr-3 font-medium">发布时间</th>
           <th class="py-2 pr-3 font-medium">译文</th>
+          <th class="py-2 pr-3 font-medium">详情</th>
           <th class="py-2 font-medium">原文</th>
         </tr>
       </thead>
@@ -35,8 +36,12 @@ defineProps<{ sources: SourceRef[] }>()
             <span v-if="s.translated" class="chip bg-sky-500/10 text-sky-700 dark:text-sky-300">已译</span>
             <span v-else class="text-slate-300 dark:text-zinc-600">—</span>
           </td>
+          <td class="py-2 pr-3">
+            <NuxtLink v-if="s.contentId" :to="`/contents/${s.contentId}`" class="link">站内 ↗</NuxtLink>
+            <span v-else class="text-slate-300 dark:text-zinc-600">—</span>
+          </td>
           <td class="py-2">
-            <a v-if="s.url" :href="s.url" target="_blank" rel="noopener" class="link">打开 ↗</a>
+            <a v-if="s.url" :href="s.url" target="_blank" rel="noopener" class="link">原文 ↗</a>
             <span v-else class="text-slate-300 dark:text-zinc-600">—</span>
           </td>
         </tr>

@@ -113,6 +113,33 @@ export interface ApiProductList {
   items: ApiProduct[]
 }
 
+export interface ContentMetricPoint {
+  captured_at: string
+  metrics: Record<string, number>
+}
+
+export interface ContentDetail {
+  id: number
+  platform: string
+  content_type: string
+  external_id: string
+  url: string | null
+  title: string | null
+  text: string | null
+  text_html: string | null
+  published_at: string | null
+  collected_at: string
+  last_seen_at: string | null
+  source_name: string | null
+  source_identity: string | null
+  identity: string
+  media: string[]
+  metrics: Record<string, number> | null
+  metrics_history: ContentMetricPoint[]
+  event: { id: number; title: string; category: string; confidence: string } | null
+  version: number | null
+}
+
 export function usePublicApi() {
   const config = useRuntimeConfig()
   // SSR 直连 FastAPI；浏览器走同源（Nitro routeRules 代理）

@@ -53,6 +53,7 @@ async def events_to_out(
             region=_REGION_OF_PLATFORM.get(raw.platform, "cn"),
             published_at=raw.published_at,
             url=raw.url,
+            content_id=raw.id,
         )
         bucket = (
             conflicts_by_event if evidence.role == "conflict" else evidences_by_event

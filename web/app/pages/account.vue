@@ -280,15 +280,9 @@ async function changePassword() {
             <span class="text-xs text-slate-400">{{ feed?.total ?? 0 }} 条命中</span>
           </div>
           <div v-if="feed?.items?.length" class="border-t border-slate-900/5 dark:border-white/5">
-            <component
-              :is="entry.url ? 'a' : 'div'"
-              v-for="entry in feed.items.map((i) => ({ row: toRawItem(i), url: i.url }))"
-              :key="entry.row.id"
-              v-bind="entry.url ? { href: entry.url, target: '_blank', rel: 'noopener' } : {}"
-              class="block"
-            >
-              <RawFeedRow :item="entry.row" />
-            </component>
+            <NuxtLink v-for="entry in feed.items.map((i) => ({ row: toRawItem(i), url: i.url }))" :key="entry.row.id" :to="`/contents/${entry.row.id}`" class="block">
+        
+      </NuxtLink>
           </div>
           <p v-else class="border-t border-slate-900/5 px-5 py-8 text-center text-sm text-slate-400 dark:border-white/5 dark:text-zinc-500">
             {{ keywords.length ? '暂无命中关键词的内容，系统持续采集中。' : '添加关键词后，这里会展示命中的最新内容。' }}

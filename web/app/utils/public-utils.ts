@@ -45,6 +45,7 @@ export function toAppEvent(e: ApiEvent): AppEvent {
         publishedAt: fmtTime(s.published_at),
         foundAt: '',
         url: s.url ?? undefined,
+        contentId: (s as any).content_id ?? null,
       }),
     ),
     evidenceCount: e.evidence_count,

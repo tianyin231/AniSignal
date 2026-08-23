@@ -95,6 +95,33 @@ class PublicContentList(BaseModel):
     total: int
 
 
+class ContentMetricPoint(BaseModel):
+    captured_at: datetime
+    metrics: dict
+
+
+class ContentDetailOut(BaseModel):
+    id: int
+    platform: Platform
+    content_type: str
+    external_id: str
+    url: str | None
+    title: str | None
+    text: str | None
+    text_html: str | None = None  # 含 HTML 的正文经 bleach 消毒后返回
+    published_at: datetime | None
+    collected_at: datetime
+    last_seen_at: datetime | None = None
+    source_name: str | None = None
+    source_identity: str | None = None
+    identity: str
+    media: list[str] = []
+    metrics: dict | None = None
+    metrics_history: list[ContentMetricPoint] = []
+    event: dict | None = None
+    version: int | None = None
+
+
 class PublicSource(BaseModel):
     name: str
     platform: Platform
@@ -121,6 +148,7 @@ class EventSourceOut(BaseModel):
     region: str
     published_at: datetime | None
     url: str | None
+    content_id: int | None = None
 
 
 class EventCorrectionOut(BaseModel):
