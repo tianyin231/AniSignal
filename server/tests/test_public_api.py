@@ -68,6 +68,11 @@ async def test_public_contents_search_and_fields(client, session):
     assert resp.json()["total"] == 1
     assert resp.json()["items"][0]["metrics"]["view"] == 680
 
+    # 首页把国服、国际服官网合并为一个用户可理解的筛选项。
+    resp = await client.get("/api/contents", params={"platform": "kuro"})
+    assert resp.json()["total"] == 1
+    assert resp.json()["items"][0]["platform"] == "kuro_global"
+
 
 async def test_public_content_marks_external_only_preview(client, session):
     await ingest_items(session, "bilibili_dynamics", [DYNAMIC_RAW])

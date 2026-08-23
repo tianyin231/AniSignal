@@ -67,7 +67,11 @@ async def list_contents(
     )
     conditions = []
     if platform:
-        conditions.append(RawContent.platform == platform)
+        conditions.append(
+            RawContent.platform.in_(("kuro_cn", "kuro_global"))
+            if platform == "kuro"
+            else RawContent.platform == platform
+        )
     if content_type:
         conditions.append(RawContent.content_type == content_type)
     if identity:
