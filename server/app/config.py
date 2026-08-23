@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     # 单管理员 Token；生产必须通过环境变量覆盖
     admin_token: str = "change-me"
 
+    # 允许的跨域来源（逗号分隔；web 部署地址变化时在此追加）
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
     # 本地测试模式（python -m app.local 自动开启）：
     # SQLite + 进程内任务执行，不需要 MySQL / Redis / Docker
     local_mode: bool = False
