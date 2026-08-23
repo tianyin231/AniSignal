@@ -207,7 +207,50 @@ async def run_aggregation(session: AsyncSession) -> AggStats:
     for product in products:
         if product.watch_terms:
             await _aggregate_product(session, product, contents, stats)
+    await _backfill_facts(session, stats)
     return stats
+
+
+async def _backfill_facts(session: AsyncSession, stats: AggStats) -> None:
+    """为缺少 facts 的存量事件补模板关键事实（不覆盖已有的/AI 生成的）。"""
+    events = list(
+        (
+            await session.execute(
+                select(Event).where(Event.is_active.is_(True), Event.manual_locked.is_(False))
+            )
+        ).scalars()
+    )
+    missing = [e for e in events if not e.facts]
+    if not missing:
+        return
+    products = {p.id: p for p in (await session.execute(select(Product))).scalars()}
+
+    rows = await session.execute(
+        select(RawContent, Evidence)
+        .join(Evidence, Evidence.raw_content_id == RawContent.id)
+        .where(Evidence.event_id.in_([e.id for e in missing]))
+        .order_by(RawContent.published_at.asc())
+    )
+    evidences_by_event: dict[int, list[RawContent]] = {}
+    for raw, evidence in rows:
+        evidences_by_event.setdefault(evidence.event_id, []).append(raw)
+
+    for event in missing:
+        raws = evidences_by_event.get(event.id) or []
+        if not raws:
+            continue
+        facts = []
+        product = products.get(event.product_id) if event.product_id else None
+        if product is not None:
+            facts.append({"label": "商品", "value": product.name})
+        facts.append({"label": "类目", "value": CATEGORY_LABELS.get(event.category, event.category)})
+        first_time = min((r.published_at or r.collected_at for r in raws), default=None)
+        if first_time:
+            facts.append({"label": "首见时间", "value": first_time.strftime("%Y-%m-%d %H:%M")})
+        facts.append({"label": "证据数", "value": f"{len(raws)} 条"})
+        facts.append({"label": "来源平台", "value": "、".join(sorted({r.platform for r in raws}))})
+        event.facts = facts
+    stats.revisions_written += 0  # 模板回填不写修订（非结论变化）
 
 
 async def _aggregate_official(
