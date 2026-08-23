@@ -24,7 +24,9 @@ from app.services.queue import ArqQueue, BaseQueue, LocalQueue
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
+# 管理接口在 /api/admin/** 下：与 Nitro 的 /admin 页面路由错开，
+# 前端仅代理 /api/** 即可同源访问
+router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
 
 async def get_queue(request: Request) -> BaseQueue:

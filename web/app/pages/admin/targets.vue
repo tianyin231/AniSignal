@@ -34,7 +34,7 @@ watch(() => form.platform, () => { form.target_type = availableTypes.value[0] ??
 
 async function refresh() {
   try {
-    targets.value = await api<CollectTarget[]>('/admin/collect-targets')
+    targets.value = await api<CollectTarget[]>('/api/admin/collect-targets')
   } catch (exc: any) {
     error.value = exc?.message ?? String(exc)
   }
@@ -46,7 +46,7 @@ async function create() {
   creating.value = true
   formError.value = null
   try {
-    await api('/admin/collect-targets', {
+    await api('/api/admin/collect-targets', {
       method: 'POST',
       body: {
         platform: form.platform,
@@ -69,7 +69,7 @@ async function create() {
 async function toggle(target: CollectTarget) {
   busyId.value = target.id
   try {
-    await api(`/admin/collect-targets/${target.id}`, {
+    await api(`/api/admin/collect-targets/${target.id}`, {
       method: 'PUT',
       body: { enabled: !target.enabled },
     })
@@ -82,7 +82,7 @@ async function toggle(target: CollectTarget) {
 async function runNow(target: CollectTarget) {
   busyId.value = target.id
   try {
-    await api(`/admin/collect-targets/${target.id}/run`, { method: 'POST' })
+    await api(`/api/admin/collect-targets/${target.id}/run`, { method: 'POST' })
   } catch (exc: any) {
     error.value = `触发失败：${exc?.message ?? exc}`
   } finally {
@@ -94,7 +94,7 @@ async function remove(target: CollectTarget) {
   if (!confirm(`删除目标「${target.display_name || target.target_value}」及其运行记录？`)) return
   busyId.value = target.id
   try {
-    await api(`/admin/collect-targets/${target.id}`, { method: 'DELETE' })
+    await api(`/api/admin/collect-targets/${target.id}`, { method: 'DELETE' })
     await refresh()
   } finally {
     busyId.value = null

@@ -14,7 +14,7 @@ async function refresh() {
   loading.value = true
   error.value = null
   try {
-    data.value = await api<Overview>('/admin/overview')
+    data.value = await api<Overview>('/api/admin/overview')
   } catch (exc: any) {
     error.value = exc?.statusCode === 401 ? 'Token 失效，请重新登录' : `加载失败：${exc?.message ?? exc}`
   } finally {
