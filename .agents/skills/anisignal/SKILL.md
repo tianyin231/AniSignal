@@ -16,7 +16,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 | 产品设计文档 | `docs/superpowers/specs/` | 已定稿，评审通过 |
 | Web 前端 | `web/`（Nuxt 4 + Tailwind 4） | 原型可用；`/admin` 管理看板已接真实后端 |
 | 后端/采集/调度 | `server/`（FastAPI + arq + compose） | **首版骨架已落地（2026-08-22）**：四平台采集器、幂等入库、调度器、Admin API、24 个单测全过 |
-| 部署 | 根目录 `compose.yaml` | mysql + redis + api + scheduler + worker；B 站链路需 Linux 容器内验证（本机无 docker 时用 pytest 覆盖逻辑） |
+| 部署 | 根目录 `Dockerfile` + `compose.yaml` | **4 容器形态（2026-08-23 定稿）**：mysql / redis / app（FastAPI+Nitro 同容器，对外仅 8090，`/api/**` 同源代理，管理接口在 `/api/admin/**`）/ collector（调度+worker 同容器，Redis 领导锁支持 `--scale collector=N`）。数据 bind mount 在 `./data/`（服务器 /www 盘）；单镜像含 bili+python+node |
 
 `server/` 关键路径：`app/collectors/`（平台采集器）、`app/parsers/`（统一 schema 解析）、`app/services/ingest.py`（幂等入库）、`app/services/collect.py`（编排+健康）、`app/services/queue.py`（BaseQueue：ArqQueue 生产 / LocalQueue 进程内）、`app/scheduler/loop.py`、`app/worker/settings.py`、`app/api/admin.py`、`app/local.py`（**本地测试入口：`uv run python -m app.local`，SQLite+进程内队列，免 Docker/MySQL/Redis**）。新平台接入 = collector + parser + 在 `ingest.PARSERS` 与 `collect._COLLECTORS` 各注册一行。
 
