@@ -1,28 +1,32 @@
-# AniSignal Web（前端原型）
+# AniSignal Web（Nuxt 4 + Tailwind 4）
 
-Nuxt 4 + Tailwind CSS 4。当前全部数据为 `app/utils/data.ts` 中的演示数据，未接后端。
+全站真实数据驱动：首页（要闻/官方/来源动态三 tab）、内容库 `/contents`、内容详情 `/contents/[id]`（站内解析预览）、事件库、商品履约、来源健康、搜索、账号中心（登录后）与管理看板 `/admin`。
 
 ## 命令
 
 ```bash
 npm install
-npm run dev     # 开发服务器
+npm run dev     # 开发服务器（API 默认走同源代理到 127.0.0.1:8000，配合 server 的 app.local）
 npm run build   # 生产构建
 ```
 
 ## 结构
 
-- `app/layouts/default.vue`：论坛式三栏布局（左导航 / 中内容 / 右情报栏）
-- `app/pages/`：首页、官方动态、商品、事件库（`/events`）、事件详情、搜索（`/search`）、来源健康、订阅中心、关于（`/about`）
-- `app/components/`：事件行、履约阶梯、证据表、身份标签等
-- `app/utils/data.ts`：领域模型与演示数据（对应设计文档 §7）
+```text
+app/
+├── layouts/       # default（三栏）admin auth（认证）account（账号中心）
+├── pages/         # 首页/official/sources/events/products/contents/search/watch/login/register/forgot/account + admin/*（7 页）
+├── components/    # EventRow RawFeedRow FulfillmentStepper SourceTable AnnouncementBanner AdminToasts TodayBriefCard …
+├── composables/   # usePublicApi useAdminApi useAuth useSiteConfig useAdminToast
+└── utils/         # data.ts（类型+平台/身份元数据）public-utils.ts（适配器）avatars.ts admin-types.ts
+```
 
-## 设计约定
+## 关键约定
 
-- 导航分工：顶栏只放内容主栏目（首页/官方动态/商品）与账号区；侧栏放二级页面（早报/来源/订阅）与个人区
-- 材质参考 macOS：底层"壁纸"渐变（`.aurora-bg`，蓝/青为主）→ 55% 透明 + blur(28px) 的大圆角浮窗（`.panel`，顶部内高光 + 多层柔影）→ 纵向高光渐变主按钮（`.btn-primary`）与灰底白块分段控件
-- 详情页顶部有返回按钮：站内有历史则 `history.back()`，直达链接回退到所属列表页
-- 亮暗主题通过 `<html>` 上的 `dark` 类切换，首帧前由内联脚本恢复
-- 主色为论坛蓝（blue-600/400），全站无紫色系；身份标签色系：官方=蓝（主色）、送测=琥珀、普通用户=绿、媒体=天蓝、商家=青绿、未说明=灰
-- 列表行采用编辑式排版：无徽章堆叠，身份以着色文本表达，元数据一行等宽排布，行间发丝线分隔（避免信息流广告感）
-- 时间戳与计数一律等宽字体（情报终端感）
+- **API 调用**：`usePublicApi()`（公开）/ `useAdminApi()`（管理，X-Admin-Token）；浏览器走同源（Nitro routeRules 代理 `/api/**` → 127.0.0.1:8000），SSR 直连 `apiSsrBase`。
+- 页面文案走站点配置：`useSiteConfig().t('key')`（默认值在 useSiteConfig.ts，与后端 DEFAULT_TEXTS 对应）。
+- 认证三页/账号中心用独立 layout；登录注册后跳 `/account`。
+- 管理端所有异步操作必须有 busy 文案 + toast（useAdminToast），禁止 alert()。
+- 材质参考 macOS：玻璃 panel/aurora 背景，主色论坛蓝，**全站无紫色系**；身份标签色系见 data.ts identityMeta。
+- 时间戳统一 `utils/admin-types.ts fmtTime`（YYYY/MM/DD HH:mm，北京时间）。
+- **改模板后必须浏览器实测**（DOM snapshot/截图），构建通过不代表结构正确。
