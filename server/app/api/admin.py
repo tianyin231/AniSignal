@@ -31,6 +31,7 @@ from app.schemas.api import (
     EventListOut,
     EventMergeRequest,
     EventOut,
+    EventSplitRequest,
     EventUpdate,
     OverviewOut,
     ProductCreate,
@@ -323,6 +324,11 @@ async def update_event(
             setattr(event, field, value)
             changes.append(field)
     if changes:
+        if "summary" in changes:
+            from app.clock import utcnow
+
+            event.summary_status = "manual" if event.summary else None
+            event.summary_updated_at = utcnow() if event.summary else None
         event.manual_locked = True  # 人工编辑后锁定，引擎不再覆盖（§12）
         session.add(
             EventRevision(
@@ -354,6 +360,65 @@ async def set_lock(
     await session.commit()
     await session.refresh(event)
     return (await events_to_out(session, [event], include_detail=True))[0]
+
+
+@router.post("/events/{event_id}/split", response_model=EventOut)
+async def split_event_endpoint(
+    event_id: int,
+    body: EventSplitRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.events import split_event
+
+    try:
+        event = await split_event(session, event_id, body.content_ids)
+    except ValueError as exc:
+        if str(exc) in {"event_not_found", "evidence_not_found"}:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await session.commit()
+    await session.refresh(event)
+    return (await events_to_out(session, [event], include_detail=True))[0]
+
+
+@router.delete("/events/{event_id}/evidences/{content_id}")
+async def remove_event_evidence(
+    event_id: int,
+    content_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.events import exclude_evidence
+
+    try:
+        remaining, deactivated = await exclude_evidence(session, event_id, content_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    await session.commit()
+    return {
+        "removed": True,
+        "remaining_evidences": remaining,
+        "deactivated": deactivated,
+    }
+
+
+@router.post("/events/{event_id}/summarize")
+async def regenerate_event_summary(
+    event_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.ai import summarize_event
+
+    result = await summarize_event(session, event_id, force=True)
+    if result.get("status") == "failed":
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, result.get("reason", "AI 摘要失败"))
+    if result.get("status") == "skipped":
+        code = (
+            status.HTTP_404_NOT_FOUND
+            if result.get("reason") == "event_not_found"
+            else status.HTTP_409_CONFLICT
+        )
+        raise HTTPException(code, result.get("reason", "摘要任务已跳过"))
+    return result
 
 
 @router.post("/events/merge")

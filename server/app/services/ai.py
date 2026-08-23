@@ -15,6 +15,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow
 from app.config import get_settings
 from app.models import (
     AiUsage,
@@ -145,17 +146,17 @@ def _fallback_summary(event: Event, evidence_count: int) -> str:
     return f"已收录与「{event.title}」相关的 {evidence_count} 条线索，结论以证据原文为准。"
 
 
-async def summarize_event(session: AsyncSession, event_id: int) -> dict:
+async def summarize_event(
+    session: AsyncSession, event_id: int, *, force: bool = False
+) -> dict:
     """AI 只生成证据摘要；结构化事实始终由聚合引擎确定。"""
     event = await session.get(Event, event_id)
     if event is None:
         return {"status": "skipped", "reason": "event_not_found"}
-    if event.manual_locked:
+    if event.manual_locked and not force:
         return {"status": "skipped", "reason": "manual_locked"}
 
     config = await get_ai_config(session)
-    if not ai_available(config):
-        return {"status": "skipped", "reason": "ai_not_configured"}
 
     latest_sq = (
         select(
@@ -175,7 +176,7 @@ async def summarize_event(session: AsyncSession, event_id: int) -> dict:
             (ContentVersion.raw_content_id == latest_sq.c.rid)
             & (ContentVersion.version == latest_sq.c.version),
         )
-        .where(Evidence.event_id == event_id)
+        .where(Evidence.event_id == event_id, Evidence.role != "excluded")
         .order_by(RawContent.published_at.asc())
         .limit(8)
     )
@@ -193,36 +194,45 @@ async def summarize_event(session: AsyncSession, event_id: int) -> dict:
         return {"status": "skipped", "reason": "no_evidences"}
     evidence_context.append(str(len(evidences)))
 
-    system = (
-        "你是库洛游戏《鸣潮》的情报编辑，只能根据给定证据输出 JSON："
-        '{"summary": "100字以内中文结论摘要"}。'
-        "禁止补充证据中没有的游戏名、角色、时间、奖励或结论；"
-        "不要把《鸣潮》写成其它游戏；区分官方信息与用户反馈；存疑时明确说明。"
-    )
-    user = (
-        f"事件标题：{event.title}\n类目：{event.category}\n"
-        f"确定的证据数量：{len(evidences)}\n证据列表：\n" + "\n".join(evidences)
-    )
-    started = time.monotonic()
-    try:
-        raw_out, usage = await chat(config, system, user, json_mode=True)
-        parsed = json.loads(raw_out)
-    except Exception as exc:  # noqa: BLE001
-        await record_usage(session, task="summarize_event", config=config, usage=None,
-                           duration_ms=int((time.monotonic() - started) * 1000),
-                           ref_id=event_id, status="failed")
-        logger.warning("summarize_event %s failed: %r", event_id, exc)
-        return {"status": "failed", "reason": str(exc)[:200]}
-
-    await record_usage(session, task="summarize_event", config=config, usage=usage,
-                       duration_ms=int((time.monotonic() - started) * 1000), ref_id=event_id)
-
-    summary = str(parsed.get("summary") or "").strip()[:1000]
-    if not summary or not _summary_supported(summary, "\n".join(evidence_context)):
+    used_fallback = not ai_available(config)
+    if used_fallback:
         summary = _fallback_summary(event, len(evidences))
+    else:
+        system = (
+            "你是库洛游戏《鸣潮》的情报编辑，只能根据给定证据输出 JSON："
+            '{"summary": "100字以内中文结论摘要"}。'
+            "禁止补充证据中没有的游戏名、角色、时间、奖励或结论；"
+            "不要把《鸣潮》写成其它游戏；区分官方信息与用户反馈；存疑时明确说明。"
+        )
+        user = (
+            f"事件标题：{event.title}\n类目：{event.category}\n"
+            f"确定的证据数量：{len(evidences)}\n证据列表：\n" + "\n".join(evidences)
+        )
+        started = time.monotonic()
+        try:
+            raw_out, usage = await chat(config, system, user, json_mode=True)
+            parsed = json.loads(raw_out)
+        except Exception as exc:  # noqa: BLE001
+            await record_usage(session, task="summarize_event", config=config, usage=None,
+                               duration_ms=int((time.monotonic() - started) * 1000),
+                               ref_id=event_id, status="failed")
+            logger.warning("summarize_event %s failed: %r", event_id, exc)
+            return {"status": "failed", "reason": str(exc)[:200]}
+
+        await record_usage(session, task="summarize_event", config=config, usage=usage,
+                           duration_ms=int((time.monotonic() - started) * 1000), ref_id=event_id)
+
+        summary = str(parsed.get("summary") or "").strip()[:1000]
+        used_fallback = not summary or not _summary_supported(
+            summary, "\n".join(evidence_context)
+        )
+        if used_fallback:
+            summary = _fallback_summary(event, len(evidences))
 
     changed = summary != (event.summary or "")
     event.summary = summary
+    event.summary_status = "fallback" if used_fallback else "ai"
+    event.summary_updated_at = utcnow()
     from app.models import EventRevision
 
     if changed:
@@ -230,11 +240,20 @@ async def summarize_event(session: AsyncSession, event_id: int) -> dict:
             EventRevision(
                 event_id=event.id,
                 actor="engine",
-                note=f"AI 摘要更新（{config['model']}）",
+                note=(
+                    f"安全回退摘要更新（{config['model'] or '未配置 AI'}）"
+                    if used_fallback
+                    else f"AI 摘要更新（{config['model']}）"
+                ),
             )
         )
     await session.commit()
-    return {"status": "ok", "summary": summary, "facts": len(event.facts or [])}
+    return {
+        "status": "ok",
+        "summary": summary,
+        "summary_status": event.summary_status,
+        "facts": len(event.facts or []),
+    }
 
 
 async def translate_content(session: AsyncSession, content_id: int) -> dict:

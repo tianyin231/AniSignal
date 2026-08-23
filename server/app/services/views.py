@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    ContentVersion,
     Event,
     EventRevision,
     Evidence,
@@ -47,12 +48,27 @@ async def events_to_out(
     evidences_by_event: dict[int, list[EventSourceOut]] = {}
     conflicts_by_event: dict[int, list[EventSourceOut]] = {}
     keywords_by_event: dict[int, set] = {}
-    for evidence, raw, source in evidence_rows:
+    evidence_data = list(evidence_rows)
+    raw_ids = [raw.id for _, raw, _ in evidence_data]
+    titles: dict[int, str | None] = {}
+    if raw_ids:
+        version_rows = await session.execute(
+            select(ContentVersion)
+            .where(ContentVersion.raw_content_id.in_(raw_ids))
+            .order_by(ContentVersion.raw_content_id, ContentVersion.version.desc())
+        )
+        for version in version_rows.scalars():
+            titles.setdefault(version.raw_content_id, version.title)
+
+    for evidence, raw, source in evidence_data:
+        if evidence.role == "excluded":
+            continue
         for kw in raw.matched_keywords or []:
             keywords_by_event.setdefault(evidence.event_id, set()).add(kw)
         item = EventSourceOut(
             platform=raw.platform,
             account=(source.name if source else None),
+            title=titles.get(raw.id),
             region=_REGION_OF_PLATFORM.get(raw.platform, "cn"),
             published_at=raw.published_at,
             url=raw.url,
@@ -96,6 +112,8 @@ async def events_to_out(
                 id=event.id,
                 title=event.title,
                 summary=event.summary,
+                summary_status=event.summary_status,
+                summary_updated_at=event.summary_updated_at,
                 category=event.category,
                 product_id=event.product_id,
                 product_slug=(product.slug if product else None),

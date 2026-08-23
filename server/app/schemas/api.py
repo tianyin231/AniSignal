@@ -164,6 +164,7 @@ class PublicStats(BaseModel):
 class EventSourceOut(BaseModel):
     platform: str
     account: str | None
+    title: str | None = None
     region: str
     published_at: datetime | None
     url: str | None
@@ -180,6 +181,8 @@ class EventOut(BaseModel):
     id: int
     title: str
     summary: str | None
+    summary_status: str | None = None
+    summary_updated_at: datetime | None = None
     category: str
     product_id: int | None
     product_slug: str | None
@@ -293,3 +296,7 @@ class EventUpdate(BaseModel):
 class EventMergeRequest(BaseModel):
     source_id: int
     target_id: int
+
+
+class EventSplitRequest(BaseModel):
+    content_ids: list[int] = Field(min_length=1)

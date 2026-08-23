@@ -34,6 +34,8 @@ class Event(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
     summary: Mapped[str | None] = mapped_column(Text)
+    summary_status: Mapped[str | None] = mapped_column(String(16))  # ai/fallback/manual
+    summary_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     category: Mapped[str] = mapped_column(String(32), index=True)
     product_id: Mapped[int | None] = mapped_column(
         ForeignKey("products.id", name="fk_events_product_id_products", ondelete="SET NULL"),
@@ -78,7 +80,8 @@ class Evidence(Base):
         ForeignKey("raw_contents.id", name="fk_evidences_raw_content_id_raw_contents", ondelete="CASCADE"),
         index=True,
     )
-    role: Mapped[str] = mapped_column(String(16), default="support")  # support/conflict
+    # excluded 保留人工排除审计，同时阻止聚合器再次挂回事件。
+    role: Mapped[str] = mapped_column(String(16), default="support")  # support/conflict/excluded
     note: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

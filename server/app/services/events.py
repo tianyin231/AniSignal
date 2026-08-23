@@ -110,6 +110,11 @@ def _build_facts(category: str, cluster: list, product=None) -> list:
 
 async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
     """全部内容 + 最新版本（含分类）+ 来源身份。"""
+    excluded_ids = set(
+        await session.scalars(
+            select(Evidence.raw_content_id).where(Evidence.role == "excluded")
+        )
+    )
     rows = await session.execute(
         select(RawContent, ContentVersion, Source)
         .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id, isouter=True)
@@ -119,7 +124,7 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
     seen: set[int] = set()
     result: list[ContentRow] = []
     for raw, version, source in rows:
-        if raw.id in seen or version is None:
+        if raw.id in seen or raw.id in excluded_ids or version is None:
             continue
         seen.add(raw.id)
         published = raw.published_at
@@ -424,6 +429,8 @@ async def _reconcile_official_event(
     event.first_seen_at = first.published_at or first.collected_at
     event.last_updated_at = utcnow()
     event.summary = None
+    event.summary_status = None
+    event.summary_updated_at = None
     if event.id not in stats.touched_event_ids:
         stats.touched_event_ids.append(event.id)
     changes = []
@@ -673,3 +680,155 @@ def _add_revision(session: AsyncSession, event: Event, stats: AggStats, note: st
 
 def _regions_of(rows: list[ContentRow]) -> set[str]:
     return {_REGION_OF_PLATFORM.get(row.platform, "cn") for row in rows}
+
+
+def _refresh_manual_event(event: Event, rows: list[ContentRow], product=None) -> None:
+    """证据人工变化后，用剩余证据重建可确定的事件字段。"""
+    first = sorted(rows, key=_sort_key)[0]
+    event.identity = "official" if all(row.identity == "official" for row in rows) else "user"
+    if product is not None:
+        event.confidence, event.confidence_reason = _product_confidence(event.category, rows)
+        event.conclusion = _product_conclusion(event.category, rows, product)
+    elif event.identity == "official":
+        event.confidence = "high"
+        event.confidence_reason = "官方来源公告"
+        event.conclusion = _CATEGORY_CONCLUSION.get(event.category, "官方公告")
+    event.title = first.title[:255]
+    event.regions = sorted(_regions_of(rows))
+    event.facts = _build_facts(event.category, rows, product)
+    event.first_seen_at = first.published_at or first.collected_at
+    event.last_updated_at = utcnow()
+    event.summary = None
+    event.summary_status = None
+    event.summary_updated_at = None
+    event.manual_locked = True
+
+
+async def split_event(
+    session: AsyncSession, event_id: int, content_ids: list[int]
+) -> Event:
+    """把所选证据移动到新的人工锁定事件。"""
+    event = await session.get(Event, event_id)
+    if event is None:
+        raise ValueError("event_not_found")
+
+    requested_ids = set(content_ids)
+    evidences = list(
+        await session.scalars(
+            select(Evidence).where(
+                Evidence.event_id == event_id,
+                Evidence.role != "excluded",
+            )
+        )
+    )
+    selected = [evidence for evidence in evidences if evidence.raw_content_id in requested_ids]
+    if len(selected) != len(requested_ids):
+        raise ValueError("evidence_not_found")
+    if len(selected) == len(evidences):
+        raise ValueError("cannot_split_all_evidences")
+
+    content_by_id = {
+        row.raw_id: row for row in await load_classified_contents(session)
+    }
+    selected_rows = [content_by_id[evidence.raw_content_id] for evidence in selected]
+    remaining_rows = [
+        content_by_id[evidence.raw_content_id]
+        for evidence in evidences
+        if evidence.raw_content_id not in requested_ids
+    ]
+    product = await session.get(Product, event.product_id) if event.product_id else None
+    first = sorted(selected_rows, key=_sort_key)[0]
+    split = Event(
+        title=first.title[:255],
+        category=event.category,
+        product_id=event.product_id,
+        identity=event.identity,
+        importance=event.importance,
+        confidence=event.confidence,
+        confidence_reason=event.confidence_reason,
+        conclusion=event.conclusion,
+        status_label=event.status_label,
+        facts=_build_facts(event.category, selected_rows, product),
+        regions=sorted(_regions_of(selected_rows)),
+        manual_locked=True,
+        first_seen_at=first.published_at or first.collected_at,
+        last_updated_at=utcnow(),
+    )
+    session.add(split)
+    _refresh_manual_event(split, selected_rows, product)
+    await session.flush()
+    for evidence in selected:
+        evidence.event_id = split.id
+        evidence.role = "support"
+
+    _refresh_manual_event(event, remaining_rows, product)
+    session.add_all(
+        [
+            EventRevision(
+                event_id=event.id,
+                actor="admin",
+                note=f"人工拆出 {len(selected)} 条证据至事件 #{split.id}",
+            ),
+            EventRevision(
+                event_id=split.id,
+                actor="admin",
+                note=f"从事件 #{event.id} 人工拆分，迁入 {len(selected)} 条证据",
+            ),
+        ]
+    )
+    return split
+
+
+async def exclude_evidence(
+    session: AsyncSession, event_id: int, content_id: int
+) -> tuple[int, bool]:
+    """从事件移除证据，并持久排除其自动聚合。"""
+    event = await session.get(Event, event_id)
+    if event is None:
+        raise ValueError("event_not_found")
+    evidence = await session.scalar(
+        select(Evidence).where(
+            Evidence.event_id == event_id,
+            Evidence.raw_content_id == content_id,
+            Evidence.role != "excluded",
+        )
+    )
+    if evidence is None:
+        raise ValueError("evidence_not_found")
+
+    other_evidences = list(
+        await session.scalars(
+            select(Evidence).where(
+                Evidence.event_id == event_id,
+                Evidence.raw_content_id != content_id,
+                Evidence.role != "excluded",
+            )
+        )
+    )
+    evidence.role = "excluded"
+    evidence.note = "管理员从事件中排除"
+    event.manual_locked = True
+    event.summary = None
+    event.summary_status = None
+    event.summary_updated_at = None
+    event.last_updated_at = utcnow()
+
+    if other_evidences:
+        content_by_id = {
+            row.raw_id: row for row in await load_classified_contents(session)
+        }
+        remaining_rows = [content_by_id[item.raw_content_id] for item in other_evidences]
+        product = await session.get(Product, event.product_id) if event.product_id else None
+        _refresh_manual_event(event, remaining_rows, product)
+    else:
+        event.is_active = False
+        event.facts = []
+
+    session.add(
+        EventRevision(
+            event_id=event.id,
+            actor="admin",
+            note=f"人工移除并排除证据内容 #{content_id}",
+        )
+    )
+    return len(other_evidences), not other_evidences

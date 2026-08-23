@@ -16,6 +16,23 @@ const toast = useAdminToast()
 const selected = ref<ApiEvent | null>(null)
 const edit = reactive({ title: '', conclusion: '', status_label: '', importance: false, confidence: 'medium' })
 const mergeSource = ref('')
+const splitEvidenceIds = ref<number[]>([])
+const busyAction = ref<string | null>(null)
+
+const evidences = computed(() => {
+  if (!selected.value) return []
+  return [
+    ...selected.value.sources.map(source => ({ ...source, role: 'support' })),
+    ...selected.value.conflicts.map(source => ({ ...source, role: 'conflict' })),
+  ]
+})
+
+const summaryLabels: Record<string, string> = {
+  ai: 'AI 摘要',
+  fallback: '安全回退',
+  manual: '人工摘要',
+  legacy: '历史摘要',
+}
 
 async function refresh() {
   try {
@@ -30,6 +47,7 @@ onMounted(refresh)
 
 function pick(event: ApiEvent) {
   selected.value = event
+  splitEvidenceIds.value = []
   edit.title = event.title
   edit.conclusion = event.conclusion ?? ''
   edit.status_label = event.status_label ?? ''
@@ -112,6 +130,70 @@ async function merge() {
     busy.value = false
   }
 }
+
+async function regenerateSummary() {
+  if (!selected.value) return
+  busy.value = true
+  busyAction.value = 'summary'
+  error.value = null
+  try {
+    const result = await api<{ summary_status: string }>(`/api/admin/events/${selected.value.id}/summarize`, { method: 'POST' })
+    toast.ok(result.summary_status === 'fallback' ? '模型结果未通过校验，已使用安全回退摘要' : 'AI 摘要已重新生成')
+    const eventId = selected.value.id
+    await refresh()
+    const updated = events.value.find(event => event.id === eventId)
+    if (updated) pick(updated)
+  } catch (exc: any) {
+    error.value = `摘要生成失败：${exc?.data?.detail ?? exc?.message}`
+  } finally {
+    busy.value = false
+    busyAction.value = null
+  }
+}
+
+async function removeEvidence(contentId: number) {
+  if (!selected.value || !confirm(`从事件 #${selected.value.id} 移除证据内容 #${contentId}？该内容将不再参与自动聚合。`)) return
+  busy.value = true
+  busyAction.value = `remove-${contentId}`
+  error.value = null
+  const eventId = selected.value.id
+  try {
+    const result = await api<{ deactivated: boolean }>(`/api/admin/events/${eventId}/evidences/${contentId}`, { method: 'DELETE' })
+    toast.ok(result.deactivated ? '最后一条证据已移除，事件已停用' : '证据已移除并记录排除')
+    await refresh()
+    const updated = events.value.find(event => event.id === eventId)
+    if (updated) pick(updated)
+    else selected.value = null
+  } catch (exc: any) {
+    error.value = `移除失败：${exc?.data?.detail ?? exc?.message}`
+  } finally {
+    busy.value = false
+    busyAction.value = null
+  }
+}
+
+async function splitSelectedEvidence() {
+  if (!selected.value || !splitEvidenceIds.value.length) return
+  if (!confirm(`将所选 ${splitEvidenceIds.value.length} 条证据从事件 #${selected.value.id} 拆成新事件？`)) return
+  busy.value = true
+  busyAction.value = 'split'
+  error.value = null
+  try {
+    const created = await api<ApiEvent>(`/api/admin/events/${selected.value.id}/split`, {
+      method: 'POST',
+      body: { content_ids: splitEvidenceIds.value },
+    })
+    toast.ok(`已拆分为新事件 #${created.id}，两个事件均已锁定`)
+    await refresh()
+    const updated = events.value.find(event => event.id === created.id)
+    if (updated) pick(updated)
+  } catch (exc: any) {
+    error.value = `拆分失败：${exc?.data?.detail ?? exc?.message}`
+  } finally {
+    busy.value = false
+    busyAction.value = null
+  }
+}
 </script>
 
 <template>
@@ -137,6 +219,7 @@ async function merge() {
               <th class="px-3 py-2.5 font-medium">类目</th>
               <th class="px-3 py-2.5 font-medium">可信度</th>
               <th class="px-3 py-2.5 font-medium">证据</th>
+              <th class="px-3 py-2.5 font-medium">摘要</th>
               <th class="px-3 py-2.5 font-medium">锁定</th>
               <th class="px-3 py-2.5 font-medium">更新</th>
             </tr>
@@ -164,6 +247,12 @@ async function merge() {
                 </span>
               </td>
               <td class="mono px-3 py-2.5">{{ event.evidence_count }}</td>
+              <td class="whitespace-nowrap px-3 py-2.5 text-xs">
+                <span
+                  class="chip"
+                  :class="event.summary_status === 'fallback' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : event.summary_status === 'ai' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+                >{{ summaryLabels[event.summary_status ?? ''] ?? '未生成' }}</span>
+              </td>
               <td class="px-3 py-2.5">
                 <button class="text-xs" :class="event.manual_locked ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:underline'" :disabled="busy" @click.stop="toggleLock(event)">
                   {{ event.manual_locked ? '已锁定 解锁' : '未锁定' }}
@@ -202,6 +291,58 @@ async function merge() {
           <input v-model="edit.importance" type="checkbox" class="rounded"> 标记为重要事件
         </label>
         <button class="btn-primary w-full px-4 py-2" :disabled="busy" @click="save">保存（自动锁定）</button>
+
+        <div class="space-y-2 border-t border-slate-900/10 pt-3 dark:border-white/10">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-medium text-slate-500 dark:text-zinc-400">摘要质量</label>
+            <span
+              class="chip"
+              :class="selected.summary_status === 'fallback' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : selected.summary_status === 'ai' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+            >{{ summaryLabels[selected.summary_status ?? ''] ?? '未生成' }}</span>
+          </div>
+          <p class="rounded-md bg-slate-900/[0.03] px-3 py-2 text-sm leading-6 dark:bg-white/5">
+            {{ selected.summary || '当前没有摘要。' }}
+          </p>
+          <p class="text-xs text-slate-500 dark:text-zinc-400">
+            {{ selected.evidence_count }} 条证据 · 生成于 {{ fmtTime(selected.summary_updated_at) }}
+          </p>
+          <button class="min-h-11 w-full rounded-md border border-slate-900/10 px-3 py-2 text-sm dark:border-white/15" :disabled="busy" @click="regenerateSummary">
+            {{ busyAction === 'summary' ? '生成中…' : '重新生成摘要' }}
+          </button>
+        </div>
+
+        <div class="space-y-2 border-t border-slate-900/10 pt-3 dark:border-white/10">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-medium text-slate-500 dark:text-zinc-400">证据处理</label>
+            <span class="mono text-xs text-slate-400">已选 {{ splitEvidenceIds.length }}</span>
+          </div>
+          <p class="text-xs leading-5 text-slate-500 dark:text-zinc-400">应独立成事件的证据请选择“拆分”；无关内容请选择“移除”。</p>
+          <div class="max-h-72 space-y-2 overflow-y-auto pr-1">
+            <div v-for="source in evidences" :key="`${source.role}-${source.content_id}`" class="rounded-md border border-slate-900/10 p-2.5 dark:border-white/10">
+              <div class="flex items-start gap-2">
+                <input v-if="source.content_id" v-model="splitEvidenceIds" type="checkbox" :value="source.content_id" class="mt-1 rounded" :disabled="busy" :aria-label="`选择证据内容 #${source.content_id}`">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium">{{ source.title || `内容 #${source.content_id}` }}</p>
+                  <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">
+                    {{ source.platform }} · {{ source.account || '未知来源' }} · {{ fmtTime(source.published_at) }}
+                    <span v-if="source.role === 'conflict'" class="ml-1 text-red-500">冲突证据</span>
+                  </p>
+                </div>
+              </div>
+              <div v-if="source.content_id" class="mt-2 flex justify-end gap-3 text-xs">
+                <NuxtLink :to="`/contents/${source.content_id}`" target="_blank" class="link inline-flex min-h-11 items-center px-1">查看内容 ↗</NuxtLink>
+                <button class="min-h-11 px-1 text-red-600 hover:underline dark:text-red-400" :disabled="busy" @click="removeEvidence(source.content_id)">
+                  {{ busyAction === `remove-${source.content_id}` ? '移除中…' : '移除' }}
+                </button>
+              </div>
+            </div>
+          </div>
+          <button
+            class="min-h-11 w-full rounded-md border border-blue-500/30 px-3 py-2 text-sm text-blue-600 dark:text-blue-300"
+            :disabled="busy || !splitEvidenceIds.length || splitEvidenceIds.length >= selected.evidence_count"
+            @click="splitSelectedEvidence"
+          >{{ busyAction === 'split' ? '拆分中…' : `拆分所选证据（${splitEvidenceIds.length}）` }}</button>
+        </div>
 
         <div class="border-t border-slate-900/10 pt-3 dark:border-white/10">
           <p class="text-xs text-slate-500 dark:text-zinc-400">
