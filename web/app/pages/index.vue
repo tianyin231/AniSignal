@@ -10,6 +10,13 @@ const tabs = [
   { key: 'latest', label: '社区线索' },
 ]
 const validTabs = new Set(tabs.map((item) => item.key))
+const officialPlatformTabs = [
+  { key: 'all', label: '全部' },
+  { key: 'bilibili', label: 'B站' },
+  { key: 'youtube', label: 'YouTube' },
+  { key: 'kuro', label: '官网' },
+]
+const validOfficialPlatforms = new Set(officialPlatformTabs.map((item) => item.key))
 const route = useRoute()
 const router = useRouter()
 const tab = computed({
@@ -18,6 +25,15 @@ const tab = computed({
     return validTabs.has(value) ? value : 'briefing'
   },
   set: (v: string) => router.replace({ query: { ...route.query, tab: v, page: undefined } }),
+})
+const officialPlatform = computed({
+  get: () => {
+    const value = String(route.query.platform || 'all')
+    return validOfficialPlatforms.has(value) ? value : 'all'
+  },
+  set: (value: string) => router.replace({
+    query: { ...route.query, platform: value === 'all' ? undefined : value, page: undefined },
+  }),
 })
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
@@ -33,7 +49,7 @@ const { data: eventsData, status: eventsStatus } = await useAsyncData(
   { watch: [page] },
 )
 const { data: feed, status: feedStatus } = await useAsyncData(
-  () => `home-feed-${tab.value}-${page.value}`,
+  () => `home-feed-${tab.value}-${officialPlatform.value}-${page.value}`,
   () =>
     tab.value === 'latest' || tab.value === 'official'
       ? api<PublicContentList>('/api/contents', {
@@ -41,12 +57,21 @@ const { data: feed, status: feedStatus } = await useAsyncData(
             limit: pageSize,
             offset: (page.value - 1) * pageSize,
             ...(tab.value === 'official'
-              ? { identity: 'official', published_within_hours: 168 }
+              ? {
+                  identity: 'official',
+                  published_within_hours: 168,
+                  ...(officialPlatform.value !== 'all' ? { platform: officialPlatform.value } : {}),
+                }
               : { exclude_identity: 'official', published_within_hours: 72 }),
           },
         })
       : Promise.resolve({ items: [], total: 0 }),
-  { watch: [tab, page] },
+  { watch: [tab, officialPlatform, page] },
+)
+const { data: officialVideosData } = await useAsyncData('home-official-videos', () =>
+  api<PublicContentList>('/api/contents', {
+    query: { identity: 'official', published_within_hours: 168, limit: 100 },
+  }),
 )
 const { data: stats } = await useAsyncData('home-stats', () => api<PublicStats>('/api/stats'))
 
@@ -56,6 +81,22 @@ const totalPages = computed(() =>
 )
 const eventList = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const list = computed(() => (feed.value?.items ?? []).map(toRawItem))
+const recentOfficialVideos = computed(() => {
+  const rows = (officialVideosData.value?.items ?? [])
+    .filter((item) => ['bilibili', 'youtube'].includes(item.platform))
+    .sort((a, b) => new Date(b.published_at || b.collected_at).getTime() - new Date(a.published_at || a.collected_at).getTime())
+  const selected = ['youtube', 'bilibili'].flatMap((platform) =>
+    rows.filter((item) => item.platform === platform).slice(0, 2),
+  )
+  if (selected.length < 4) {
+    const selectedIds = new Set(selected.map((item) => item.id))
+    selected.push(...rows.filter((item) => !selectedIds.has(item.id)).slice(0, 4 - selected.length))
+  }
+  return selected
+    .sort((a, b) => new Date(b.published_at || b.collected_at).getTime() - new Date(a.published_at || a.collected_at).getTime())
+    .slice(0, 4)
+    .map(toRawItem)
+})
 const loading = computed(() => (isBriefing.value ? eventsStatus.value : feedStatus.value) === 'pending')
 const sectionHint = computed(() => ({
   briefing: '近 7 天内出现新证据的聚合事件；摘要受证据约束，点击可核对原文。',
@@ -84,37 +125,71 @@ useSeoMeta({ title: '近期情报' })
 
     <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
 
-    <!-- 近期结论：只展示近 7 天内有新证据的事件 -->
-    <section v-else-if="isBriefing" class="panel overflow-hidden">
-      <EventRow v-for="e in eventList" :key="e.id" :event="e" />
-      <p v-if="!eventList.length" class="px-4 py-10 text-center text-sm text-slate-400">
-        近 7 天暂无可核对的新事件；可到“官方内容”查看同期内容。
-      </p>
-      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
-        <span>共 {{ eventsData?.total ?? 0 }} 条</span>
-        <div class="flex items-center gap-3">
-          <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page - 1)">« 上一页</button>
-          <span class="mono">{{ page }} / {{ totalPages }}</span>
-          <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page + 1)">下一页 »</button>
+    <!-- 近期结论：平台入口先可见，再展示近 7 天内有新证据的事件 -->
+    <template v-else-if="isBriefing">
+      <section v-if="recentOfficialVideos.length" class="panel mb-4 p-4">
+        <header class="mb-3 flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-sm font-semibold text-slate-800 dark:text-zinc-100">最新官方影像</h2>
+            <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">YouTube 视频与 B站官方动态，点击查看站内解析。</p>
+          </div>
+          <NuxtLink to="/?tab=official&platform=youtube" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            查看 YouTube
+          </NuxtLink>
+        </header>
+        <div class="grid gap-3 sm:grid-cols-2">
+          <OfficialVideoCard v-for="video in recentOfficialVideos" :key="video.id" :item="video" />
         </div>
-      </div>
-    </section>
+      </section>
+
+      <section class="panel overflow-hidden">
+        <EventRow v-for="e in eventList" :key="e.id" :event="e" />
+        <p v-if="!eventList.length" class="px-4 py-10 text-center text-sm text-slate-400">
+          近 7 天暂无可核对的新事件；可到“官方内容”查看同期内容。
+        </p>
+        <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
+          <span>共 {{ eventsData?.total ?? 0 }} 条</span>
+          <div class="flex items-center gap-3">
+            <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page - 1)">« 上一页</button>
+            <span class="mono">{{ page }} / {{ totalPages }}</span>
+            <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page + 1)">下一页 »</button>
+          </div>
+        </div>
+      </section>
+    </template>
 
     <!-- 官方内容 / 社区线索：严格按身份和发布时间拆分 -->
-    <section v-else class="panel overflow-hidden">
-      <RawFeedRow v-for="row in list" :key="row.id" :item="row" />
-      <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
-        {{ tab === 'official' ? '近 7 天暂无官方内容。' : '近 72 小时暂无社区线索。' }}
-      </p>
-      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
-        <span>共 {{ feed?.total ?? 0 }} 条</span>
-        <div class="flex items-center gap-3">
-          <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page - 1)">« 上一页</button>
-          <span class="mono">{{ page }} / {{ totalPages }}</span>
-          <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page + 1)">下一页 »</button>
+    <template v-else>
+      <nav v-if="tab === 'official'" aria-label="官方内容平台筛选" class="mb-3 flex flex-wrap gap-1.5">
+        <button
+          v-for="item in officialPlatformTabs"
+          :key="item.key"
+          type="button"
+          class="min-h-9 cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          :class="officialPlatform === item.key
+            ? 'bg-blue-600 text-white'
+            : 'bg-slate-500/10 text-slate-600 hover:bg-slate-500/15 hover:text-slate-800 dark:text-zinc-300 dark:hover:text-white'"
+          :aria-pressed="officialPlatform === item.key"
+          @click="officialPlatform = item.key"
+        >
+          {{ item.label }}
+        </button>
+      </nav>
+      <section class="panel overflow-hidden">
+        <RawFeedRow v-for="row in list" :key="row.id" :item="row" />
+        <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
+          {{ tab === 'official' ? '近 7 天暂无此平台的官方内容。' : '近 72 小时暂无社区线索。' }}
+        </p>
+        <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
+          <span>共 {{ feed?.total ?? 0 }} 条</span>
+          <div class="flex items-center gap-3">
+            <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page - 1)">« 上一页</button>
+            <span class="mono">{{ page }} / {{ totalPages }}</span>
+            <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page + 1)">下一页 »</button>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </template>
 
     <div class="mt-6 space-y-4 xl:hidden">
       <StatusCard />
