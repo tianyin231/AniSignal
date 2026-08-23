@@ -114,9 +114,7 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
     </section>
 
     <section v-else-if="view === 'timeline'" class="panel overflow-hidden">
-      <NuxtLink v-for="e in events" :key="e.id" :to="`/events/${e.id}`" class="block">
-        <EventRow :event="e" />
-      </NuxtLink>
+      <EventRow v-for="e in events" :key="e.id" :event="e" />
       <p v-if="!events.length" class="px-4 py-10 text-center text-sm text-slate-400">
         在已接入来源中暂无该商品的相关事件。
       </p>

@@ -71,9 +71,7 @@ useSeoMeta({ title: '今日情报' })
 
     <!-- 要闻：事件结论流（默认） -->
     <section v-else-if="isBriefing" class="panel overflow-hidden">
-      <NuxtLink v-for="e in eventList" :key="e.id" :to="`/events/${e.id}`" class="block">
-        <EventRow :event="e" />
-      </NuxtLink>
+      <EventRow v-for="e in eventList" :key="e.id" :event="e" />
       <p v-if="!eventList.length" class="px-4 py-10 text-center text-sm text-slate-400">
         事件整理中；引擎会随采集持续聚合官方公告与商品履约变化。
       </p>
