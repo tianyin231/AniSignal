@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Radar } from 'lucide-vue-next'
+import { Radar, UserRound } from 'lucide-vue-next'
 
 const route = useRoute()
 const links = [
@@ -9,6 +9,22 @@ const links = [
   { to: '/events', label: '事件' },
 ]
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
+
+const { user, logout } = useAuth()
+const menuOpen = ref(false)
+const menuRoot = ref<HTMLElement | null>(null)
+
+function onDocClick(event: MouseEvent) {
+  if (menuRoot.value && !menuRoot.value.contains(event.target as Node)) menuOpen.value = false
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
+
+async function handleLogout() {
+  menuOpen.value = false
+  await logout()
+  navigateTo('/')
+}
 </script>
 
 <template>
@@ -38,6 +54,35 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
       <div class="flex shrink-0 items-center gap-1">
         <SearchBox />
         <ThemeToggle />
+        <NuxtLink
+          v-if="!user"
+          to="/login"
+          class="btn-primary ml-1 hidden px-3.5 py-1.5 text-xs sm:block"
+        >
+          登录
+        </NuxtLink>
+        <div v-else ref="menuRoot" class="relative">
+          <button
+            class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-slate-200/70 dark:hover:bg-zinc-800/70"
+            @click="menuOpen = !menuOpen"
+          >
+            <span class="grid size-6 place-items-center rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300">
+              <UserRound :size="13" />
+            </span>
+            <span class="hidden max-w-32 truncate text-xs text-slate-600 sm:block dark:text-zinc-300">{{ user.email }}</span>
+          </button>
+          <div v-if="menuOpen" class="popover absolute right-0 top-full z-50 mt-1.5 w-44 p-1.5">
+            <NuxtLink to="/account" class="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-500/10 dark:text-zinc-200" @click="menuOpen = false">
+              账号设置
+            </NuxtLink>
+            <NuxtLink to="/watch" class="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-500/10 dark:text-zinc-200" @click="menuOpen = false">
+              订阅中心
+            </NuxtLink>
+            <button class="block w-full rounded-md px-3 py-2 text-left text-sm text-red-500 hover:bg-red-500/10 dark:text-red-400" @click="handleLogout">
+              退出登录
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </header>
