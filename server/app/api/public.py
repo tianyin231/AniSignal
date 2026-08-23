@@ -309,7 +309,7 @@ async def list_events(
             await session.execute(
                 select(EventModel)
                 .where(*conditions)
-                .order_by(EventModel.last_updated_at.desc(), EventModel.id.desc())
+                .order_by(EventModel.importance.desc(), EventModel.first_seen_at.desc(), EventModel.id.desc())
                 .limit(limit)
                 .offset(offset)
             )

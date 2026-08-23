@@ -51,16 +51,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
       </div>
       <h1 class="mt-2.5 text-lg font-semibold leading-snug">{{ d.title }}</h1>
       <p class="mono mt-2 text-xs text-slate-400 dark:text-zinc-500">
-        {{ d.source_name ?? '—' }} · 发布 {{ fmtTime(d.published_at) }} · 采集 {{ fmtTime(d.collected_at) }}
-        <template v-if="d.last_seen_at"> · 最近发现 {{ fmtTime(d.last_seen_at) }}
-  <!-- 图片灯箱 -->
-  <div v-if="lightbox" class="fixed inset-0 z-50 grid place-items-center bg-black/80 p-6" @click="lightbox = null">
-    <img :src="lightbox" referrerpolicy="no-referrer" class="max-h-full max-w-full rounded-lg object-contain shadow-2xl" >
-    <button class="absolute right-5 top-5 rounded-full bg-white/10 px-3 py-1.5 text-sm text-white backdrop-blur hover:bg-white/20" @click.stop="lightbox = null">
-      关闭 ✕
-    </button>
-  </div>
-</template>
+        {{ d.source_name ?? '—' }} · 发布 {{ fmtTime(d.published_at) }} · 采集 {{ fmtTime(d.collected_at) }}<template v-if="d.last_seen_at"> · 最近发现 {{ fmtTime(d.last_seen_at) }}</template>
       </p>
     </section>
 
@@ -160,5 +151,22 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         </section>
       </div>
     </div>
+  </div>
+
+  <!-- 图片灯箱：click.self 防误关，flex 居中，ESC 关闭 -->
+  <div
+    v-if="lightbox"
+    class="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+    @click.self="lightbox = null"
+    @keydown.esc="lightbox = null"
+  >
+    <img :src="lightbox" referrerpolicy="no-referrer" class="max-h-[85vh] max-w-[90vw] rounded-lg object-contain shadow-2xl" alt="媒体预览">
+    <button
+      type="button"
+      class="absolute right-5 top-5 rounded-full bg-white/15 px-3.5 py-1.5 text-sm text-white backdrop-blur transition-colors hover:bg-white/30"
+      @click.stop="lightbox = null"
+    >
+      关闭 ✕
+    </button>
   </div>
 </template>
