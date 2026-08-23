@@ -1,18 +1,27 @@
-"""AI 层：OpenAI 兼容接口的轻封装 + 事件摘要/内容翻译任务。
+"""AI 层：OpenAI 兼容接口的轻封装 + 事件摘要/内容翻译任务 + 用量记账。
 
 配置来源：site_settings('ai') 优先，环境变量（ANISIGNAL_AI_*）兜底；
 未配置时所有任务安全跳过（框架就绪，配好 key 即生效）。
+定价（每百万 token 单价）在 ai 设置里配置，费用 = tokens × 单价 / 1e6。
 """
 
 import json
 import logging
+import time
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import ContentTranslation, ContentVersion, Event, Evidence, RawContent
+from app.models import (
+    AiUsage,
+    ContentTranslation,
+    ContentVersion,
+    Event,
+    Evidence,
+    RawContent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +35,8 @@ async def get_ai_config(session: AsyncSession) -> dict:
         "base_url": (stored.get("base_url") or env.ai_base_url or "").rstrip("/"),
         "api_key": stored.get("api_key") or env.ai_api_key or "",
         "model": stored.get("model") or env.ai_model or "",
+        "price_in": float(stored.get("price_in") or 0),  # 每百万输入 token 单价（元/美元由你定）
+        "price_out": float(stored.get("price_out") or 0),
     }
 
 
@@ -33,8 +44,39 @@ def ai_available(config: dict) -> bool:
     return bool(config.get("base_url") and config.get("api_key") and config.get("model"))
 
 
-async def chat(config: dict, system: str, user: str, *, json_mode: bool = False) -> str:
-    """OpenAI 兼容 chat/completions 调用，返回首个回复文本。"""
+async def record_usage(
+    session: AsyncSession,
+    *,
+    task: str,
+    config: dict,
+    usage: dict | None,
+    duration_ms: int,
+    ref_id: int | None = None,
+    status: str = "ok",
+) -> None:
+    prompt_tokens = int((usage or {}).get("prompt_tokens") or 0)
+    completion_tokens = int((usage or {}).get("completion_tokens") or 0)
+    cost = (prompt_tokens * config.get("price_in", 0) + completion_tokens * config.get("price_out", 0)) / 1e6
+    session.add(
+        AiUsage(
+            task=task,
+            ref_id=ref_id,
+            model=config.get("model") or "",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            cost=round(cost, 6),
+            duration_ms=duration_ms,
+            status=status,
+        )
+    )
+    await session.commit()
+
+
+async def chat(config: dict, system: str, user: str, *, json_mode: bool = False) -> tuple[str, dict | None]:
+    """OpenAI 兼容 chat/completions；返回 (回复文本, usage)。"""
+    import asyncio
+
     body: dict = {
         "model": config["model"],
         "messages": [
@@ -53,7 +95,7 @@ async def chat(config: dict, system: str, user: str, *, json_mode: bool = False)
         )
         resp.raise_for_status()
         data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    return data["choices"][0]["message"]["content"], data.get("usage")
 
 
 def _public_view(config: dict) -> dict:
@@ -61,6 +103,8 @@ def _public_view(config: dict) -> dict:
         "base_url": config["base_url"],
         "model": config["model"],
         "api_key_set": bool(config["api_key"]),
+        "price_in": config.get("price_in", 0),
+        "price_out": config.get("price_out", 0),
     }
 
 
@@ -68,7 +112,7 @@ def _public_view(config: dict) -> dict:
 
 
 async def summarize_event(session: AsyncSession, event_id: int) -> dict:
-    """AI 汇总事件证据 → 结论摘要 + 关键事实（覆盖引擎模板）。"""
+    """AI 汇总事件证据 → 结论摘要 + 关键事实（覆盖引擎模板），并记录用量。"""
     config = await get_ai_config(session)
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
@@ -104,12 +148,19 @@ async def summarize_event(session: AsyncSession, event_id: int) -> dict:
         "区分官方信息与用户反馈；存疑时明确说明。"
     )
     user = f"事件标题：{event.title}\n类目：{event.category}\n证据列表：\n" + "\n".join(evidences)
+    started = time.monotonic()
     try:
-        raw_out = await chat(config, system, user, json_mode=True)
+        raw_out, usage = await chat(config, system, user, json_mode=True)
         parsed = json.loads(raw_out)
     except Exception as exc:  # noqa: BLE001
+        await record_usage(session, task="summarize_event", config=config, usage=None,
+                           duration_ms=int((time.monotonic() - started) * 1000),
+                           ref_id=event_id, status="failed")
         logger.warning("summarize_event %s failed: %r", event_id, exc)
         return {"status": "failed", "reason": str(exc)[:200]}
+
+    await record_usage(session, task="summarize_event", config=config, usage=usage,
+                       duration_ms=int((time.monotonic() - started) * 1000), ref_id=event_id)
 
     summary = str(parsed.get("summary") or "")[:1000]
     facts = parsed.get("facts") or []
@@ -125,9 +176,6 @@ async def summarize_event(session: AsyncSession, event_id: int) -> dict:
     event.summary = summary
     if facts:
         event.facts = facts
-    event.last_updated_at = (
-        event.last_updated_at
-    )  # 摘要更新不算状态变化，不触发排序抖动
     from app.clock import utcnow
     from app.models import EventRevision
 
@@ -144,7 +192,7 @@ async def summarize_event(session: AsyncSession, event_id: int) -> dict:
 
 
 async def translate_content(session: AsyncSession, content_id: int) -> dict:
-    """外语内容机翻 → zh-CN（存 content_translations，可重算）。"""
+    """外语内容机翻 → zh-CN（存 content_translations，可重算），并记录用量。"""
     config = await get_ai_config(session)
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
@@ -169,16 +217,22 @@ async def translate_content(session: AsyncSession, content_id: int) -> dict:
 
     system = "你是游戏公告翻译。把用户内容翻译成简体中文，保留专有名词，只输出译文。"
     user = f"标题：{title}\n\n正文：{text[:6000]}"
+    started = time.monotonic()
     try:
-        translated = await chat(config, system, user)
+        translated, usage = await chat(config, system, user)
     except Exception as exc:  # noqa: BLE001
+        await record_usage(session, task="translate_content", config=config, usage=None,
+                           duration_ms=int((time.monotonic() - started) * 1000),
+                           ref_id=content_id, status="failed")
         return {"status": "failed", "reason": str(exc)[:200]}
+    await record_usage(session, task="translate_content", config=config, usage=usage,
+                       duration_ms=int((time.monotonic() - started) * 1000), ref_id=content_id)
 
     existing = await session.get(ContentTranslation, content_id)
     if existing is None:
         existing = ContentTranslation(raw_content_id=content_id)
         session.add(existing)
-    existing.text = f"【{translated.splitlines()[0] if translated else ''}】\n\n{translated}"
+    existing.text = translated[:20000]
     existing.model = config["model"]
     await session.commit()
     return {"status": "ok", "chars": len(translated)}

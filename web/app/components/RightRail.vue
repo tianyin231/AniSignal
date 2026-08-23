@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-4">
     <StatusCard />
-    <ReportCard />
+    <TodayBriefCard />
     <SourceHealthMini />
     <SubscribeCta />
   </div>

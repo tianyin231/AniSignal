@@ -32,6 +32,7 @@ export interface AppEvent {
   conclusion: string
   statusChange?: string
   facts?: { label: string; value: string }[]
+  matchedKeywords?: string[]
   regionNote?: string
   conflicts?: string
   corrections?: { at: string; note: string }[]

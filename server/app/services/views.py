@@ -46,7 +46,10 @@ async def events_to_out(
     )
     evidences_by_event: dict[int, list[EventSourceOut]] = {}
     conflicts_by_event: dict[int, list[EventSourceOut]] = {}
+    keywords_by_event: dict[int, set] = {}
     for evidence, raw, source in evidence_rows:
+        for kw in raw.matched_keywords or []:
+            keywords_by_event.setdefault(evidence.event_id, set()).add(kw)
         item = EventSourceOut(
             platform=raw.platform,
             account=(source.name if source else None),
@@ -104,6 +107,7 @@ async def events_to_out(
                 conclusion=event.conclusion,
                 status_label=event.status_label,
                 facts=(event.facts or []),
+                matched_keywords=sorted(keywords_by_event.get(event.id, set()))[:6],
                 regions=(event.regions or []),
                 evidence_count=len(sources) + len(conflicts),
                 sources=sources,

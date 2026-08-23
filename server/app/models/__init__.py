@@ -1,7 +1,7 @@
 from app.models.base import Base
 from app.models.classification import ClassificationRule
 from app.models.collect_target import CollectTarget
-from app.models.content import ContentTranslation, ContentVersion, MetricSnapshot, RawContent
+from app.models.content import AiUsage, ContentTranslation, ContentVersion, MetricSnapshot, RawContent
 from app.models.enums import (
     ANNOUNCE_CATEGORIES,
     Category,
@@ -33,6 +33,7 @@ __all__ = [
     "ContentVersion",
     "MetricSnapshot",
     "ContentTranslation",
+    "AiUsage",
     "ClassificationRule",
     "Event",
     "Evidence",
