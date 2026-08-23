@@ -8,6 +8,10 @@ const { data } = await useAsyncData('status-product', () =>
   api<ApiProductList>('/api/products'),
 )
 const product = computed(() => data.value?.items?.[0])
+const stageEvidences = computed(() => {
+  const selected = new Set(product.value?.stage_evidence_ids ?? [])
+  return (product.value?.evidences ?? []).filter(item => selected.has(item.content_id))
+})
 </script>
 
 <template>
@@ -39,6 +43,7 @@ const product = computed(() => data.value?.items?.[0])
         <span class="text-[11px] text-slate-400">{{ product.stage_source === 'manual' ? '人工审核' : product.stage_source === 'ai' ? 'AI 证据判断' : product.stage_source === 'automatic' ? '证据自动计算' : '未形成结论' }}</span>
       </div>
       <p class="mt-1.5 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">{{ product.stage_reason }}</p>
+      <ProductEvidenceLinks :items="stageEvidences" />
       <p class="mono mt-1 text-[11px] text-slate-400">更新于 {{ fmtTime(product.stage_updated_at || product.updated_at) }}</p>
     </div>
   </section>

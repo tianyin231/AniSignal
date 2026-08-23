@@ -102,6 +102,9 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
             </p>
             <a :href="d.url" target="_blank" rel="noopener" class="btn-primary mt-3 inline-block px-4 py-2 text-sm">查看原文 ↗</a>
           </div>
+          <p v-else-if="d.platform === 'bilibili' && d.content_type === 'dynamic' && d.media.length" class="mt-3 text-sm leading-relaxed text-slate-400 dark:text-zinc-500">
+            该官方动态由 B 站以纯图片形式返回，公开详情中未提供独立文字描述。图片可在站内放大查看，也可通过右侧原文核对。
+          </p>
           <p v-else class="mt-3 text-sm text-slate-400 dark:text-zinc-500">
             暂无可解析的正文。
           </p>
