@@ -1,4 +1,5 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '注册 · AniSignal' })
 
 const step = ref<'form' | 'code'>('form')
@@ -66,7 +67,7 @@ async function verify() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-sm py-10">
+  <div class="w-full">
     <form v-if="step === 'form'" class="panel p-6" @submit.prevent="submit">
       <h1 class="text-lg font-semibold">注册</h1>
       <p class="mt-1 text-sm text-slate-500 dark:text-zinc-400">注册免费，用于订阅与通知；全站内容不登录也可浏览。</p>

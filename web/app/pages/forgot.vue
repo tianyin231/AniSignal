@@ -1,4 +1,5 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '找回密码 · AniSignal' })
 
 const step = ref<'email' | 'reset'>('email')
@@ -41,7 +42,7 @@ async function submitReset() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-sm py-10">
+  <div class="w-full">
     <form v-if="step === 'email'" class="panel p-6" @submit.prevent="submitEmail">
       <h1 class="text-lg font-semibold">找回密码</h1>
       <p class="mt-1 text-sm leading-relaxed text-slate-500 dark:text-zinc-400">
