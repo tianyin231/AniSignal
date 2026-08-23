@@ -114,7 +114,7 @@ export interface ApiProduct {
   stage_hint: number
   current_stage: number
   stage_label: string
-  stage_source: 'unverified' | 'automatic' | 'manual'
+  stage_source: 'unverified' | 'automatic' | 'ai' | 'manual'
   stage_reason: string
   stage_updated_at: string | null
   stage_evidence_ids: number[]

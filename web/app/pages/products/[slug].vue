@@ -116,7 +116,7 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
       <div class="panel p-4 sm:p-5">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约阶段</h2>
-          <span class="text-xs text-slate-400">{{ product.stage_source === 'manual' ? '人工审核' : product.stage_source === 'automatic' ? '证据自动计算' : '暂无结论' }}</span>
+          <span class="text-xs text-slate-400">{{ product.stage_source === 'manual' ? '人工审核' : product.stage_source === 'ai' ? 'AI 证据判断' : product.stage_source === 'automatic' ? '证据自动计算' : '暂无结论' }}</span>
         </div>
         <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">{{ product.stage_reason }}</p>
         <div class="mt-4">

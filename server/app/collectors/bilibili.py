@@ -9,12 +9,18 @@ import asyncio
 import json
 import logging
 
+import httpx
+
 from app.collectors.base import CollectorError, extract_items
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
 
 logger = logging.getLogger(__name__)
+
+_DYNAMIC_DETAIL_URL = "https://api.bilibili.com/x/polymer/web-dynamic/v1/detail"
+_DRAW_DETAIL_CACHE: dict[str, dict] = {}
+_DRAW_DETAIL_CACHE_LIMIT = 256
 
 
 class BilibiliCollector:
@@ -116,15 +122,11 @@ class BilibiliCollector:
         )
         return (await self._enrich_draw_dynamics(items))[:limit]
 
-    async def _enrich_draw_dynamics(self, items: list[dict], cap: int = 6) -> list[dict]:
-        """图文（DRAW）动态在列表接口里 text/pics 常为空；逐条取详情补全，每轮最多 cap 条。
-
-        已有正文或图片的条目跳过（历史内容入库后天然不会重复补）。
-        """
+    async def _enrich_draw_dynamics(self, items: list[dict], cap: int = 20) -> list[dict]:
+        """匿名补全 DRAW 的正文与图片；结果在 worker 进程内缓存，避免重复请求。"""
         enriched = 0
+        attempted = 0
         for item in items:
-            if enriched >= cap:
-                break
             if item.get("type") != "DYNAMIC_TYPE_DRAW":
                 continue
             if (item.get("text") or "").strip() or item.get("pics"):
@@ -132,24 +134,47 @@ class BilibiliCollector:
             dynamic_id = str(item.get("id") or "")
             if not dynamic_id:
                 continue
-            try:
-                detail = await self._run("dynamic", dynamic_id, "-o", "json", "--no-cache")
-            except CollectorError:
-                continue
-            if isinstance(detail, dict):
-                detail = [detail]
-            else:
-                detail = extract_items(detail)
-            if not detail:
-                continue
-            rich = detail[0]
+            rich = _DRAW_DETAIL_CACHE.get(dynamic_id)
+            if rich is None:
+                if attempted >= cap:
+                    break
+                attempted += 1
+                try:
+                    rich = await self._fetch_draw_detail(dynamic_id)
+                except (httpx.HTTPError, ValueError) as exc:
+                    logger.warning("anonymous DRAW detail failed for %s: %s", dynamic_id, exc)
+                    continue
+                if rich:
+                    _DRAW_DETAIL_CACHE[dynamic_id] = rich
+                    if len(_DRAW_DETAIL_CACHE) > _DRAW_DETAIL_CACHE_LIMIT:
+                        _DRAW_DETAIL_CACHE.pop(next(iter(_DRAW_DETAIL_CACHE)))
             if (rich.get("text") or "").strip() or rich.get("pics"):
                 item["text"] = rich.get("text") or item.get("text")
-                item["pics"] = rich.get("pics") or item.get("pics")
+                item["pics"] = list(rich.get("pics") or item.get("pics") or [])
                 enriched += 1
         if enriched:
-            logger.info("enriched %s DRAW dynamics with per-dynamic detail", enriched)
+            logger.info("enriched %s DRAW dynamics with anonymous public detail", enriched)
         return items
+
+    async def _fetch_draw_detail(self, dynamic_id: str) -> dict:
+        """读取无需登录的公开详情；平台拒绝时返回空，绝不切换 Cookie 链路。"""
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": f"https://t.bilibili.com/{dynamic_id}",
+        }
+        async with httpx.AsyncClient(timeout=self._timeout, headers=headers) as client:
+            response = await client.get(_DYNAMIC_DETAIL_URL, params={"id": dynamic_id})
+            response.raise_for_status()
+        payload = response.json()
+        if payload.get("code") != 0:
+            logger.warning(
+                "anonymous DRAW detail refused for %s: code=%s message=%s",
+                dynamic_id,
+                payload.get("code"),
+                payload.get("message"),
+            )
+            return {}
+        return _extract_dynamic_detail(payload)
 
 
 def _loads(text: str) -> object:
@@ -167,6 +192,21 @@ def _loads(text: str) -> object:
             except json.JSONDecodeError:
                 pass
         raise CollectorError(f"cannot parse bili output as JSON: {text[:300]!r}")
+
+
+def _extract_dynamic_detail(payload: dict) -> dict:
+    """把 B 站公开动态详情中的描述和 DRAW 图片映射为项目采集字段。"""
+    item = ((payload.get("data") or {}).get("item") or {})
+    dynamic = ((item.get("modules") or {}).get("module_dynamic") or {})
+    desc = dynamic.get("desc") or {}
+    draw = ((dynamic.get("major") or {}).get("draw") or {})
+    pics = []
+    for image in draw.get("items") or []:
+        src = image.get("src") if isinstance(image, dict) else None
+        if isinstance(src, str) and src:
+            pics.append("https://" + src[7:] if src.startswith("http://") else src)
+    text = desc.get("text") if isinstance(desc, dict) else None
+    return {"text": text or "", "pics": pics}
 
 
 __all__ = ["BilibiliCollector"]

@@ -510,7 +510,8 @@ async def create_product(body: ProductCreate, session: AsyncSession = Depends(ge
     await session.flush()
 
     if body.create_bilibili_target:
-        keyword = (body.monitor_keyword or "").strip() or watch_terms[0]
+        # 搜索词默认使用完整商品名，避免以角色名等宽泛匹配词采回大量无关内容。
+        keyword = (body.monitor_keyword or "").strip() or body.name.strip()
         target = await session.scalar(
             select(CollectTarget).where(
                 CollectTarget.platform == "bilibili",
@@ -563,6 +564,7 @@ async def update_product(
         ]
         if stage == -1:
             product.stage_hint = -1
+            product.stage_hint_source = None
             product.stage_hint_reason = None
             product.stage_hint_evidence_ids = []
             product.stage_hint_updated_at = utcnow()
@@ -571,6 +573,7 @@ async def update_product(
                 session, product.id, stage, reason or "", evidence_ids or []
             )
             product.stage_hint = stage
+            product.stage_hint_source = "manual"
             product.stage_hint_reason = reason.strip()
             product.stage_hint_evidence_ids = list(dict.fromkeys(evidence_ids))
             product.stage_hint_updated_at = utcnow()
@@ -609,6 +612,31 @@ async def update_product(
         await run_aggregation(session)
     await session.commit()
     await session.refresh(product)
+    return await product_to_out(session, product)
+
+
+@router.post("/products/{product_id}/assess", response_model=ProductOut)
+async def assess_product(
+    product_id: int, session: AsyncSession = Depends(get_session)
+):
+    from app.services.ai import assess_product_stage
+
+    result = await assess_product_stage(session, product_id)
+    reason = result.get("reason")
+    if result.get("status") != "ok":
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if reason == "product_not_found"
+            else status.HTTP_422_UNPROCESSABLE_CONTENT
+        )
+        messages = {
+            "product_not_found": "product not found",
+            "no_evidences": "暂无已关联的到货/开箱内容，请先完成精确采集",
+            "ai_not_configured": "请先在 AI 层配置可用模型",
+            "model_output_invalid": "模型返回未通过证据校验，请重试或人工复核",
+        }
+        raise HTTPException(status_code, messages.get(reason, str(reason or "AI 判断失败")))
+    product = await session.get(Product, product_id)
     return await product_to_out(session, product)
 
 

@@ -4,7 +4,10 @@
     <AnnouncementBanner />
     <AppTopBar />
     <div class="mx-auto max-w-[1280px] px-4 lg:px-6">
-      <div class="grid gap-6 py-6 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_300px]">
+      <div
+        class="grid gap-6 py-6 lg:grid-cols-[220px_minmax(0,1fr)]"
+        :class="{ 'xl:grid-cols-[220px_minmax(0,1fr)_300px]': !contentFocus }"
+      >
         <aside class="hidden lg:block">
           <div class="sticky top-[72px]">
             <AppSidebar />
@@ -13,7 +16,7 @@
         <main class="min-w-0">
           <slot />
         </main>
-        <aside class="hidden xl:block">
+        <aside v-if="!contentFocus" class="hidden xl:block">
           <div class="sticky top-[72px] space-y-4">
             <RightRail />
           </div>
@@ -23,3 +26,8 @@
     <AppFooter />
   </div>
 </template>
+
+<script setup lang="ts">
+const route = useRoute()
+const contentFocus = computed(() => /^\/contents\/[^/]+$/.test(route.path))
+</script>

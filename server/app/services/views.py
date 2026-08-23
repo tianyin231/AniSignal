@@ -229,25 +229,48 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         observed_stage = 3
 
     selected_ids = set(product.stage_hint_evidence_ids or [])
+    hint_source = product.stage_hint_source or (
+        "manual" if product.stage_hint >= 0 else None
+    )
     manual_valid = bool(
-        0 < product.stage_hint <= 3
+        hint_source == "manual"
+        and 0 < product.stage_hint <= 3
         and (product.stage_hint_reason or "").strip()
         and selected_ids
         and selected_ids.issubset(seen_raw_ids)
     )
-    effective = product.stage_hint if manual_valid else observed_stage
+    ai_valid = bool(
+        hint_source == "ai"
+        and 0 <= product.stage_hint <= 3
+        and (product.stage_hint_reason or "").strip()
+        and selected_ids.issubset(seen_raw_ids)
+        and (product.stage_hint == 0 or selected_ids)
+    )
+    ai_applied = ai_valid and product.stage_hint >= observed_stage
+    hint_applied = manual_valid or ai_applied
+    effective = (
+        product.stage_hint
+        if manual_valid
+        else max(observed_stage, product.stage_hint) if ai_valid else observed_stage
+    )
     reviewed_sources = {
         source.external_id if source else f"{raw.platform}:{raw.external_id}"
         for _, event, raw, source in evidence_rows
-        if manual_valid
+        if hint_applied
         and product.stage_hint >= 2
         and raw.id in selected_ids
         and event.category in ("unboxing", "arrived")
         and (source.identity if source else "unknown") in ("user", "unknown")
     }
     stage_user_count = max(user_count, len(reviewed_sources))
-    stage_source = "manual" if manual_valid else ("automatic" if observed_stage else "unverified")
+    stage_source = (
+        "manual"
+        if manual_valid
+        else "ai" if ai_applied else "automatic" if observed_stage else "unverified"
+    )
     if manual_valid:
+        stage_reason = product.stage_hint_reason.strip()
+    elif ai_applied:
         stage_reason = product.stage_hint_reason.strip()
     elif observed_stage:
         stage_reason = f"已核验 {seeded_count} 条送测证据、{user_count} 个普通用户账号"
@@ -262,7 +285,8 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
     else:
         official_status = "未发现可核验的官方发货信息"
     if reviewed_sources:
-        consumer_status = f"经人工审核确认 {len(reviewed_sources)} 个独立账号的到货/开箱证据"
+        reviewer = "AI 审核" if ai_applied else "人工审核"
+        consumer_status = f"经{reviewer}确认 {len(reviewed_sources)} 个独立账号的到货/开箱证据"
     elif user_count:
         consumer_status = f"已核验 {user_count} 个普通用户账号的到货/开箱证据"
     elif seeded_count:
@@ -284,8 +308,9 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
             stage_evidence = stage_user_count or None
             stage_date = _date(user_dates)
         note = _STAGE_NOTES.get(index)
-        if manual_valid and index == effective:
-            note = f"人工审核已绑定 {len(selected_ids)} 条原始内容证据"
+        if hint_applied and index == effective:
+            reviewer = "AI 审核" if ai_applied else "人工审核"
+            note = f"{reviewer}已绑定 {len(selected_ids)} 条原始内容证据"
         stages.append(
             ProductStageOut(
                 label=label,
@@ -314,10 +339,10 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         stage_label=FULFILLMENT_STAGES[effective],
         stage_source=stage_source,
         stage_reason=stage_reason,
-        stage_evidence_ids=sorted(selected_ids) if manual_valid else [],
+        stage_evidence_ids=sorted(selected_ids) if hint_applied else [],
         stage_updated_at=(
             product.stage_hint_updated_at
-            if manual_valid
+            if hint_applied
             else max([*seeded_dates, *user_dates], default=None)
         ),
         official_status=official_status,

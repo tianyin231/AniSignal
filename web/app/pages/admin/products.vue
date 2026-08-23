@@ -9,6 +9,7 @@ const { api } = useAdminApi()
 const products = ref<ApiProduct[]>([])
 const error = ref<string | null>(null)
 const busy = ref(false)
+const assessingId = ref<number | null>(null)
 const toast = useAdminToast()
 
 const form = reactive({
@@ -203,6 +204,21 @@ async function restoreAutomatic() {
     busy.value = false
   }
 }
+
+async function assess(product: ApiProduct) {
+  assessingId.value = product.id
+  error.value = null
+  try {
+    const result = await api<ApiProduct>(`/api/admin/products/${product.id}/assess`, { method: 'POST' })
+    toast.ok(`AI 判断完成：${result.stage_label}`)
+    await refresh()
+  } catch (exc: any) {
+    error.value = `AI 判断失败：${exc?.data?.detail ?? exc?.message}`
+    toast.err(error.value)
+  } finally {
+    assessingId.value = null
+  }
+}
 </script>
 
 <template>
@@ -210,7 +226,7 @@ async function restoreAutomatic() {
     <div>
       <h1 class="text-lg font-semibold">商品管理</h1>
       <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
-        新增时只需名称和监控词；没有证据时系统保持“暂无结论”，人工阶段必须绑定原文并写明理由。
+        新增时只填商品名称即可；系统自动生成精确匹配词并创建采集，AI 仅根据已关联原文判断阶段。
       </p>
     </div>
 
@@ -219,15 +235,10 @@ async function restoreAutomatic() {
         <h2 class="text-sm font-semibold">{{ editing ? `编辑：${editing.name}` : '快速新增商品' }}</h2>
         <button v-if="editing" type="button" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300" @click="resetForm">取消编辑</button>
       </div>
-      <div class="mt-4 grid gap-3 sm:grid-cols-2">
+      <div class="mt-4 max-w-xl">
         <label class="text-xs text-slate-500 dark:text-zinc-400">
           商品名称 <span class="text-red-500">*</span>
           <input v-model="form.name" required class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" placeholder="如：爱弥斯联名机械键盘">
-        </label>
-        <label class="text-xs text-slate-500 dark:text-zinc-400">
-          内容匹配词 <span class="text-red-500">*</span>
-          <input v-model="form.watch_terms" required class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" placeholder="逗号分隔" @input="termsTouched = true">
-          <span class="mt-1 block text-[11px] text-slate-400">用于标题与正文匹配；系统会按商品名给出初始建议。</span>
         </label>
       </div>
 
@@ -235,13 +246,18 @@ async function restoreAutomatic() {
         <input v-model="form.create_bilibili_target" type="checkbox" class="mt-0.5 accent-blue-600">
         <span>
           <span class="font-medium text-slate-700 dark:text-zinc-200">同时创建 B 站关键词监控</span>
-          <span class="mt-0.5 block text-xs text-slate-500 dark:text-zinc-400">默认每 30 分钟采集；已有同名监控会直接复用。</span>
+          <span class="mt-0.5 block text-xs text-slate-500 dark:text-zinc-400">默认按完整商品名、每 30 分钟采集；已有同名监控会直接复用。</span>
         </span>
       </label>
 
       <details class="mt-4 rounded-lg border border-slate-900/10 p-3 dark:border-white/10" :open="!!editing">
-        <summary class="cursor-pointer text-xs font-medium text-slate-500 dark:text-zinc-400">高级信息（选填）</summary>
+        <summary class="cursor-pointer text-xs font-medium text-slate-500 dark:text-zinc-400">高级匹配与商品信息</summary>
         <div class="mt-3 grid gap-3 sm:grid-cols-3">
+          <label class="text-xs text-slate-500 sm:col-span-2 dark:text-zinc-400">
+            内容匹配词
+            <input v-model="form.watch_terms" required class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" placeholder="逗号分隔" @input="termsTouched = true">
+            <span class="mt-1 block text-[11px] text-slate-400">已按商品名自动生成；避免改成角色名等过宽词。</span>
+          </label>
           <input v-model="form.slug" :disabled="!!editing" placeholder="URL 标识，留空自动生成" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm disabled:opacity-50 dark:border-white/15 dark:bg-white/5">
           <input v-model="form.publisher" placeholder="发行方" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
           <input v-model="form.skus" placeholder="SKU（逗号分隔）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
@@ -250,7 +266,7 @@ async function restoreAutomatic() {
           <input v-model="form.balance_window" placeholder="尾款窗口" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
           <input v-model="form.original_ship_at" placeholder="原定发货" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
           <input v-model="form.ship_note" placeholder="发货说明" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-if="!editing && form.create_bilibili_target" v-model="form.monitor_keyword" placeholder="B站搜索词，留空用首个匹配词" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-if="!editing && form.create_bilibili_target" v-model="form.monitor_keyword" placeholder="B站搜索词，留空用完整商品名" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
         </div>
       </details>
 
@@ -324,10 +340,11 @@ async function restoreAutomatic() {
             <td class="max-w-52 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.consumer_status }}</td>
             <td class="px-3 py-3">
               <span class="chip bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ p.stage_label }}</span>
-              <span class="mt-1 block text-[11px] text-slate-400">{{ p.stage_source === 'manual' ? '人工审核' : p.stage_source === 'automatic' ? '自动计算' : '未形成结论' }}</span>
+              <span class="mt-1 block text-[11px] text-slate-400">{{ p.stage_source === 'manual' ? '人工审核' : p.stage_source === 'ai' ? 'AI 证据判断' : p.stage_source === 'automatic' ? '自动计算' : '未形成结论' }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-3 text-right">
-              <button class="rounded px-2 py-1 text-xs text-emerald-700 hover:underline dark:text-emerald-300" @click="startReview(p)">审核阶段</button>
+              <button class="rounded px-2 py-1 text-xs text-emerald-700 hover:underline disabled:opacity-50 dark:text-emerald-300" :disabled="assessingId !== null" @click="assess(p)">{{ assessingId === p.id ? '判断中…' : 'AI 判断' }}</button>
+              <button class="rounded px-2 py-1 text-xs text-emerald-700 hover:underline dark:text-emerald-300" @click="startReview(p)">人工复核</button>
               <button class="rounded px-2 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="startEdit(p)">编辑</button>
               <button class="rounded px-2 py-1 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busy" @click="remove(p)">删除</button>
             </td>

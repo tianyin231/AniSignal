@@ -34,9 +34,10 @@ class Product(Base):
     ship_note: Mapped[str | None] = mapped_column(Text)
     # 命中任一词的内容会关联到该商品（履约类目时）
     watch_terms: Mapped[list] = mapped_column(JSON, default=list)
-    # 管理端手动指定的当前阶段（-1 = 跟随引擎计算）
+    # 管理端或 AI 指定的当前阶段（-1 = 跟随引擎计算）
     stage_hint: Mapped[int] = mapped_column(Integer, default=-1)
-    # 人工阶段必须绑定原始内容证据并填写判断理由。
+    stage_hint_source: Mapped[str | None] = mapped_column(String(16))  # manual / ai
+    # 阶段判断必须绑定原始内容证据并填写判断理由。
     stage_hint_reason: Mapped[str | None] = mapped_column(Text)
     stage_hint_evidence_ids: Mapped[list] = mapped_column(JSON, default=list)
     stage_hint_updated_at: Mapped[datetime | None] = mapped_column(DateTime)

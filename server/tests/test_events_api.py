@@ -5,7 +5,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 
 from app.clock import utcnow
-from app.models import CollectTarget, Event, Evidence, Product, RawContent, Source
+from app.models import CollectTarget, Event, EventRevision, Evidence, Product, RawContent, Source
 from app.services.events import run_aggregation
 from app.services.ingest import ingest_items
 
@@ -270,7 +270,7 @@ async def test_admin_products_crud(client, session, admin_headers):
     assert resp.status_code == 201
     pid = resp.json()["id"]
     target = await session.scalar(
-        select(CollectTarget).where(CollectTarget.target_value == "测试")
+        select(CollectTarget).where(CollectTarget.target_value == "测试商品")
     )
     assert target is not None
     resp = await client.put(
@@ -290,8 +290,51 @@ async def test_admin_product_quick_create_generates_slug(client, session, admin_
     assert resp.status_code == 201
     assert resp.json()["slug"].startswith("product-")
     assert await session.scalar(
-        select(CollectTarget).where(CollectTarget.target_value == "快速商品")
+        select(CollectTarget).where(CollectTarget.target_value == "快速创建商品")
     )
+
+
+async def test_admin_ai_assesses_product_with_audited_evidence(
+    client, session, admin_headers, monkeypatch
+):
+    from app.services import ai as ai_service
+    from app.services.settings import set_setting
+
+    await _prepare(session)
+    product = await session.scalar(select(Product))
+    event = await session.scalar(
+        select(Event).where(Event.product_id == product.id, Event.category == "unboxing")
+    )
+    evidence = await session.scalar(select(Evidence).where(Evidence.event_id == event.id))
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "m", "api_key": "sk-x"},
+    )
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        assert "普通购买者" in system
+        assert f'"id": {evidence.raw_content_id}' in user
+        return (
+            '{"stage":2,"reason":"一名独立普通用户明确发布该商品开箱内容",'
+            f'"evidence_ids":[{evidence.raw_content_id}]}}',
+            {"prompt_tokens": 10, "completion_tokens": 5},
+        )
+
+    monkeypatch.setattr(ai_service, "chat", fake_chat)
+    resp = await client.post(
+        f"/api/admin/products/{product.id}/assess", headers=admin_headers
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["stage_source"] == "ai"
+    assert resp.json()["stage_evidence_ids"] == [evidence.raw_content_id]
+    revision = await session.scalar(
+        select(EventRevision)
+        .where(EventRevision.event_id == event.id, EventRevision.actor == "ai")
+        .order_by(EventRevision.id.desc())
+    )
+    assert revision is not None
 
 
 async def test_admin_stage_review_requires_reason_and_evidence(client, session, admin_headers):

@@ -56,6 +56,7 @@ onMounted(() => refresh())
 const TASK_LABELS: Record<string, string> = {
   summarize_event: '事件摘要',
   translate_content: '内容翻译',
+  assess_product: '商品履约判断',
   test: '连通测试',
 }
 
