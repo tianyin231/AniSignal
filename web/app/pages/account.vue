@@ -281,7 +281,7 @@ async function changePassword() {
           </div>
           <div v-if="feed?.items?.length" class="border-t border-slate-900/5 dark:border-white/5">
             <NuxtLink v-for="entry in feed.items.map((i) => ({ row: toRawItem(i), url: i.url }))" :key="entry.row.id" :to="`/contents/${entry.row.id}`" class="block">
-        
+        <RawFeedRow :item="entry.row" />
       </NuxtLink>
           </div>
           <p v-else class="border-t border-slate-900/5 px-5 py-8 text-center text-sm text-slate-400 dark:border-white/5 dark:text-zinc-500">
