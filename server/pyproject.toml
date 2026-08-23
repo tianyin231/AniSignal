@@ -16,6 +16,7 @@ dependencies = [
   "pydantic>=2.8",
   "pydantic-settings>=2.4",
   "aiosmtplib>=5.1.2",
+  "bleach>=6.4.0",
 ]
 
 [dependency-groups]

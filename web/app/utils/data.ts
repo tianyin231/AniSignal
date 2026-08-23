@@ -11,6 +11,7 @@ export interface SourceRef {
   publishedAt: string
   foundAt: string
   translated?: boolean
+  contentId?: number | null
   url: string
 }
 

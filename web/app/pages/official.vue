@@ -73,15 +73,9 @@ useSeoMeta({ title: '官方动态' })
       加载中…
     </section>
     <section v-else class="panel overflow-hidden">
-      <component
-        :is="entry.url ? 'a' : 'div'"
-        v-for="entry in list"
-        :key="entry.row.id"
-        v-bind="entry.url ? { href: entry.url, target: '_blank', rel: 'noopener' } : {}"
-        class="block"
-      >
-        <RawFeedRow :item="entry.row" />
-      </component>
+      <NuxtLink v-for="entry in list" :key="entry.row.id" :to="`/contents/${entry.row.id}`" class="block">
+        
+      </NuxtLink>
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
         在已接入来源中暂无此筛选下的官方内容。
       </p>

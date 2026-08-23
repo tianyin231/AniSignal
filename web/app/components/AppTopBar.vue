@@ -8,6 +8,7 @@ const links = [
   { to: '/official', label: '官方动态' },
   { to: '/products', label: '商品' },
   { to: '/events', label: '事件' },
+  { to: '/contents', label: '内容库' },
 ]
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
 

@@ -89,15 +89,9 @@ useSeoMeta({ title: '今日情报' })
 
     <!-- 内容流 -->
     <section v-else class="panel overflow-hidden">
-      <component
-        :is="entry.url ? 'a' : 'div'"
-        v-for="entry in list.map((row) => ({ row, url: feed!.items.find((i) => String(i.id) === row.id)?.url ?? null }))"
-        :key="entry.row.id"
-        v-bind="entry.url ? { href: entry.url, target: '_blank', rel: 'noopener' } : {}"
-        class="block"
-      >
-        <RawFeedRow :item="entry.row" />
-      </component>
+      <NuxtLink v-for="entry in list.map((row) => ({ row, url: feed!.items.find((i) => String(i.id) === row.id)?.url ?? null }))" :key="entry.row.id" :to="`/contents/${entry.row.id}`" class="block">
+        
+      </NuxtLink>
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
         在已接入来源中暂无内容。
       </p>

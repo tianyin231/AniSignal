@@ -97,15 +97,9 @@ useSeoMeta({ title: '搜索' })
     <section v-else class="panel mt-4 overflow-hidden">
       <p v-if="contentsStatus === 'pending'" class="px-4 py-10 text-center text-sm text-slate-400">搜索中…</p>
       <template v-else>
-        <component
-          :is="c.url ? 'a' : 'div'"
-          v-for="entry in contents.map((c) => ({ c, url: contentsData.items.find((i) => String(i.id) === c.id)?.url ?? null }))"
-          :key="entry.c.id"
-          v-bind="entry.url ? { href: entry.url, target: '_blank', rel: 'noopener' } : {}"
-          class="block"
-        >
-          <RawFeedRow :item="entry.c" />
-        </component>
+        <NuxtLink v-for="c in contents" :key="c.id" :to="`/contents/${c.id}`" class="block">
+          <RawFeedRow :item="c" />
+        </NuxtLink>
         <p v-if="!contents.length" class="px-4 py-10 text-center text-sm text-slate-400">没有匹配的内容。</p>
       </template>
     </section>

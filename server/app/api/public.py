@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.models import CollectTarget, ContentVersion, RawContent, Source
 from app.schemas.api import (
+    ContentDetailOut,
     EventListOut,
     EventOut,
     ProductListOut,
@@ -153,6 +154,100 @@ async def list_sources(session: AsyncSession = Depends(get_session)):
     ]
     return PublicSourceList(items=items)
 
+
+_ALLOWED_TAGS = [
+    "a", "abbr", "b", "blockquote", "br", "code", "div", "em", "h1", "h2",
+    "h3", "h4", "h5", "h6", "hr", "i", "img", "li", "ol", "p", "pre", "q",
+    "small", "span", "strong", "sub", "sup", "table", "tbody", "td", "th",
+    "thead", "tr", "u", "ul",
+]
+_ALLOWED_ATTRS = {"a": ["href", "title"], "img": ["src", "alt"]}
+
+
+def _sanitize_html(text: str) -> str | None:
+    if "<" not in text or ">" not in text:
+        return None
+    import bleach
+
+    return bleach.clean(text, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
+
+
+@router.get("/contents/{content_id}", response_model=ContentDetailOut)
+async def get_content_detail(content_id: int, session: AsyncSession = Depends(get_session)):
+    """站内内容详情：解析后的正文/媒体/指标历史/关联事件；外链仅作参考出处。"""
+    from fastapi import HTTPException
+
+    from app.models import Event as EventModel
+    from app.models import Evidence, MetricSnapshot
+    from app.schemas.api import ContentDetailOut, ContentMetricPoint
+
+    row = await session.execute(
+        select(RawContent, ContentVersion, Source)
+        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id, isouter=True)
+        .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .where(RawContent.id == content_id)
+        .order_by(ContentVersion.version.desc())
+        .limit(1)
+    )
+    result = row.first()
+    if result is None:
+        raise HTTPException(status_code=404, detail="content not found")
+    raw, version, source = result
+
+    normalized = (version.normalized_json if version else None) or {}
+    text = (version.text if version else None) or str(normalized.get("text") or "")
+    media = [m for m in (normalized.get("media") or []) if isinstance(m, str)]
+
+    history_rows = await session.execute(
+        select(MetricSnapshot)
+        .where(MetricSnapshot.raw_content_id == content_id)
+        .order_by(MetricSnapshot.id.desc())
+        .limit(10)
+    )
+    history = [
+        ContentMetricPoint(captured_at=snap.captured_at, metrics=snap.metrics)
+        for snap in history_rows.scalars()
+    ]
+    latest_metrics = history[0].metrics if history else None
+
+    event_row = await session.execute(
+        select(EventModel, Evidence)
+        .join(Evidence, Evidence.event_id == EventModel.id)
+        .where(Evidence.raw_content_id == content_id, EventModel.is_active.is_(True))
+        .limit(1)
+    )
+    event_pair = event_row.first()
+    event = None
+    if event_pair:
+        event_model = event_pair[0]
+        event = {
+            "id": event_model.id,
+            "title": event_model.title,
+            "category": event_model.category,
+            "confidence": event_model.confidence,
+        }
+
+    return ContentDetailOut(
+        id=raw.id,
+        platform=raw.platform,
+        content_type=raw.content_type,
+        external_id=raw.external_id,
+        url=raw.url,
+        title=(version.title if version else None) or raw.external_id,
+        text=text or None,
+        text_html=_sanitize_html(text) if text else None,
+        published_at=raw.published_at,
+        collected_at=raw.collected_at,
+        last_seen_at=raw.last_seen_at,
+        source_name=(source.name if source else None),
+        source_identity=(source.identity if source else None),
+        identity=(source.identity if source else "unknown"),
+        media=media,
+        metrics=latest_metrics,
+        metrics_history=list(reversed(history)),
+        event=event,
+        version=version.version if version else None,
+    )
 
 @router.get("/events", response_model=EventListOut)
 async def list_events(
