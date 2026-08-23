@@ -42,6 +42,15 @@ async def list_contents(
 ):
     from app.services.classify import HIDDEN_CATEGORIES
 
+    # 只关联"最新版本"，保证过滤与展示都基于当前分类
+    latest_sq = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("v"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
     conditions = []
     if platform:
         conditions.append(RawContent.platform == platform)
@@ -56,11 +65,16 @@ async def list_contents(
 
     rows = await session.execute(
         select(RawContent, Source.name, Source.identity, ContentVersion)
+        .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest_sq.c.rid)
+            & (ContentVersion.version == latest_sq.c.v),
+        )
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id, isouter=True)
         .where(*conditions)
-        .order_by(RawContent.collected_at.desc(), RawContent.id.desc(), ContentVersion.version.desc())
-        .limit(limit * 3)  # 多取以容纳同一内容的多版本行，Python 侧去重截断
+        .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
+        .limit(limit)
         .offset(offset)
     )
     items: list[PublicContentItem] = []
@@ -94,14 +108,17 @@ async def list_contents(
     for item in items:
         item.metrics = metrics_map.get(item.id)
 
-    count_conditions = list(conditions)
     count_sq = (
         select(func.count(func.distinct(RawContent.id)))
+        .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest_sq.c.rid)
+            & (ContentVersion.version == latest_sq.c.v),
+        )
         .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .where(*conditions)
     )
-    if q or not include_chat:
-        count_sq = count_sq.join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-    count_sq = count_sq.where(*count_conditions)
     total = await session.scalar(count_sq) or 0
     return PublicContentList(items=items, total=total)
 
