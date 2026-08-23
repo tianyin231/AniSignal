@@ -5,6 +5,7 @@ definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '账号设置 · AniSignal' })
 
 const { user, loaded, fetchMe, logout } = useAuth()
+const route = useRoute()
 const oldPassword = ref('')
 const newPassword = ref('')
 const message = ref('')
@@ -14,7 +15,8 @@ const busy = ref(false)
 onMounted(() => {
   // 未登录跳登录页（等 me 拉取完成再判断）
   watchEffect(() => {
-    if (loaded.value && !user.value) navigateTo('/login', { replace: true })
+    if (loaded.value && !user.value)
+      navigateTo({ path: '/login', query: { redirect: route.fullPath }, replace: true })
   })
 })
 
