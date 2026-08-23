@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { fmtTime } from '~/utils/public-utils'
 
+definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '账号设置 · AniSignal' })
 
 const { user, loaded, fetchMe, logout } = useAuth()
@@ -43,7 +44,7 @@ async function handleLogout() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-lg space-y-4 py-10">
+  <div class="w-full space-y-4">
     <section v-if="user" class="panel p-5">
       <div class="flex items-center justify-between">
         <div>

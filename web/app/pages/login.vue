@@ -1,4 +1,5 @@
 <script setup lang="ts">
+definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '登录 · AniSignal' })
 
 const email = ref('')
@@ -23,7 +24,7 @@ async function submit() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-sm py-10">
+  <div class="w-full">
     <form class="panel p-6" @submit.prevent="submit">
       <h1 class="text-lg font-semibold">登录</h1>
       <p class="mt-1 text-sm text-slate-500 dark:text-zinc-400">全站内容免费浏览；登录用于管理订阅与通知。</p>
