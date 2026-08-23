@@ -84,6 +84,8 @@ User -> WatchRule -> Notification -> DeliveryRecord
 2. **AI 结果可以重算**——翻译/摘要/分类只是候选，不阻塞入库，可全量重跑。
 3. **事件结论可以修正**——事件保留支持/冲突证据、可信度理由和人工修正记录。
 
+**账号系统（2026-08-23 上线）**：邮箱+密码（scrypt，Python 标准库），服务端会话（httpOnly cookie；`users/email_codes/user_sessions` 表；改密/重置吊销全部会话）；验证码 6 位/15 分钟/尝限 5 次，发码与登录均限频；登录/找回统一文案防枚举。邮件走通用 SMTP（`ANISIGNAL_SMTP_*` env），未配置 SMTP 时验证码落库、管理端 `/api/admin/email-codes` 可查（开发通道）。前端 `/login /register /forgot /account` + `useAuth` composable。
+
 播放量、点赞等指标一律存**时间快照**（用于判断首次越过阈值的时刻），不要只存最新值。
 
 ## 合规红线（设计文档 §13 + 实测边界）
