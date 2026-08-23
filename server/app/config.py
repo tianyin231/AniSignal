@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 30.0
     http_max_retries: int = 2
 
+    # 邮件发送（通用 SMTP；未配置 host 时验证码只落库，管理端可查）
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "AniSignal <noreply@anisignal.local>"
+    smtp_starttls: bool = True
+
+    # 账号会话有效期（天）
+    session_days: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:

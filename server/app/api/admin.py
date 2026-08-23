@@ -504,6 +504,48 @@ async def delete_rule(rule_id: int, session: AsyncSession = Depends(get_session)
     await session.commit()
 
 
+# ---------- 账号辅助 ----------
+
+
+@router.get("/email-codes")
+async def list_email_codes(
+    limit: int = Query(default=20, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
+):
+    """最近验证码（SMTP 未配置时的开发/排查通道；仅发信失败的码保留明文）。"""
+    from app.models import EmailCode, User
+
+    rows = await session.execute(
+        select(EmailCode, User.email)
+        .join(User, EmailCode.user_id == User.id)
+        .order_by(EmailCode.id.desc())
+        .limit(limit)
+    )
+    return [
+        {
+            "id": code.id,
+            "email": email,
+            "purpose": code.purpose,
+            "code": code.code_plain,
+            "expires_at": code.expires_at,
+            "used": code.used_at is not None,
+            "sent_via_smtp": code.code_plain is None,
+        }
+        for code, email in rows
+    ]
+
+
+@router.get("/users/count")
+async def users_count(session: AsyncSession = Depends(get_session)):
+    from app.models import User
+
+    total = await session.scalar(select(func.count(User.id))) or 0
+    verified = await session.scalar(
+        select(func.count(User.id)).where(User.is_verified.is_(True))
+    ) or 0
+    return {"total": total, "verified": verified}
+
+
 # ---------- 重算入口 ----------
 
 
