@@ -38,6 +38,7 @@ MIYOUSHE_ITEM = {
 
 YOUTUBE_ITEM = {
     "id": "dQw4w9WgXcQ",
+    "channel_id": "UC0Bi5KMcECRVYis5Gb_ZYZQ",
     "title": "Wuthering Waves — Patch Trailer",
     "link": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     "published": "2026-08-13T12:00:00+00:00",
@@ -96,6 +97,7 @@ def test_parse_youtube_rss_item():
     assert c.external_id == "dQw4w9WgXcQ"
     assert c.published_at is not None
     assert c.author.name == "Wuthering Waves"
-    assert c.author.external_id is None
+    assert c.author.external_id == "UC0Bi5KMcECRVYis5Gb_ZYZQ"
+    assert c.author.identity == "official"
     assert c.media[0].endswith("hqdefault.jpg")
     assert c.metrics == {}

@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 
 from app.models import (
     ClassificationRule,
+    ContentMatch,
     Event,
     EventRevision,
     Evidence,
@@ -326,3 +327,61 @@ async def test_official_recompute_reconciles_stale_evidence(session):
     assert second.evidences_added == 0
     assert second.evidences_removed == 0
     assert second.revisions_written == 0
+
+
+async def test_high_confidence_cross_language_match_merges_official_contents(
+    session, monkeypatch
+):
+    from app.services import similarity
+    from app.services.settings import set_setting
+    from tests.test_parsers_others import YOUTUBE_ITEM
+
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "test-model", "api_key": "x"},
+    )
+    bili = dict(
+        VIDEO_RAW,
+        bvid="BVofficial",
+        title="《鸣潮》先约电台EP3.6——清宵《尘外客》版本",
+        description="清宵角色音乐现已发布",
+        owner_mid=1955897084,
+        owner_name="鸣潮",
+        pubdate=1787193000,
+    )
+    youtube = dict(
+        YOUTUBE_ITEM,
+        id="qaVli_4qiVs",
+        title='Wuthering Waves EP3.6 — Qingxiao - "Outside the Mountain"',
+        published="2026-08-20T02:30:04+00:00",
+    )
+    await ingest_items(session, "bilibili_search", [bili])
+    await ingest_items(session, "youtube_rss", [youtube])
+    raw_ids = list(await session.scalars(select(RawContent.id).order_by(RawContent.id)))
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        return (
+            '{"matches":[{"left_id":%d,"right_id":%d,"same_event":true,'
+            '"confidence":0.97,"reason":"中英文标题和发布时间对应"}]}'
+            % tuple(raw_ids),
+            {"prompt_tokens": 100, "completion_tokens": 30},
+        )
+
+    monkeypatch.setattr(similarity, "chat", fake_chat)
+    match_stats = await similarity.match_official_contents(session, raw_ids)
+    assert match_stats.positive == 1
+    match = await session.scalar(select(ContentMatch))
+    assert match.is_same_event is True
+    assert match.confidence == 0.97
+
+    await run_aggregation(session)
+    await session.commit()
+    events = list(await session.scalars(select(Event).where(Event.is_active.is_(True))))
+    assert len(events) == 1
+    assert events[0].title.startswith("《鸣潮》先约电台")
+    assert "AI 高置信匹配" in events[0].confidence_reason
+    evidence_count = await session.scalar(
+        select(func.count(Evidence.id)).where(Evidence.event_id == events[0].id)
+    )
+    assert evidence_count == 2

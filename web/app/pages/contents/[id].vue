@@ -17,11 +17,23 @@ if (error.value || !detail.value)
   throw createError({ statusCode: 404, statusMessage: '内容不存在', fatal: true })
 
 const d = computed(() => detail.value!)
-const biliPlayerUrl = computed(() =>
-  d.value.platform === 'bilibili' && d.value.content_type === 'video' && d.value.external_id.startsWith('BV')
-    ? `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(d.value.external_id)}&autoplay=0&danmaku=0`
-    : null,
-)
+const player = computed(() => {
+  if (d.value.platform === 'bilibili' && d.value.content_type === 'video' && d.value.external_id.startsWith('BV')) {
+    return {
+      url: `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(d.value.external_id)}&autoplay=0&danmaku=0`,
+      title: 'B站视频预览',
+      note: '播放器由 B 站提供；若视频禁止外链播放，请使用原文链接。',
+    }
+  }
+  if (d.value.platform === 'youtube' && /^[\w-]{11}$/.test(d.value.external_id)) {
+    return {
+      url: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(d.value.external_id)}`,
+      title: 'YouTube 视频预览',
+      note: '播放器由 YouTube 隐私增强模式提供；若视频限制嵌入，请使用原文链接。',
+    }
+  }
+  return null
+})
 const previewLabel = computed(() => ({
   full: '正文可预览',
   partial: '图片可预览',
@@ -72,18 +84,20 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
     </section>
 
     <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <section v-if="biliPlayerUrl" class="panel overflow-hidden lg:col-span-2">
+        <section v-if="player" class="panel overflow-hidden lg:col-span-2">
           <div class="aspect-video bg-black">
             <iframe
-              :src="biliPlayerUrl"
-              title="B站视频预览"
+              :src="player.url"
+              :title="player.title"
               class="size-full"
+              loading="lazy"
               scrolling="no"
               frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowfullscreen
             />
           </div>
-          <p class="px-4 py-2.5 text-xs text-slate-400 dark:text-zinc-500">播放器由 B 站提供；若视频禁止外链播放，请使用原文链接。</p>
+          <p class="px-4 py-2.5 text-xs text-slate-400 dark:text-zinc-500">{{ player.note }}</p>
         </section>
 
         <!-- 正文（站内解析预览） -->

@@ -48,6 +48,7 @@ class IngestStats:
     items_updated: int = 0  # 已存在且指纹变化（产生新版本）的条数
     parse_failed: int = 0
     errors: list[str] = field(default_factory=list)
+    touched_content_ids: list[int] = field(default_factory=list)
 
 
 async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]) -> IngestStats:
@@ -67,9 +68,13 @@ async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]
             logger.warning("parse failed for %s item: %r", fetch_kind, exc)
             continue
         try:
-            is_new, changed = await _ingest_one(session, normalized, raw, parser_version, rules)
+            is_new, changed, content_id = await _ingest_one(
+                session, normalized, raw, parser_version, rules
+            )
             stats.items_new += int(is_new)
             stats.items_updated += int(changed)
+            if is_new or changed:
+                stats.touched_content_ids.append(content_id)
         except Exception as exc:  # noqa: BLE001
             stats.errors.append(f"ingest failed: {exc!r}")
             logger.warning(
@@ -92,8 +97,8 @@ async def _ingest_one(
     raw: dict,
     parser_version: str,
     rules: list,
-) -> tuple[bool, bool]:
-    """返回 (is_new, fingerprint_changed)。"""
+) -> tuple[bool, bool, int]:
+    """返回 (is_new, fingerprint_changed, content_id)。"""
     source_id = await _upsert_source(session, normalized)
     fingerprint = content_fingerprint(normalized)
 
@@ -121,7 +126,7 @@ async def _ingest_one(
         await session.flush()  # 拿到 id 供 version/snapshot 外键使用
         _add_version(session, content, 1, normalized, parser_version, rules)
         _add_snapshot(session, content, normalized)
-        return True, False
+        return True, False, content.id
 
     # 已存在：原始数据不可覆盖，只更新观测字段
     existing.last_seen_at = utcnow()
@@ -143,7 +148,7 @@ async def _ingest_one(
         _add_version(session, existing, (latest or 0) + 1, normalized, parser_version, rules)
         existing.content_hash = fingerprint
     _add_snapshot(session, existing, normalized)
-    return False, changed
+    return False, changed, existing.id
 
 
 async def _upsert_source(session: AsyncSession, normalized: NormalizedContent) -> int | None:

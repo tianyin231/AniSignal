@@ -23,6 +23,7 @@ from app.clock import to_naive_utc, utcnow
 from app.models import (
     ANNOUNCE_CATEGORIES,
     Category,
+    ContentMatch,
     ContentVersion,
     Event,
     EventRevision,
@@ -197,14 +198,15 @@ def _sort_key(row: ContentRow) -> datetime:
     return row.published_at or row.collected_at
 
 
-def cluster_announcements(items: list[ContentRow]) -> list[list[ContentRow]]:
-    """同类目内聚类：时间相近，且与组内每条内容都共享有效主题。"""
+def _rule_clusters(items: list[ContentRow]) -> list[list[ContentRow]]:
+    """规则聚类保持严格：同类目、时间相近，并与组内每条都共享主题。"""
     clusters: list[list[ContentRow]] = []
     for row in sorted(items, key=_sort_key):
         for cluster in clusters:
             last = cluster[-1]
             if (
-                _sort_key(row) - _sort_key(last) <= _MERGE_WINDOW
+                row.category == last.category
+                and _sort_key(row) - _sort_key(last) <= _MERGE_WINDOW
                 and all(_shared_title(row.title, item.title) for item in cluster)
             ):
                 cluster.append(row)
@@ -212,6 +214,65 @@ def cluster_announcements(items: list[ContentRow]) -> list[list[ContentRow]]:
         else:
             clusters.append([row])
     return clusters
+
+
+def cluster_announcements(
+    items: list[ContentRow], linked_pairs: set[tuple[int, int]] | None = None
+) -> list[list[ContentRow]]:
+    """先按标题规则聚类，再用高置信跨平台关系合并规则簇。"""
+    clusters = _rule_clusters(items)
+    linked_pairs = linked_pairs or set()
+    if not linked_pairs or len(clusters) < 2:
+        return clusters
+
+    cluster_index = {
+        row.raw_id: index for index, cluster in enumerate(clusters) for row in cluster
+    }
+    parent = list(range(len(clusters)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    rows_by_id = {row.raw_id: row for row in items}
+    for left_id, right_id in linked_pairs:
+        if left_id not in cluster_index or right_id not in cluster_index:
+            continue
+        left_category = rows_by_id[left_id].category
+        right_category = rows_by_id[right_id].category
+        # 两个明确但互相冲突的业务类目不因模型关系自动合并。
+        if (
+            left_category != right_category
+            and Category.OFFICIAL_ANNOUNCE not in (left_category, right_category)
+            and left_category in ANNOUNCE_CATEGORIES
+            and right_category in ANNOUNCE_CATEGORIES
+        ):
+            continue
+        union(cluster_index[left_id], cluster_index[right_id])
+
+    merged: dict[int, list[ContentRow]] = {}
+    for index, cluster in enumerate(clusters):
+        merged.setdefault(find(index), []).extend(cluster)
+    return sorted(merged.values(), key=lambda cluster: min(_sort_key(row) for row in cluster))
+
+
+def _cluster_category(cluster: list[ContentRow]) -> str:
+    categories = [row.category for row in cluster if row.category in ANNOUNCE_CATEGORIES]
+    specific = [category for category in categories if category != Category.OFFICIAL_ANNOUNCE]
+    return str(specific[0] if specific else Category.OFFICIAL_ANNOUNCE)
+
+
+def _canonical_row(cluster: list[ContentRow]) -> ContentRow:
+    """跨语言事件优先使用中文官方标题，时间仍由最早证据计算。"""
+    platform_rank = {"bilibili": 0, "kuro_cn": 1, "kuro_global": 2, "youtube": 3}
+    return min(cluster, key=lambda row: (platform_rank.get(row.platform, 9), _sort_key(row)))
 
 
 _CATEGORY_CONCLUSION = {
@@ -292,10 +353,28 @@ async def _aggregate_official(
     session: AsyncSession, contents: list[ContentRow], stats: AggStats
 ) -> None:
     """按当前聚类结果精确对账官方事件，允许移除历史误挂证据。"""
+    official_all = [row for row in contents if row.identity == "official"]
+    official_ids = {row.raw_id for row in official_all}
+    semantic_pairs: set[tuple[int, int]] = set()
+    if official_ids:
+        from app.services.similarity import MATCH_CONFIDENCE
+
+        pair_rows = await session.execute(
+            select(ContentMatch.left_raw_id, ContentMatch.right_raw_id).where(
+                ContentMatch.is_same_event.is_(True),
+                ContentMatch.confidence >= MATCH_CONFIDENCE,
+                ContentMatch.left_raw_id.in_(official_ids),
+                ContentMatch.right_raw_id.in_(official_ids),
+            )
+        )
+        semantic_pairs = {
+            tuple(sorted((left_id, right_id))) for left_id, right_id in pair_rows
+        }
+    semantically_linked_ids = {content_id for pair in semantic_pairs for content_id in pair}
     official = [
         row
-        for row in contents
-        if row.identity == "official" and row.category in ANNOUNCE_CATEGORIES
+        for row in official_all
+        if row.category in ANNOUNCE_CATEGORIES or row.raw_id in semantically_linked_ids
     ]
 
     existing = list(
@@ -322,53 +401,68 @@ async def _aggregate_official(
     ) if any(event.manual_locked for event in existing) else set()
     if locked_raw_ids:
         official = [row for row in official if row.raw_id not in locked_raw_ids]
-
-    by_category: dict[str, list[ContentRow]] = {}
-    for row in official:
-        by_category.setdefault(row.category, []).append(row)
+        remaining_ids = {row.raw_id for row in official}
+        semantic_pairs = {
+            pair for pair in semantic_pairs if pair[0] in remaining_ids and pair[1] in remaining_ids
+        }
 
     unlocked = [event for event in existing if not event.manual_locked]
     used_event_ids: set[int] = set()
-    for category, items in by_category.items():
-        for cluster in cluster_announcements(items):
-            raw_ids = {row.raw_id for row in cluster}
-            candidates = [
-                event
-                for event in unlocked
-                if event.id not in used_event_ids and event.category == category
-            ]
-            event = max(
-                candidates,
-                key=lambda item: len(evidence_by_event[item.id] & raw_ids),
-                default=None,
+    for cluster in cluster_announcements(official, semantic_pairs):
+        category = _cluster_category(cluster)
+        raw_ids = {row.raw_id for row in cluster}
+        has_semantic_match = any(
+            left_id in raw_ids and right_id in raw_ids
+            for left_id, right_id in semantic_pairs
+        )
+        confidence_reason = (
+            "官方来源；跨平台内容由 AI 高置信匹配"
+            if has_semantic_match
+            else "官方来源公告"
+        )
+        candidates = [
+            event
+            for event in unlocked
+            if event.id not in used_event_ids and event.category == category
+        ]
+        event = max(
+            candidates,
+            key=lambda item: len(evidence_by_event[item.id] & raw_ids),
+            default=None,
+        )
+        if event is not None and not (evidence_by_event[event.id] & raw_ids):
+            event = None
+        if event is None:
+            first = sorted(cluster, key=_sort_key)[0]
+            canonical = _canonical_row(cluster)
+            event = Event(
+                title=canonical.title[:255],
+                category=category,
+                product_id=None,
+                identity="official",
+                confidence="high",
+                confidence_reason=confidence_reason,
+                conclusion=_CATEGORY_CONCLUSION.get(category, "官方公告"),
+                regions=sorted(_regions_of(cluster)),
+                facts=_build_facts(category, cluster),
+                first_seen_at=first.published_at or first.collected_at,
+                last_updated_at=utcnow(),
             )
-            if event is not None and not (evidence_by_event[event.id] & raw_ids):
-                event = None
-            if event is None:
-                first = sorted(cluster, key=_sort_key)[0]
-                event = Event(
-                    title=first.title[:255],
-                    category=category,
-                    product_id=None,
-                    identity="official",
-                    confidence="high",
-                    confidence_reason="官方来源公告",
-                    conclusion=_CATEGORY_CONCLUSION.get(category, "官方公告"),
-                    regions=sorted(_regions_of(cluster)),
-                    facts=_build_facts(category, cluster),
-                    first_seen_at=first.published_at or first.collected_at,
-                    last_updated_at=utcnow(),
-                )
-                session.add(event)
-                await session.flush()
-                evidence_by_event[event.id] = set()
-                stats.events_created += 1
-                _add_revision(session, event, stats, "事件由聚合引擎创建")
+            session.add(event)
+            await session.flush()
+            evidence_by_event[event.id] = set()
+            stats.events_created += 1
+            _add_revision(session, event, stats, "事件由聚合引擎创建")
 
-            used_event_ids.add(event.id)
-            await _reconcile_official_event(
-                session, event, cluster, evidence_by_event[event.id], stats
-            )
+        used_event_ids.add(event.id)
+        await _reconcile_official_event(
+            session,
+            event,
+            cluster,
+            evidence_by_event[event.id],
+            stats,
+            confidence_reason,
+        )
 
     for event in unlocked:
         if event.id in used_event_ids:
@@ -385,12 +479,13 @@ async def _reconcile_official_event(
     cluster: list[ContentRow],
     existing_ids: set[int],
     stats: AggStats,
+    confidence_reason: str,
 ) -> None:
     expected_ids = {row.raw_id for row in cluster}
     removed_ids = existing_ids - expected_ids
     added_rows = [row for row in cluster if row.raw_id not in existing_ids]
     first = sorted(cluster, key=_sort_key)[0]
-    expected_title = first.title[:255]
+    expected_title = _canonical_row(cluster).title[:255]
     expected_facts = _build_facts(event.category, cluster)
     expected_regions = sorted(_regions_of(cluster))
     metadata_changed = any(
@@ -398,7 +493,7 @@ async def _reconcile_official_event(
             event.title != expected_title,
             event.identity != "official",
             event.confidence != "high",
-            event.confidence_reason != "官方来源公告",
+            event.confidence_reason != confidence_reason,
             event.conclusion != _CATEGORY_CONCLUSION.get(event.category, "官方公告"),
             (event.regions or []) != expected_regions,
             (event.facts or []) != expected_facts,
@@ -424,7 +519,7 @@ async def _reconcile_official_event(
     event.title = expected_title
     event.identity = "official"
     event.confidence = "high"
-    event.confidence_reason = "官方来源公告"
+    event.confidence_reason = confidence_reason
     event.conclusion = _CATEGORY_CONCLUSION.get(event.category, "官方公告")
     event.regions = expected_regions
     event.facts = expected_facts
