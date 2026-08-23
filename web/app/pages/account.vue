@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { Plus, X } from 'lucide-vue-next'
+import { Pencil, Plus, X } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { fmtTime, toRawItem } from '~/utils/public-utils'
+import { AVATARS, DEFAULT_AVATAR, avatarGradient, displayName } from '~/utils/avatars'
 
 definePageMeta({ layout: 'account' })
 useSeoMeta({ title: '账号中心 · AniSignal' })
 
-const { user, loaded, fetchMe } = useAuth()
+const { user, loaded, fetchMe, updateProfile } = useAuth()
 const route = useRoute()
 
 onMounted(() => {
@@ -19,6 +20,8 @@ onMounted(() => {
 // ---------- 概览 ----------
 interface Overview {
   email: string
+  display_name: string | null
+  avatar: string | null
   is_verified: boolean
   created_at: string | null
   last_login_at: string | null
@@ -36,15 +39,31 @@ const newKeyword = ref('')
 const keywordError = ref('')
 const busy = ref(false)
 
-// ---------- 关注流 ----------
+// ---------- 关注流（每页 20 条）----------
+const FEED_PAGE_SIZE = 20
 const feed = ref<PublicContentList | null>(null)
+const feedPage = ref(1)
+const feedTotalPages = computed(() => Math.max(1, Math.ceil((feed.value?.total ?? 0) / FEED_PAGE_SIZE)))
+
+async function fetchFeed() {
+  feed.value = await $fetch<PublicContentList>('/api/account/feed', {
+    query: { limit: FEED_PAGE_SIZE, offset: (feedPage.value - 1) * FEED_PAGE_SIZE },
+  })
+}
+
+function feedGoPage(p: number) {
+  feedPage.value = Math.min(Math.max(1, p), feedTotalPages.value)
+  fetchFeed()
+}
 
 async function refresh() {
   try {
     const [ov, kw, fd] = await Promise.all([
       $fetch<Overview>('/api/account/overview'),
       $fetch<Keyword[]>('/api/account/keywords'),
-      $fetch<PublicContentList>('/api/account/feed', { query: { limit: 30 } }),
+      $fetch<PublicContentList>('/api/account/feed', {
+        query: { limit: FEED_PAGE_SIZE, offset: (feedPage.value - 1) * FEED_PAGE_SIZE },
+      }),
     ])
     overview.value = ov
     keywords.value = kw
@@ -91,6 +110,30 @@ async function removeKeyword(k: Keyword) {
   }
 }
 
+// ---------- 资料编辑 ----------
+const editingProfile = ref(false)
+const nameDraft = ref('')
+const avatarDraft = ref(DEFAULT_AVATAR)
+
+function startEditProfile() {
+  nameDraft.value = user.value?.display_name ?? ''
+  avatarDraft.value = user.value?.avatar ?? DEFAULT_AVATAR
+  editingProfile.value = true
+}
+
+async function saveProfile() {
+  busy.value = true
+  try {
+    await updateProfile(nameDraft.value.trim(), avatarDraft.value)
+    editingProfile.value = false
+    await refresh()
+  } catch (exc: any) {
+    keywordError.value = exc?.data?.detail ?? '保存失败'
+  } finally {
+    busy.value = false
+  }
+}
+
 // ---------- 安全 ----------
 const oldPassword = ref('')
 const newPassword = ref('')
@@ -122,20 +165,49 @@ async function changePassword() {
     <!-- 账号信息 -->
     <section class="panel p-5 sm:p-6">
       <div class="flex flex-wrap items-center gap-4">
-        <span class="grid size-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-b from-blue-500 to-blue-600 text-xl font-semibold text-white shadow-inner">
-          {{ (user?.email || '?')[0].toUpperCase() }}
+        <span class="grid size-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-b text-xl font-semibold text-white shadow-inner" :class="avatarGradient(overview?.avatar ?? user?.avatar)">
+          {{ displayName(overview ?? user)[0]!.toUpperCase() }}
         </span>
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
-            <h1 class="truncate text-lg font-semibold">{{ user?.email ?? '…' }}</h1>
+            <h1 class="truncate text-lg font-semibold">{{ displayName(overview ?? user) }}</h1>
+            <button class="chip bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400" @click="startEditProfile">
+              <Pencil :size="11" /> 编辑资料
+            </button>
             <span v-if="overview?.is_verified" class="chip bg-emerald-500/10 font-medium text-emerald-600 dark:text-emerald-400">邮箱已验证</span>
             <span class="chip bg-blue-500/10 font-medium text-blue-700 dark:text-blue-300">{{ overview?.subscription.label ?? '免费版' }}</span>
           </div>
           <p class="mono mt-1 text-xs text-slate-400 dark:text-zinc-500">
-            注册于 {{ fmtTime(overview?.created_at) }} · 最近登录 {{ fmtTime(overview?.last_login_at) }}
+            {{ user?.email }} · 注册于 {{ fmtTime(overview?.created_at) }} · 最近登录 {{ fmtTime(overview?.last_login_at) }}
             <template v-if="overview?.subscription.expires_at"> · 到期 {{ overview.subscription.expires_at }}</template>
             <template v-else> · 无到期时间</template>
           </p>
+        </div>
+      </div>
+
+      <!-- 资料编辑 -->
+      <div v-if="editingProfile" class="mt-5 rounded-xl border border-blue-500/30 bg-blue-500/5 p-4">
+        <h3 class="text-sm font-semibold">编辑资料</h3>
+        <label class="mt-3 block text-xs font-medium text-slate-500 dark:text-zinc-400">昵称（留空则使用邮箱前缀）</label>
+        <input v-model="nameDraft" maxlength="24" placeholder="最多 24 个字符"
+          class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+        <p class="mt-3 block text-xs font-medium text-slate-500 dark:text-zinc-400">头像</p>
+        <div class="mt-2 grid grid-cols-6 gap-2">
+          <button
+            v-for="a in AVATARS"
+            :key="a.id"
+            type="button"
+            :title="a.label"
+            class="grid aspect-square place-items-center rounded-xl bg-gradient-to-b text-sm font-semibold text-white transition-transform hover:scale-105"
+            :class="[a.gradient, avatarDraft === a.id ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-zinc-900' : '']"
+            @click="avatarDraft = a.id"
+          >
+            {{ displayName(overview ?? user)[0]!.toUpperCase() }}
+          </button>
+        </div>
+        <div class="mt-4 flex gap-2">
+          <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveProfile">保存</button>
+          <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" @click="editingProfile = false">取消</button>
         </div>
       </div>
 
@@ -221,6 +293,14 @@ async function changePassword() {
           <p v-else class="border-t border-slate-900/5 px-5 py-8 text-center text-sm text-slate-400 dark:border-white/5 dark:text-zinc-500">
             {{ keywords.length ? '暂无命中关键词的内容，系统持续采集中。' : '添加关键词后，这里会展示命中的最新内容。' }}
           </p>
+          <div v-if="(feed?.total ?? 0) > FEED_PAGE_SIZE" class="flex items-center justify-between border-t border-slate-900/5 px-5 py-2.5 text-xs text-slate-400 dark:border-white/5 dark:text-zinc-500">
+            <span>共 {{ feed?.total }} 条 · 每页 {{ FEED_PAGE_SIZE }} 条</span>
+            <div class="flex items-center gap-3">
+              <button :disabled="feedPage <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="feedGoPage(feedPage - 1)">« 上一页</button>
+              <span class="mono">{{ feedPage }} / {{ feedTotalPages }}</span>
+              <button :disabled="feedPage >= feedTotalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="feedGoPage(feedPage + 1)">下一页 »</button>
+            </div>
+          </div>
         </section>
       </div>
 

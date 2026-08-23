@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Radar, UserRound } from 'lucide-vue-next'
+import { Radar } from 'lucide-vue-next'
+import { avatarGradient, displayName } from '~/utils/avatars'
 
 const route = useRoute()
 const links = [
@@ -66,10 +67,10 @@ async function handleLogout() {
             class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-slate-200/70 dark:hover:bg-zinc-800/70"
             @click="menuOpen = !menuOpen"
           >
-            <span class="grid size-6 place-items-center rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300">
-              <UserRound :size="13" />
+            <span class="grid size-6 place-items-center rounded-full bg-gradient-to-b text-[11px] font-semibold text-white" :class="avatarGradient(user.avatar)">
+              {{ displayName(user)[0]!.toUpperCase() }}
             </span>
-            <span class="hidden max-w-32 truncate text-xs text-slate-600 sm:block dark:text-zinc-300">{{ user.email }}</span>
+            <span class="hidden max-w-32 truncate text-xs text-slate-600 sm:block dark:text-zinc-300">{{ displayName(user) }}</span>
           </button>
           <div v-if="menuOpen" class="popover absolute right-0 top-full z-50 mt-1.5 w-44 p-1.5">
             <NuxtLink to="/account" class="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-500/10 dark:text-zinc-200" @click="menuOpen = false">

@@ -140,10 +140,40 @@ async def me(request: Request, session: AsyncSession = Depends(get_session)):
     return {
         "id": user.id,
         "email": user.email,
+        "display_name": user.display_name,
+        "avatar": user.avatar,
         "is_verified": user.is_verified,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
     }
+
+
+@router.put("/profile")
+async def update_profile(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    user = await _current_user(request, session)
+    if user is None:
+        raise HTTPException(status_code=401, detail="未登录")
+    """修改昵称与头像（头像为预设样式库 key，白名单校验）。"""
+    display_name = body.get("display_name")
+    avatar = body.get("avatar")
+    if display_name is not None:
+        display_name = str(display_name).strip()
+        if len(display_name) > 24:
+            raise HTTPException(status_code=400, detail="昵称不超过 24 个字符")
+        user.display_name = display_name or None
+    if avatar is not None:
+        from app.services.avatars import AVATAR_IDS
+
+        avatar = str(avatar)
+        if avatar not in AVATAR_IDS:
+            raise HTTPException(status_code=400, detail="不支持的头像样式")
+        user.avatar = avatar
+    await session.commit()
+    return {"display_name": user.display_name, "avatar": user.avatar}
 
 
 @router.post("/password/change")
@@ -231,3 +261,5 @@ async def get_current_user(request: Request, session: AsyncSession = Depends(get
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
     return user
+
+

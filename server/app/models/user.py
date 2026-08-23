@@ -14,6 +14,9 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
+    # 昵称与头像（头像为预设样式库的 key，如 "aurora-blue"）
+    display_name: Mapped[str | None] = mapped_column(String(64))
+    avatar: Mapped[str | None] = mapped_column(String(32))
     # 格式：scrypt$n$r$p$salt_hex$hash_hex
     password_hash: Mapped[str] = mapped_column(String(255))
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
