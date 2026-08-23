@@ -385,6 +385,7 @@ async def assess_product_stage(session: AsyncSession, product_id: int) -> dict:
         "账号未标明官方、商家、媒体或送测，且以个人口吻分享开箱/使用时，可判为普通用户。"
         "必须核对内容确实对应目标商品；不要根据播放量或纯营销措辞推测身份。"
         "evidence_ids 只能选输入中的 id；阶段大于0必须给证据，理由要说明账号性质和到货事实。"
+        "理由使用面向普通用户的自然中文，不要出现 identity_hint、category_hint 等内部字段名。"
     )
     user = (
         f"目标商品：{product.name}\n匹配词：{json.dumps(product.watch_terms or [], ensure_ascii=False)}\n"

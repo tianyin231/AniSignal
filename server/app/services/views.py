@@ -285,8 +285,8 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
     else:
         official_status = "未发现可核验的官方发货信息"
     if reviewed_sources:
-        reviewer = "AI 审核" if ai_applied else "人工审核"
-        consumer_status = f"经{reviewer}确认 {len(reviewed_sources)} 个独立账号的到货/开箱证据"
+        reviewer = "经 AI 审核" if ai_applied else "经人工审核"
+        consumer_status = f"{reviewer}确认 {len(reviewed_sources)} 个独立账号的到货/开箱证据"
     elif user_count:
         consumer_status = f"已核验 {user_count} 个普通用户账号的到货/开箱证据"
     elif seeded_count:

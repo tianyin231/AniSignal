@@ -315,6 +315,7 @@ async def test_admin_ai_assesses_product_with_audited_evidence(
     async def fake_chat(config, system, user, *, json_mode=False):
         assert "普通购买者" in system
         assert "unknown 仅表示系统尚未人工标注" in system
+        assert "不要出现 identity_hint" in system
         assert f'"id": {evidence.raw_content_id}' in user
         return (
             '{"stage":2,"reason":"一名独立普通用户明确发布该商品开箱内容",'
