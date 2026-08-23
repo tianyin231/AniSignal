@@ -219,6 +219,38 @@ def test_game_name_boilerplate_does_not_merge_topics():
     assert len(clusters) == 2
 
 
+def test_series_name_does_not_merge_different_topics():
+    """“先约电台”既是活动名也是音乐栏目名，不能单独作为事件指纹。"""
+    from datetime import datetime
+
+    from app.services.events import ContentRow
+
+    ts = datetime(2026, 8, 20, 8)
+
+    def row(raw_id: int, title: str) -> ContentRow:
+        return ContentRow(
+            raw_id=raw_id,
+            platform="kuro_cn" if raw_id == 1 else "bilibili",
+            external_id=str(raw_id),
+            url=None,
+            published_at=ts,
+            collected_at=ts,
+            title=title,
+            category="version_update",
+            identity="official",
+            source_name="鸣潮",
+            source_external_id=None,
+        )
+
+    clusters = cluster_announcements(
+        [
+            row(1, "[先约电台]活动说明"),
+            row(2, "《鸣潮》先约电台EP3.6——清宵《尘外客》"),
+        ]
+    )
+    assert len(clusters) == 2
+
+
 async def test_different_topics_not_merged(session):
     """同类目但标题无共享片段的两条官方公告 → 各自成事件（修复回归）。"""
     await _seed_rules(session)

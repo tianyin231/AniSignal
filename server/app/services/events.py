@@ -146,6 +146,7 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
 _TITLE_BOILERPLATE = (
     "《鸣潮》",
     "鸣潮",
+    "先约电台",
     "官方",
     "公告",
     "说明",
