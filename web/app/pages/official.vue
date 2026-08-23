@@ -74,7 +74,7 @@ useSeoMeta({ title: '官方动态' })
     </section>
     <section v-else class="panel overflow-hidden">
       <NuxtLink v-for="entry in list" :key="entry.row.id" :to="`/contents/${entry.row.id}`" class="block">
-        
+        <RawFeedRow :item="entry.row" />
       </NuxtLink>
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
         在已接入来源中暂无此筛选下的官方内容。
