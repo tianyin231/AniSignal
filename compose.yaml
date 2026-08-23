@@ -10,8 +10,6 @@ services:
       - --collation-server=utf8mb4_unicode_ci
     volumes:
       - mysql_data:/var/lib/mysql
-    ports:
-      - "127.0.0.1:3306:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-anisignal}"]
       interval: 5s
@@ -23,8 +21,6 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
-    ports:
-      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -46,7 +42,8 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      # 只绑回环：管理 API 不直接暴露公网，测试走 SSH，公网访问等反代阶段
+      - "127.0.0.1:${API_PORT:-8000}:8000"
 
   scheduler:
     build: ./server
