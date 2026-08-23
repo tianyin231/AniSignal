@@ -5,6 +5,8 @@
 export interface AuthUser {
   id: number
   email: string
+  display_name?: string | null
+  avatar?: string | null
   is_verified: boolean
   created_at: string | null
   last_login_at: string | null
@@ -29,6 +31,11 @@ export function useAuth() {
     await fetchMe()
   }
 
+  async function updateProfile(display_name: string, avatar: string) {
+    await $fetch('/api/auth/profile', { method: 'PUT', body: { display_name, avatar } })
+    await fetchMe()
+  }
+
   async function logout() {
     await $fetch('/api/auth/logout', { method: 'POST' })
     user.value = null
@@ -38,5 +45,5 @@ export function useAuth() {
     if (!loaded.value) fetchMe()
   })
 
-  return { user, loaded, fetchMe, login, logout }
+  return { user, loaded, fetchMe, login, logout, updateProfile }
 }

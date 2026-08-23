@@ -89,3 +89,23 @@ async def test_account_requires_login(client):
     client.cookies.clear()
     resp = await client.get("/api/account/overview")
     assert resp.status_code == 401
+
+
+async def test_profile_update(client, session):
+    await _register_and_login(client, session, email="profile@t.com")
+    resp = await client.put(
+        "/api/auth/profile",
+        json={"display_name": "漂泊者", "avatar": "teal-mint"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"display_name": "漂泊者", "avatar": "teal-mint"}
+
+    # me 与 overview 都带上新资料
+    resp = await client.get("/api/auth/me")
+    assert resp.json()["display_name"] == "漂泊者"
+    resp = await client.get("/api/account/overview")
+    assert resp.json()["avatar"] == "teal-mint"
+
+    # 非法头像被白名单拦截
+    resp = await client.put("/api/auth/profile", json={"avatar": "hacker"})
+    assert resp.status_code == 400

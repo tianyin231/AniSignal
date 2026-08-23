@@ -51,6 +51,8 @@ async def overview(
     return {
         "id": user.id,
         "email": user.email,
+        "display_name": user.display_name,
+        "avatar": user.avatar,
         "is_verified": user.is_verified,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
