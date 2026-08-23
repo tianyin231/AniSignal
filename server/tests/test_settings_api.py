@@ -158,3 +158,55 @@ async def test_ai_usage_recorded(client, session, admin_headers, monkeypatch):
     assert any(t["task"] == "summarize_event" for t in body["by_task"])
     resp = await client.get("/api/admin/ai/calls", headers=admin_headers)
     assert resp.status_code == 200
+
+
+async def test_ai_summary_uses_latest_plain_evidence_and_rejects_unsupported_game(
+    session, monkeypatch
+):
+    """摘要只读最新证据；模型凭空换成其它游戏时使用可信回退文案。"""
+    from sqlalchemy import select
+
+    from app.models import ContentVersion, Event, RawContent
+    from app.services import ai as ai_mod
+    from app.services.events import run_aggregation
+    from app.services.ingest import ingest_items
+    from app.services.settings import set_setting
+    from tests.test_parsers_others import KURO_ITEM
+
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "m", "api_key": "sk-x"},
+    )
+    await ingest_items(session, "kuro_notices", [KURO_ITEM])
+    raw = await session.scalar(select(RawContent))
+    session.add(
+        ContentVersion(
+            raw_content_id=raw.id,
+            version=2,
+            title="3.6版本活动说明",
+            text="<p>活动时间：3.6版本更新后 ~ 2026年9月29日03:59</p>",
+            parser_version="test",
+            category="version_update",
+        )
+    )
+    await run_aggregation(session)
+    await session.commit()
+    event = await session.scalar(select(Event).where(Event.is_active.is_(True)))
+    deterministic_facts = list(event.facts)
+    captured = {}
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        captured["system"] = system
+        captured["user"] = user
+        return '{"summary": "战双帕弥什推出全新回馈活动", "facts": [{"label": "时间", "value": "未知"}]}', {}
+
+    monkeypatch.setattr(ai_mod, "chat", fake_chat)
+    result = await ai_mod.summarize_event(session, event.id)
+    await session.refresh(event)
+
+    assert result["status"] == "ok"
+    assert "2026年9月29日03:59" in captured["user"]
+    assert "<p>" not in captured["user"]
+    assert "战双帕弥什" not in event.summary
+    assert event.facts == deterministic_facts

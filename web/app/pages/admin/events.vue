@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ApiEvent, ApiEventList } from '~/composables/usePublicApi'
-import { categoryMeta, fmtTime } from '~/utils/public-utils'
+import { fmtTime } from '~/utils/admin-types'
+import { categoryMeta } from '~/utils/public-utils'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '事件审核 · AniSignal 管理看板' })

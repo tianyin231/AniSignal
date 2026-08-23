@@ -1,6 +1,11 @@
 """公开 API 单测：内容流（过滤/搜索/摘要）、来源健康（不泄露内部字段）、统计。"""
 
-from app.models import CollectTarget
+from datetime import timedelta
+
+from sqlalchemy import select
+
+from app.clock import utcnow
+from app.models import CollectTarget, RawContent
 from app.services.ingest import ingest_items
 
 from tests.test_parsers_bilibili import VIDEO_RAW
@@ -54,6 +59,7 @@ async def test_public_contents_search_and_fields(client, session):
     assert item["cover"] == "https://example.com/banner.png"
     assert item["source_name"] == "Kuro Games"
     assert item["identity"] == "official"
+    assert item["category"] == "official_announce"
 
     # 平台过滤
     resp = await client.get("/api/contents", params={"platform": "bilibili"})
@@ -81,3 +87,23 @@ async def test_public_stats(client, session):
     assert body["by_platform"] == {"bilibili": 1, "kuro_global": 1}
     assert body["official_contents"] == 1
     assert body["latest_collected_at"] is not None
+
+
+async def test_public_contents_recent_window_and_identity_exclusion(client, session):
+    await _seed(session)
+    rows = list(await session.scalars(select(RawContent).order_by(RawContent.id)))
+    rows[0].published_at = utcnow() - timedelta(days=10)
+    rows[1].published_at = utcnow() - timedelta(hours=2)
+    await session.commit()
+
+    resp = await client.get(
+        "/api/contents",
+        params={"published_within_hours": 72, "exclude_identity": "official"},
+    )
+    body = resp.json()
+    assert body["total"] == 0
+
+    resp = await client.get("/api/contents", params={"published_within_hours": 72})
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["external_id"] == "50553"

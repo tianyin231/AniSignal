@@ -4,8 +4,6 @@ import { fmtTime } from '~/utils/admin-types'
 import { type Identity, type Platform, type RawItem, type Region, type AppEvent, type SourceRef } from '~/utils/data'
 import type { ApiEvent, ApiProduct, PublicContentItem } from '~/composables/usePublicApi'
 
-export { fmtTime }
-
 export const regionOf = (platform: string): Region =>
   ['kuro_global', 'youtube'].includes(platform) ? 'global' : 'cn'
 
@@ -73,6 +71,8 @@ export function toRawItem(item: PublicContentItem): RawItem {
     region: regionOf(item.platform),
     title: item.title || item.external_id,
     publishedAt: fmtTime(item.published_at || item.collected_at),
+    identity: item.identity as Identity,
+    category: item.category ? (categoryMeta[item.category]?.label ?? item.category) : undefined,
     keywords: item.matched_keywords ?? [],
   }
 }

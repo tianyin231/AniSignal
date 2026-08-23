@@ -3,14 +3,15 @@
 公开页当前展示"原始内容流"；事件聚合视图属于事件引擎阶段（设计文档 §4）。
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.models import CollectTarget, ContentVersion, RawContent, Source
+from app.clock import utcnow
+from app.models import CollectTarget, ContentVersion, Evidence, RawContent, Source
 from app.schemas.api import (
     ContentDetailOut,
     EventListOut,
@@ -34,6 +35,10 @@ async def list_contents(
     platform: str | None = Query(default=None),
     content_type: str | None = Query(default=None),
     identity: str | None = Query(default=None, description="official/user/... 来源身份过滤"),
+    exclude_identity: str | None = Query(default=None, max_length=32, description="排除指定来源身份"),
+    published_within_hours: int | None = Query(
+        default=None, ge=1, le=8760, description="仅返回最近若干小时发布的内容"
+    ),
     include_chat: bool = Query(default=False, description="包含闲聊/杂谈类（默认隐藏降噪）"),
     sort: str = Query(default="time", pattern="^(time|hot)$", description="hot=按最新播放量排序"),
     q: str | None = Query(default=None, max_length=100, description="标题关键词"),
@@ -59,6 +64,10 @@ async def list_contents(
         conditions.append(RawContent.content_type == content_type)
     if identity:
         conditions.append(Source.identity == identity)
+    if exclude_identity:
+        conditions.append((Source.identity != exclude_identity) | Source.identity.is_(None))
+    if published_within_hours:
+        conditions.append(RawContent.published_at >= utcnow() - timedelta(hours=published_within_hours))
     if not include_chat:
         conditions.append(ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None))
     if q:
@@ -100,6 +109,7 @@ async def list_contents(
                 collected_at=raw.collected_at,
                 source_name=source_name,
                 identity=source_identity or "unknown",
+                category=version.category,
                 metrics=None,
                 cover=media[0] if isinstance(media, list) and media else None,
                 matched_keywords=(raw.matched_keywords or []),
@@ -289,6 +299,9 @@ async def list_events(
     category: str | None = Query(default=None),
     product_slug: str | None = Query(default=None),
     importance: bool | None = Query(default=None),
+    published_within_hours: int | None = Query(
+        default=None, ge=1, le=8760, description="仅返回最近若干小时内有新证据的事件"
+    ),
     q: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
@@ -308,6 +321,14 @@ async def list_events(
         conditions.append(EventModel.product_id == (product.id if product else -1))
     if importance is not None:
         conditions.append(EventModel.importance.is_(importance))
+    if published_within_hours:
+        cutoff = utcnow() - timedelta(hours=published_within_hours)
+        recent_event_ids = (
+            select(Evidence.event_id)
+            .join(RawContent, RawContent.id == Evidence.raw_content_id)
+            .where(RawContent.published_at >= cutoff)
+        )
+        conditions.append(EventModel.id.in_(recent_event_ids))
     if q:
         conditions.append(EventModel.title.like(f"%{q}%"))
 

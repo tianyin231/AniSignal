@@ -101,6 +101,7 @@ class PublicContentItem(BaseModel):
     collected_at: datetime
     source_name: str | None
     identity: str
+    category: str | None = None
     metrics: dict | None
     cover: str | None
     matched_keywords: list[str] = []

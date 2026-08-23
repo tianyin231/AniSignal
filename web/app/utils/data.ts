@@ -119,6 +119,8 @@ export interface RawItem {
   region: Region
   title: string
   publishedAt: string
+  identity: Identity
+  category?: string
   translated?: boolean
   mergedInto?: string
   keywords?: string[]

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PublicSource } from '~/composables/usePublicApi'
-import { fmtTime } from '~/utils/public-utils'
+import { fmtTime } from '~/utils/admin-types'
 
 const { api } = usePublicApi()
 const { data } = await useAsyncData('rail-sources', () =>

@@ -403,6 +403,8 @@ async def recompute_events(session: AsyncSession = Depends(get_session)):
     return {
         "events_created": stats.events_created,
         "evidences_added": stats.evidences_added,
+        "evidences_removed": stats.evidences_removed,
+        "events_deactivated": stats.events_deactivated,
         "revisions_written": stats.revisions_written,
         "stage_advances": stats.stage_advances,
         "skipped_locked": stats.skipped_locked,

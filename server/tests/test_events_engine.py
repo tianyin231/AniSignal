@@ -187,6 +187,38 @@ def test_cluster_shared_title_logic():
     assert len(clusters[1]) == 1  # c 独立
 
 
+def test_game_name_boilerplate_does_not_merge_topics():
+    """共享“《鸣潮》”不代表同一事件主题。"""
+    from datetime import datetime
+
+    from app.services.events import ContentRow
+
+    ts = datetime(2026, 8, 20, 8)
+
+    def row(raw_id: int, title: str) -> ContentRow:
+        return ContentRow(
+            raw_id=raw_id,
+            platform="kuro_cn",
+            external_id=str(raw_id),
+            url=None,
+            published_at=ts,
+            collected_at=ts,
+            title=title,
+            category="official_announce",
+            identity="official",
+            source_name="鸣潮官网",
+            source_external_id=None,
+        )
+
+    clusters = cluster_announcements(
+        [
+            row(1, "《鸣潮》防沉迷系统说明"),
+            row(2, "《鸣潮》公平运营声明"),
+        ]
+    )
+    assert len(clusters) == 2
+
+
 async def test_different_topics_not_merged(session):
     """同类目但标题无共享片段的两条官方公告 → 各自成事件（修复回归）。"""
     await _seed_rules(session)
@@ -204,3 +236,53 @@ async def test_different_topics_not_merged(session):
         (await session.execute(select(Event).where(Event.category == "official_announce"))).scalars()
     )
     assert len(announces) == 2, "不同主题的公告不应合并"
+
+
+async def test_official_recompute_reconciles_stale_evidence(session):
+    """规则变化或旧聚合误判后，重算应精确对账而不是只追加证据。"""
+    await _seed_rules(session)
+    await ingest_items(
+        session,
+        "kuro_notices",
+        [
+            {"platform": "kuro_cn", "entry": {"id": "7101", "tabTitle": {"zh-Hans": "《鸣潮》防沉迷系统说明"}}, "detail": None},
+            {"platform": "kuro_cn", "entry": {"id": "7102", "tabTitle": {"zh-Hans": "《鸣潮》公平运营声明"}}, "detail": None},
+        ],
+    )
+    raw_ids = list(await session.scalars(select(RawContent.id).order_by(RawContent.id)))
+    stale = Event(
+        title="《鸣潮》防沉迷系统说明",
+        category="official_announce",
+        identity="official",
+        confidence="high",
+        regions=["cn"],
+    )
+    session.add(stale)
+    await session.flush()
+    session.add_all([Evidence(event_id=stale.id, raw_content_id=raw_id) for raw_id in raw_ids])
+    await session.commit()
+
+    stats = await run_aggregation(session)
+    await session.commit()
+
+    active = list(
+        await session.scalars(
+            select(Event).where(Event.category == "official_announce", Event.is_active.is_(True))
+        )
+    )
+    assert len(active) == 2
+    evidence_sets = []
+    for event in active:
+        evidence_sets.append(
+            set(await session.scalars(select(Evidence.raw_content_id).where(Evidence.event_id == event.id)))
+        )
+    assert sorted(len(ids) for ids in evidence_sets) == [1, 1]
+    assert set().union(*evidence_sets) == set(raw_ids)
+    assert stats.evidences_removed == 1
+
+    second = await run_aggregation(session)
+    await session.commit()
+    assert second.events_created == 0
+    assert second.evidences_added == 0
+    assert second.evidences_removed == 0
+    assert second.revisions_written == 0

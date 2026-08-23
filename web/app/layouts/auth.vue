@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Radar } from 'lucide-vue-next'
 import type { ApiEventList, PublicStats } from '~/composables/usePublicApi'
-import { categoryMeta, fmtTime, toAppEvent } from '~/utils/public-utils'
+import { fmtTime } from '~/utils/admin-types'
+import { categoryMeta, toAppEvent } from '~/utils/public-utils'
 
 // 认证专属布局：极简品牌头 + 居中表单 + 站点内容预览（真实数据）
 const { api } = usePublicApi()

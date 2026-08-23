@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { platformMeta, regionMeta, type RawItem } from '~/utils/data'
+import { identityMeta, platformMeta, regionMeta, type RawItem } from '~/utils/data'
 
 defineProps<{ item: RawItem }>()
 </script>
@@ -21,6 +21,12 @@ defineProps<{ item: RawItem }>()
         <span>{{ platformMeta[item.platform].label }} · {{ item.account }}</span>
         <span aria-hidden="true">·</span>
         <span>{{ regionMeta[item.region] }}</span>
+        <template v-if="item.category">
+          <span aria-hidden="true">·</span>
+          <span>{{ item.category }}</span>
+        </template>
+        <span aria-hidden="true">·</span>
+        <span :class="identityMeta[item.identity].text">{{ identityMeta[item.identity].label }}</span>
         <template v-if="item.translated">
           <span aria-hidden="true">·</span>
           <span class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>
@@ -35,7 +41,6 @@ defineProps<{ item: RawItem }>()
             <span v-for="k in item.keywords" :key="k" class="rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-700 dark:text-blue-300">{{ k }}</span>
           </span>
         </template>
-        <span v-else class="text-slate-300 dark:text-zinc-600">· 独立内容</span>
       </div>
     </div>
   </div>
