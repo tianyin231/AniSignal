@@ -417,3 +417,22 @@ async def test_high_confidence_cross_language_match_merges_official_contents(
         select(func.count(Evidence.id)).where(Evidence.event_id == events[0].id)
     )
     assert evidence_count == 2
+
+
+def test_missing_llm_match_result_can_be_completed_conservatively():
+    from app.services.similarity import _complete_missing_decisions, _parse_decisions
+
+    allowed = {(1, 2), (3, 4)}
+    decisions = _parse_decisions(
+        '{"matches":[{"left_id":1,"right_id":2,"same_event":true,'
+        '"confidence":0.95,"reason":"同一发布"}]}',
+        allowed,
+    )
+    decisions = _complete_missing_decisions(decisions, allowed)
+
+    assert decisions[(1, 2)]["same_event"] is True
+    assert decisions[(3, 4)] == {
+        "same_event": False,
+        "confidence": 0.0,
+        "reason": "模型未返回该候选，按保守策略不合并",
+    }
