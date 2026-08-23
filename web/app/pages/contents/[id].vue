@@ -4,7 +4,8 @@ const lightbox = ref<string | null>(null)
 import { ArrowUpRight } from 'lucide-vue-next'
 import type { ContentDetail } from '~/composables/usePublicApi'
 import { contentTypeLabels } from '~/utils/admin-types'
-import { fmtTime, categoryMeta } from '~/utils/public-utils'
+import { fmtTime } from '~/utils/admin-types'
+import { categoryMeta } from '~/utils/public-utils'
 import { identityMeta, platformMeta, type Identity, type Platform } from '~/utils/data'
 
 const route = useRoute()

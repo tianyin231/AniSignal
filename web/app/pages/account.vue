@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Pencil, Plus, X } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
-import { fmtTime, toRawItem } from '~/utils/public-utils'
+import { fmtTime } from '~/utils/admin-types'
+import { toRawItem } from '~/utils/public-utils'
 import { AVATARS, DEFAULT_AVATAR, avatarGradient, displayName } from '~/utils/avatars'
 
 definePageMeta({ layout: 'account' })

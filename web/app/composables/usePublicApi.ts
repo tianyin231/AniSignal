@@ -14,6 +14,7 @@ export interface PublicContentItem {
   collected_at: string
   source_name: string | null
   identity: string
+  category: string | null
   metrics: Record<string, number> | null
   cover: string | null
   matched_keywords: string[]

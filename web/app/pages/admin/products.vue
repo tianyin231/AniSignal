@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ApiProduct, ApiProductList } from '~/composables/usePublicApi'
-import { fmtTime } from '~/utils/public-utils'
+import { fmtTime } from '~/utils/admin-types'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '商品管理 · AniSignal 管理看板' })

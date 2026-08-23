@@ -11,10 +11,12 @@ ensure 语义：事件只在创建时由引擎写标题/结论等字段，之后
 """
 
 import logging
-from dataclasses import dataclass, field
+import re
+import unicodedata
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
@@ -67,6 +69,8 @@ class ContentRow:
 class AggStats:
     events_created: int = 0
     evidences_added: int = 0
+    evidences_removed: int = 0
+    events_deactivated: int = 0
     revisions_written: int = 0
     stage_advances: int = 0
     skipped_locked: int = 0
@@ -139,8 +143,31 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
     return result
 
 
+_TITLE_BOILERPLATE = (
+    "《鸣潮》",
+    "鸣潮",
+    "官方",
+    "公告",
+    "说明",
+    "声明",
+    "活动",
+)
+
+
+def _normalize_title(title: str) -> str:
+    """移除游戏名、版本号和公告套话，只保留可区分主题的字符。"""
+    value = unicodedata.normalize("NFKC", title).lower()
+    value = re.sub(r"#[^#]+#", "", value)
+    value = re.sub(r"\d+(?:\.\d+)?\s*版本", "", value)
+    for phrase in _TITLE_BOILERPLATE:
+        value = value.replace(phrase.lower(), "")
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", value)
+
+
 def _shared_title(a: str, b: str) -> bool:
-    """最长公共子串 ≥ _MIN_SHARED_SUBSTR 视为同主题（中文标题友好）。"""
+    """去除公共套话后，最长公共子串达到阈值才视为同主题。"""
+    a = _normalize_title(a)
+    b = _normalize_title(b)
     if len(a) < _MIN_SHARED_SUBSTR or len(b) < _MIN_SHARED_SUBSTR:
         return False
     best = 0
@@ -163,14 +190,14 @@ def _sort_key(row: ContentRow) -> datetime:
 
 
 def cluster_announcements(items: list[ContentRow]) -> list[list[ContentRow]]:
-    """同类目内按时间链式聚类：相邻 ≤72h 且标题共享片段。"""
+    """同类目内聚类：时间相近，且与组内每条内容都共享有效主题。"""
     clusters: list[list[ContentRow]] = []
     for row in sorted(items, key=_sort_key):
         for cluster in clusters:
             last = cluster[-1]
             if (
                 _sort_key(row) - _sort_key(last) <= _MERGE_WINDOW
-                and _shared_title(row.title, last.title)
+                and all(_shared_title(row.title, item.title) for item in cluster)
             ):
                 cluster.append(row)
                 break
@@ -256,29 +283,156 @@ async def _backfill_facts(session: AsyncSession, stats: AggStats) -> None:
 async def _aggregate_official(
     session: AsyncSession, contents: list[ContentRow], stats: AggStats
 ) -> None:
+    """按当前聚类结果精确对账官方事件，允许移除历史误挂证据。"""
     official = [
         row
         for row in contents
         if row.identity == "official" and row.category in ANNOUNCE_CATEGORIES
     ]
+
+    existing = list(
+        await session.scalars(
+            select(Event).where(
+                Event.is_active.is_(True),
+                Event.product_id.is_(None),
+                Event.category.in_(ANNOUNCE_CATEGORIES),
+            )
+        )
+    )
+    evidence_by_event: dict[int, set[int]] = {event.id: set() for event in existing}
+    if existing:
+        evidence_rows = await session.execute(
+            select(Evidence.event_id, Evidence.raw_content_id).where(
+                Evidence.event_id.in_([event.id for event in existing])
+            )
+        )
+        for event_id, raw_id in evidence_rows:
+            evidence_by_event[event_id].add(raw_id)
+
+    locked_raw_ids = set().union(
+        *(evidence_by_event[event.id] for event in existing if event.manual_locked)
+    ) if any(event.manual_locked for event in existing) else set()
+    if locked_raw_ids:
+        official = [row for row in official if row.raw_id not in locked_raw_ids]
+
     by_category: dict[str, list[ContentRow]] = {}
     for row in official:
         by_category.setdefault(row.category, []).append(row)
 
+    unlocked = [event for event in existing if not event.manual_locked]
+    used_event_ids: set[int] = set()
     for category, items in by_category.items():
         for cluster in cluster_announcements(items):
-            await _ensure_event(
-                session,
-                category=category,
-                product_id=None,
-                cluster=cluster,
-                stats=stats,
-                title=sorted(cluster, key=_sort_key)[0].title,
-                identity="official",
-                confidence="high",
-                confidence_reason="官方来源公告",
-                conclusion=_CATEGORY_CONCLUSION.get(category, "官方公告"),
+            raw_ids = {row.raw_id for row in cluster}
+            candidates = [
+                event
+                for event in unlocked
+                if event.id not in used_event_ids and event.category == category
+            ]
+            event = max(
+                candidates,
+                key=lambda item: len(evidence_by_event[item.id] & raw_ids),
+                default=None,
             )
+            if event is not None and not (evidence_by_event[event.id] & raw_ids):
+                event = None
+            if event is None:
+                first = sorted(cluster, key=_sort_key)[0]
+                event = Event(
+                    title=first.title[:255],
+                    category=category,
+                    product_id=None,
+                    identity="official",
+                    confidence="high",
+                    confidence_reason="官方来源公告",
+                    conclusion=_CATEGORY_CONCLUSION.get(category, "官方公告"),
+                    regions=sorted(_regions_of(cluster)),
+                    facts=_build_facts(category, cluster),
+                    first_seen_at=first.published_at or first.collected_at,
+                    last_updated_at=utcnow(),
+                )
+                session.add(event)
+                await session.flush()
+                evidence_by_event[event.id] = set()
+                stats.events_created += 1
+                _add_revision(session, event, stats, "事件由聚合引擎创建")
+
+            used_event_ids.add(event.id)
+            await _reconcile_official_event(
+                session, event, cluster, evidence_by_event[event.id], stats
+            )
+
+    for event in unlocked:
+        if event.id in used_event_ids:
+            continue
+        event.is_active = False
+        event.last_updated_at = utcnow()
+        stats.events_deactivated += 1
+        _add_revision(session, event, stats, "当前规则下已无匹配证据，事件停用")
+
+
+async def _reconcile_official_event(
+    session: AsyncSession,
+    event: Event,
+    cluster: list[ContentRow],
+    existing_ids: set[int],
+    stats: AggStats,
+) -> None:
+    expected_ids = {row.raw_id for row in cluster}
+    removed_ids = existing_ids - expected_ids
+    added_rows = [row for row in cluster if row.raw_id not in existing_ids]
+    first = sorted(cluster, key=_sort_key)[0]
+    expected_title = first.title[:255]
+    expected_facts = _build_facts(event.category, cluster)
+    expected_regions = sorted(_regions_of(cluster))
+    metadata_changed = any(
+        (
+            event.title != expected_title,
+            event.identity != "official",
+            event.confidence != "high",
+            event.confidence_reason != "官方来源公告",
+            event.conclusion != _CATEGORY_CONCLUSION.get(event.category, "官方公告"),
+            (event.regions or []) != expected_regions,
+            (event.facts or []) != expected_facts,
+            event.first_seen_at != (first.published_at or first.collected_at),
+        )
+    )
+
+    if removed_ids:
+        await session.execute(
+            delete(Evidence).where(
+                Evidence.event_id == event.id,
+                Evidence.raw_content_id.in_(removed_ids),
+            )
+        )
+        stats.evidences_removed += len(removed_ids)
+    for row in added_rows:
+        session.add(Evidence(event_id=event.id, raw_content_id=row.raw_id))
+    stats.evidences_added += len(added_rows)
+
+    if not removed_ids and not added_rows and not metadata_changed:
+        return
+
+    event.title = expected_title
+    event.identity = "official"
+    event.confidence = "high"
+    event.confidence_reason = "官方来源公告"
+    event.conclusion = _CATEGORY_CONCLUSION.get(event.category, "官方公告")
+    event.regions = expected_regions
+    event.facts = expected_facts
+    event.first_seen_at = first.published_at or first.collected_at
+    event.last_updated_at = utcnow()
+    event.summary = None
+    if event.id not in stats.touched_event_ids:
+        stats.touched_event_ids.append(event.id)
+    changes = []
+    if added_rows:
+        changes.append(f"新增 {len(added_rows)} 条")
+    if removed_ids:
+        changes.append(f"移除 {len(removed_ids)} 条")
+    if metadata_changed and not changes:
+        changes.append("同步标题与事实")
+    _add_revision(session, event, stats, "证据对账：" + "，".join(changes))
 
 
 async def _aggregate_product(

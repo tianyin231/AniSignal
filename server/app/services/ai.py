@@ -7,10 +7,12 @@
 
 import json
 import logging
+import re
 import time
+from html import unescape
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -111,43 +113,94 @@ def _public_view(config: dict) -> dict:
 # ---------- 任务实现（worker 与管理端共用） ----------
 
 
+def _plain_evidence(text: str) -> str:
+    import bleach
+
+    plain = unescape(bleach.clean(text or "", tags=[], strip=True))
+    return re.sub(r"\s+", " ", plain).strip()
+
+
+def _summary_supported(summary: str, evidence_text: str) -> bool:
+    """摘要中的专名和数字必须能在证据上下文中找到。"""
+    for game_name in ("战双帕弥什", "战双"):
+        if game_name in summary and game_name not in evidence_text:
+            return False
+    for name in re.findall(r"《([^》]{1,40})》", summary):
+        if name != "鸣潮" and f"《{name}》" not in evidence_text:
+            return False
+    for name in re.findall(r"【([^】]{1,60})】", summary):
+        if f"【{name}】" not in evidence_text:
+            return False
+    for number in re.findall(r"\d+(?:\.\d+)?", summary):
+        if number not in evidence_text:
+            return False
+    return True
+
+
+def _fallback_summary(event: Event, evidence_count: int) -> str:
+    if event.identity == "official":
+        return f"官方发布「{event.title}」。当前收录 {evidence_count} 条来源证据，具体内容以原文为准。"
+    return f"已收录与「{event.title}」相关的 {evidence_count} 条线索，结论以证据原文为准。"
+
+
 async def summarize_event(session: AsyncSession, event_id: int) -> dict:
-    """AI 汇总事件证据 → 结论摘要 + 关键事实（覆盖引擎模板），并记录用量。"""
+    """AI 只生成证据摘要；结构化事实始终由聚合引擎确定。"""
+    event = await session.get(Event, event_id)
+    if event is None:
+        return {"status": "skipped", "reason": "event_not_found"}
+    if event.manual_locked:
+        return {"status": "skipped", "reason": "manual_locked"}
+
     config = await get_ai_config(session)
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
 
-    event = await session.get(Event, event_id)
-    if event is None:
-        return {"status": "skipped", "reason": "event_not_found"}
+    latest_sq = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("version"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
 
     rows = await session.execute(
         select(RawContent, ContentVersion, Evidence)
         .join(Evidence, Evidence.raw_content_id == RawContent.id)
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+        .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest_sq.c.rid)
+            & (ContentVersion.version == latest_sq.c.version),
+        )
         .where(Evidence.event_id == event_id)
         .order_by(RawContent.published_at.asc())
-        .limit(12)
+        .limit(8)
     )
     evidences = []
-    seen: set[int] = set()
+    evidence_context = [event.title]
     for raw, version, _ in rows:
-        if raw.id in seen:
-            continue
-        seen.add(raw.id)
+        title = (version.title or raw.external_id).strip()
+        text = _plain_evidence(version.text or "")
+        published = raw.published_at.strftime("%Y-%m-%d %H:%M") if raw.published_at else "时间未知"
+        evidence_context.extend([title, text, published])
         evidences.append(
-            f"- [{raw.platform}] {(version.title or raw.external_id)[:60]}：{(version.text or '')[:200]}"
+            f"- 证据#{raw.id} [{raw.platform}] {published} {title[:120]}：{text[:1600]}"
         )
     if not evidences:
         return {"status": "skipped", "reason": "no_evidences"}
+    evidence_context.append(str(len(evidences)))
 
     system = (
-        "你是游戏周边情报编辑。根据给定的多平台证据，输出 JSON："
-        '{"summary": "100字以内中文结论摘要", "facts": [{"label": "标签", "value": "值"}]}。'
-        "facts 包含：发生了什么、时间、来源数量；不要编造证据中没有的信息；"
-        "区分官方信息与用户反馈；存疑时明确说明。"
+        "你是库洛游戏《鸣潮》的情报编辑，只能根据给定证据输出 JSON："
+        '{"summary": "100字以内中文结论摘要"}。'
+        "禁止补充证据中没有的游戏名、角色、时间、奖励或结论；"
+        "不要把《鸣潮》写成其它游戏；区分官方信息与用户反馈；存疑时明确说明。"
     )
-    user = f"事件标题：{event.title}\n类目：{event.category}\n证据列表：\n" + "\n".join(evidences)
+    user = (
+        f"事件标题：{event.title}\n类目：{event.category}\n"
+        f"确定的证据数量：{len(evidences)}\n证据列表：\n" + "\n".join(evidences)
+    )
     started = time.monotonic()
     try:
         raw_out, usage = await chat(config, system, user, json_mode=True)
@@ -162,24 +215,15 @@ async def summarize_event(session: AsyncSession, event_id: int) -> dict:
     await record_usage(session, task="summarize_event", config=config, usage=usage,
                        duration_ms=int((time.monotonic() - started) * 1000), ref_id=event_id)
 
-    summary = str(parsed.get("summary") or "")[:1000]
-    facts = parsed.get("facts") or []
-    facts = [
-        {"label": str(f.get("label", ""))[:16], "value": str(f.get("value", ""))[:100]}
-        for f in facts
-        if isinstance(f, dict) and f.get("label") and f.get("value")
-    ][:8]
-    if not summary:
-        return {"status": "failed", "reason": "empty_summary"}
+    summary = str(parsed.get("summary") or "").strip()[:1000]
+    if not summary or not _summary_supported(summary, "\n".join(evidence_context)):
+        summary = _fallback_summary(event, len(evidences))
 
-    changed = summary != (event.summary or "") or facts != (event.facts or [])
+    changed = summary != (event.summary or "")
     event.summary = summary
-    if facts:
-        event.facts = facts
-    from app.clock import utcnow
     from app.models import EventRevision
 
-    if changed and not event.manual_locked:
+    if changed:
         session.add(
             EventRevision(
                 event_id=event.id,
@@ -188,7 +232,7 @@ async def summarize_event(session: AsyncSession, event_id: int) -> dict:
             )
         )
     await session.commit()
-    return {"status": "ok", "summary": summary, "facts": len(facts)}
+    return {"status": "ok", "summary": summary, "facts": len(event.facts or [])}
 
 
 async def translate_content(session: AsyncSession, content_id: int) -> dict:

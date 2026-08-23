@@ -35,10 +35,10 @@ const multiPlatform = computed(
         <span>{{ regionsText }}</span>
       </template>
       <span v-if="event.regionNote" class="text-amber-600 dark:text-amber-400">{{ event.regionNote }}</span>
-      <template v-if="event.evidenceCount > 1">
-        <span aria-hidden="true">·</span>
-        <span class="mono">{{ event.evidenceCount }} 证据</span>
-      </template>
+      <span aria-hidden="true">·</span>
+      <span class="mono">{{ event.evidenceCount }} 条证据</span>
+      <span aria-hidden="true">·</span>
+      <span>可信度 {{ event.confidence }}</span>
       <template v-if="multiPlatform">
         <span aria-hidden="true">·</span>
         <span>{{ platformsText }}</span>
@@ -62,7 +62,7 @@ const multiPlatform = computed(
         <span class="font-medium text-amber-600 dark:text-amber-400">已更正</span>
       </template>
     </div>
-    <p class="mt-1.5 line-clamp-1 text-[13px] leading-relaxed text-slate-500 dark:text-zinc-400">
+    <p class="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-slate-500 dark:text-zinc-400">
       {{ event.summary }}
     </p>
   </NuxtLink>

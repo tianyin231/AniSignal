@@ -1,8 +1,11 @@
 """事件/商品 API 测试（公开 + 管理）。"""
 
+from datetime import timedelta
+
 from sqlalchemy import select
 
-from app.models import Event, Product
+from app.clock import utcnow
+from app.models import Event, Evidence, Product, RawContent
 from app.services.events import run_aggregation
 from app.services.ingest import ingest_items
 
@@ -155,3 +158,24 @@ async def test_event_has_facts(client, session):
     assert events
     labels = {f["label"] for f in events[0]["facts"]}
     assert "类目" in labels and "证据数" in labels
+
+
+async def test_public_events_recent_window_uses_evidence_publish_time(client, session):
+    await _prepare(session)
+    raws = list(await session.scalars(select(RawContent)))
+    for raw in raws:
+        raw.published_at = utcnow() - timedelta(days=10)
+
+    unboxing = await session.scalar(
+        select(Event).where(Event.category == "unboxing", Event.is_active.is_(True))
+    )
+    recent_raw_id = await session.scalar(
+        select(Evidence.raw_content_id).where(Evidence.event_id == unboxing.id)
+    )
+    recent_raw = await session.get(RawContent, recent_raw_id)
+    recent_raw.published_at = utcnow() - timedelta(hours=2)
+    await session.commit()
+
+    body = (await client.get("/api/events", params={"published_within_hours": 72})).json()
+    assert body["total"] == 1
+    assert body["items"][0]["category"] == "unboxing"

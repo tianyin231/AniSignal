@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { fmtTime } from '~/utils/admin-types'
-import { platformMeta, type Platform, type RawItem, type Region } from '~/utils/data'
+import { type Platform, type RawItem, type Region } from '~/utils/data'
+import { toRawItem } from '~/utils/public-utils'
 import type { PublicContentList, PublicContentItem } from '~/composables/usePublicApi'
 
 const tabs = [
@@ -25,24 +25,9 @@ const { data, status } = await useAsyncData('official-feed', () =>
   api<PublicContentList>('/api/contents', { query: { identity: 'official', limit: 100 } }),
 )
 
-const regionOf: Record<string, Region> = {
-  bilibili: 'cn',
-  miyoushe: 'cn',
-  kuro_cn: 'cn',
-  kuro_global: 'global',
-  youtube: 'global',
-}
-
 function toRow(item: PublicContentItem): { row: RawItem; url: string | null } {
   return {
-    row: {
-      id: String(item.id),
-      platform: item.platform as Platform,
-      account: item.source_name ?? '官方',
-      region: regionOf[item.platform] ?? 'cn',
-      title: item.title || item.external_id,
-      publishedAt: fmtTime(item.published_at || item.collected_at),
-    },
+    row: toRawItem(item),
     url: item.url,
   }
 }
