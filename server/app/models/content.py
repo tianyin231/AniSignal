@@ -107,3 +107,24 @@ class ContentTranslation(Base):
     text: Mapped[str] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AiUsage(Base):
+    """AI 调用记账：token 与费用（管理端 LLM 页统计源）。"""
+
+    __tablename__ = "ai_usage"
+    __table_args__ = (
+        Index("ix_ai_usage_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task: Mapped[str] = mapped_column(String(32))
+    ref_id: Mapped[int | None] = mapped_column(Integer)
+    model: Mapped[str] = mapped_column(String(64))
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost: Mapped[float] = mapped_column(default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="ok")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

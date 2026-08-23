@@ -69,6 +69,7 @@ export interface ApiEvent {
   conclusion: string | null
   status_label: string | null
   facts: { label: string; value: string }[]
+  matched_keywords: string[]
   regions: string[]
   evidence_count: number
   sources: ApiEventSource[]

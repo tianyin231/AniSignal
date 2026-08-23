@@ -102,3 +102,59 @@ async def test_ai_settings_masked_and_test(client, admin_headers):
     resp = await client.post("/api/admin/settings/ai/test", headers=admin_headers)
     assert resp.status_code == 200
     assert resp.json()["ok"] is False
+
+
+async def test_ai_usage_recorded(client, session, admin_headers, monkeypatch):
+    """AI 调用记账：usage 落库，费用按单价计算。"""
+    from app.services import ai as ai_mod
+
+    # 假 LLM 返回
+    async def fake_chat(config, system, user, *, json_mode=False):
+        return '{"summary": "测试摘要", "facts": [{"label": "测试", "value": "1"}]}', {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+        }
+
+    monkeypatch.setattr(ai_mod, "chat", fake_chat)
+    # 直接写 ai 配置（含定价）
+    from app.services.settings import set_setting
+
+    await set_setting(session, "ai", {
+        "base_url": "https://api.example.com/v1",
+        "model": "m",
+        "api_key": "sk-x",
+        "price_in": 2.0,
+        "price_out": 8.0,
+    })
+
+    # 用新端点（/api/admin/ai/summarize-all 依赖事件存在）
+    from app.services.events import run_aggregation
+    from app.services.ingest import ingest_items
+    from tests.test_parsers_others import KURO_ITEM
+    from sqlalchemy import select
+    from app.models import AiUsage, Event
+
+    await ingest_items(session, "kuro_notices", [KURO_ITEM])
+    await run_aggregation(session)
+    await session.commit()
+    event_id = (await session.scalars(select(Event.id))).first()
+
+    result = await ai_mod.summarize_event(session, event_id)
+    assert result["status"] == "ok"
+
+    usage = await session.scalar(select(AiUsage).order_by(AiUsage.id.desc()))
+    assert usage is not None
+    assert usage.prompt_tokens == 100
+    assert usage.completion_tokens == 50
+    assert usage.total_tokens == 150
+    assert abs(usage.cost - (100 * 2.0 + 50 * 8.0) / 1e6) < 1e-9
+    assert usage.task == "summarize_event"
+
+    # 用量统计端点
+    resp = await client.get("/api/admin/ai/usage", headers=admin_headers)
+    body = resp.json()
+    assert body["window"]["total_tokens"] >= 150
+    assert any(t["task"] == "summarize_event" for t in body["by_task"])
+    resp = await client.get("/api/admin/ai/calls", headers=admin_headers)
+    assert resp.status_code == 200

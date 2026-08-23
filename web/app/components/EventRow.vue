@@ -43,6 +43,12 @@ const multiPlatform = computed(
         <span aria-hidden="true">·</span>
         <span>{{ platformsText }}</span>
       </template>
+      <template v-if="event.matchedKeywords?.length">
+        <span aria-hidden="true">·</span>
+        <span class="inline-flex flex-wrap gap-1">
+          <span v-for="k in event.matchedKeywords" :key="k" class="rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-700 dark:text-blue-300">{{ k }}</span>
+        </span>
+      </template>
       <template v-if="event.statusChange">
         <span aria-hidden="true">·</span>
         <span class="font-medium text-blue-600 dark:text-blue-400">变化: {{ event.statusChange }}</span>

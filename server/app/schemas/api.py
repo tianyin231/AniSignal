@@ -190,6 +190,7 @@ class EventOut(BaseModel):
     conclusion: str | None
     status_label: str | None
     facts: list[dict] = []
+    matched_keywords: list[str] = []
     regions: list[str]
     evidence_count: int
     sources: list[EventSourceOut]

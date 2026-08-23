@@ -123,7 +123,7 @@ useSeoMeta({ title: '今日情报' })
 
     <div class="mt-6 space-y-4 xl:hidden">
       <StatusCard />
-      <ReportCard />
+      <TodayBriefCard />
     </div>
   </div>
 </template>
