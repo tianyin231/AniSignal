@@ -1,0 +1,206 @@
+"""幂等入库：原始 JSON 先落库、解析产物版本化、指标进快照表。
+
+流程契约（见项目 skill"数据解析层"）：
+- 每条原始 item 经 parser 得到 NormalizedContent；
+- (platform, external_id) 已存在 → 不覆盖 raw_json，只更新 last_seen；
+- 内容指纹变化 → 追加新 ContentVersion（可全量重算）；
+- 指标每次采集都记 MetricSnapshot（用于"首次越过阈值"判断）。
+"""
+
+import logging
+from dataclasses import dataclass, field
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.clock import to_naive_utc, utcnow
+from app.models import ContentVersion, MetricSnapshot, RawContent, Source
+from app.models.enums import Identity
+from app.parsers.bilibili import PARSER_VERSION as BILIBILI_PARSER_VERSION
+from app.parsers.bilibili import parse_dynamic, parse_video
+from app.parsers.kuro import PARSER_VERSION as KURO_PARSER_VERSION
+from app.parsers.kuro import parse_notice
+from app.parsers.miyoushe import PARSER_VERSION as MIYOUSHE_PARSER_VERSION
+from app.parsers.miyoushe import parse_post
+from app.parsers.youtube import PARSER_VERSION as YOUTUBE_PARSER_VERSION
+from app.parsers.youtube import parse_rss_item
+from app.schemas.content import NormalizedContent
+from app.services.fingerprint import content_fingerprint
+
+logger = logging.getLogger(__name__)
+
+# fetch_kind → (解析函数, parser 版本)；新平台接入时在这里注册
+PARSERS: dict[str, tuple] = {
+    "bilibili_search": (parse_video, BILIBILI_PARSER_VERSION),
+    "bilibili_user_videos": (parse_video, BILIBILI_PARSER_VERSION),
+    "bilibili_dynamics": (parse_dynamic, BILIBILI_PARSER_VERSION),
+    "kuro_notices": (parse_notice, KURO_PARSER_VERSION),
+    "miyoushe_posts": (parse_post, MIYOUSHE_PARSER_VERSION),
+    "youtube_rss": (parse_rss_item, YOUTUBE_PARSER_VERSION),
+}
+
+
+@dataclass
+class IngestStats:
+    items_found: int = 0
+    items_new: int = 0
+    items_updated: int = 0  # 已存在且指纹变化（产生新版本）的条数
+    parse_failed: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]) -> IngestStats:
+    if fetch_kind not in PARSERS:
+        raise ValueError(f"no parser registered for fetch_kind={fetch_kind}")
+    parse, parser_version = PARSERS[fetch_kind]
+    stats = IngestStats(items_found=len(items))
+    for raw in items:
+        try:
+            normalized = parse(raw)
+            if not normalized.external_id:
+                raise ValueError("parser produced empty external_id")
+        except Exception as exc:  # noqa: BLE001 - 单条解析失败不中断批次
+            stats.parse_failed += 1
+            stats.errors.append(f"parse failed: {exc!r}")
+            logger.warning("parse failed for %s item: %r", fetch_kind, exc)
+            continue
+        try:
+            is_new, changed = await _ingest_one(session, normalized, raw, parser_version)
+            stats.items_new += int(is_new)
+            stats.items_updated += int(changed)
+        except Exception as exc:  # noqa: BLE001
+            stats.errors.append(f"ingest failed: {exc!r}")
+            logger.warning(
+                "ingest failed for %s/%s: %r",
+                normalized.platform,
+                normalized.external_id,
+                exc,
+            )
+    await session.commit()
+    return stats
+
+
+async def _ingest_one(
+    session: AsyncSession,
+    normalized: NormalizedContent,
+    raw: dict,
+    parser_version: str,
+) -> tuple[bool, bool]:
+    """返回 (is_new, fingerprint_changed)。"""
+    source_id = await _upsert_source(session, normalized)
+    fingerprint = content_fingerprint(normalized)
+
+    existing = await session.scalar(
+        select(RawContent).where(
+            RawContent.platform == normalized.platform,
+            RawContent.external_id == normalized.external_id,
+        )
+    )
+    if existing is None:
+        content = RawContent(
+            platform=normalized.platform,
+            content_type=normalized.content_type,
+            external_id=normalized.external_id,
+            source_id=source_id,
+            url=normalized.url,
+            published_at=to_naive_utc(normalized.published_at) if normalized.published_at else None,
+            collected_at=utcnow(),
+            last_seen_at=utcnow(),
+            raw_json=raw,
+            content_hash=fingerprint,
+        )
+        session.add(content)
+        await session.flush()  # 拿到 id 供 version/snapshot 外键使用
+        _add_version(session, content, 1, normalized, parser_version)
+        _add_snapshot(session, content, normalized)
+        return True, False
+
+    # 已存在：原始数据不可覆盖，只更新观测字段
+    existing.last_seen_at = utcnow()
+    if source_id is not None:
+        existing.source_id = source_id
+    if normalized.url and not existing.url:
+        existing.url = normalized.url
+
+    changed = existing.content_hash != fingerprint
+    if changed:
+        latest = await session.scalar(
+            select(ContentVersion.version)
+            .where(ContentVersion.raw_content_id == existing.id)
+            .order_by(ContentVersion.version.desc())
+            .limit(1)
+        )
+        _add_version(session, existing, (latest or 0) + 1, normalized, parser_version)
+        existing.content_hash = fingerprint
+    _add_snapshot(session, existing, normalized)
+    return False, changed
+
+
+async def _upsert_source(session: AsyncSession, normalized: NormalizedContent) -> int | None:
+    author = normalized.author
+    if not author or not author.external_id:
+        return None
+    identity = Identity.OFFICIAL if author.official_title else author.identity
+    existing = await session.scalar(
+        select(Source).where(
+            Source.platform == normalized.platform,
+            Source.external_id == author.external_id,
+        )
+    )
+    if existing is None:
+        source = Source(
+            platform=normalized.platform,
+            external_id=author.external_id,
+            name=author.name,
+            official_title=author.official_title,
+            follower_count=author.follower_count,
+            identity=identity,
+            raw_json=author.model_dump(mode="json", exclude={"identity"}),
+        )
+        session.add(source)
+        await session.flush()
+        return source.id
+    existing.last_seen_at = utcnow()
+    if author.name:
+        existing.name = author.name
+    if author.official_title:
+        existing.official_title = author.official_title
+    if author.follower_count is not None:
+        existing.follower_count = author.follower_count
+    if identity != Identity.UNKNOWN:
+        existing.identity = identity
+    return existing.id
+
+
+def _add_version(
+    session: AsyncSession,
+    content: RawContent,
+    version: int,
+    normalized: NormalizedContent,
+    parser_version: str,
+) -> None:
+    session.add(
+        ContentVersion(
+            raw_content_id=content.id,
+            version=version,
+            parsed_at=utcnow(),
+            title=normalized.title,
+            text=normalized.text,
+            normalized_json=normalized.model_dump(mode="json"),
+            parser_version=parser_version,
+        )
+    )
+
+
+def _add_snapshot(
+    session: AsyncSession, content: RawContent, normalized: NormalizedContent
+) -> None:
+    if not normalized.metrics:
+        return
+    session.add(
+        MetricSnapshot(
+            raw_content_id=content.id,
+            metrics=normalized.metrics,
+            captured_at=utcnow(),
+        )
+    )
