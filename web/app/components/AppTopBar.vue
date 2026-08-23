@@ -37,9 +37,7 @@ const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.s
       </nav>
       <div class="flex shrink-0 items-center gap-1">
         <SearchBox />
-        <NotificationBell />
         <ThemeToggle />
-        <AccountMenu />
       </div>
     </div>
   </header>

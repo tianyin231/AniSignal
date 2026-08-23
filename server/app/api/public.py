@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.models import CollectTarget, ContentVersion, RawContent, Source
 from app.schemas.api import (
+    EventListOut,
+    EventOut,
+    ProductListOut,
+    ProductOut,
     PublicContentItem,
     PublicContentList,
     PublicSource,
@@ -148,6 +152,91 @@ async def list_sources(session: AsyncSession = Depends(get_session)):
         for target in rows.scalars()
     ]
     return PublicSourceList(items=items)
+
+
+@router.get("/events", response_model=EventListOut)
+async def list_events(
+    category: str | None = Query(default=None),
+    product_slug: str | None = Query(default=None),
+    importance: bool | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.models import Event as EventModel
+    from app.models import Product as ProductModel
+    from app.services.views import events_to_out
+
+    conditions = [EventModel.is_active.is_(True)]
+    if category:
+        conditions.append(EventModel.category == category)
+    if product_slug:
+        product = await session.scalar(
+            select(ProductModel).where(ProductModel.slug == product_slug)
+        )
+        conditions.append(EventModel.product_id == (product.id if product else -1))
+    if importance is not None:
+        conditions.append(EventModel.importance.is_(importance))
+    if q:
+        conditions.append(EventModel.title.like(f"%{q}%"))
+
+    total = await session.scalar(
+        select(func.count(EventModel.id)).where(*conditions)
+    ) or 0
+    events = list(
+        (
+            await session.execute(
+                select(EventModel)
+                .where(*conditions)
+                .order_by(EventModel.last_updated_at.desc(), EventModel.id.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+    )
+    items = await events_to_out(session, events)
+    return EventListOut(items=items, total=total)
+
+
+@router.get("/events/{event_id}", response_model=EventOut)
+async def get_event(event_id: int, session: AsyncSession = Depends(get_session)):
+    from app.models import Event as EventModel
+    from app.services.views import events_to_out
+
+    event = await session.get(EventModel, event_id)
+    if event is None or not event.is_active:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=404, detail="event not found")
+    return (await events_to_out(session, [event], include_detail=True))[0]
+
+
+@router.get("/products", response_model=ProductListOut)
+async def list_products(session: AsyncSession = Depends(get_session)):
+    from app.models import Product as ProductModel
+    from app.services.views import product_to_out
+
+    products = list(
+        (await session.execute(select(ProductModel).order_by(ProductModel.id))).scalars()
+    )
+    items = [await product_to_out(session, p) for p in products]
+    return ProductListOut(items=items)
+
+
+@router.get("/products/{slug}", response_model=ProductOut)
+async def get_product(slug: str, session: AsyncSession = Depends(get_session)):
+    from fastapi import HTTPException
+
+    from app.models import Product as ProductModel
+    from app.services.views import product_to_out
+
+    product = await session.scalar(
+        select(ProductModel).where(ProductModel.slug == slug)
+    )
+    if product is None:
+        raise HTTPException(status_code=404, detail="product not found")
+    return await product_to_out(session, product)
 
 
 @router.get("/stats", response_model=PublicStats)

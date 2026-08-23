@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { fmtTime } from '~/utils/admin-types'
-import { platformMeta, type Platform, type RawItem, type Region } from '~/utils/data'
-import type { PublicContentList, PublicContentItem, PublicStats } from '~/composables/usePublicApi'
+import type { ApiEventList, PublicContentList, PublicStats } from '~/composables/usePublicApi'
+import { fmtTime, toAppEvent, toRawItem } from '~/utils/public-utils'
+import type { Platform, RawItem, Region } from '~/utils/data'
 
 const tabs = [
   { key: 'latest', label: '最新' },
   { key: 'official', label: '官方' },
+  { key: 'important', label: '重要事件' },
 ]
 const route = useRoute()
 const router = useRouter()
@@ -17,42 +18,33 @@ const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
 
 const { api } = usePublicApi()
-const feedQuery = computed(() => ({
-  limit: pageSize,
-  offset: (page.value - 1) * pageSize,
-  ...(tab.value === 'official' ? { identity: 'official' } : {}),
-}))
 const { data: feed, status } = await useAsyncData(
   () => `home-feed-${tab.value}-${page.value}`,
-  () => api<PublicContentList>('/api/contents', { query: feedQuery.value }),
+  () =>
+    api<PublicContentList>('/api/contents', {
+      query: {
+        limit: pageSize,
+        offset: (page.value - 1) * pageSize,
+        ...(tab.value === 'official' ? { identity: 'official' } : {}),
+      },
+    }),
   { watch: [tab, page] },
+)
+const { data: importantData, status: importantStatus } = await useAsyncData(
+  () => `home-important-${page.value}`,
+  () =>
+    api<ApiEventList>('/api/events', {
+      query: { importance: true, limit: pageSize, offset: (page.value - 1) * pageSize },
+    }),
+  { watch: [page] },
 )
 const { data: stats } = await useAsyncData('home-stats', () => api<PublicStats>('/api/stats'))
 
-const totalPages = computed(() => Math.max(1, Math.ceil((feed.value?.total ?? 0) / pageSize)))
-
-const regionOf: Record<string, Region> = {
-  bilibili: 'cn',
-  miyoushe: 'cn',
-  kuro_cn: 'cn',
-  kuro_global: 'global',
-  youtube: 'global',
-}
-
-function toRow(item: PublicContentItem): { row: RawItem; url: string | null } {
-  return {
-    row: {
-      id: String(item.id),
-      platform: item.platform as Platform,
-      account: item.source_name ?? '—',
-      region: regionOf[item.platform] ?? 'cn',
-      title: item.title || item.external_id,
-      publishedAt: fmtTime(item.published_at || item.collected_at),
-    },
-    url: item.url,
-  }
-}
-const list = computed(() => (feed.value?.items ?? []).map(toRow))
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(((tab.value === 'important' ? importantData.value?.total : feed.value?.total) ?? 0) / pageSize)),
+)
+const list = computed(() => (feed.value?.items ?? []).map(toRawItem))
+const importantList = computed(() => (importantData.value?.items ?? []).map(toAppEvent))
 
 function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
@@ -71,13 +63,33 @@ useSeoMeta({ title: '今日情报' })
       <span v-if="stats.latest_collected_at">最近采集 {{ fmtTime(stats.latest_collected_at) }}</span>
     </section>
 
-    <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
+    <section v-if="status === 'pending' || importantStatus === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…
     </section>
+
+    <!-- 重要事件：聚合后的结论流 -->
+    <section v-else-if="tab === 'important'" class="panel overflow-hidden">
+      <NuxtLink v-for="e in importantList" :key="e.id" :to="`/events/${e.id}`" class="block">
+        <EventRow :event="e" />
+      </NuxtLink>
+      <p v-if="!importantList.length" class="px-4 py-10 text-center text-sm text-slate-400">
+        暂无标记为重要的事件；引擎会在履约状态推进与官方重要公告时自动标记。
+      </p>
+      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
+        <span>共 {{ importantData?.total ?? 0 }} 条</span>
+        <div class="flex items-center gap-3">
+          <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page - 1)">« 上一页</button>
+          <span class="mono">{{ page }} / {{ totalPages }}</span>
+          <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page + 1)">下一页 »</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 内容流 -->
     <section v-else class="panel overflow-hidden">
       <component
         :is="entry.url ? 'a' : 'div'"
-        v-for="entry in list"
+        v-for="entry in list.map((row) => ({ row, url: feed!.items.find((i) => String(i.id) === row.id)?.url ?? null }))"
         :key="entry.row.id"
         v-bind="entry.url ? { href: entry.url, target: '_blank', rel: 'noopener' } : {}"
         class="block"
@@ -87,7 +99,7 @@ useSeoMeta({ title: '今日情报' })
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
         在已接入来源中暂无内容。
       </p>
-      <div class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
+      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
         <span>共 {{ feed?.total ?? 0 }} 条</span>
         <div class="flex items-center gap-3">
           <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page - 1)">« 上一页</button>

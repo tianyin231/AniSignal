@@ -1,0 +1,44 @@
+"""商品档案（设计文档 §7：Product -> SKU）。"""
+
+from datetime import datetime
+
+from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.clock import utcnow
+from app.models.base import Base
+
+# 履约阶梯固定标签（设计文档 §9.2）；索引即阶段号
+FULFILLMENT_STAGES = [
+    "尚未发货",
+    "出现送测样品",
+    "首位普通用户到货",
+    "多名独立用户到货",
+    "相近购买时间样本到货",
+    "普遍到货",
+]
+
+
+class Product(Base):
+    __tablename__ = "products"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(255))
+    publisher: Mapped[str | None] = mapped_column(String(255))
+    skus: Mapped[list] = mapped_column(JSON, default=list)
+    price_note: Mapped[str | None] = mapped_column(String(64))
+    presale_at: Mapped[str | None] = mapped_column(String(64))
+    balance_window: Mapped[str | None] = mapped_column(String(64))
+    original_ship_at: Mapped[str | None] = mapped_column(String(64))
+    ship_note: Mapped[str | None] = mapped_column(Text)
+    # 命中任一词的内容会关联到该商品（履约类目时）
+    watch_terms: Mapped[list] = mapped_column(JSON, default=list)
+    # 管理端手动指定的当前阶段（-1 = 跟随引擎计算）
+    stage_hint: Mapped[int] = mapped_column(Integer, default=-1)
+    # 引擎上次计算出的阶段（用于检测推进并写修订）
+    computed_stage: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    events = relationship("Event", back_populates="product")

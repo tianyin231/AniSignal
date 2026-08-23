@@ -39,6 +39,80 @@ export interface PublicStats {
   latest_collected_at: string | null
 }
 
+export interface ApiEventSource {
+  platform: string
+  account: string | null
+  region: string
+  published_at: string | null
+  url: string | null
+}
+
+export interface ApiEventCorrection {
+  at: string
+  actor: string
+  note: string
+}
+
+export interface ApiEvent {
+  id: number
+  title: string
+  summary: string | null
+  category: string
+  product_id: number | null
+  product_slug: string | null
+  identity: string
+  importance: boolean
+  manual_locked: boolean
+  confidence: string
+  confidence_reason: string | null
+  conclusion: string | null
+  status_label: string | null
+  regions: string[]
+  evidence_count: number
+  sources: ApiEventSource[]
+  conflicts: ApiEventSource[]
+  corrections: ApiEventCorrection[]
+  first_seen_at: string | null
+  updated_at: string | null
+}
+
+export interface ApiEventList {
+  items: ApiEvent[]
+  total: number
+}
+
+export interface ApiProductStage {
+  label: string
+  state: 'done' | 'current' | 'pending'
+  tone: string | null
+  date: string | null
+  evidence: number | null
+  note: string | null
+}
+
+export interface ApiProduct {
+  id: number
+  slug: string
+  name: string
+  publisher: string | null
+  skus: string[]
+  price_note: string | null
+  presale_at: string | null
+  balance_window: string | null
+  original_ship_at: string | null
+  ship_note: string | null
+  watch_terms: string[]
+  stage_hint: number
+  current_stage: number
+  stage_label: string
+  stages: ApiProductStage[]
+  updated_at: string | null
+}
+
+export interface ApiProductList {
+  items: ApiProduct[]
+}
+
 export function usePublicApi() {
   const config = useRuntimeConfig()
   // SSR 直连 FastAPI；浏览器走同源（Nitro routeRules 代理）
