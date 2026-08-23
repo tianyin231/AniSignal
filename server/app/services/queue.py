@@ -1,0 +1,102 @@
+"""任务队列抽象：生产走 arq（Redis），本地测试走进程内执行。
+
+Admin API 与调度器只依赖 BaseQueue 接口；两种实现的差别（持久化、
+跨进程分发）对调用方透明。
+"""
+
+import asyncio
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+
+class BaseQueue:
+    async def enqueue_collect(self, target_id: int) -> str | None:
+        raise NotImplementedError
+
+    async def pending_count(self) -> int | None:
+        raise NotImplementedError
+
+    async def aclose(self) -> None:
+        pass
+
+
+class LocalRedis:
+    """platform_slot 依赖的最小内存实现（SET NX PX / PTTL 语义）。"""
+
+    def __init__(self) -> None:
+        self._keys: dict[str, float] = {}
+
+    async def set(self, key: str, value: str, nx: bool = False, px: int | None = None) -> bool | None:
+        now = time.monotonic()
+        if nx:
+            expiry = self._keys.get(key, 0.0)
+            if expiry > now:
+                return None
+        self._keys[key] = now + (px / 1000.0 if px else float("inf"))
+        return True
+
+    async def pttl(self, key: str) -> int:
+        expiry = self._keys.get(key)
+        if expiry is None:
+            return -2
+        remaining_ms = int((expiry - time.monotonic()) * 1000)
+        return max(0, remaining_ms)
+
+
+class LocalQueue(BaseQueue):
+    """本地测试队列：采集任务作为当前进程的 asyncio task 执行。
+
+    共享一个 LocalRedis，保证同平台礼貌间隔在并发 task 之间同样生效。
+    """
+
+    def __init__(self) -> None:
+        self._redis = LocalRedis()
+        self._tasks: set[asyncio.Task] = set()
+
+    @property
+    def redis(self) -> LocalRedis:
+        return self._redis
+
+    async def enqueue_collect(self, target_id: int) -> str | None:
+        from app.services.collect import run_collection
+
+        task = asyncio.create_task(self._run(run_collection, target_id))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return f"local:{target_id}:{time.time():.0f}"
+
+    async def _run(self, run_collection, target_id: int) -> None:
+        try:
+            await run_collection(self._redis, target_id)
+        except Exception:  # noqa: BLE001 - 与 arq worker 行为一致：单任务失败不终止
+            logger.exception("local collect task %s failed", target_id)
+
+    async def pending_count(self) -> int | None:
+        return len(self._tasks)
+
+    async def aclose(self) -> None:
+        for task in list(self._tasks):
+            task.cancel()
+
+
+class ArqQueue(BaseQueue):
+    """生产队列：包装 arq Redis 池。"""
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    async def enqueue_collect(self, target_id: int) -> str | None:
+        job = await self._pool.enqueue_job("collect_target", target_id)
+        return getattr(job, "job_id", None) if job is not None else None
+
+    async def pending_count(self) -> int | None:
+        try:
+            return await self._pool.zcard("arq:queue")
+        except Exception as exc:  # noqa: BLE001 - 队列深度是尽力而为的观测值
+            logger.warning("queue depth unavailable: %r", exc)
+            return None
+
+    async def aclose(self) -> None:
+        await self._pool.aclose()
