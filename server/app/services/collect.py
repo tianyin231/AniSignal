@@ -42,7 +42,7 @@ class CollectError(RuntimeError):
 
 
 def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict], int]:
-    """采集相关性过滤：共现词（标题/简介需至少命中一个）+ 热度门槛。
+    """采集相关性过滤：共现词（标题需至少命中一个）+ 热度门槛。
 
     返回 (保留列表, 过滤数量)。官方账号类目标（notices/dynamics/videos）
     不做过滤——官方内容本身就是信号。
@@ -54,10 +54,9 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
     kept: list[dict] = []
     filtered = 0
     for item in items:
-        haystack = " ".join(
-            str(item.get(k) or "")
-            for k in ("title", "description", "summary", "text")
-        ).casefold()
+        # 社区视频简介常带整段频道标签或往期游戏名，拿简介匹配会把其他
+        # 游戏的视频误判为鸣潮信息；标题信号更精确，也与后台字段说明一致。
+        haystack = str(item.get("title") or "").casefold()
         hit_terms = [t for t in co_terms if t.casefold() in haystack]
         if co_terms and not hit_terms:
             filtered += 1

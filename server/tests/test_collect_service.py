@@ -102,7 +102,7 @@ async def test_failure_backoff_doubles_interval(session, patched_collect):
     assert timedelta(minutes=100) < (nxt - now) < timedelta(minutes=140)
 
 
-def test_community_youtube_rss_filters_by_summary_case_insensitively():
+def test_community_youtube_rss_filters_by_title_case_insensitively():
     target = CollectTarget(
         platform="youtube",
         target_type="channel_rss",
@@ -110,8 +110,8 @@ def test_community_youtube_rss_filters_by_summary_case_insensitively():
         co_terms=["Wuthering Waves", "WuWa"],
     )
     items = [
-        {"title": "New character guide", "summary": "A WUTHERING WAVES build"},
-        {"title": "Another game guide", "summary": "Unrelated release"},
+        {"title": "New WUTHERING WAVES character guide", "summary": "Build notes"},
+        {"title": "Another game guide", "summary": "Wuthering Waves and other channel tags"},
     ]
     kept, filtered = collect_module.filter_relevant(items, target)
     assert kept == [items[0]]
