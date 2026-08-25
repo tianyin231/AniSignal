@@ -68,9 +68,14 @@ const feedRequest = useAsyncData(
       : Promise.resolve({ items: [], total: 0 }),
   { watch: [tab, officialPlatform, page] },
 )
-const communityHighlightsRequest = useAsyncData('home-community-highlights', () =>
+const communityYouTubeHighlightsRequest = useAsyncData('home-community-youtube-highlights', () =>
   api<PublicContentList>('/api/contents', {
-    query: { exclude_identity: 'official', published_within_hours: 168, limit: 100 },
+    query: { platform: 'youtube', exclude_identity: 'official', published_within_hours: 168, limit: 2 },
+  }),
+)
+const communityBilibiliHighlightsRequest = useAsyncData('home-community-bilibili-highlights', () =>
+  api<PublicContentList>('/api/contents', {
+    query: { platform: 'bilibili', exclude_identity: 'official', published_within_hours: 168, limit: 2 },
   }),
 )
 const statsRequest = useAsyncData('home-stats', () => api<PublicStats>('/api/stats'))
@@ -78,9 +83,16 @@ const statsRequest = useAsyncData('home-stats', () => api<PublicStats>('/api/sta
 const [
   { data: eventsData, status: eventsStatus },
   { data: feed, status: feedStatus },
-  { data: communityHighlightsData },
+  { data: communityYouTubeHighlightsData },
+  { data: communityBilibiliHighlightsData },
   { data: stats },
-] = await Promise.all([eventsRequest, feedRequest, communityHighlightsRequest, statsRequest])
+] = await Promise.all([
+  eventsRequest,
+  feedRequest,
+  communityYouTubeHighlightsRequest,
+  communityBilibiliHighlightsRequest,
+  statsRequest,
+])
 
 const isBriefing = computed(() => tab.value === 'briefing')
 const totalPages = computed(() =>
@@ -89,18 +101,12 @@ const totalPages = computed(() =>
 const eventList = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const list = computed(() => (feed.value?.items ?? []).map(toRawItem))
 const recentCommunityVideos = computed(() => {
-  const rows = (communityHighlightsData.value?.items ?? [])
-    .filter((item) => ['bilibili', 'youtube'].includes(item.platform))
+  const rows = [
+    ...(communityYouTubeHighlightsData.value?.items ?? []),
+    ...(communityBilibiliHighlightsData.value?.items ?? []),
+  ]
     .sort((a, b) => new Date(b.published_at || b.collected_at).getTime() - new Date(a.published_at || a.collected_at).getTime())
-  const selected = ['youtube', 'bilibili'].flatMap((platform) =>
-    rows.filter((item) => item.platform === platform).slice(0, 2),
-  )
-  if (selected.length < 4) {
-    const selectedIds = new Set(selected.map((item) => item.id))
-    selected.push(...rows.filter((item) => !selectedIds.has(item.id)).slice(0, 4 - selected.length))
-  }
-  return selected
-    .sort((a, b) => new Date(b.published_at || b.collected_at).getTime() - new Date(a.published_at || a.collected_at).getTime())
+  return rows
     .slice(0, 4)
     .map(toRawItem)
 })
