@@ -58,6 +58,7 @@ class Category(StrEnum):
     UNBOXING = "unboxing"
     REVIEW = "review"
     QUALITY = "quality"
+    PROMOTION = "promotion"
     OTHER = "other"
 
 

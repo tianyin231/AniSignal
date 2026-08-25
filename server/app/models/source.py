@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, JSON, String, UniqueConstraint
+from sqlalchemy import BigInteger, DateTime, Index, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.clock import utcnow
@@ -13,6 +13,7 @@ class Source(Base):
     __tablename__ = "sources"
     __table_args__ = (
         UniqueConstraint("platform", "external_id", name="uq_source"),
+        Index("ix_sources_identity", "identity"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

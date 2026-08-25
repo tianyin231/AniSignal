@@ -25,6 +25,7 @@ class RawContent(Base):
     __table_args__ = (
         UniqueConstraint("platform", "external_id", name="uq_raw_content"),
         Index("ix_raw_contents_collected_at", "collected_at"),
+        Index("ix_raw_contents_published_at", "published_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

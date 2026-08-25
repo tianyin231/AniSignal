@@ -47,7 +47,7 @@ const multiPlatform = computed(
           </span>
         </div>
       </div>
-      <span class="mono shrink-0 text-xs text-slate-400 dark:text-zinc-500" :title="`最近更新 ${event.updatedAt}`">{{ event.firstSeenAt }}</span>
+      <span class="mono shrink-0 text-xs text-slate-400 dark:text-zinc-500" :title="`首次出现 ${event.firstSeenAt}`">{{ event.latestEvidenceAt }}</span>
     </div>
     <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400 dark:text-zinc-500">
       <span class="font-medium" :class="identity.text">{{ identity.label }}</span>

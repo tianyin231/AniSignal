@@ -88,10 +88,29 @@ async def test_public_events_list_and_filter(client, session):
     unboxing = next(i for i in body["items"] if i["category"] == "unboxing")
     assert unboxing["product_slug"] == "kb"
     assert unboxing["evidence_count"] == 1
+    assert unboxing["latest_evidence_at"] is not None
     assert unboxing["sources"][0]["platform"] == "bilibili"
     # 类目过滤
     resp = await client.get("/api/events", params={"category": "delay"})
     assert all(i["category"] == "delay" for i in resp.json()["items"])
+
+
+async def test_public_events_order_by_latest_evidence(client, session):
+    await _prepare(session)
+    events = list(await session.scalars(select(Event).where(Event.is_active.is_(True))))
+    unboxing = next(event for event in events if event.category == "unboxing")
+    for event in events:
+        links = list(await session.scalars(select(Evidence).where(Evidence.event_id == event.id)))
+        for link in links:
+            raw = await session.get(RawContent, link.raw_content_id)
+            raw.published_at = utcnow() - timedelta(days=30)
+    newest_link = await session.scalar(select(Evidence).where(Evidence.event_id == unboxing.id))
+    newest_raw = await session.get(RawContent, newest_link.raw_content_id)
+    newest_raw.published_at = utcnow() - timedelta(minutes=5)
+    await session.commit()
+
+    items = (await client.get("/api/events")).json()["items"]
+    assert items[0]["id"] == unboxing.id
 
 
 async def test_public_event_detail_with_corrections(client, session):

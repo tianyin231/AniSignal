@@ -82,6 +82,7 @@ export interface ApiEvent {
   conflicts: ApiEventSource[]
   corrections: ApiEventCorrection[]
   first_seen_at: string | null
+  latest_evidence_at: string | null
   updated_at: string | null
 }
 

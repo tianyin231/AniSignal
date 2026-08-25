@@ -47,7 +47,7 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
     返回 (保留列表, 过滤数量)。官方账号类目标（notices/dynamics/videos）
     不做过滤——官方内容本身就是信号。
     """
-    if target.target_type in ("notices", "channel_rss"):
+    if target.target_type == "notices":
         return items, 0
     co_terms = [t for t in (target.co_terms or []) if t]
     min_views = target.min_views or 0
@@ -55,9 +55,10 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
     filtered = 0
     for item in items:
         haystack = " ".join(
-            str(item.get(k) or "") for k in ("title", "description", "text")
-        )
-        hit_terms = [t for t in co_terms if t in haystack]
+            str(item.get(k) or "")
+            for k in ("title", "description", "summary", "text")
+        ).casefold()
+        hit_terms = [t for t in co_terms if t.casefold() in haystack]
         if co_terms and not hit_terms:
             filtered += 1
             continue

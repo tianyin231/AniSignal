@@ -125,3 +125,31 @@ async def test_public_contents_recent_window_and_identity_exclusion(client, sess
     body = resp.json()
     assert body["total"] == 1
     assert body["items"][0]["external_id"] == "50553"
+
+
+async def test_public_contents_order_by_publication_not_backfill_time(client, session):
+    await _seed(session)
+    rows = list(await session.scalars(select(RawContent).order_by(RawContent.id)))
+    older, newer = rows
+    older.published_at = utcnow() - timedelta(days=365)
+    older.collected_at = utcnow()
+    newer.published_at = utcnow() - timedelta(hours=1)
+    newer.collected_at = utcnow() - timedelta(days=1)
+    await session.commit()
+
+    body = (await client.get("/api/contents")).json()
+    assert body["items"][0]["id"] == newer.id
+    assert body["items"][1]["id"] == older.id
+
+
+async def test_public_contents_hide_promotions_by_default(client, session):
+    from app.services.classify import seed_defaults
+
+    await seed_defaults(session)
+    promo = dict(VIDEO_RAW, bvid="BVpromo", title="关注并转发抽奖")
+    await ingest_items(session, "bilibili_search", [promo])
+
+    assert (await client.get("/api/contents")).json()["total"] == 0
+    visible = (await client.get("/api/contents", params={"include_chat": True})).json()
+    assert visible["total"] == 1
+    assert visible["items"][0]["category"] == "promotion"

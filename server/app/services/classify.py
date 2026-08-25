@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 # 首次建库播种的履约词典（管理端可改可删）
 DEFAULT_RULES: list[tuple[str, str, int]] = [
     # (category, pattern, priority) —— 越具体越靠前
+    # 低价值运营内容：保留原始证据，但不进入默认公开流和事件首页。
+    ("promotion", "抽奖", 1),
+    ("promotion", "转发有奖", 2),
+    ("promotion", "关注并转发", 3),
+    ("promotion", "中奖名单", 4),
+    ("promotion", "创作激励", 5),
+    ("promotion", "七日签到", 6),
+    ("promotion", "商城礼包", 7),
     ("presale", "预售", 10),
     ("presale", "开启预约", 11),
     ("balance", "尾款", 20),
@@ -52,7 +60,7 @@ DEFAULT_RULES: list[tuple[str, str, int]] = [
 ]
 
 # 默认不进入公开内容流的类目（管理端与搜索仍可查）
-HIDDEN_CATEGORIES = {"chat", "other"}
+HIDDEN_CATEGORIES = {"chat", "other", "promotion"}
 
 # 官方身份 + 这些平台的内容未命中词典时按官方公告归类
 _OFFICIAL_FALLBACK_PLATFORMS = {"kuro_cn", "kuro_global"}

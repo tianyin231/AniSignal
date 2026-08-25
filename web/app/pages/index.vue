@@ -36,19 +36,19 @@ const officialPlatform = computed({
   }),
 })
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
-const pageSize = 30
+const pageSize = 20
 
 const { api } = usePublicApi()
 const { t } = useSiteConfig()
 
-const { data: eventsData, status: eventsStatus } = await useAsyncData(
+const eventsRequest = useAsyncData(
   () => `home-briefing-${page.value}`,
   () => api<ApiEventList>('/api/events', {
     query: { published_within_hours: 168, limit: pageSize, offset: (page.value - 1) * pageSize },
   }),
   { watch: [page] },
 )
-const { data: feed, status: feedStatus } = await useAsyncData(
+const feedRequest = useAsyncData(
   () => `home-feed-${tab.value}-${officialPlatform.value}-${page.value}`,
   () =>
     tab.value === 'latest' || tab.value === 'official'
@@ -68,12 +68,19 @@ const { data: feed, status: feedStatus } = await useAsyncData(
       : Promise.resolve({ items: [], total: 0 }),
   { watch: [tab, officialPlatform, page] },
 )
-const { data: officialVideosData } = await useAsyncData('home-official-videos', () =>
+const communityHighlightsRequest = useAsyncData('home-community-highlights', () =>
   api<PublicContentList>('/api/contents', {
-    query: { identity: 'official', published_within_hours: 168, limit: 100 },
+    query: { exclude_identity: 'official', published_within_hours: 168, limit: 100 },
   }),
 )
-const { data: stats } = await useAsyncData('home-stats', () => api<PublicStats>('/api/stats'))
+const statsRequest = useAsyncData('home-stats', () => api<PublicStats>('/api/stats'))
+
+const [
+  { data: eventsData, status: eventsStatus },
+  { data: feed, status: feedStatus },
+  { data: communityHighlightsData },
+  { data: stats },
+] = await Promise.all([eventsRequest, feedRequest, communityHighlightsRequest, statsRequest])
 
 const isBriefing = computed(() => tab.value === 'briefing')
 const totalPages = computed(() =>
@@ -81,8 +88,8 @@ const totalPages = computed(() =>
 )
 const eventList = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const list = computed(() => (feed.value?.items ?? []).map(toRawItem))
-const recentOfficialVideos = computed(() => {
-  const rows = (officialVideosData.value?.items ?? [])
+const recentCommunityVideos = computed(() => {
+  const rows = (communityHighlightsData.value?.items ?? [])
     .filter((item) => ['bilibili', 'youtube'].includes(item.platform))
     .sort((a, b) => new Date(b.published_at || b.collected_at).getTime() - new Date(a.published_at || a.collected_at).getTime())
   const selected = ['youtube', 'bilibili'].flatMap((platform) =>
@@ -117,7 +124,7 @@ useSeoMeta({ title: '近期情报' })
 
     <section v-if="stats" class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-400 dark:text-zinc-500">
       <span>已入库 <span class="mono text-slate-500 dark:text-zinc-400">{{ stats.total_contents }}</span> 条</span>
-      <span>官方 <span class="mono text-slate-500 dark:text-zinc-400">{{ stats.official_contents }}</span> 条</span>
+      <span>社区 <span class="mono text-slate-500 dark:text-zinc-400">{{ Math.max(0, stats.total_contents - stats.official_contents) }}</span> 条</span>
       <span v-if="stats.latest_collected_at">最近采集 {{ fmtTime(stats.latest_collected_at) }}</span>
     </section>
     <p class="mb-1 px-1 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">{{ t('home_intro') }}</p>
@@ -125,20 +132,20 @@ useSeoMeta({ title: '近期情报' })
 
     <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
 
-    <!-- 近期结论：平台入口先可见，再展示近 7 天内有新证据的事件 -->
+    <!-- 近期结论：先展示社区观察，再展示近 7 天内有新证据的事件 -->
     <template v-else-if="isBriefing">
-      <section v-if="recentOfficialVideos.length" class="panel mb-4 p-4">
+      <section v-if="recentCommunityVideos.length" class="panel mb-4 p-4">
         <header class="mb-3 flex items-start justify-between gap-4">
           <div>
-            <h2 class="text-sm font-semibold text-slate-800 dark:text-zinc-100">最新官方影像</h2>
-            <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">YouTube 视频与 B站官方动态，点击查看站内解析。</p>
+            <h2 class="text-sm font-semibold text-slate-800 dark:text-zinc-100">社区近期观察</h2>
+            <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">来自 YouTube 与 B站的玩家内容，仅作线索，不替代官方结论。</p>
           </div>
-          <NuxtLink to="/?tab=official&platform=youtube" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-            查看 YouTube
+          <NuxtLink to="/?tab=latest" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            查看社区线索
           </NuxtLink>
         </header>
         <div class="grid gap-3 sm:grid-cols-2">
-          <OfficialVideoCard v-for="video in recentOfficialVideos" :key="video.id" :item="video" />
+          <OfficialVideoCard v-for="video in recentCommunityVideos" :key="video.id" :item="video" />
         </div>
       </section>
 

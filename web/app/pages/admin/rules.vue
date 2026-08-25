@@ -19,12 +19,12 @@ const toast = useAdminToast()
 
 const categories = [
   'presale', 'balance', 'delay', 'unboxing', 'quality', 'review',
-  'arrived', 'shipping', 'version_update', 'official_announce', 'other',
+  'arrived', 'shipping', 'version_update', 'official_announce', 'promotion', 'other',
 ]
 const categoryLabels: Record<string, string> = {
   presale: '预售', balance: '尾款', delay: '延期', unboxing: '开箱', quality: '质量',
   review: '评测', arrived: '到货', shipping: '发货', version_update: '版本',
-  official_announce: '官方公告', other: '其他',
+  official_announce: '官方公告', promotion: '推广', other: '其他',
 }
 
 const form = reactive({ category: 'unboxing', pattern: '', priority: 100 })

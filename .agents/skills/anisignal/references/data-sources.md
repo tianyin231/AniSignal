@@ -12,7 +12,7 @@
 | 米游社 | `searchPosts -> getPostFull` 公开接口 | 成功 | 接入 |
 | 鸣潮国服官网 | 库洛公开公告 CDN JSON | 成功 | 接入 |
 | 鸣潮国际服官网 | 库洛公开公告 CDN JSON | 成功 | 接入 |
-| YouTube | 官方 RSS（搜索可用 yt-dlp） | 成功 | 低成本补充 |
+| YouTube | 频道 RSS（官方 + 精选社区） | 成功 | 低成本补充 |
 | 库街区 | `Wuthery/kuro.py` 公告接口 | 只能拿官方公告；普通帖子是前端渲染 | 只接官方公告 |
 | 小黑盒 | 无维护中的可用匿名项目 | 未确认 | 不接入 |
 | X | twikit / twscrape | 需登录或 Cookie | 不接入 |
@@ -197,7 +197,9 @@ build_player_url(bvid, cid=None, page=1)
 
 ## YouTube
 
-官方频道更新用 RSS：`https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}`。关键词搜索与元数据可用 `yt-dlp`；首版只存视频 ID、标题、发布时间、缩略图、原链，不下载视频。
+频道更新用 RSS：`https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}`。只有已验证的官方 channel ID 白名单标记为 `official`，其他 RSS 频道标记为 `user`。社区创作者可能同时发布多款游戏，采集目标必须配置 `co_terms` （例如 `Wuthering Waves` / `WuWa`），在标题或 RSS summary 中命中才入库。当前精选社区源：Rexlent `UCX42emUG96mELubKENIvv-Q`、Xlice `UCnRqDZs2TrRxqPAnafCJGaA`。
+
+关键词搜索与元数据可用 `yt-dlp`；首版只存视频 ID、标题、发布时间、缩略图、原链，不下载视频。
 
 ## 库街区边界
 
