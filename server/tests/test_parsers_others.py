@@ -101,3 +101,14 @@ def test_parse_youtube_rss_item():
     assert c.author.identity == "official"
     assert c.media[0].endswith("hqdefault.jpg")
     assert c.metrics == {}
+
+
+def test_parse_youtube_community_channel_as_user():
+    item = dict(
+        YOUTUBE_ITEM,
+        channel_id="UCX42emUG96mELubKENIvv-Q",
+        author="Rexlent",
+    )
+    c = parse_rss_item(item)
+    assert c.author.identity == "user"
+    assert c.author.official_title is None

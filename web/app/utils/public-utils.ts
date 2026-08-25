@@ -18,6 +18,7 @@ export const categoryMeta: Record<string, { label: string }> = {
   unboxing: { label: '开箱' },
   review: { label: '评测' },
   quality: { label: '质量' },
+  promotion: { label: '推广' },
   other: { label: '其他' },
 }
 
@@ -48,6 +49,7 @@ export function toAppEvent(e: ApiEvent): AppEvent {
     ),
     evidenceCount: e.evidence_count,
     firstSeenAt: fmtTime(e.first_seen_at),
+    latestEvidenceAt: fmtTime(e.latest_evidence_at ?? e.first_seen_at),
     updatedAt: fmtTime(e.updated_at),
     important: e.importance || undefined,
     confidence: CONFIDENCE_LABEL[e.confidence] ?? '中',

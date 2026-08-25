@@ -85,6 +85,7 @@ async def list_contents(
     if q:
         conditions.append(ContentVersion.title.like(f"%{q}%"))
 
+    publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
     rows = await session.execute(
         select(RawContent, Source.name, Source.identity, ContentVersion)
         .join(latest_sq, latest_sq.c.rid == RawContent.id)
@@ -95,7 +96,7 @@ async def list_contents(
         )
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(*conditions)
-        .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
+        .order_by(publication_time.desc(), RawContent.id.desc())
         .limit(200 if sort == "hot" else limit)
         .offset(0 if sort == "hot" else offset)
     )
@@ -160,15 +161,21 @@ async def _latest_metrics(session: AsyncSession, content_ids: list[int]) -> dict
 
     if not content_ids:
         return {}
-    rows = await session.execute(
-        select(MetricSnapshot)
+    latest_sq = (
+        select(
+            MetricSnapshot.raw_content_id.label("raw_content_id"),
+            func.max(MetricSnapshot.id).label("snapshot_id"),
+        )
         .where(MetricSnapshot.raw_content_id.in_(content_ids))
-        .order_by(MetricSnapshot.raw_content_id, MetricSnapshot.id.desc())
+        .group_by(MetricSnapshot.raw_content_id)
+        .subquery()
     )
-    result: dict[int, dict] = {}
-    for snapshot in rows.scalars():
-        result.setdefault(snapshot.raw_content_id, snapshot.metrics)
-    return result
+    rows = await session.execute(
+        select(MetricSnapshot).join(
+            latest_sq, MetricSnapshot.id == latest_sq.c.snapshot_id
+        )
+    )
+    return {snapshot.raw_content_id: snapshot.metrics for snapshot in rows.scalars()}
 
 
 def _excerpt(text: str) -> str | None:
@@ -330,6 +337,18 @@ async def list_events(
     from app.services.views import events_to_out
 
     conditions = [EventModel.is_active.is_(True)]
+    latest_evidence_sq = (
+        select(
+            Evidence.event_id.label("event_id"),
+            func.max(
+                func.coalesce(RawContent.published_at, RawContent.collected_at)
+            ).label("latest_evidence_at"),
+        )
+        .join(RawContent, RawContent.id == Evidence.raw_content_id)
+        .where(Evidence.role != "excluded")
+        .group_by(Evidence.event_id)
+        .subquery()
+    )
     if category:
         conditions.append(EventModel.category == category)
     if product_slug:
@@ -344,7 +363,10 @@ async def list_events(
         recent_event_ids = (
             select(Evidence.event_id)
             .join(RawContent, RawContent.id == Evidence.raw_content_id)
-            .where(RawContent.published_at >= cutoff)
+            .where(
+                RawContent.published_at >= cutoff,
+                Evidence.role != "excluded",
+            )
         )
         conditions.append(EventModel.id.in_(recent_event_ids))
     if q:
@@ -357,8 +379,13 @@ async def list_events(
         (
             await session.execute(
                 select(EventModel)
+                .join(latest_evidence_sq, latest_evidence_sq.c.event_id == EventModel.id)
                 .where(*conditions)
-                .order_by(EventModel.importance.desc(), EventModel.first_seen_at.desc(), EventModel.id.desc())
+                .order_by(
+                    latest_evidence_sq.c.latest_evidence_at.desc(),
+                    EventModel.importance.desc(),
+                    EventModel.id.desc(),
+                )
                 .limit(limit)
                 .offset(offset)
             )

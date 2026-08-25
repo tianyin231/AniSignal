@@ -1,5 +1,7 @@
 """事件/商品的 API 视图序列化（公开与管理端共用）。"""
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,6 +51,7 @@ async def events_to_out(
     evidences_by_event: dict[int, list[EventSourceOut]] = {}
     conflicts_by_event: dict[int, list[EventSourceOut]] = {}
     keywords_by_event: dict[int, set] = {}
+    latest_evidence_by_event: dict[int, datetime] = {}
     evidence_data = list(evidence_rows)
     raw_ids = [raw.id for _, raw, _ in evidence_data]
     titles: dict[int, str | None] = {}
@@ -64,6 +67,10 @@ async def events_to_out(
     for evidence, raw, source in evidence_data:
         if evidence.role == "excluded":
             continue
+        published = raw.published_at or raw.collected_at
+        current_latest = latest_evidence_by_event.get(evidence.event_id)
+        if current_latest is None or published > current_latest:
+            latest_evidence_by_event[evidence.event_id] = published
         for kw in raw.matched_keywords or []:
             keywords_by_event.setdefault(evidence.event_id, set()).add(kw)
         item = EventSourceOut(
@@ -133,6 +140,7 @@ async def events_to_out(
                 conflicts=conflicts if include_detail else [],
                 corrections=corrections_by_event.get(event.id, []) if include_detail else [],
                 first_seen_at=event.first_seen_at,
+                latest_evidence_at=latest_evidence_by_event.get(event.id),
                 updated_at=event.last_updated_at,
             )
         )

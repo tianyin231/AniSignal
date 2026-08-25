@@ -203,6 +203,7 @@ class EventOut(BaseModel):
     conflicts: list[EventSourceOut] = []
     corrections: list[EventCorrectionOut] = []
     first_seen_at: datetime | None
+    latest_evidence_at: datetime | None = None
     updated_at: datetime | None
 
 

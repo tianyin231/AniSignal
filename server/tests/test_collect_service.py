@@ -100,3 +100,20 @@ async def test_failure_backoff_doubles_interval(session, patched_collect):
     nxt = collect_module.next_run_with_jitter(target, now)
     # 2 次失败 → 4 倍间隔（30min * 4 = 120min），抖动 ±10%
     assert timedelta(minutes=100) < (nxt - now) < timedelta(minutes=140)
+
+
+def test_community_youtube_rss_filters_by_summary_case_insensitively():
+    target = CollectTarget(
+        platform="youtube",
+        target_type="channel_rss",
+        target_value="UCcommunity",
+        co_terms=["Wuthering Waves", "WuWa"],
+    )
+    items = [
+        {"title": "New character guide", "summary": "A WUTHERING WAVES build"},
+        {"title": "Another game guide", "summary": "Unrelated release"},
+    ]
+    kept, filtered = collect_module.filter_relevant(items, target)
+    assert kept == [items[0]]
+    assert filtered == 1
+    assert "Wuthering Waves" in kept[0]["_matched_keywords"]

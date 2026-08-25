@@ -5,20 +5,24 @@ from datetime import datetime
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
-PARSER_VERSION = "2"
+PARSER_VERSION = "3"
+
+OFFICIAL_CHANNEL_IDS = {"UC0Bi5KMcECRVYis5Gb_ZYZQ"}
 
 
 def parse_rss_item(raw: dict) -> NormalizedContent:
     video_id = str(raw.get("id") or "")
+    channel_id = str(raw.get("channel_id") or "")
+    is_official = channel_id in OFFICIAL_CHANNEL_IDS
     return NormalizedContent(
         platform=Platform.YOUTUBE,
         content_type=ContentType.RSS_ITEM,
         external_id=video_id,
         author=NormalizedAuthor(
-            external_id=raw.get("channel_id") or None,
+            external_id=channel_id or None,
             name=raw.get("author") or None,
-            official_title="YouTube 官方频道",
-            identity=Identity.OFFICIAL,
+            official_title="Wuthering Waves 官方频道" if is_official else None,
+            identity=Identity.OFFICIAL if is_official else Identity.USER,
         ),
         title=raw.get("title") or None,
         text=raw.get("summary") or None,

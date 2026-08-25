@@ -25,6 +25,7 @@ export interface AppEvent {
   sources: SourceRef[]
   evidenceCount: number
   firstSeenAt: string
+  latestEvidenceAt: string
   updatedAt: string
   important?: boolean
   confidence: '高' | '中' | '低'
