@@ -87,6 +87,18 @@ def test_parse_dynamic_derives_title_from_text():
     assert c.extra["video_bvid"] == "BV1kp8z6REgg"
 
 
+def test_parse_dynamic_keeps_text_after_leading_topics():
+    raw = dict(
+        DYNAMIC_RAW,
+        type="DYNAMIC_TYPE_FORWARD",
+        text="#鸣潮# 团子叠叠乐第二弹 预售即将开启！更多详细情报即将公开。",
+    )
+
+    c = parse_dynamic(raw)
+
+    assert c.title == "团子叠叠乐第二弹 预售即将开启！更多详细情报即将公开。"
+
+
 def test_parse_dynamic_image_only_gets_fallback_title():
     raw = dict(DYNAMIC_RAW, type="DYNAMIC_TYPE_DRAW", text="", pics=["https://i0.hdslb.com/bfs/a.jpg"])
     c = parse_dynamic(raw)
