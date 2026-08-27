@@ -1,4 +1,4 @@
-"""管理端站点设置：SMTP 热配置（含测试发信）、全服公告、文案区域。"""
+"""管理端站点设置：通知通道、全服公告、文案区域。"""
 
 import logging
 
@@ -22,6 +22,9 @@ async def get_all_settings(session: AsyncSession = Depends(get_session)):
 
     return {
         "smtp": smtp,
+        "onepush": settings_service.onepush_public_view(
+            await settings_service.get_onepush(session)
+        ),
         "ai": _public_view(await get_ai_config(session)),
         "announcement": await settings_service.get_announcement(session),
         "texts": await settings_service.get_texts(session),
@@ -95,13 +98,17 @@ async def put_smtp(body: dict, session: AsyncSession = Depends(get_session)):
     password = body.get("password")
     if password is None or password == "":
         password = stored.get("password")  # 保留旧值（可能为空）
+    port = int(body.get("port") or 587)
+    tls_mode = str(body.get("tls_mode") or ("tls" if port == 465 else "starttls")).lower()
+    if tls_mode not in {"starttls", "tls", "none"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "加密方式只支持 starttls / tls / none")
     value = {
         "host": str(body.get("host") or "").strip(),
-        "port": int(body.get("port") or 587),
+        "port": port,
         "user": str(body.get("user") or "").strip(),
         "password": password or "",
         "from": str(body.get("from") or "").strip(),
-        "starttls": bool(body.get("starttls", True)),
+        "tls_mode": tls_mode,
     }
     await settings_service.set_setting(session, "smtp", value)
     return settings_service.smtp_public_view(await settings_service.get_effective_smtp(session))
@@ -121,6 +128,54 @@ async def test_smtp(body: dict, session: AsyncSession = Depends(get_session)):
         smtp=smtp,
     )
     return {"sent": sent, "host": smtp["host"], "message": "测试邮件已发送，请查收" if sent else "发送失败：SMTP 未配置或不可用，查看服务端日志"}
+
+
+@router.put("/onepush")
+async def put_onepush(body: dict, session: AsyncSession = Depends(get_session)):
+    """保存全站 OnePush；YAML 留空时保留已存参数。"""
+    current = await settings_service.get_onepush(session)
+    config = current["config"]
+    config_yaml = str(body.get("config_yaml") or "").strip()
+    if config_yaml:
+        import yaml
+        from onepush import get_notifier
+
+        try:
+            parsed = yaml.safe_load(config_yaml)
+        except yaml.YAMLError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"YAML 格式错误：{exc!s}"[:200]) from exc
+        if not isinstance(parsed, dict):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "OnePush 配置必须是 YAML 对象")
+        provider = str(parsed.get("provider") or "").strip()
+        if not provider:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "OnePush 配置缺少 provider")
+        if provider == "smtp":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "邮件请使用独立 SMTP 配置")
+        try:
+            get_notifier(provider)
+        except Exception as exc:  # noqa: BLE001 - 转换为明确的配置错误
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"不支持的 OnePush provider：{provider}") from exc
+        config = parsed
+
+    value = {
+        "enabled": bool(body.get("enabled")) and bool(config),
+        "config": config,
+    }
+    await settings_service.set_setting(session, "onepush", value)
+    return settings_service.onepush_public_view(value)
+
+
+@router.post("/onepush/test")
+async def test_onepush(session: AsyncSession = Depends(get_session)):
+    """用当前配置发送一条测试推送；即使通道未启用也可测试。"""
+    from app.services.notifier import send_onepush
+
+    return await send_onepush(
+        "AniSignal OnePush 测试",
+        "收到本消息说明当前 OnePush 配置可用。",
+        await settings_service.get_onepush(session),
+        force=True,
+    )
 
 
 @router.put("/announcement")

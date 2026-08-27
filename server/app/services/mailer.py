@@ -21,14 +21,21 @@ async def send_email(to: str, subject: str, body: str, smtp: dict | None = None)
     message["To"] = to
     message["Subject"] = subject
     message.set_content(body)
+    port = int(config.get("port") or 587)
+    tls_mode = str(config.get("tls_mode") or "").lower()
+    if tls_mode not in {"starttls", "tls", "none"}:
+        tls_mode = "tls" if port == 465 else (
+            "starttls" if bool(config.get("starttls", True)) else "none"
+        )
     try:
         await aiosmtplib.send(
             message,
             hostname=config["host"],
-            port=int(config.get("port") or 587),
+            port=port,
             username=config.get("user") or None,
             password=config.get("password") or None,
-            start_tls=bool(config.get("starttls", True)),
+            use_tls=tls_mode == "tls",
+            start_tls=tls_mode == "starttls",
         )
         logger.info("email sent to %s (subject=%s)", to, subject)
         return True
@@ -39,11 +46,16 @@ async def send_email(to: str, subject: str, body: str, smtp: dict | None = None)
 
 def _env_smtp() -> dict:
     settings = get_settings()
+    tls_mode = settings.smtp_tls_mode.lower()
+    if tls_mode not in {"starttls", "tls", "none"}:
+        tls_mode = "tls" if settings.smtp_port == 465 else (
+            "starttls" if settings.smtp_starttls else "none"
+        )
     return {
         "host": settings.smtp_host,
         "port": settings.smtp_port,
         "user": settings.smtp_user,
         "password": settings.smtp_password,
         "from": settings.smtp_from,
-        "starttls": settings.smtp_starttls,
+        "tls_mode": tls_mode,
     }
