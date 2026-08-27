@@ -1,11 +1,12 @@
 """B 站解析器：CLI JSON 字段映射（字段清单见 data-sources.md，实测于 2026-08-13）。"""
 
+import re
 from datetime import datetime, timezone
 
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
-PARSER_VERSION = "3"
+PARSER_VERSION = "4"
 
 # 已知官方账号（身份判定用；账号 UID 由配置注入，此处仅做兜底）
 _OFFICIAL_MID = "1955897084"  # 鸣潮官方账号，见 data-sources.md
@@ -83,14 +84,16 @@ def parse_dynamic(raw: dict) -> NormalizedContent:
 
 
 def _display_title(text: str | None) -> str | None:
-    """取正文中第一行有意义的内容作为动态标题（跳过空行与 #话题# 行）。"""
+    """取正文中第一行有意义的内容作为动态标题，移除行首话题标签。"""
     if not text:
         return None
     for line in text.splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        if not stripped:
             continue
-        return stripped[:60] + ("…" if len(stripped) > 60 else "")
+        title = re.sub(r"^(?:#[^#\r\n]+#\s*)+", "", stripped).strip()
+        if title:
+            return title[:60] + ("…" if len(title) > 60 else "")
     return None
 
 

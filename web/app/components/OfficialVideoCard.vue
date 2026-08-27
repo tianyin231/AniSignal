@@ -13,13 +13,13 @@ watch(() => props.item.cover, () => (coverFailed.value = false))
 <template>
   <NuxtLink
     :to="`/contents/${item.id}`"
-    class="group overflow-hidden rounded-xl border border-slate-900/10 bg-white/60 transition-colors hover:border-blue-400/60 hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/10 dark:bg-white/5 dark:hover:border-blue-400/50 dark:hover:bg-white/[0.08]"
+    class="group cursor-pointer overflow-hidden rounded-xl border border-slate-900/10 bg-white/60 transition-colors hover:border-blue-400/60 hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/10 dark:bg-white/5 dark:hover:border-blue-400/50 dark:hover:bg-white/[0.08]"
   >
     <div class="relative aspect-video overflow-hidden bg-slate-100 dark:bg-zinc-900">
       <img
         v-if="item.cover && !coverFailed"
         :src="item.cover"
-        alt=""
+        :alt="`${item.title} 封面`"
         referrerpolicy="no-referrer"
         loading="lazy"
         class="size-full object-cover transition-opacity duration-200 group-hover:opacity-90"

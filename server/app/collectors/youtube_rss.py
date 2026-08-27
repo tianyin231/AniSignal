@@ -4,6 +4,7 @@ RSS 是原始层：collector 把 XML entry 整理成 dict 存 raw_json（不下�
 只保存视频 ID、标题、发布时间、缩略图与原链，见 data-sources.md）。
 """
 
+import asyncio
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -28,6 +29,7 @@ class YoutubeRssCollector:
     def __init__(self) -> None:
         settings = get_settings()
         self._timeout = settings.http_timeout_seconds
+        self._max_retries = settings.http_max_retries
 
     async def fetch(self, target_type: str, target_value: str, limit: int) -> FetchResult:
         if target_type != "channel_rss":
@@ -40,10 +42,23 @@ class YoutubeRssCollector:
 
     async def fetch_feed(self, channel_id: str, limit: int) -> list[dict]:
         async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
-            resp = await client.get(
-                FEED_URL, params={"channel_id": channel_id}, timeout=self._timeout
-            )
-            resp.raise_for_status()
+            for attempt in range(self._max_retries + 1):
+                if attempt:
+                    await asyncio.sleep(min(2**attempt, 8))
+                try:
+                    resp = await client.get(
+                        FEED_URL, params={"channel_id": channel_id}, timeout=self._timeout
+                    )
+                    resp.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    retryable = status in (404, 429) or status >= 500
+                    if not retryable or attempt == self._max_retries:
+                        raise
+                except httpx.TransportError:
+                    if attempt == self._max_retries:
+                        raise
         try:
             root = ET.fromstring(resp.text)
         except ET.ParseError as exc:
