@@ -14,6 +14,7 @@ async def test_smtp_masked_and_password_kept(client, admin_headers):
     assert body["host"] == "smtp.example.com"
     assert "secret-code" not in str(body)  # 密码不回显
     assert body["password_set"] is True
+    assert body["tls_mode"] == "starttls"
 
     # 密码为空保存 → 保留旧密码（password_set 仍 True）
     resp = await client.put(
@@ -23,6 +24,7 @@ async def test_smtp_masked_and_password_kept(client, admin_headers):
     )
     assert resp.json()["host"] == "smtp2.example.com"
     assert resp.json()["password_set"] is True
+    assert resp.json()["tls_mode"] == "tls"
 
     # 测试发信：未配置真实 SMTP → sent=False 但不报错
     resp = await client.post(
@@ -30,6 +32,55 @@ async def test_smtp_masked_and_password_kept(client, admin_headers):
     )
     assert resp.status_code == 200
     assert resp.json()["sent"] is False
+
+
+async def test_onepush_config_masked_preserved_and_testable(client, admin_headers, monkeypatch):
+    resp = await client.put(
+        "/api/admin/settings/onepush",
+        json={
+            "enabled": True,
+            "config_yaml": "provider: pushplus\ntoken: secret-token\n",
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {
+        "enabled": True,
+        "configured": True,
+        "provider": "pushplus",
+        "fields": ["token"],
+    }
+    assert "secret-token" not in str(body)
+
+    # YAML 留空保存只更新开关，不清除已存 token。
+    resp = await client.put(
+        "/api/admin/settings/onepush",
+        json={"enabled": False, "config_yaml": ""},
+        headers=admin_headers,
+    )
+    assert resp.json()["provider"] == "pushplus"
+    assert resp.json()["enabled"] is False
+
+    async def fake_send(title, content, onepush, *, force=False):
+        assert onepush["config"]["token"] == "secret-token"
+        assert force is True
+        return {"ok": True, "status": "sent", "message": "测试成功"}
+
+    monkeypatch.setattr("app.services.notifier.send_onepush", fake_send)
+    resp = await client.post("/api/admin/settings/onepush/test", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+async def test_onepush_rejects_smtp_provider(client, admin_headers):
+    resp = await client.put(
+        "/api/admin/settings/onepush",
+        json={"enabled": True, "config_yaml": "provider: smtp\nhost: smtp.example.com\n"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 400
+    assert "独立 SMTP" in resp.json()["detail"]
 
 
 async def test_announcement_toggle(client, admin_headers):

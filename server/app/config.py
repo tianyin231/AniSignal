@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "AniSignal <noreply@anisignal.local>"
     smtp_starttls: bool = True
+    smtp_tls_mode: str = ""
 
     # 账号会话有效期（天）
     session_days: int = 30

@@ -1,4 +1,4 @@
-"""站点配置服务：KV 读写 + SMTP 热配置合成。
+"""站点配置服务：KV 读写 + SMTP / OnePush 热配置合成。
 
 文案区域使用白名单 key（前端组件按 key 读取并带默认值兜底）。
 """
@@ -60,13 +60,18 @@ async def get_effective_smtp(session: AsyncSession) -> dict:
     """DB 配置优先，回落 env。返回字段齐全的 SMTP 参数。"""
     env = get_settings()
     stored = await get_setting(session, "smtp") or {}
+    port = int(stored.get("port") or env.smtp_port)
+    tls_mode = str(stored.get("tls_mode") or env.smtp_tls_mode).lower()
+    if tls_mode not in {"starttls", "tls", "none"}:
+        legacy_starttls = bool(stored.get("starttls", env.smtp_starttls))
+        tls_mode = "tls" if port == 465 else ("starttls" if legacy_starttls else "none")
     return {
         "host": stored.get("host") or env.smtp_host,
-        "port": int(stored.get("port") or env.smtp_port),
+        "port": port,
         "user": stored.get("user") if stored.get("user") is not None else env.smtp_user,
         "password": stored.get("password") or env.smtp_password,
         "from": stored.get("from") or env.smtp_from,
-        "starttls": bool(stored.get("starttls", env.smtp_starttls)),
+        "tls_mode": tls_mode,
     }
 
 
@@ -81,5 +86,23 @@ def smtp_public_view(smtp: dict) -> dict:
             "db" if smtp["password"] and smtp["password"] != get_settings().smtp_password else "env"
         ),
         "from": smtp["from"],
-        "starttls": smtp["starttls"],
+        "tls_mode": smtp["tls_mode"],
+    }
+
+
+async def get_onepush(session: AsyncSession) -> dict:
+    stored = await get_setting(session, "onepush") or {}
+    config = stored.get("config") if isinstance(stored.get("config"), dict) else {}
+    return {"enabled": bool(stored.get("enabled")), "config": config}
+
+
+def onepush_public_view(onepush: dict) -> dict:
+    """管理端展示用：只返回 provider 与字段名，不回显 token/key 等值。"""
+    config = onepush.get("config") if isinstance(onepush.get("config"), dict) else {}
+    provider = str(config.get("provider") or "")
+    return {
+        "enabled": bool(onepush.get("enabled")),
+        "configured": bool(provider),
+        "provider": provider,
+        "fields": sorted(str(key) for key in config if key != "provider"),
     }

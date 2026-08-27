@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Megaphone, Save, Send } from 'lucide-vue-next'
+import { BellRing, Mail, Megaphone, Save, Send } from 'lucide-vue-next'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '站点设置 · AniSignal 管理看板' })
@@ -22,12 +22,23 @@ interface SmtpView {
   password_set: boolean
   password_source: string
   from: string
-  starttls: boolean
+  tls_mode: 'starttls' | 'tls' | 'none'
 }
-const smtp = reactive({ host: '', port: 587, user: '', password: '', from: '', starttls: true })
+const smtp = reactive({ host: '', port: 587, user: '', password: '', from: '', tls_mode: 'starttls' as SmtpView['tls_mode'] })
 const smtpInfo = ref<SmtpView | null>(null)
 const testTo = ref('')
 const testResult = ref('')
+
+// ---------- OnePush ----------
+interface OnePushView {
+  enabled: boolean
+  configured: boolean
+  provider: string
+  fields: string[]
+}
+const onepush = reactive({ enabled: false, config_yaml: '' })
+const onepushInfo = ref<OnePushView | null>(null)
+const onepushTestResult = ref('')
 
 // ---------- AI（LLM） ----------
 interface AiView { base_url: string; model: string; api_key_set: boolean }
@@ -49,7 +60,7 @@ const TEXT_LABELS: Record<string, string> = {
 const texts = ref<Record<string, string>>({})
 
 async function refresh() {
-  const data = await api<{ smtp: SmtpView; announcement: typeof announcement; texts: Record<string, string> }>(
+  const data = await api<{ smtp: SmtpView; onepush: OnePushView; announcement: typeof announcement; texts: Record<string, string> }>(
     '/api/admin/settings',
   )
   smtpInfo.value = data.smtp
@@ -57,10 +68,49 @@ async function refresh() {
   smtp.port = data.smtp.port || 587
   smtp.user = data.smtp.user || ''
   smtp.from = data.smtp.from || ''
-  smtp.starttls = data.smtp.starttls
+  smtp.tls_mode = data.smtp.tls_mode
   smtp.password = ''
+  onepushInfo.value = data.onepush
+  onepush.enabled = data.onepush.enabled
+  onepush.config_yaml = ''
   Object.assign(announcement, data.announcement)
   texts.value = { ...data.texts }
+}
+
+async function saveOnepush() {
+  startBusy('saveOnepush')
+  error.value = notice.value = ''
+  try {
+    onepushInfo.value = await api<OnePushView>('/api/admin/settings/onepush', {
+      method: 'PUT',
+      body: onepush,
+    })
+    onepush.config_yaml = ''
+    toast.ok('OnePush 配置已保存')
+  } catch (exc: any) {
+    error.value = exc?.data?.detail ?? '保存失败'
+    toast.err('OnePush 保存失败，请检查 YAML')
+  } finally {
+    endBusy()
+  }
+}
+
+async function testOnepush() {
+  if (busy.value) return
+  startBusy('testOnepush')
+  onepushTestResult.value = ''
+  try {
+    const result = await api<{ ok: boolean; message: string }>('/api/admin/settings/onepush/test', {
+      method: 'POST',
+    })
+    onepushTestResult.value = `${stamp()} · ${result.message}`
+    result.ok ? toast.ok('OnePush 测试消息已发出') : toast.err('OnePush 测试失败')
+  } catch (exc: any) {
+    onepushTestResult.value = `${stamp()} · ${exc?.data?.detail ?? '发送失败'}`
+    toast.err('OnePush 测试请求失败')
+  } finally {
+    endBusy()
+  }
 }
 onMounted(refresh)
 
@@ -174,7 +224,7 @@ async function saveTexts() {
     <div>
       <h1 class="text-lg font-semibold">站点设置</h1>
       <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
-        SMTP 发信、全服公告与各页面文案区域；保存即生效，无需重启。
+        OnePush、SMTP 发信、全服公告与各页面文案区域；保存即生效，无需重启。
       </p>
     </div>
 
@@ -183,7 +233,7 @@ async function saveTexts() {
 
     <!-- SMTP -->
     <section class="panel p-5">
-      <h2 class="flex items-center gap-2 text-sm font-semibold">邮件发送（SMTP）</h2>
+      <h2 class="flex items-center gap-2 text-sm font-semibold"><Mail :size="15" /> 邮件发送（SMTP）</h2>
       <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
         未配置时注册/找回验证码只存库（管理端可查）；配置后验证码真实发送到用户邮箱。
         <template v-if="smtpInfo?.password_set">
@@ -192,38 +242,83 @@ async function saveTexts() {
       </p>
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">SMTP 服务器</label>
-          <input v-model="smtp.host" placeholder="如 smtp.qq.com" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <label for="smtp-host" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">SMTP 服务器</label>
+          <input id="smtp-host" v-model="smtp.host" placeholder="如 smtp.qq.com" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">端口（587 = STARTTLS）</label>
-          <input v-model.number="smtp.port" type="number" class="mono mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <label for="smtp-port" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">端口</label>
+          <input id="smtp-port" v-model.number="smtp.port" type="number" class="mono mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">账号</label>
-          <input v-model="smtp.user" placeholder="xxx@qq.com" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <label for="smtp-user" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">账号</label>
+          <input id="smtp-user" v-model="smtp.user" autocomplete="username" placeholder="xxx@qq.com" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">密码 / 授权码</label>
-          <input v-model="smtp.password" type="password" placeholder="留空 = 保留已存密码" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <label for="smtp-password" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">密码 / 授权码</label>
+          <input id="smtp-password" v-model="smtp.password" type="password" autocomplete="new-password" placeholder="留空 = 保留已存密码" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
         </div>
         <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">发件人（From）</label>
-          <input v-model="smtp.from" placeholder="AniSignal <noreply@example.com>" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <label for="smtp-from" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">发件人（From）</label>
+          <input id="smtp-from" v-model="smtp.from" placeholder="AniSignal <noreply@example.com>" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
+        </div>
+        <div class="sm:col-span-2">
+          <label for="smtp-tls-mode" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">连接加密</label>
+          <select id="smtp-tls-mode" v-model="smtp.tls_mode" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5 sm:w-72">
+            <option value="starttls">STARTTLS（通常使用 587）</option>
+            <option value="tls">SSL/TLS（通常使用 465）</option>
+            <option value="none">不加密</option>
+          </select>
         </div>
       </div>
-      <label class="mt-3 flex items-center gap-2 text-sm">
-        <input v-model="smtp.starttls" type="checkbox" class="rounded"> 启用 STARTTLS
-      </label>
       <div class="mt-4 flex flex-wrap items-center gap-2">
-        <button class="btn-primary inline-flex items-center gap-1.5 px-4 py-2" :disabled="busy" @click="saveSmtp">
+        <button class="btn-primary inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy" @click="saveSmtp">
           <Save :size="14" /> {{ busyWhat === 'saveSmtp' ? '保存中…' : '保存 SMTP' }}
         </button>
-        <input v-model="testTo" type="email" placeholder="测试收件邮箱" class="w-52 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-        <button class="inline-flex items-center gap-1.5 rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy || !testTo.trim()" @click="sendTest">
+        <label for="smtp-test-to" class="sr-only">测试收件邮箱</label>
+        <input id="smtp-test-to" v-model="testTo" type="email" placeholder="测试收件邮箱" class="min-h-11 w-52 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
+        <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-slate-900/10 px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15" :disabled="busy || !testTo.trim()" @click="sendTest">
           <Send :size="14" /> {{ busyWhat === 'sendTest' ? '发送中…' : '发送测试邮件' }}
         </button>
         <span v-if="testResult" class="text-xs" :class="testResult.includes('失败') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ testResult }}</span>
+      </div>
+    </section>
+
+    <!-- OnePush -->
+    <section class="panel p-5">
+      <h2 class="flex items-center gap-2 text-sm font-semibold"><BellRing :size="15" /> OnePush 全站推送</h2>
+      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+        全站共用一个管理员推送通道，适合 Bark、PushPlus、Server 酱、企业微信等。
+        参数按 OnePush YAML 格式填写；保存后不会回显 token、key 等敏感值。
+        <a href="https://github.com/LmeSzinc/AzurLaneAutoScript/wiki/Onepush-configuration-%5BCN%5D" target="_blank" rel="noopener noreferrer" class="link rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">查看配置说明</a>
+      </p>
+      <div v-if="onepushInfo?.configured" class="mt-3 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-slate-600 dark:text-zinc-300">
+        当前 provider：<span class="mono font-medium text-blue-700 dark:text-blue-300">{{ onepushInfo.provider }}</span>
+        <template v-if="onepushInfo.fields.length"> · 已保存字段：{{ onepushInfo.fields.join('、') }}</template>
+      </div>
+      <label class="mt-4 flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+        <input v-model="onepush.enabled" type="checkbox" class="rounded focus-visible:ring-2 focus-visible:ring-blue-500">
+        启用 OnePush 自动发送
+      </label>
+      <div class="mt-3">
+        <label for="onepush-config" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">OnePush YAML 配置</label>
+        <textarea
+          id="onepush-config"
+          v-model="onepush.config_yaml"
+          rows="5"
+          spellcheck="false"
+          placeholder="provider: bark&#10;key: YOUR_BARK_KEY"
+          class="mono mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5"
+        />
+        <p class="mt-1.5 text-xs text-slate-500 dark:text-zinc-400">已配置时留空保存会保留原参数；关闭开关只停止自动发送，仍可执行测试。</p>
+      </div>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <button class="btn-primary inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy" @click="saveOnepush">
+          <Save :size="14" /> {{ busyWhat === 'saveOnepush' ? '保存中…' : '保存 OnePush' }}
+        </button>
+        <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-slate-900/10 px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15" :disabled="busy || !onepushInfo?.configured" @click="testOnepush">
+          <Send :size="14" /> {{ busyWhat === 'testOnepush' ? '发送中…' : '发送测试推送' }}
+        </button>
+        <span v-if="onepushTestResult" class="text-xs" :class="onepushTestResult.includes('失败') || onepushTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ onepushTestResult }}</span>
       </div>
     </section>
 
