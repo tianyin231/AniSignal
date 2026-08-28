@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Pencil, Plus, X } from 'lucide-vue-next'
+import { BellRing, Clock3, Mail, Pencil, Plus, Sparkles, X } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 import { toRawItem } from '~/utils/public-utils'
@@ -30,8 +30,32 @@ interface Overview {
   keywords_total: number
   keywords_enabled: number
   feed_total: number
+  notification_enabled: boolean
 }
 const overview = ref<Overview | null>(null)
+
+interface NotificationRecord {
+  id: number
+  kind: 'morning' | 'ai'
+  source: 'schedule' | 'manual'
+  status: 'pending' | 'sent' | 'skipped' | 'failed'
+  subject: string | null
+  matched_keywords: string[]
+  content_count: number
+  error: string | null
+  created_at: string
+  sent_at: string | null
+}
+interface NotificationStatus {
+  enabled: boolean
+  schedule: string
+  records: NotificationRecord[]
+}
+const notificationInfo = ref<NotificationStatus | null>(null)
+const notificationBusy = ref('')
+const notificationMessage = ref('')
+const notificationError = ref('')
+let notificationPoll: ReturnType<typeof setTimeout> | undefined
 
 // ---------- 关键词 ----------
 interface Keyword { id: number; keyword: string; enabled: boolean }
@@ -59,21 +83,79 @@ function feedGoPage(p: number) {
 
 async function refresh() {
   try {
-    const [ov, kw, fd] = await Promise.all([
+    const [ov, kw, fd, nt] = await Promise.all([
       $fetch<Overview>('/api/account/overview'),
       $fetch<Keyword[]>('/api/account/keywords'),
       $fetch<PublicContentList>('/api/account/feed', {
         query: { limit: FEED_PAGE_SIZE, offset: (feedPage.value - 1) * FEED_PAGE_SIZE },
       }),
+      $fetch<NotificationStatus>('/api/account/notifications'),
     ])
     overview.value = ov
     keywords.value = kw
     feed.value = fd
+    notificationInfo.value = nt
+    scheduleNotificationPoll()
   } catch {
     /* 未登录由守卫处理 */
   }
 }
 onMounted(refresh)
+onBeforeUnmount(() => {
+  if (notificationPoll) clearTimeout(notificationPoll)
+})
+
+function scheduleNotificationPoll() {
+  if (notificationPoll) clearTimeout(notificationPoll)
+  if (!notificationInfo.value?.records.some(record => record.status === 'pending')) return
+  notificationPoll = setTimeout(fetchNotifications, 5000)
+}
+
+async function fetchNotifications() {
+  notificationInfo.value = await $fetch<NotificationStatus>('/api/account/notifications')
+  scheduleNotificationPoll()
+}
+
+async function toggleNotifications() {
+  if (notificationBusy.value) return
+  notificationBusy.value = 'toggle'
+  notificationMessage.value = notificationError.value = ''
+  try {
+    const enabled = !notificationInfo.value?.enabled
+    await $fetch('/api/account/notifications', { method: 'PUT', body: { enabled } })
+    notificationMessage.value = enabled ? '每日关键词早报已启用。' : '邮件通知已关闭。'
+    await refresh()
+  } catch (exc: any) {
+    notificationError.value = exc?.data?.detail ?? '通知设置保存失败'
+  } finally {
+    notificationBusy.value = ''
+  }
+}
+
+async function sendNotification(kind: 'morning' | 'ai') {
+  if (notificationBusy.value) return
+  notificationBusy.value = kind
+  notificationMessage.value = notificationError.value = ''
+  try {
+    const result = await $fetch<{ message: string }>('/api/account/notifications/send', {
+      method: 'POST',
+      body: { kind },
+    })
+    notificationMessage.value = result.message
+    await fetchNotifications()
+  } catch (exc: any) {
+    notificationError.value = exc?.data?.detail ?? '通知任务提交失败'
+  } finally {
+    notificationBusy.value = ''
+  }
+}
+
+const notificationStatusLabel: Record<NotificationRecord['status'], string> = {
+  pending: '生成中',
+  sent: '已发送',
+  skipped: '无匹配',
+  failed: '失败',
+}
 
 async function addKeyword() {
   const keyword = newKeyword.value.trim()
@@ -238,7 +320,7 @@ async function changePassword() {
             <span class="text-xs text-slate-400">{{ overview?.keywords_enabled ?? 0 }} 个启用中</span>
           </div>
           <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-            关键词用于生成下方「我的关注流」（标题命中即收录）；邮件通知上线后，启用中的关键词即成为你的监控位。
+            关键词用于生成下方「我的关注流」和邮件早报；只有启用中的关键词会参与通知匹配。
           </p>
 
           <form class="mt-3 flex gap-2" @submit.prevent="addKeyword">
@@ -297,8 +379,73 @@ async function changePassword() {
         </section>
       </div>
 
-      <!-- 右栏：订阅 + 安全 -->
+      <!-- 右栏：通知 + 订阅 + 安全 -->
       <div class="space-y-5">
+        <section class="panel p-5">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h2 class="flex items-center gap-2 text-sm font-semibold"><BellRing :size="15" /> 邮件通知</h2>
+              <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">{{ notificationInfo?.schedule ?? '每天 08:00（北京时间）' }}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="notificationInfo?.enabled ?? false"
+              :aria-label="notificationInfo?.enabled ? '关闭邮件通知' : '启用邮件通知'"
+              class="relative h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              :class="notificationInfo?.enabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-zinc-700'"
+              :disabled="!!notificationBusy || !overview?.is_verified"
+              @click="toggleNotifications"
+            >
+              <span class="absolute top-1 size-5 rounded-full bg-white shadow-sm transition-transform duration-200" :class="notificationInfo?.enabled ? 'translate-x-6' : 'translate-x-1'" />
+            </button>
+          </div>
+
+          <p class="mt-3 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+            仅发送明确命中已启用关键词的内容；标题和采集线索无法确定时，系统会用 AI 复核，拿不准则不发送。
+          </p>
+
+          <div class="mt-4 grid gap-2">
+            <button
+              type="button"
+              class="btn-primary inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              :disabled="!!notificationBusy || !notificationInfo?.enabled || !(overview?.keywords_enabled ?? 0)"
+              @click="sendNotification('morning')"
+            >
+              <Mail :size="15" /> {{ notificationBusy === 'morning' ? '提交中…' : '发送今日早报' }}
+            </button>
+            <button
+              type="button"
+              class="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-900/10 px-4 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:text-blue-300"
+              :disabled="!!notificationBusy || !notificationInfo?.enabled || !(overview?.keywords_enabled ?? 0)"
+              @click="sendNotification('ai')"
+            >
+              <Sparkles :size="15" /> {{ notificationBusy === 'ai' ? '提交中…' : '生成 AI 精炼通知' }}
+            </button>
+          </div>
+          <p class="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">
+            <Clock3 :size="13" class="mt-0.5 shrink-0" /> AI 会复核并总结最近 24 小时内容，通常需要几分钟，完成后自动发到当前邮箱。
+          </p>
+          <p v-if="notificationMessage" class="mt-3 text-xs text-emerald-600 dark:text-emerald-400">{{ notificationMessage }}</p>
+          <p v-if="notificationError" class="mt-3 text-xs text-red-600 dark:text-red-400">{{ notificationError }}</p>
+
+          <div v-if="notificationInfo?.records.length" class="mt-4 border-t border-slate-900/5 pt-3 dark:border-white/5">
+            <p class="text-xs font-medium text-slate-500 dark:text-zinc-400">最近发送</p>
+            <div class="mt-2 space-y-2">
+              <div v-for="record in notificationInfo.records.slice(0, 3)" :key="record.id" class="rounded-lg bg-slate-500/5 px-3 py-2 dark:bg-white/5">
+                <div class="flex items-center justify-between gap-2 text-xs">
+                  <span class="font-medium">{{ record.kind === 'ai' ? 'AI 精炼通知' : '关键词早报' }}</span>
+                  <span
+                    :class="record.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : record.status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-slate-400'"
+                  >{{ notificationStatusLabel[record.status] }}</span>
+                </div>
+                <p class="mono mt-1 text-[11px] text-slate-400 dark:text-zinc-500">{{ fmtTime(record.sent_at ?? record.created_at) }} · {{ record.content_count }} 条内容</p>
+                <p v-if="record.error" class="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-zinc-400">{{ record.error }}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="panel p-5">
           <h2 class="text-sm font-semibold">订阅</h2>
           <div class="mt-3 rounded-xl border border-blue-500/30 bg-blue-500/5 p-3.5">
@@ -316,7 +463,7 @@ async function changePassword() {
               <p class="mono text-xs text-slate-400">¥3 / 30 天</p>
             </div>
             <p class="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-              每日 08:00 早报 + 关键词监控位邮件即时通知。上线前全站免费，不收任何费用。
+              每日 08:00 关键词早报已经开放测试；上线前全站免费，不收任何费用。
             </p>
           </div>
         </section>

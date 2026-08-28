@@ -9,6 +9,7 @@ from app.models import CollectTarget
 class _FakeQueue:
     def __init__(self) -> None:
         self.enqueued: list[int] = []
+        self.notifications: list[int] = []
 
     async def enqueue_collect(self, target_id: int) -> str | None:
         self.enqueued.append(target_id)
@@ -16,6 +17,13 @@ class _FakeQueue:
 
     async def pending_count(self) -> int | None:
         return 3
+
+    async def enqueue_notification(self, delivery_id: int) -> str | None:
+        self.notifications.append(delivery_id)
+        return "fake-notification-job"
+
+    async def enqueue_morning(self) -> str | None:
+        return "fake-morning-job"
 
 
 async def test_healthz_open(client):
