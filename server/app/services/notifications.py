@@ -381,13 +381,17 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
             return {"status": "failed", "reason": ai_error}
         items = await group_candidates(session, selected)
     else:
-        strong = [item for item in candidates if item["strength"] == "strong"]
-        weak = [item for item in candidates if item["strength"] == "weak"]
-        if weak:
-            reviewed, _ = await ai_curate(session, user.id, keywords, weak)
+        trusted = [
+            item
+            for item in candidates
+            if item["strength"] == "strong" and item["identity"] == "official"
+        ]
+        uncertain = [item for item in candidates if item not in trusted]
+        if uncertain:
+            reviewed, _ = await ai_curate(session, user.id, keywords, uncertain)
             if reviewed:
-                strong.extend(reviewed)
-        items = await group_candidates(session, strong)
+                trusted.extend(reviewed)
+        items = await group_candidates(session, trusted)
 
     items = items[:MAX_ITEMS]
     if not items and delivery.source == "schedule":

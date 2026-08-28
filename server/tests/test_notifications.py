@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.models import ContentVersion, NotificationDelivery, RawContent, User, UserKeyword
+from app.models import ContentVersion, NotificationDelivery, RawContent, Source, User, UserKeyword
 from app.services import notifications
 from app.services.auth import hash_password
 from app.scheduler.loop import _morning_due
@@ -29,13 +29,23 @@ async def _user_with_keyword(session, email="notice@t.com", enabled=True):
     return user
 
 
-async def _content(session, title: str, text: str = ""):
+async def _content(session, title: str, text: str = "", identity: str = "official"):
     day = notifications.beijing_today()
     start_at, _ = notifications.morning_window(day)
+    source = Source(
+        platform="bilibili",
+        external_id=f"source-{abs(hash(title))}",
+        name="鸣潮官方",
+        identity=identity,
+        raw_json={},
+    )
+    session.add(source)
+    await session.flush()
     raw = RawContent(
         platform="bilibili",
         content_type="video",
         external_id=f"BV{abs(hash(title))}",
+        source_id=source.id,
         url="https://example.com/source",
         published_at=start_at + timedelta(hours=2),
         raw_json={},
@@ -101,6 +111,30 @@ async def test_scheduled_morning_skips_weak_match_when_ai_uncertain(session, mon
         "schedule",
         day=notifications.beijing_today(),
         dedupe_key=f"test:{user.id}",
+    )
+    result = await notifications.process_delivery(session, delivery.id)
+    assert result["reason"] == "no_matches"
+
+
+async def test_scheduled_morning_reviews_community_title_match(session, monkeypatch):
+    user = await _user_with_keyword(session, email="community@t.com")
+    await _content(session, "爱弥斯闲聊视频", identity="user")
+
+    async def no_decision(*args, **kwargs):
+        return [], None
+
+    async def should_not_send(*args, **kwargs):
+        raise AssertionError("未经 AI 选中的社区内容不应发送")
+
+    monkeypatch.setattr(notifications, "ai_curate", no_decision)
+    monkeypatch.setattr(notifications, "send_email", should_not_send)
+    delivery = await notifications.create_delivery(
+        session,
+        user.id,
+        "morning",
+        "schedule",
+        day=notifications.beijing_today(),
+        dedupe_key=f"community:{user.id}",
     )
     result = await notifications.process_delivery(session, delivery.id)
     assert result["reason"] == "no_matches"
