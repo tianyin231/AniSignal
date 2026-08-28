@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BellRing, Clock3, Mail, Pencil, Plus, Sparkles, X } from 'lucide-vue-next'
+import { BellRing, CircleAlert, Clock3, Mail, Pencil, Plus, Sparkles, X } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 import { toRawItem } from '~/utils/public-utils'
@@ -56,6 +56,18 @@ const notificationBusy = ref('')
 const notificationMessage = ref('')
 const notificationError = ref('')
 let notificationPoll: ReturnType<typeof setTimeout> | undefined
+
+const notificationReady = computed(() => Boolean(
+  overview.value?.is_verified
+  && notificationInfo.value?.enabled
+  && (overview.value?.keywords_enabled ?? 0) > 0,
+))
+const notificationBlockReason = computed(() => {
+  if (!overview.value?.is_verified) return '请先完成邮箱验证，再启用通知。'
+  if (!notificationInfo.value?.enabled) return '请先开启邮件通知，之后才能手动发送。'
+  if (!(overview.value?.keywords_enabled ?? 0)) return '还没有启用关键词。先添加关键词，系统才有明确的筛选范围。'
+  return ''
+})
 
 // ---------- 关键词 ----------
 interface Keyword { id: number; keyword: string; enabled: boolean }
@@ -148,6 +160,11 @@ async function sendNotification(kind: 'morning' | 'ai') {
   } finally {
     notificationBusy.value = ''
   }
+}
+
+function focusKeywordInput() {
+  document.querySelector('#keyword-monitor')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  window.setTimeout(() => document.querySelector<HTMLInputElement>('#keyword-input')?.focus(), 350)
 }
 
 const notificationStatusLabel: Record<NotificationRecord['status'], string> = {
@@ -314,7 +331,7 @@ async function changePassword() {
     <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div class="space-y-5">
         <!-- 关键词监控 -->
-        <section class="panel p-5">
+        <section id="keyword-monitor" class="panel scroll-mt-20 p-5">
           <div class="flex items-center justify-between gap-2">
             <h2 class="text-sm font-semibold">关键词监控</h2>
             <span class="text-xs text-slate-400">{{ overview?.keywords_enabled ?? 0 }} 个启用中</span>
@@ -326,7 +343,7 @@ async function changePassword() {
           <form class="mt-3 flex gap-2" @submit.prevent="addKeyword">
             <div class="relative flex-1">
               <Plus :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input v-model="newKeyword" placeholder="添加关键词，如 爱弥斯 / 菲比 / 3.6版本" maxlength="64"
+              <input id="keyword-input" v-model="newKeyword" placeholder="添加关键词，如 爱弥斯 / 菲比 / 3.6 版本" maxlength="64"
                 class="w-full rounded-md border border-slate-900/10 bg-white/70 py-2 pl-8 pr-3 text-sm dark:border-white/15 dark:bg-white/5">
             </div>
             <button type="submit" class="btn-primary shrink-0 px-4 py-2" :disabled="busy || !newKeyword.trim()">添加</button>
@@ -397,7 +414,7 @@ async function changePassword() {
               :disabled="!!notificationBusy || !overview?.is_verified"
               @click="toggleNotifications"
             >
-              <span class="absolute top-1 size-5 rounded-full bg-white shadow-sm transition-transform duration-200" :class="notificationInfo?.enabled ? 'translate-x-6' : 'translate-x-1'" />
+              <span class="absolute left-1 top-1 size-5 rounded-full bg-white shadow-sm transition-transform duration-200" :class="notificationInfo?.enabled ? 'translate-x-5' : 'translate-x-0'" />
             </button>
           </div>
 
@@ -405,19 +422,36 @@ async function changePassword() {
             仅发送明确命中已启用关键词的内容；标题和采集线索无法确定时，系统会用 AI 复核，拿不准则不发送。
           </p>
 
+          <div v-if="notificationBlockReason" class="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
+            <CircleAlert :size="14" class="mt-0.5 shrink-0" />
+            <div class="min-w-0 flex-1">
+              <p>{{ notificationBlockReason }}</p>
+              <button
+                v-if="notificationInfo?.enabled && !(overview?.keywords_enabled ?? 0)"
+                type="button"
+                class="mt-1 font-medium text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
+                @click="focusKeywordInput"
+              >
+                去添加关键词
+              </button>
+            </div>
+          </div>
+
           <div class="mt-4 grid gap-2">
             <button
               type="button"
-              class="btn-primary inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-              :disabled="!!notificationBusy || !notificationInfo?.enabled || !(overview?.keywords_enabled ?? 0)"
+              class="inline-flex min-h-11 w-full items-center justify-center gap-2 px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed"
+              :class="notificationReady ? 'btn-primary' : 'rounded-md border border-slate-900/10 bg-slate-100 text-slate-400 disabled:opacity-100 dark:border-white/10 dark:bg-white/5 dark:text-zinc-500'"
+              :disabled="!!notificationBusy || !notificationReady"
               @click="sendNotification('morning')"
             >
               <Mail :size="15" /> {{ notificationBusy === 'morning' ? '提交中…' : '发送今日早报' }}
             </button>
             <button
               type="button"
-              class="inline-flex min-h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-slate-900/10 px-4 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-500/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:text-blue-300"
-              :disabled="!!notificationBusy || !notificationInfo?.enabled || !(overview?.keywords_enabled ?? 0)"
+              class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed"
+              :class="notificationReady ? 'border-slate-900/10 text-blue-700 hover:bg-blue-500/5 dark:border-white/15 dark:text-blue-300' : 'border-slate-900/10 bg-slate-50 text-slate-400 disabled:opacity-100 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-500'"
+              :disabled="!!notificationBusy || !notificationReady"
               @click="sendNotification('ai')"
             >
               <Sparkles :size="15" /> {{ notificationBusy === 'ai' ? '提交中…' : '生成 AI 精炼通知' }}
@@ -426,7 +460,11 @@ async function changePassword() {
           <p class="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">
             <Clock3 :size="13" class="mt-0.5 shrink-0" /> AI 会复核并总结最近 24 小时内容，通常需要几分钟，完成后自动发到当前邮箱。
           </p>
-          <p v-if="notificationMessage" class="mt-3 text-xs text-emerald-600 dark:text-emerald-400">{{ notificationMessage }}</p>
+          <p
+            v-if="notificationMessage"
+            class="mt-3 text-xs"
+            :class="notificationInfo?.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-zinc-400'"
+          >{{ notificationMessage }}</p>
           <p v-if="notificationError" class="mt-3 text-xs text-red-600 dark:text-red-400">{{ notificationError }}</p>
 
           <div v-if="notificationInfo?.records.length" class="mt-4 border-t border-slate-900/5 pt-3 dark:border-white/5">
