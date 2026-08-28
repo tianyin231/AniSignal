@@ -8,8 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.db import get_session
-from app.models import ContentVersion, RawContent, Source, User, UserKeyword
+from app.api.admin import get_queue
+from app.models import ContentVersion, NotificationDelivery, RawContent, Source, User, UserKeyword
 from app.schemas.api import PublicContentItem, PublicContentList
+from app.services.notifications import beijing_today, create_delivery, enabled_keywords
+from app.services.queue import BaseQueue
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,100 @@ async def overview(
         "keywords_total": len(keywords),
         "keywords_enabled": sum(1 for k in keywords if k.enabled),
         "feed_total": feed_total,
+        "notification_enabled": user.notification_enabled,
+    }
+
+
+@router.get("/notifications")
+async def notification_status(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    rows = list(
+        (
+            await session.execute(
+                select(NotificationDelivery)
+                .where(NotificationDelivery.user_id == user.id)
+                .order_by(NotificationDelivery.id.desc())
+                .limit(8)
+            )
+        ).scalars()
+    )
+    return {
+        "enabled": user.notification_enabled,
+        "schedule": "每天 08:00（北京时间）",
+        "records": [
+            {
+                "id": row.id,
+                "kind": row.kind,
+                "source": row.source,
+                "period_date": row.period_date,
+                "status": row.status,
+                "subject": row.subject,
+                "matched_keywords": row.matched_keywords or [],
+                "content_count": len(row.content_ids or []),
+                "error": row.error,
+                "created_at": row.created_at,
+                "sent_at": row.sent_at,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.put("/notifications")
+async def update_notification_preference(
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    user.notification_enabled = bool(body.get("enabled"))
+    await session.commit()
+    return {"enabled": user.notification_enabled, "schedule": "每天 08:00（北京时间）"}
+
+
+@router.post("/notifications/send", status_code=status.HTTP_202_ACCEPTED)
+async def request_notification(
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    queue: BaseQueue = Depends(get_queue),
+):
+    kind = str(body.get("kind") or "")
+    if kind not in {"morning", "ai"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "通知类型只支持 morning / ai")
+    if not user.is_verified:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先验证邮箱")
+    if not user.notification_enabled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先启用邮件通知")
+    if not await enabled_keywords(session, user.id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先启用至少一个关键词")
+    pending = await session.scalar(
+        select(NotificationDelivery).where(
+            NotificationDelivery.user_id == user.id,
+            NotificationDelivery.kind == kind,
+            NotificationDelivery.status == "pending",
+        )
+    )
+    if pending is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "同类通知正在生成，请稍后查看")
+    delivery = await create_delivery(
+        session,
+        user.id,
+        kind,
+        "manual",
+        day=beijing_today(),
+    )
+    job_id = await queue.enqueue_notification(delivery.id)
+    if job_id is None:
+        delivery.status = "failed"
+        delivery.error = "任务队列暂时不可用"
+        await session.commit()
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "任务队列暂时不可用")
+    return {
+        "delivery_id": delivery.id,
+        "status": "pending",
+        "message": "AI 精炼通知已进入队列，通常需要几分钟" if kind == "ai" else "今日早报已进入发送队列",
     }
 
 

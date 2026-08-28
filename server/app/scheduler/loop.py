@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 
 from app.clock import utcnow
 from app.config import get_settings
@@ -16,11 +17,20 @@ from app.services.collect import get_redis_pool, load_due_targets, next_run_with
 
 logger = logging.getLogger(__name__)
 
+_SHANGHAI = timezone(timedelta(hours=8))
+_local_morning_date = None
+
+
+def _morning_due(now: datetime) -> tuple[bool, str]:
+    local = now.replace(tzinfo=timezone.utc).astimezone(_SHANGHAI)
+    return local.hour >= 8, local.date().isoformat()
+
 
 async def local_loop(queue) -> None:
     """本地测试模式的调度循环：不走 arq，直接投递到进程内 LocalQueue。"""
     settings = get_settings()
     logger.info("local scheduler started, poll=%.0fs", settings.scheduler_poll_seconds)
+    global _local_morning_date
     while True:
         try:
             now = utcnow()
@@ -36,6 +46,11 @@ async def local_loop(queue) -> None:
                         target.target_value,
                         target.next_run_at,
                     )
+                due_now, day = _morning_due(now)
+                if due_now and _local_morning_date != day:
+                    await queue.enqueue_morning()
+                    _local_morning_date = day
+                    logger.info("local enqueued morning notifications for %s", day)
         except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
             logger.exception("local scheduler tick failed")
         await asyncio.sleep(settings.scheduler_poll_seconds)
@@ -66,6 +81,21 @@ async def _is_leader(redis) -> bool:
         await redis.pexpire(_LEADER_KEY, _LEADER_TTL_MS)
         return True
     return False
+
+
+async def _enqueue_morning_if_due(redis, now: datetime) -> None:
+    due, day = _morning_due(now)
+    if not due:
+        return
+    key = f"anisignal:morning-enqueued:{day}"
+    if await redis.get(key):
+        return
+    job = await redis.enqueue_job(
+        "send_morning_notifications",
+        _job_id=f"morning:{day}",
+    )
+    await redis.set(key, "1", nx=True, px=36 * 60 * 60 * 1000)
+    logger.info("enqueued morning notifications for %s job=%s", day, getattr(job, "job_id", None))
 
 
 async def main() -> None:
@@ -99,6 +129,7 @@ async def main() -> None:
                             getattr(job, "job_id", None),
                             target.next_run_at,
                         )
+                    await _enqueue_morning_if_due(redis, now)
             except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
                 logger.exception("scheduler tick failed")
             await asyncio.sleep(settings.scheduler_poll_seconds)

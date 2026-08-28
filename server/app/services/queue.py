@@ -18,6 +18,12 @@ class BaseQueue:
     async def pending_count(self) -> int | None:
         raise NotImplementedError
 
+    async def enqueue_notification(self, delivery_id: int) -> str | None:
+        raise NotImplementedError
+
+    async def enqueue_morning(self) -> str | None:
+        raise NotImplementedError
+
     async def aclose(self) -> None:
         pass
 
@@ -67,6 +73,32 @@ class LocalQueue(BaseQueue):
         task.add_done_callback(self._tasks.discard)
         return f"local:{target_id}:{time.time():.0f}"
 
+    async def enqueue_notification(self, delivery_id: int) -> str | None:
+        from app.db import SessionLocal
+        from app.services.notifications import process_delivery
+
+        async def run() -> None:
+            async with SessionLocal() as session:
+                await process_delivery(session, delivery_id)
+
+        task = asyncio.create_task(run())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return f"local:notification:{delivery_id}:{time.time():.0f}"
+
+    async def enqueue_morning(self) -> str | None:
+        from app.db import SessionLocal
+        from app.services.notifications import run_scheduled_morning
+
+        async def run() -> None:
+            async with SessionLocal() as session:
+                await run_scheduled_morning(session)
+
+        task = asyncio.create_task(run())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return f"local:morning:{time.time():.0f}"
+
     async def _run(self, run_collection, target_id: int) -> None:
         try:
             await run_collection(self._redis, target_id)
@@ -97,6 +129,14 @@ class ArqQueue(BaseQueue):
         except Exception as exc:  # noqa: BLE001 - 队列深度是尽力而为的观测值
             logger.warning("queue depth unavailable: %r", exc)
             return None
+
+    async def enqueue_notification(self, delivery_id: int) -> str | None:
+        job = await self._pool.enqueue_job("send_user_notification", delivery_id)
+        return getattr(job, "job_id", None) if job is not None else None
+
+    async def enqueue_morning(self) -> str | None:
+        job = await self._pool.enqueue_job("send_morning_notifications")
+        return getattr(job, "job_id", None) if job is not None else None
 
     async def aclose(self) -> None:
         await self._pool.aclose()
