@@ -10,7 +10,6 @@ from datetime import date, datetime, timedelta
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -519,21 +518,37 @@ async def statistics(
 # ---------- 随机壁纸背景（用户可关，失败回退默认背景）----------
 
 WALLPAPER_API = "https://api.yppp.net/api.php"
-# 解析结果进程内缓存：保证同一时间窗内展示与下载是同一张图，也避免频繁请求第三方
-WALLPAPER_TTL_SECONDS = 600
-_wallpaper_cache: dict = {"url": None, "expires": 0.0}
+# 同一解析结果最短复用时间：防手速刷新打爆源站，同时保证"每次刷新基本换图"
+WALLPAPER_MIN_INTERVAL_SECONDS = 2.0
+# 签发记录保留时长：只有服务端签发过的地址才允许下载（防止变成开放代理）
+WALLPAPER_ISSUED_TTL_SECONDS = 900.0
+_wallpaper_last_resolve = 0.0
+_wallpaper_last_url: str | None = None
+_wallpaper_issued: dict[str, float] = {}
 _wallpaper_lock = asyncio.Lock()
 
 logger = logging.getLogger(__name__)
 
 
+def _prune_issued(now: float) -> None:
+    expired = [u for u, ts in _wallpaper_issued.items() if now - ts > WALLPAPER_ISSUED_TTL_SECONDS]
+    for u in expired:
+        _wallpaper_issued.pop(u, None)
+
+
 async def _resolve_wallpaper() -> str | None:
-    """跟随重定向拿到最终图片地址；只接受 http(s) 的图片响应。"""
-    if _wallpaper_cache["url"] and time.monotonic() < _wallpaper_cache["expires"]:
-        return _wallpaper_cache["url"]
+    """跟随重定向拿到最终图片地址；只接受 http(s) 的图片响应。
+
+    不做长缓存：每次页面加载都解析新图（刷新即换壁纸），仅用短间隔去重防抖。
+    """
+    global _wallpaper_last_resolve, _wallpaper_last_url
     async with _wallpaper_lock:
-        if _wallpaper_cache["url"] and time.monotonic() < _wallpaper_cache["expires"]:
-            return _wallpaper_cache["url"]
+        now = time.monotonic()
+        if (
+            _wallpaper_last_url
+            and now - _wallpaper_last_resolve < WALLPAPER_MIN_INTERVAL_SECONDS
+        ):
+            return _wallpaper_last_url
         try:
             headers = {"User-Agent": "AniSignal/1.0 (wallpaper)"}
             async with httpx.AsyncClient(
@@ -552,16 +567,20 @@ async def _resolve_wallpaper() -> str | None:
         except Exception:  # noqa: BLE001 - 壁纸源故障只降级，不影响主功能
             logger.warning("wallpaper resolve failed", exc_info=True)
             return None
-        _wallpaper_cache["url"] = final_url
-        _wallpaper_cache["expires"] = time.monotonic() + WALLPAPER_TTL_SECONDS
+        _wallpaper_last_url = final_url
+        _wallpaper_last_resolve = now
+        _wallpaper_issued[final_url] = now
+        _prune_issued(now)
         return final_url
 
 
-async def _fetch_wallpaper_bytes() -> tuple[bytes, str]:
-    """下载缓存的最终图片，返回 (内容, content_type)。"""
-    url = await _resolve_wallpaper()
-    if url is None:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用")
+async def _fetch_wallpaper_bytes(url: str) -> tuple[bytes, str]:
+    """下载指定壁纸原图，返回 (内容, content_type)。只允许服务端签发过的地址。"""
+    now = time.monotonic()
+    _prune_issued(now)
+    issued_at = _wallpaper_issued.get(url)
+    if issued_at is None or now - issued_at > WALLPAPER_ISSUED_TTL_SECONDS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "壁纸地址已过期，请刷新页面后重试")
     try:
         async with httpx.AsyncClient(
             follow_redirects=True, timeout=httpx.Timeout(30.0)
@@ -577,18 +596,22 @@ async def _fetch_wallpaper_bytes() -> tuple[bytes, str]:
 
 
 @router.get("/wallpaper")
-async def wallpaper_redirect():
-    """随机壁纸：302 到解析后的原图地址。失败返回 502，前端回退默认背景。"""
+async def wallpaper_info():
+    """随机壁纸：解析并返回最终图片地址（每次调用基本不同）。
+
+    前端直接热链该地址做背景；下载时把同一地址带回 /wallpaper/download，
+    服务端只转发自己签发过的地址，保证下载的就是当前展示的那张。
+    """
     url = await _resolve_wallpaper()
     if url is None:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用")
-    return RedirectResponse(url, status_code=302)
+    return {"url": url}
 
 
 @router.get("/wallpaper/download")
-async def wallpaper_download():
+async def wallpaper_download(url: str = Query(...)):
     """下载当前展示的背景原图（服务端流式转发，带附件下载头）。"""
-    content, content_type = await _fetch_wallpaper_bytes()
+    content, content_type = await _fetch_wallpaper_bytes(url)
     ext = (
         ".webp"
         if "webp" in content_type
