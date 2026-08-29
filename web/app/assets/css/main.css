@@ -180,34 +180,36 @@
 }
 
 /* 统一滚动条：细、圆角、半透明，贴合玻璃主题。
-   元素上单独声明 scrollbar-width:none 的（如 tab 横滑区）不受影响——属性选择器优先级更高。 */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(148 163 184 / 0.45) transparent;
-}
-.dark * {
-  scrollbar-color: rgb(113 113 122 / 0.5) transparent;
-}
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgb(148 163 184 / 0.45);
-  border-radius: 999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgb(100 116 139 / 0.65);
-}
-.dark ::-webkit-scrollbar-thumb {
-  background: rgb(113 113 122 / 0.5);
-}
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgb(161 161 170 / 0.65);
-}
-::-webkit-scrollbar-corner {
-  background: transparent;
+   放在 base 层：元素上单独声明 scrollbar-width:none 的工具类（如 tab 横滑区）仍能覆盖。 */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(148 163 184 / 0.45) transparent;
+  }
+  .dark * {
+    scrollbar-color: rgb(113 113 122 / 0.5) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(148 163 184 / 0.45);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(100 116 139 / 0.65);
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    background: rgb(113 113 122 / 0.5);
+  }
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: rgb(161 161 170 / 0.65);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
