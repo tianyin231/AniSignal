@@ -141,25 +141,19 @@ useSeoMeta({ title: '近期情报' })
 
 <template>
   <div>
-    <TabNav v-model="tab" :tabs="tabs" />
-
-    <section class="mb-3 flex items-center justify-end gap-1 px-1 text-xs">
-      <NuxtLink
-        to="/stats"
-        class="inline-flex min-h-9 items-center rounded-lg px-2.5 text-slate-500 transition-colors hover:bg-slate-500/10 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:text-blue-300"
-      >
-        数据统计
-      </NuxtLink>
-      <button
-        type="button"
-        :disabled="refreshing"
-        class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-xs text-slate-500 transition-colors hover:bg-slate-500/10 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:text-blue-300"
-        @click="refreshHome"
-      >
-        <RefreshCw :size="13" :class="{ 'animate-spin': refreshing }" aria-hidden="true" />
-        {{ refreshing ? '刷新中…' : '刷新' }}
-      </button>
-    </section>
+    <TabNav v-model="tab" :tabs="tabs">
+      <template #actions>
+        <button
+          type="button"
+          :disabled="refreshing"
+          class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 py-1.5 text-xs text-slate-500 transition-colors hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60 dark:text-zinc-400 dark:hover:text-blue-300"
+          @click="refreshHome"
+        >
+          <RefreshCw :size="13" :class="{ 'animate-spin': refreshing }" aria-hidden="true" />
+          {{ refreshing ? '刷新中…' : '刷新' }}
+        </button>
+      </template>
+    </TabNav>
     <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
 
     <!-- 首页权重：官方与社区精选 > 聚合结论 > 社区线索。 -->
