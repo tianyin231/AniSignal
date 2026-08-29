@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { RefreshCw } from 'lucide-vue-next'
-import type { ApiEventList, PublicContentList, PublicStats } from '~/composables/usePublicApi'
-import { fmtTime } from '~/utils/admin-types'
+import type { ApiEventList, PublicContentList } from '~/composables/usePublicApi'
 import { toAppEvent, toRawItem } from '~/utils/public-utils'
 
 // 三个分区互不混用：聚合结论、官方内容、非官方社区线索。
@@ -76,20 +75,16 @@ const communityHighlightsRequest = useAsyncData('home-community-highlights', () 
     query: { exclude_identity: 'official', published_within_hours: 168, sort: 'hot', limit: 8 },
   }),
 )
-const statsRequest = useAsyncData('home-stats', () => api<PublicStats>('/api/stats'))
-
 const [
   { data: eventsData, status: eventsStatus },
   { data: feed, status: feedStatus },
   { data: highlightsData },
   { data: communityHighlightsData },
-  { data: stats },
 ] = await Promise.all([
   eventsRequest,
   feedRequest,
   highlightsRequest,
   communityHighlightsRequest,
-  statsRequest,
 ])
 
 const isBriefing = computed(() => tab.value === 'briefing')
@@ -124,7 +119,6 @@ async function refreshHome() {
       feedRequest.refresh(),
       highlightsRequest.refresh(),
       communityHighlightsRequest.refresh(),
-      statsRequest.refresh(),
     ])
   }
   finally {
@@ -149,12 +143,13 @@ useSeoMeta({ title: '近期情报' })
   <div>
     <TabNav v-model="tab" :tabs="tabs" />
 
-    <section v-if="stats" class="mb-3 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-slate-400 dark:text-zinc-500">
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span>已入库 <span class="mono text-slate-500 dark:text-zinc-400">{{ stats.total_contents }}</span> 条</span>
-        <span>官方 <span class="mono text-slate-500 dark:text-zinc-400">{{ stats.official_contents }}</span> 条</span>
-        <span v-if="stats.latest_collected_at">最近采集 {{ fmtTime(stats.latest_collected_at) }}</span>
-      </div>
+    <section class="mb-3 flex items-center justify-end gap-1 px-1 text-xs">
+      <NuxtLink
+        to="/stats"
+        class="inline-flex min-h-9 items-center rounded-lg px-2.5 text-slate-500 transition-colors hover:bg-slate-500/10 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:text-blue-300"
+      >
+        数据统计
+      </NuxtLink>
       <button
         type="button"
         :disabled="refreshing"

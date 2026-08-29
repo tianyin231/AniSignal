@@ -2,7 +2,7 @@
 
 from sqlalchemy import func, select
 
-from app.models import ContentVersion, MetricSnapshot, RawContent, Source
+from app.models import ContentDailyStat, ContentVersion, MetricSnapshot, RawContent, Source
 from app.schemas.content import FetchResult  # noqa: F401
 from app.services.ingest import ingest_items
 
@@ -37,6 +37,28 @@ async def test_ingest_repeated_is_idempotent(session):
     # 指标未变也记快照（时间序列），但版本不增加
     assert await session.scalar(select(func.count(ContentVersion.id))) == 1
     assert await session.scalar(select(func.count(MetricSnapshot.id))) == 2
+
+
+async def test_ingest_updates_daily_statistics_without_double_counting(session):
+    item = dict(VIDEO_RAW, _matched_keywords=["鸣潮", "新角色"])
+    second = dict(item, bvid="BV1StatsSecond", aid=999_002)
+    await ingest_items(session, "bilibili_search", [item, second])
+    await ingest_items(session, "bilibili_search", [item])
+
+    rows = list(await session.scalars(select(ContentDailyStat)))
+    assert {row.keyword: row.contents_new for row in rows} == {
+        "": 2,
+        "鸣潮": 2,
+        "新角色": 2,
+    }
+
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [dict(VIDEO_RAW, _matched_keywords=["鸣潮", "版本预告"])],
+    )
+    rows = list(await session.scalars(select(ContentDailyStat)))
+    assert {row.keyword: row.contents_new for row in rows}["版本预告"] == 1
 
 
 async def test_ingest_changed_content_creates_new_version(session):

@@ -42,6 +42,64 @@ export interface PublicStats {
   latest_collected_at: string | null
 }
 
+export interface StatisticsOverview {
+  range_days: number
+  generated_at: string
+  details_since: string | null
+  totals: {
+    total_contents: number
+    official_contents: number
+    community_contents: number
+    period_new: number
+    collection_runs: number
+    failed_runs: number
+    success_rate: number
+    items_found: number
+    items_new: number
+    yield_rate: number
+    latest_collection_at: string | null
+  }
+  trend: Array<{ date: string; total: number; official: number; community: number }>
+  platforms: Array<{ platform: string; total: number; official: number; community: number; share: number }>
+  identities: Array<{ identity: string; total: number; share: number }>
+  keywords: Array<{ keyword: string; contents: number }>
+  collection: Array<{
+    date: string
+    runs: number
+    failed: number
+    items_found: number
+    items_new: number
+    detailed_runs: number
+    items_fetched: number
+    items_filtered: number
+    items_updated: number
+  }>
+  targets: Array<{
+    target_id: number
+    label: string
+    platform: string
+    target_type: string
+    runs: number
+    items_found: number
+    items_new: number
+    yield_rate: number
+  }>
+  recent_runs: Array<{
+    id: number
+    target: string
+    platform: string
+    status: string
+    started_at: string
+    finished_at: string | null
+    duration_ms: number | null
+    items_fetched: number | null
+    items_filtered: number | null
+    items_found: number
+    items_new: number
+    items_updated: number | null
+  }>
+}
+
 export interface ApiEventSource {
   platform: string
   account: string | null

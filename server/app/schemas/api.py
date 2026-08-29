@@ -1,6 +1,6 @@
 """Admin API 的请求/响应 DTO。"""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -161,6 +161,98 @@ class PublicStats(BaseModel):
     by_platform: dict[str, int]
     official_contents: int
     latest_collected_at: datetime | None
+
+
+class StatisticsTotals(BaseModel):
+    total_contents: int
+    official_contents: int
+    community_contents: int
+    period_new: int
+    collection_runs: int
+    failed_runs: int
+    success_rate: float
+    items_found: int
+    items_new: int
+    yield_rate: float
+    latest_collection_at: datetime | None
+
+
+class StatisticsTrendPoint(BaseModel):
+    date: date
+    total: int
+    official: int
+    community: int
+
+
+class StatisticsPlatform(BaseModel):
+    platform: str
+    total: int
+    official: int
+    community: int
+    share: float
+
+
+class StatisticsIdentity(BaseModel):
+    identity: str
+    total: int
+    share: float
+
+
+class StatisticsKeyword(BaseModel):
+    keyword: str
+    contents: int
+
+
+class StatisticsCollectionPoint(BaseModel):
+    date: date
+    runs: int
+    failed: int
+    items_found: int
+    items_new: int
+    detailed_runs: int
+    items_fetched: int
+    items_filtered: int
+    items_updated: int
+
+
+class StatisticsTarget(BaseModel):
+    target_id: int
+    label: str
+    platform: str
+    target_type: str
+    runs: int
+    items_found: int
+    items_new: int
+    yield_rate: float
+
+
+class StatisticsRecentRun(BaseModel):
+    id: int
+    target: str
+    platform: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    duration_ms: int | None
+    items_fetched: int | None
+    items_filtered: int | None
+    items_found: int
+    items_new: int
+    items_updated: int | None
+
+
+class StatisticsOverview(BaseModel):
+    range_days: int
+    generated_at: datetime
+    details_since: datetime | None
+    totals: StatisticsTotals
+    trend: list[StatisticsTrendPoint]
+    platforms: list[StatisticsPlatform]
+    identities: list[StatisticsIdentity]
+    keywords: list[StatisticsKeyword]
+    collection: list[StatisticsCollectionPoint]
+    targets: list[StatisticsTarget]
+    recent_runs: list[StatisticsRecentRun]
 
 
 class EventSourceOut(BaseModel):

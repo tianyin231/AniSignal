@@ -47,6 +47,8 @@ class IngestStats:
     items_new: int = 0
     items_updated: int = 0  # 已存在且指纹变化（产生新版本）的条数
     parse_failed: int = 0
+    official_items: int = 0
+    community_items: int = 0
     errors: list[str] = field(default_factory=list)
     touched_content_ids: list[int] = field(default_factory=list)
 
@@ -68,11 +70,13 @@ async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]
             logger.warning("parse failed for %s item: %r", fetch_kind, exc)
             continue
         try:
-            is_new, changed, content_id = await _ingest_one(
+            is_new, changed, content_id, identity = await _ingest_one(
                 session, normalized, raw, parser_version, rules
             )
             stats.items_new += int(is_new)
             stats.items_updated += int(changed)
+            stats.official_items += int(identity == Identity.OFFICIAL)
+            stats.community_items += int(identity != Identity.OFFICIAL)
             if is_new or changed:
                 stats.touched_content_ids.append(content_id)
         except Exception as exc:  # noqa: BLE001
@@ -97,9 +101,11 @@ async def _ingest_one(
     raw: dict,
     parser_version: str,
     rules: list,
-) -> tuple[bool, bool, int]:
-    """返回 (is_new, fingerprint_changed, content_id)。"""
-    source_id = await _upsert_source(session, normalized)
+) -> tuple[bool, bool, int, str]:
+    """返回 (is_new, fingerprint_changed, content_id, source_identity)。"""
+    from app.services.statistics import record_content_stat
+
+    source_id, identity = await _upsert_source(session, normalized)
     fingerprint = content_fingerprint(normalized)
 
     existing = await session.scalar(
@@ -126,7 +132,15 @@ async def _ingest_one(
         await session.flush()  # 拿到 id 供 version/snapshot 外键使用
         _add_version(session, content, 1, normalized, parser_version, rules)
         _add_snapshot(session, content, normalized)
-        return True, False, content.id
+        await record_content_stat(
+            session,
+            collected_at=content.collected_at,
+            platform=str(content.platform),
+            identity=str(identity),
+            keywords=list(content.matched_keywords or []),
+            include_base=True,
+        )
+        return True, False, content.id, str(identity)
 
     # 已存在：原始数据不可覆盖，只更新观测字段
     existing.last_seen_at = utcnow()
@@ -134,8 +148,19 @@ async def _ingest_one(
         existing.source_id = source_id
     if normalized.url and not existing.url:
         existing.url = normalized.url
-    merged = sorted({*(existing.matched_keywords or []), *_matched_keywords(raw)})
+    previous_keywords = set(existing.matched_keywords or [])
+    merged = sorted({*previous_keywords, *_matched_keywords(raw)})
     existing.matched_keywords = merged
+    added_keywords = sorted(set(merged) - previous_keywords)
+    if added_keywords:
+        await record_content_stat(
+            session,
+            collected_at=existing.collected_at,
+            platform=str(existing.platform),
+            identity=str(identity),
+            keywords=added_keywords,
+            include_base=False,
+        )
 
     changed = existing.content_hash != fingerprint
     if changed:
@@ -148,10 +173,12 @@ async def _ingest_one(
         _add_version(session, existing, (latest or 0) + 1, normalized, parser_version, rules)
         existing.content_hash = fingerprint
     _add_snapshot(session, existing, normalized)
-    return False, changed, existing.id
+    return False, changed, existing.id, str(identity)
 
 
-async def _upsert_source(session: AsyncSession, normalized: NormalizedContent) -> int | None:
+async def _upsert_source(
+    session: AsyncSession, normalized: NormalizedContent
+) -> tuple[int | None, str]:
     author = normalized.author
     if not author or not author.external_id:
         # 账号体系外的官方来源（如库洛官网公告）：用平台级伪 ID 建一条 Source，
@@ -159,7 +186,7 @@ async def _upsert_source(session: AsyncSession, normalized: NormalizedContent) -
         if author and author.name and author.identity == Identity.OFFICIAL:
             author = author.model_copy(update={"external_id": f"official-{normalized.platform}"})
         else:
-            return None
+            return None, str(Identity.UNKNOWN)
     identity = Identity.OFFICIAL if author.official_title else author.identity
     existing = await session.scalar(
         select(Source).where(
@@ -179,7 +206,7 @@ async def _upsert_source(session: AsyncSession, normalized: NormalizedContent) -
         )
         session.add(source)
         await session.flush()
-        return source.id
+        return source.id, str(source.identity)
     existing.last_seen_at = utcnow()
     if author.name:
         existing.name = author.name
@@ -189,7 +216,7 @@ async def _upsert_source(session: AsyncSession, normalized: NormalizedContent) -
         existing.follower_count = author.follower_count
     if identity != Identity.UNKNOWN:
         existing.identity = identity
-    return existing.id
+    return existing.id, str(existing.identity)
 
 
 def _add_version(

@@ -6,8 +6,9 @@ import pytest
 
 import app.services.collect as collect_module
 from app.clock import utcnow
-from app.models import CollectRun, CollectTarget, RunStatus
+from app.models import CollectionDailyStat, CollectRun, CollectTarget, RunStatus
 from app.schemas.content import FetchResult
+from app.services.statistics import beijing_date
 
 from tests.test_parsers_bilibili import VIDEO_RAW
 
@@ -70,6 +71,18 @@ async def test_run_collection_success(session, patched_collect):
     run = await session.get(CollectRun, result["run_id"])
     assert run.status == RunStatus.SUCCESS
     assert run.items_found == 1
+    assert run.items_fetched == 1
+    assert run.items_filtered == 0
+    assert run.duration_ms is not None
+
+    daily = await session.get(
+        CollectionDailyStat,
+        {"stat_date": beijing_date(collect_module.utcnow()), "target_id": target.id, "status": "success"},
+    )
+    assert daily is not None
+    assert daily.runs == 1
+    assert daily.detailed_runs == 1
+    assert daily.items_new == 1
 
     await session.refresh(target)
     assert target.last_success_at is not None

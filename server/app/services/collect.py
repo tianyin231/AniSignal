@@ -94,6 +94,8 @@ async def run_collection(redis, target_id: int) -> dict:
 
         stats: IngestStats | None = None
         error_text: str | None = None
+        items_fetched = 0
+        items_filtered = 0
         try:
             collector_factory = _COLLECTORS.get(target.platform)
             if collector_factory is None:
@@ -104,7 +106,9 @@ async def run_collection(redis, target_id: int) -> dict:
                 fetch_result = await collector_factory().fetch(
                     target.target_type, target.target_value, settings.collect_limit
                 )
+            items_fetched = len(fetch_result.items)
             fetch_result.items, filtered_out = filter_relevant(fetch_result.items, target)
+            items_filtered = filtered_out
             if not filtered_out and target.target_type in ("keyword_search", "account_videos", "account_dynamics"):
                 # 未配置过滤时也打关键词溯源标
                 label = (
@@ -163,6 +167,13 @@ async def run_collection(redis, target_id: int) -> dict:
         run.finished_at = now
         run.items_found = stats.items_found if stats else 0
         run.items_new = stats.items_new if stats else 0
+        run.items_fetched = items_fetched
+        run.items_filtered = items_filtered
+        run.items_updated = stats.items_updated if stats else 0
+        run.parse_failed = stats.parse_failed if stats else 0
+        run.official_items = stats.official_items if stats else 0
+        run.community_items = stats.community_items if stats else 0
+        run.duration_ms = max(0, int((now - run.started_at).total_seconds() * 1000))
 
         if stats is not None:
             run.status = RunStatus.SUCCESS if stats.parse_failed == 0 else RunStatus.PARTIAL
@@ -174,7 +185,15 @@ async def run_collection(redis, target_id: int) -> dict:
             run.error = error_text
             target.consecutive_failures += 1
             target.last_error = error_text
+        from app.services.statistics import record_collection_stat
+
+        await record_collection_stat(session, run)
         await session.commit()
+        if hasattr(redis, "delete"):
+            try:
+                await redis.delete(*(f"statistics:v1:{days}" for days in (7, 30, 90, 365)))
+            except Exception:  # noqa: BLE001 - 缓存失效失败不阻断采集结果
+                logger.warning("statistics cache invalidation failed", exc_info=True)
         return {
             "run_id": run.id,
             "status": run.status,
