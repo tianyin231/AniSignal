@@ -25,6 +25,7 @@ interface Overview {
   avatar: string | null
   is_verified: boolean
   created_at: string | null
+  last_login_at: string | null
   keywords_total: number
   keywords_enabled: number
   feed_total: number
@@ -298,7 +299,7 @@ async function changePassword() {
             <span v-if="overview?.is_verified" class="chip bg-emerald-500/10 font-medium text-emerald-600 dark:text-emerald-400">邮箱已验证</span>
           </div>
           <p class="mono mt-1 text-xs text-slate-400 dark:text-zinc-500">
-            {{ user?.email }} · 注册于 {{ fmtTime(overview?.created_at) }}
+            {{ user?.email }} · 注册于 {{ fmtTime(overview?.created_at) }} · 最近登录 {{ fmtTime(overview?.last_login_at) }}
           </p>
         </div>
       </div>
