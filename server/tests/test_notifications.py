@@ -42,6 +42,35 @@ def test_notification_html_escapes_external_content():
     assert "javascript:" not in html
 
 
+def test_notification_filters_low_signal_community_content():
+    base = {"identity": "unknown", "category": None}
+    assert notifications._is_low_signal_notification(
+        {**base, "title": "看鸣潮动画短片后彻底破防"}
+    )
+    assert notifications._is_low_signal_notification(
+        {**base, "title": "爱弥斯矩阵配队伤害实测"}
+    )
+    assert notifications._is_low_signal_notification(
+        {**base, "title": "爱弥斯联名键盘开箱", "category": "unboxing"}
+    )
+    assert not notifications._is_low_signal_notification(
+        {**base, "title": "爱弥斯联名机械键盘出现售后反馈", "category": "quality"}
+    )
+    assert not notifications._is_low_signal_notification(
+        {**base, "title": "鸣潮官方角色预告", "identity": "official"}
+    )
+
+
+def test_notification_summary_cannot_upgrade_community_to_official():
+    community = {"identity": "unknown"}
+    assert not notifications._summary_respects_identity(
+        community, "鸣潮官方发布了爱弥斯新内容。"
+    )
+    assert notifications._summary_respects_identity(
+        community, "社区用户反馈爱弥斯联名键盘存在按键问题。"
+    )
+
+
 async def _user_with_keyword(session, email="notice@t.com", enabled=True):
     user = User(
         email=email,

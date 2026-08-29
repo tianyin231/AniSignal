@@ -32,6 +32,29 @@ logger = logging.getLogger(__name__)
 SHANGHAI = timezone(timedelta(hours=8))
 MAX_ITEMS = 5
 
+_LOW_SIGNAL_NOTIFICATION_PATTERNS = (
+    re.compile(r"(?:reaction|反应|锐评|破防|泪崩)", re.IGNORECASE),
+    re.compile(r"看.{0,16}(?:鸣潮|pv|动画|短片|剧情)", re.IGNORECASE),
+    re.compile(r"(?:配队|伤害|矩阵|轮椅轴|手法|深塔|满星|速通)"),
+    re.compile(r"(?:绘画过程|同人|手书|cosplay|cos|only|电台)", re.IGNORECASE),
+)
+
+
+def _is_low_signal_notification(item: dict) -> bool:
+    """通知宁缺毋滥：过滤个人开箱、反应视频、攻略与二创。"""
+    if item.get("identity") == "official":
+        return False
+    if item.get("category") in {"unboxing", "review", "arrived"}:
+        return True
+    title = _plain(str(item.get("title") or ""))
+    return any(pattern.search(title) for pattern in _LOW_SIGNAL_NOTIFICATION_PATTERNS)
+
+
+def _summary_respects_identity(item: dict, summary: str) -> bool:
+    if item.get("identity") == "official":
+        return True
+    return re.search(r"(?:官方发布|官方宣布|正式官宣|官宣)", summary) is None
+
 
 def beijing_today(now: datetime | None = None) -> date:
     value = now or utcnow()
@@ -248,6 +271,9 @@ async def ai_curate(
         record_usage,
     )
 
+    eligible = [item for item in candidates if not _is_low_signal_notification(item)]
+    if not eligible:
+        return [], None
     config = await get_ai_config(session)
     if not ai_available(config):
         return None, "AI 尚未配置"
@@ -262,15 +288,17 @@ async def ai_curate(
             "published_at": item["published_at"].isoformat(),
             "literal_keywords": item["keywords"],
         }
-        for item in candidates[:30]
+        for item in eligible[:30]
     ]
     system = (
         "你是《鸣潮》资讯早报编辑，只能根据输入候选生成 JSON："
         '{"items":[{"id":1,"summary":"80字以内事实摘要"}]}。'
-        "只保留真正以用户关键词为主题或提供实质新信息的内容，最多5条；"
-        "抽奖、签到、泛闲聊、标题党、纯观看反应、情绪表达、无证据指控和仅顺带提及关键词的内容不要选；"
+        "只保留真正以用户关键词为主题、且提供可核实新事实的内容，最多5条；没有合格内容就返回空数组，宁缺毋滥；"
+        "抽奖、签到、泛闲聊、标题党、传闻预测、纯观看反应、攻略配队、伤害展示、开箱晒单、二创、情绪表达、无证据指控和仅顺带提及关键词的内容一律不要选；"
+        "普通用户内容只有明确提供发售、预售、发货、延期或质量售后等新事实时才可入选；"
         "摘要要用一句自然中文说明发生了什么和新增了什么，不得照抄标题或视频简介，也不要写空泛评价；"
         "官方预告应明确说明官方发布了什么角色、版本、活动或商品信息；"
+        "只有 identity=official 的候选可以写成官方发布或官宣；"
         "严格区分官方信息、社区观察和普通用户反馈，不得补充输入中没有的事实、数字或结论。"
     )
     prompt = (
@@ -283,7 +311,7 @@ async def ai_curate(
         raw_out, usage = await chat(config, system, prompt, json_mode=True)
         parsed = json.loads(raw_out)
         selected_rows = parsed.get("items") or []
-        by_id = {item["id"]: item for item in candidates}
+        by_id = {item["id"]: item for item in eligible}
         selected: list[dict] = []
         seen: set[int] = set()
         for row in selected_rows:
@@ -293,8 +321,12 @@ async def ai_curate(
             candidate = by_id[content_id]
             summary = _plain(str(row.get("summary") or ""))[:160]
             evidence = f"{candidate['title']} {candidate['text']}"
-            if not summary or not _summary_supported(summary, evidence):
-                summary = candidate["text"][:120] or candidate["title"]
+            if (
+                not summary
+                or not _summary_supported(summary, evidence)
+                or not _summary_respects_identity(candidate, summary)
+            ):
+                continue
             selected.append({**candidate, "ai_summary": summary})
             seen.add(content_id)
             if len(selected) >= MAX_ITEMS:
