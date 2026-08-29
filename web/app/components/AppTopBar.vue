@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { Radar } from 'lucide-vue-next'
 import { avatarGradient, displayName } from '~/utils/avatars'
 
 const route = useRoute()
@@ -33,9 +32,7 @@ async function handleLogout() {
   <header class="glass sticky top-0 z-40">
     <div class="mx-auto flex h-14 max-w-[1280px] items-center gap-4 px-4 lg:px-6">
       <NuxtLink to="/" class="flex shrink-0 items-center gap-2">
-        <span class="grid size-7 place-items-center rounded-md bg-blue-600 text-white">
-          <Radar :size="15" />
-        </span>
+        <img src="/icon.png" alt="" class="size-7 shrink-0">
         <span class="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-zinc-50">AniSignal</span>
       </NuxtLink>
       <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-sm [scrollbar-width:none]">
