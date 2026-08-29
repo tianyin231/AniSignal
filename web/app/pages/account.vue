@@ -336,10 +336,6 @@ async function changePassword() {
             <h2 class="text-sm font-semibold">关键词监控</h2>
             <span class="text-xs text-slate-400">{{ overview?.keywords_enabled ?? 0 }} 个启用中</span>
           </div>
-          <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-            关键词用于生成下方「我的关注流」和邮件早报；只有启用中的关键词会参与通知匹配。
-          </p>
-
           <form class="mt-3 flex gap-2" @submit.prevent="addKeyword">
             <div class="relative flex-1">
               <Plus :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -418,10 +414,6 @@ async function changePassword() {
             </button>
           </div>
 
-          <p class="mt-3 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-            仅发送明确命中已启用关键词的内容；标题和采集线索无法确定时，系统会用 AI 复核，拿不准则不发送。
-          </p>
-
           <div v-if="notificationBlockReason" class="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
             <CircleAlert :size="14" class="mt-0.5 shrink-0" />
             <div class="min-w-0 flex-1">
@@ -481,28 +473,6 @@ async function changePassword() {
                 <p v-if="record.error" class="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-zinc-400">{{ record.error }}</p>
               </div>
             </div>
-          </div>
-        </section>
-
-        <section class="panel p-5">
-          <h2 class="text-sm font-semibold">订阅</h2>
-          <div class="mt-3 rounded-xl border border-blue-500/30 bg-blue-500/5 p-3.5">
-            <div class="flex items-baseline justify-between">
-              <p class="text-sm font-medium text-blue-700 dark:text-blue-300">免费版（当前）</p>
-              <p class="mono text-xs text-slate-400">永久免费</p>
-            </div>
-            <p class="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-              全站内容免费浏览，含本页全部功能；无到期时间。
-            </p>
-          </div>
-          <div class="mt-2.5 rounded-xl border border-dashed border-slate-900/15 p-3.5 dark:border-white/15">
-            <div class="flex items-baseline justify-between">
-              <p class="text-sm font-medium text-slate-600 dark:text-zinc-300">基础订阅（规划中）</p>
-              <p class="mono text-xs text-slate-400">¥3 / 30 天</p>
-            </div>
-            <p class="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-              每日 08:00 关键词早报已经开放测试；上线前全站免费，不收任何费用。
-            </p>
           </div>
         </section>
 

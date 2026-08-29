@@ -1,7 +1,5 @@
 <script setup lang="ts">
-// 订阅功能尚未上线：诚实说明规划，不用演示数据冒充
 useSeoMeta({ title: '订阅中心' })
-const { t } = useSiteConfig()
 
 const plans = [
   {
@@ -30,9 +28,6 @@ const plans = [
   <div class="space-y-4">
     <section class="panel p-4 sm:p-5">
       <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">订阅中心</h1>
-      <p class="mt-1.5 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
-        {{ t('watch_intro') }}
-      </p>
     </section>
 
     <div class="grid gap-4 sm:grid-cols-2">
@@ -55,13 +50,5 @@ const plans = [
         </ul>
       </section>
     </div>
-
-    <section class="panel p-4 sm:p-5">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">通知纪律</h2>
-      <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
-        同一事件、同一状态只通知一次；新内容未改变结论时不单独打扰；无新增的早报会明确说明而不是静默跳过；
-        每封邮件说明为什么收到、发生了什么，并提供退订入口。
-      </p>
-    </section>
   </div>
 </template>

@@ -51,11 +51,6 @@ const announcement = reactive({ enabled: false, level: 'info', text: '', link: '
 // ---------- 文案 ----------
 const TEXT_LABELS: Record<string, string> = {
   footer_note: '页脚说明',
-  home_intro: '首页介绍行',
-  official_note: '官方动态页提示',
-  events_note: '事件库页提示',
-  sources_note: '来源健康页说明',
-  watch_intro: '订阅中心页说明',
 }
 const texts = ref<Record<string, string>>({})
 
@@ -380,9 +375,6 @@ async function saveTexts() {
     <!-- 文案区域 -->
     <section class="panel p-5">
       <h2 class="text-sm font-semibold">页面文案区域</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-        各页面展示说明文字，留空恢复默认；保存后全站立即生效。
-      </p>
       <div class="mt-4 space-y-3">
         <div v-for="(label, key) in TEXT_LABELS" :key="key">
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">{{ label }}（{{ key }}）</label>

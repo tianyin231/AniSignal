@@ -47,7 +47,7 @@ watch(() => props.item.cover, () => (coverFailed.value = false))
         >
           {{ item.title }}
         </NuxtLink>
-        <p v-if="item.excerpt" class="mt-3 line-clamp-4 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
+        <p v-if="item.excerpt" class="mt-3 line-clamp-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
           {{ item.excerpt }}
         </p>
         <div v-if="item.keywords?.length" class="mt-3 flex flex-wrap gap-1.5">

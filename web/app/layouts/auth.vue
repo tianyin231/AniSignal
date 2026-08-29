@@ -40,9 +40,6 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
       <section class="panel-glass hidden space-y-4 p-5 lg:block">
         <div>
           <h2 class="text-sm font-semibold">正在发生的事</h2>
-          <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-            多平台官方内容自动归并为带证据链的事件；全站免费浏览，登录仅用于订阅与通知。
-          </p>
         </div>
         <ul class="space-y-2.5">
           <li v-for="e in events" :key="e.id">

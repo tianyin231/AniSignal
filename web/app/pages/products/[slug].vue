@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ApiEventList, ApiProduct } from '~/composables/usePublicApi'
-import { categoryMeta, toAppEvent } from '~/utils/public-utils'
+import { toAppEvent } from '~/utils/public-utils'
 import type { ProductStage } from '~/utils/data'
 
 const route = useRoute()
@@ -118,19 +118,11 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
         </div>
       </div>
       <div class="panel p-4 sm:p-5">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约阶段</h2>
-          <span class="text-xs text-slate-400">{{ product.stage_source === 'manual' ? '人工审核' : product.stage_source === 'ai' ? 'AI 证据判断' : product.stage_source === 'automatic' ? '证据自动计算' : '暂无结论' }}</span>
-        </div>
-        <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">{{ product.stage_reason }}</p>
+        <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约阶段</h2>
         <ProductEvidenceLinks :items="stageEvidences" />
         <div class="mt-4">
           <FulfillmentStepper :stages="stages" variant="full" />
         </div>
-        <p class="mt-4 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">
-          阶段只依据公开证据推进：送测开箱仅证明样品存在；独立账号数达到阈值才推进"多名用户到货"；
-          相近购买时间与普遍到货需要更多样本，暂不自动推进。
-        </p>
       </div>
     </section>
 

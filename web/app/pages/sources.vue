@@ -6,7 +6,6 @@ import type { PublicSource } from '~/composables/usePublicApi'
 useSeoMeta({ title: '来源健康' })
 
 const { api } = usePublicApi()
-const { t } = useSiteConfig()
 const { data } = await useAsyncData('public-sources', () => api<{ items: PublicSource[] }>('/api/sources'))
 
 const regionOf: Record<string, Region> = {
@@ -30,9 +29,6 @@ const targetTypeLabels: Record<string, string> = {
   <div class="space-y-4">
     <section class="panel p-4 sm:p-5">
       <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">来源健康</h1>
-      <p class="mt-1.5 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
-        {{ t('sources_note') }}
-      </p>
     </section>
 
     <section class="panel overflow-x-auto">
@@ -85,9 +81,5 @@ const targetTypeLabels: Record<string, string> = {
         </tbody>
       </table>
     </section>
-
-    <p class="text-xs leading-relaxed text-slate-400 dark:text-zinc-500">
-      「没有抓到」不会被解释为「没有消息」。来源失效必须显示为不可用或数据可能不完整；每个平台适配器可独立关闭，并支持人工补录关键事件。
-    </p>
   </div>
 </template>

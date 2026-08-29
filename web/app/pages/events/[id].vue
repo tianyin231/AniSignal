@@ -60,11 +60,8 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
 
     <section class="panel p-4 sm:p-5">
       <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">当前结论</h2>
-      <p v-if="detail.summary" class="mt-2 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
-        {{ detail.summary }}
-      </p>
       <p class="mt-2 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
-        {{ event.conclusion || '结论整理中' }}
+        {{ detail.summary || event.conclusion || '结论整理中' }}
       </p>
       <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
         <span class="chip" :class="confidenceClass[event.confidence]">可信度 {{ event.confidence }}</span>
@@ -72,9 +69,6 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
           状态：{{ event.statusChange }}
         </span>
       </div>
-      <p v-if="event.confidenceReason" class="mt-2 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">
-        可信度依据：{{ event.confidenceReason }}
-      </p>
     </section>
 
     <section class="panel p-4 sm:p-5">
@@ -100,9 +94,6 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
           <p class="mt-0.5 leading-relaxed text-slate-600 dark:text-zinc-300">{{ c.note }}</p>
         </li>
       </ol>
-      <p class="mt-3 border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
-        结论可以被修正：引擎自动聚合，人工复核后锁定；每条修正都留痕。
-      </p>
     </section>
 
     <SubscribeCta />

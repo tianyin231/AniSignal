@@ -47,9 +47,5 @@ const products = computed(() => data.value?.items ?? [])
       暂无追踪中的商品。商品与监控词由管理员在后台维护。
     </section>
 
-    <p class="mt-4 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">
-      商品履约追踪以公开证据为准：送测样品不等于消费者订单发货；单一账号的开箱需要人工复核。
-      第一个商品闭环稳定前不增加新品类。
-    </p>
   </div>
 </template>

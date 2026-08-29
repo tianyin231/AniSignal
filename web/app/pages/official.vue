@@ -20,7 +20,6 @@ const tab = computed({
 })
 
 const { api } = usePublicApi()
-const { t } = useSiteConfig()
 const { data, status } = await useAsyncData('official-feed', () =>
   api<PublicContentList>('/api/contents', { query: { identity: 'official', limit: 100 } }),
 )
@@ -46,10 +45,6 @@ useSeoMeta({ title: '官方动态' })
 <template>
   <div>
     <TabNav v-model="tab" :tabs="tabs" />
-
-    <p class="mb-3 text-xs text-slate-400 dark:text-zinc-500">
-      {{ t('official_note') }}
-    </p>
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…
