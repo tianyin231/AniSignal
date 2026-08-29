@@ -45,7 +45,9 @@ watch(
 )
 watch(theme, () => nextTick(createChart))
 
-onMounted(() => {
+onMounted(async () => {
+  await nextTick()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
   createChart()
   resizeObserver = new ResizeObserver(() => chart?.resize())
   if (root.value) resizeObserver.observe(root.value)
