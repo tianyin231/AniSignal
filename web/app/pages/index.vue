@@ -308,7 +308,6 @@ useSeoMeta({ title: '近期情报' })
 
     <div class="mt-6 space-y-4 xl:hidden">
       <StatusCard />
-      <TodayBriefCard />
-    </div>
+      </div>
   </div>
 </template>
