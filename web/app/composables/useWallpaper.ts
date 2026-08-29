@@ -1,8 +1,8 @@
 /**
  * 随机壁纸背景：与浅色/深色主题同级的用户偏好（localStorage 持久化）。
- * 开启时经后端 /api/wallpaper（302 到解析后的原图，10 分钟缓存）加载；
- * 加载失败回退默认极光背景，不打断页面。下载走 /api/wallpaper/download，
- * 与展示共用同一解析缓存，保证下载的正是当前看到的那张。
+ * 开启时向后端 /api/wallpaper 要一个新解析的原图地址（每次页面加载基本不同），
+ * 直接热链显示；加载失败回退默认极光背景。下载走 /api/wallpaper/download?url=<当前地址>，
+ * 服务端只转发自己签发过的地址，保证下载的就是当前展示的那张。
  */
 
 export type WallpaperStatus = 'off' | 'loading' | 'on' | 'failed'
@@ -11,24 +11,32 @@ const STORAGE_KEY = 'anisignal-wallpaper'
 
 export function useWallpaper() {
   const status = useState<WallpaperStatus>('wallpaper-status', () => 'off')
-  // 实际应用的背景地址（带 cache-bust，每次开启取新图）
+  // 当前展示的原图地址（热链），同时用于下载
   const src = useState<string>('wallpaper-src', () => '')
 
   function apply() {
     status.value = 'loading'
     src.value = ''
-    const url = `/api/wallpaper?t=${Date.now()}`
-    const probe = new Image()
-    probe.onload = () => {
-      if (status.value !== 'loading') return // 已被关闭或重新开启
-      src.value = url
-      status.value = 'on'
-    }
-    probe.onerror = () => {
-      if (status.value !== 'loading') return
-      status.value = 'failed'
-    }
-    probe.src = url
+    $fetch<{ url?: string }>('/api/wallpaper')
+      .then((res) => {
+        const url = res?.url
+        if (!url || status.value !== 'loading') return
+        const probe = new Image()
+        probe.onload = () => {
+          if (status.value !== 'loading') return
+          src.value = url
+          status.value = 'on'
+        }
+        probe.onerror = () => {
+          if (status.value !== 'loading') return
+          status.value = 'failed'
+        }
+        probe.referrerPolicy = 'no-referrer'
+        probe.src = url
+      })
+      .catch(() => {
+        if (status.value === 'loading') status.value = 'failed'
+      })
   }
 
   function persist(value: string) {
