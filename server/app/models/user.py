@@ -108,6 +108,7 @@ class NotificationDelivery(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")
     subject: Mapped[str | None] = mapped_column(String(255))
     body: Mapped[str | None] = mapped_column(Text)
+    html_body: Mapped[str | None] = mapped_column(Text)
     matched_keywords: Mapped[list] = mapped_column(JSON, default=list)
     content_ids: Mapped[list] = mapped_column(JSON, default=list)
     error: Mapped[str | None] = mapped_column(Text)
