@@ -16,7 +16,7 @@ const previewLabel = computed(() => ({
 
 <template>
   <article class="flex border-b border-slate-900/5 last:border-0 dark:border-white/5">
-    <NuxtLink :to="detailTo" class="group flex min-w-0 flex-1 gap-3 px-4 py-3 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:hover:bg-zinc-800/40">
+    <NuxtLink :to="detailTo" class="group flex min-w-0 flex-1 gap-3 px-4 py-3 transition-colors hover:bg-slate-900/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 dark:hover:bg-zinc-800/40">
       <span
         class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-bold text-white"
         :class="platformMeta[item.platform].badge"

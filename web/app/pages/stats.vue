@@ -233,7 +233,7 @@ useSeoMeta({ title: '数据统计' })
             :key="item.value"
             type="button"
             class="min-h-9 rounded-md px-3 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
-            :class="range === item.value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-zinc-800'"
+            :class="range === item.value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-900/[0.06] dark:text-zinc-300 dark:hover:bg-white/10'"
             :aria-pressed="range === item.value"
             @click="range = item.value"
           >
