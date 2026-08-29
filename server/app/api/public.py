@@ -3,9 +3,14 @@
 公开页当前展示"原始内容流"；事件聚合视图属于事件引擎阶段（设计文档 §4）。
 """
 
-from datetime import datetime, timedelta
+import asyncio
+import logging
+import time
+from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Query, Request
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -509,3 +514,91 @@ async def statistics(
         except Exception:  # noqa: BLE001
             pass
     return result
+
+
+# ---------- 随机壁纸背景（用户可关，失败回退默认背景）----------
+
+WALLPAPER_API = "https://api.yppp.net/api.php"
+# 解析结果进程内缓存：保证同一时间窗内展示与下载是同一张图，也避免频繁请求第三方
+WALLPAPER_TTL_SECONDS = 600
+_wallpaper_cache: dict = {"url": None, "expires": 0.0}
+_wallpaper_lock = asyncio.Lock()
+
+logger = logging.getLogger(__name__)
+
+
+async def _resolve_wallpaper() -> str | None:
+    """跟随重定向拿到最终图片地址；只接受 http(s) 的图片响应。"""
+    if _wallpaper_cache["url"] and time.monotonic() < _wallpaper_cache["expires"]:
+        return _wallpaper_cache["url"]
+    async with _wallpaper_lock:
+        if _wallpaper_cache["url"] and time.monotonic() < _wallpaper_cache["expires"]:
+            return _wallpaper_cache["url"]
+        try:
+            headers = {"User-Agent": "AniSignal/1.0 (wallpaper)"}
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=httpx.Timeout(10.0)
+            ) as client:
+                request = client.build_request("GET", WALLPAPER_API, headers=headers)
+                # 流式取响应头即够；1MB+ 的图片体不读到本地，立刻释放
+                resp = await client.send(request, stream=True)
+                final_url = str(resp.url)
+                content_type = resp.headers.get("content-type", "").lower()
+                await resp.aclose()
+            if resp.status_code != 200 or not final_url.startswith(("http://", "https://")):
+                return None
+            if not content_type.startswith("image/"):
+                return None
+        except Exception:  # noqa: BLE001 - 壁纸源故障只降级，不影响主功能
+            logger.warning("wallpaper resolve failed", exc_info=True)
+            return None
+        _wallpaper_cache["url"] = final_url
+        _wallpaper_cache["expires"] = time.monotonic() + WALLPAPER_TTL_SECONDS
+        return final_url
+
+
+async def _fetch_wallpaper_bytes() -> tuple[bytes, str]:
+    """下载缓存的最终图片，返回 (内容, content_type)。"""
+    url = await _resolve_wallpaper()
+    if url is None:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用")
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=httpx.Timeout(30.0)
+        ) as client:
+            resp = await client.get(url, headers={"User-Agent": "AniSignal/1.0 (wallpaper)"})
+    except Exception:  # noqa: BLE001
+        logger.warning("wallpaper download failed", exc_info=True)
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用") from None
+    content_type = resp.headers.get("content-type", "").lower()
+    if resp.status_code != 200 or not content_type.startswith("image/"):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用")
+    return resp.content, content_type
+
+
+@router.get("/wallpaper")
+async def wallpaper_redirect():
+    """随机壁纸：302 到解析后的原图地址。失败返回 502，前端回退默认背景。"""
+    url = await _resolve_wallpaper()
+    if url is None:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用")
+    return RedirectResponse(url, status_code=302)
+
+
+@router.get("/wallpaper/download")
+async def wallpaper_download():
+    """下载当前展示的背景原图（服务端流式转发，带附件下载头）。"""
+    content, content_type = await _fetch_wallpaper_bytes()
+    ext = (
+        ".webp"
+        if "webp" in content_type
+        else ".png"
+        if "png" in content_type
+        else ".jpg"
+    )
+    filename = f"anisignal-wallpaper-{date.today():%Y%m%d}{ext}"
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

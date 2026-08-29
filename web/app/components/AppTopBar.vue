@@ -55,6 +55,7 @@ async function handleLogout() {
       </nav>
       <div class="flex shrink-0 items-center gap-1">
         <SearchBox />
+        <WallpaperToggle />
         <ThemeToggle />
         <NuxtLink
           v-if="!user"

@@ -171,3 +171,81 @@ async def test_public_contents_hide_promotions_by_default(client, session):
     visible = (await client.get("/api/contents", params={"include_chat": True})).json()
     assert visible["total"] == 1
     assert visible["items"][0]["category"] == "promotion"
+
+
+async def test_wallpaper_redirect(client, monkeypatch):
+    from app.api import public as public_module
+
+    async def fake_resolve():
+        return "https://list.yppp.net/d/image/abc123.webp"
+
+    monkeypatch.setattr(public_module, "_resolve_wallpaper", fake_resolve)
+    resp = await client.get("/api/wallpaper")
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "https://list.yppp.net/d/image/abc123.webp"
+
+
+async def test_wallpaper_unavailable_returns_502(client, monkeypatch):
+    from app.api import public as public_module
+
+    async def fake_resolve():
+        return None
+
+    monkeypatch.setattr(public_module, "_resolve_wallpaper", fake_resolve)
+    assert (await client.get("/api/wallpaper")).status_code == 502
+    assert (await client.get("/api/wallpaper/download")).status_code == 502
+
+
+async def test_wallpaper_download_attachment(client, monkeypatch):
+    from app.api import public as public_module
+
+    async def fake_resolve():
+        return "https://list.yppp.net/d/image/abc123.webp"
+
+    async def fake_fetch():
+        return b"fake-image-bytes", "image/webp"
+
+    monkeypatch.setattr(public_module, "_resolve_wallpaper", fake_resolve)
+    monkeypatch.setattr(public_module, "_fetch_wallpaper_bytes", fake_fetch)
+    resp = await client.get("/api/wallpaper/download")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("image/webp")
+    assert 'filename="anisignal-wallpaper-' in resp.headers["content-disposition"]
+    assert resp.headers["content-disposition"].endswith('.webp"')
+
+
+async def test_wallpaper_resolve_rejects_non_image(monkeypatch):
+    """解析结果必须是图片响应，否则视为源不可用。"""
+    import httpx
+    from app.api import public as public_module
+
+    public_module._wallpaper_cache["url"] = None
+    public_module._wallpaper_cache["expires"] = 0.0
+
+    class FakeResp:
+        status_code = 200
+        url = "https://evil.example/not-image"
+        headers = {"content-type": "text/html"}
+
+        async def aclose(self):
+            pass
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            pass
+
+        def build_request(self, *a, **k):
+            return object()
+
+        async def send(self, *a, **k):
+            return FakeResp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    assert await public_module._resolve_wallpaper() is None
+    assert public_module._wallpaper_cache["url"] is None  # 不缓存非图片结果
