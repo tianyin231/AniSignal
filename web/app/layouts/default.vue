@@ -1,6 +1,7 @@
 <template>
   <div class="min-h-screen">
     <div class="aurora-bg pointer-events-none fixed inset-0 -z-10" aria-hidden="true" />
+    <WallpaperBackdrop />
     <AnnouncementBanner />
     <AppTopBar />
     <div class="mx-auto max-w-[1280px] px-4 lg:px-6">

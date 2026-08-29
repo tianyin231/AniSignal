@@ -12,6 +12,7 @@ async function handleLogout() {
 
 <template>
   <div class="aurora-bg min-h-screen">
+    <WallpaperBackdrop />
     <AnnouncementBanner />
   <header class="glass sticky top-0 z-20">
       <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
