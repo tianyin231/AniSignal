@@ -21,7 +21,7 @@ const icon = computed<{ comp: Component; class: string }>(() => ({
 })[status.value]!)
 
 const downloadHref = computed(() =>
-  origin.value ? `/api/wallpaper/download?url=${encodeURIComponent(origin.value)}` : '',
+  src.value ? `/api/wallpaper/download?url=${encodeURIComponent(src.value)}` : '',
 )
 
 function onToggle() {
