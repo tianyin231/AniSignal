@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BellRing, CircleAlert, Clock3, Mail, Pencil, Plus, Sparkles, X } from 'lucide-vue-next'
+import { BellRing, CircleAlert, Clock3, KeyRound, Mail, Pencil, Plus, RotateCw, Sparkles, X } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 import { toRawItem } from '~/utils/public-utils'
@@ -25,12 +25,9 @@ interface Overview {
   avatar: string | null
   is_verified: boolean
   created_at: string | null
-  last_login_at: string | null
-  subscription: { plan: string; label: string; expires_at: string | null }
   keywords_total: number
   keywords_enabled: number
   feed_total: number
-  notification_enabled: boolean
 }
 const overview = ref<Overview | null>(null)
 
@@ -69,24 +66,70 @@ const notificationBlockReason = computed(() => {
   return ''
 })
 
+// ---------- 邮箱验证 ----------
+const resendBusy = ref(false)
+const resendMessage = ref('')
+
+async function resendVerification() {
+  if (resendBusy.value || !user.value?.email) return
+  resendBusy.value = true
+  resendMessage.value = ''
+  try {
+    const res = await $fetch<{ message: string }>('/api/auth/resend', {
+      method: 'POST',
+      body: { email: user.value.email },
+    })
+    resendMessage.value = res.message || '验证邮件已发送，请查收。'
+  } catch (exc: any) {
+    resendMessage.value = exc?.data?.detail ?? '发送失败，请稍后再试'
+  } finally {
+    resendBusy.value = false
+  }
+}
+
 // ---------- 关键词 ----------
-interface Keyword { id: number; keyword: string; enabled: boolean }
+interface Keyword { id: number; keyword: string; enabled: boolean; matches: number }
 const keywords = ref<Keyword[]>([])
 const newKeyword = ref('')
 const keywordError = ref('')
 const busy = ref(false)
 
-// ---------- 关注流（每页 20 条）----------
+// ---------- 关注流（每页 20 条，可按关键词筛选）----------
 const FEED_PAGE_SIZE = 20
 const feed = ref<PublicContentList | null>(null)
 const feedPage = ref(1)
+const selectedKeywordId = ref<number | null>(null)
 const feedTotalPages = computed(() => Math.max(1, Math.ceil((feed.value?.total ?? 0) / FEED_PAGE_SIZE)))
+const selectedKeyword = computed(() => keywords.value.find(k => k.id === selectedKeywordId.value) ?? null)
+
+const feedQuery = computed(() => ({
+  limit: FEED_PAGE_SIZE,
+  offset: (feedPage.value - 1) * FEED_PAGE_SIZE,
+  ...(selectedKeywordId.value ? { keyword_id: selectedKeywordId.value } : {}),
+}))
 
 async function fetchFeed() {
-  feed.value = await $fetch<PublicContentList>('/api/account/feed', {
-    query: { limit: FEED_PAGE_SIZE, offset: (feedPage.value - 1) * FEED_PAGE_SIZE },
-  })
+  feed.value = await $fetch<PublicContentList>('/api/account/feed', { query: feedQuery.value })
 }
+
+function setKeywordFilter(k: Keyword) {
+  if (!k.enabled || busy.value) return
+  selectedKeywordId.value = selectedKeywordId.value === k.id ? null : k.id
+  feedPage.value = 1
+  fetchFeed()
+}
+
+function clearKeywordFilter() {
+  selectedKeywordId.value = null
+  feedPage.value = 1
+  fetchFeed()
+}
+
+// 被筛选的关键词停用/删除后，自动回到全部
+watch(keywords, (list) => {
+  if (selectedKeywordId.value && !list.some(k => k.id === selectedKeywordId.value && k.enabled))
+    clearKeywordFilter()
+})
 
 function feedGoPage(p: number) {
   feedPage.value = Math.min(Math.max(1, p), feedTotalPages.value)
@@ -98,9 +141,7 @@ async function refresh() {
     const [ov, kw, fd, nt] = await Promise.all([
       $fetch<Overview>('/api/account/overview'),
       $fetch<Keyword[]>('/api/account/keywords'),
-      $fetch<PublicContentList>('/api/account/feed', {
-        query: { limit: FEED_PAGE_SIZE, offset: (feedPage.value - 1) * FEED_PAGE_SIZE },
-      }),
+      $fetch<PublicContentList>('/api/account/feed', { query: feedQuery.value }),
       $fetch<NotificationStatus>('/api/account/notifications'),
     ])
     overview.value = ov
@@ -212,6 +253,7 @@ async function removeKeyword(k: Keyword) {
 
 // ---------- 资料编辑 ----------
 const editingProfile = ref(false)
+const profileError = ref('')
 const nameDraft = ref('')
 const avatarDraft = ref(DEFAULT_AVATAR)
 
@@ -228,13 +270,14 @@ async function saveProfile() {
     editingProfile.value = false
     await refresh()
   } catch (exc: any) {
-    keywordError.value = exc?.data?.detail ?? '保存失败'
+    profileError.value = exc?.data?.detail ?? '保存失败'
   } finally {
     busy.value = false
   }
 }
 
-// ---------- 安全 ----------
+// ---------- 安全（低频操作，默认收起）----------
+const showSecurity = ref(false)
 const oldPassword = ref('')
 const newPassword = ref('')
 const securityMsg = ref('')
@@ -275,15 +318,29 @@ async function changePassword() {
               <Pencil :size="11" /> 编辑资料
             </button>
             <span v-if="overview?.is_verified" class="chip bg-emerald-500/10 font-medium text-emerald-600 dark:text-emerald-400">邮箱已验证</span>
-            <span class="chip bg-blue-500/10 font-medium text-blue-700 dark:text-blue-300">{{ overview?.subscription.label ?? '免费版' }}</span>
           </div>
           <p class="mono mt-1 text-xs text-slate-400 dark:text-zinc-500">
-            {{ user?.email }} · 注册于 {{ fmtTime(overview?.created_at) }} · 最近登录 {{ fmtTime(overview?.last_login_at) }}
-            <template v-if="overview?.subscription.expires_at"> · 到期 {{ overview.subscription.expires_at }}</template>
-            <template v-else> · 无到期时间</template>
+            {{ user?.email }} · 注册于 {{ fmtTime(overview?.created_at) }}
           </p>
         </div>
       </div>
+
+      <!-- 未验证邮箱：重发入口 -->
+      <div v-if="overview && !overview.is_verified" class="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3">
+        <CircleAlert :size="15" class="shrink-0 text-amber-600 dark:text-amber-300" />
+        <p class="min-w-0 flex-1 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
+          邮箱还未验证，通知与早报功能不可用。验证邮件 15 分钟内有效，未收到可重发。
+        </p>
+        <button
+          class="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+          :disabled="resendBusy"
+          @click="resendVerification"
+        >
+          <RotateCw :size="13" :class="resendBusy ? 'animate-spin' : ''" />
+          {{ resendBusy ? '发送中…' : '重发验证邮件' }}
+        </button>
+      </div>
+      <p v-if="resendMessage" class="mt-2 text-xs text-slate-500 dark:text-zinc-400">{{ resendMessage }}</p>
 
       <!-- 资料编辑 -->
       <div v-if="editingProfile" class="mt-5 rounded-xl border border-blue-500/30 bg-blue-500/5 p-4">
@@ -305,36 +362,21 @@ async function changePassword() {
             {{ displayName(overview ?? user)[0]!.toUpperCase() }}
           </button>
         </div>
+        <p v-if="profileError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ profileError }}</p>
         <div class="mt-4 flex gap-2">
           <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveProfile">保存</button>
           <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" @click="editingProfile = false">取消</button>
-        </div>
-      </div>
-
-      <!-- 关键指标 -->
-      <div class="mt-5 grid grid-cols-3 gap-3">
-        <div class="rounded-xl bg-slate-500/5 px-4 py-3 dark:bg-white/5">
-          <p class="text-xs text-slate-500 dark:text-zinc-400">监控关键词</p>
-          <p class="mono mt-1 text-xl font-semibold">{{ overview?.keywords_total ?? '—' }}<span class="text-xs font-normal text-slate-400"> / 10</span></p>
-        </div>
-        <div class="rounded-xl bg-slate-500/5 px-4 py-3 dark:bg-white/5">
-          <p class="text-xs text-slate-500 dark:text-zinc-400">关注内容</p>
-          <p class="mono mt-1 text-xl font-semibold">{{ overview?.feed_total ?? '—' }}</p>
-        </div>
-        <div class="rounded-xl bg-slate-500/5 px-4 py-3 dark:bg-white/5">
-          <p class="text-xs text-slate-500 dark:text-zinc-400">订阅状态</p>
-          <p class="mt-1 text-xl font-semibold">{{ overview?.subscription.label ?? '免费版' }}</p>
         </div>
       </div>
     </section>
 
     <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
       <div class="space-y-5">
-        <!-- 关键词监控 -->
+        <!-- 关键词监控 + 关注流（点击关键词筛选）-->
         <section id="keyword-monitor" class="panel scroll-mt-20 p-5">
           <div class="flex items-center justify-between gap-2">
             <h2 class="text-sm font-semibold">关键词监控</h2>
-            <span class="text-xs text-slate-400">{{ overview?.keywords_enabled ?? 0 }} 个启用中</span>
+            <span class="text-xs text-slate-400">{{ overview?.keywords_enabled ?? 0 }} 个启用中<span v-if="overview?.keywords_enabled" class="ml-1 hidden sm:inline">· 点击关键词可筛选下方关注流</span></span>
           </div>
           <form class="mt-3 flex gap-2" @submit.prevent="addKeyword">
             <div class="relative flex-1">
@@ -353,15 +395,29 @@ async function changePassword() {
             <div
               v-for="k in keywords"
               :key="k.id"
-              class="group flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors"
-              :class="k.enabled
-                ? 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300'
-                : 'border-slate-900/10 text-slate-400 line-through dark:border-white/15 dark:text-zinc-500'"
+              class="group flex items-center gap-1.5 rounded-full border py-1 pl-2 pr-1.5 text-sm transition-colors"
+              :class="selectedKeywordId === k.id
+                ? 'border-blue-600 bg-blue-600 text-white dark:border-blue-500 dark:bg-blue-500'
+                : k.enabled
+                  ? 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300'
+                  : 'border-slate-900/10 text-slate-400 dark:border-white/15 dark:text-zinc-500'"
             >
-              <button :disabled="busy" :title="k.enabled ? '点击暂停' : '点击启用'" @click="toggleKeyword(k)">
-                <span class="size-1.5 rounded-full" :class="k.enabled ? 'bg-blue-500' : 'bg-slate-400'" />
+              <button :disabled="busy" :title="k.enabled ? '点击暂停' : '点击启用'" class="grid place-items-center" @click="toggleKeyword(k)">
+                <span class="size-1.5 rounded-full" :class="k.enabled ? (selectedKeywordId === k.id ? 'bg-white' : 'bg-blue-500') : 'bg-slate-400'" />
               </button>
-              <span>{{ k.keyword }}</span>
+              <button
+                :disabled="busy || !k.enabled"
+                :title="k.enabled ? '点击筛选关注流' : '启用后可筛选'"
+                class="flex items-center gap-1.5"
+                @click="setKeywordFilter(k)"
+              >
+                <span :class="k.enabled ? '' : 'line-through'">{{ k.keyword }}</span>
+                <span
+                  v-if="k.enabled"
+                  class="mono rounded-full px-1.5 text-[11px] leading-4 tabular-nums"
+                  :class="selectedKeywordId === k.id ? 'bg-white/20' : 'bg-blue-500/15 dark:bg-blue-400/15'"
+                >{{ k.matches }}</span>
+              </button>
               <button :disabled="busy" class="opacity-40 transition-opacity group-hover:opacity-100" title="删除" @click="removeKeyword(k)">
                 <X :size="13" />
               </button>
@@ -371,15 +427,31 @@ async function changePassword() {
 
         <!-- 我的关注流 -->
         <section class="panel overflow-hidden">
-          <div class="flex items-center justify-between px-5 py-3.5">
-            <h2 class="text-sm font-semibold">我的关注流</h2>
-            <span class="text-xs text-slate-400">{{ feed?.total ?? 0 }} 条命中</span>
+          <div class="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5">
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold">我的关注流</h2>
+              <button
+                v-if="selectedKeyword"
+                type="button"
+                class="inline-flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-xs font-medium text-white dark:bg-blue-500"
+                title="清除筛选"
+                @click="clearKeywordFilter"
+              >
+                {{ selectedKeyword.keyword }} <X :size="12" />
+              </button>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-500">
+              <span v-if="(feed?.new_today ?? 0) > 0" class="rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-600 dark:text-emerald-400">近24h +{{ feed?.new_today }}</span>
+              <span>{{ feed?.total ?? 0 }} 条命中</span>
+            </div>
           </div>
           <div v-if="feed?.items?.length" class="border-t border-slate-900/5 dark:border-white/5">
             <RawFeedRow v-for="item in feed.items" :key="item.id" :item="toRawItem(item)" />
           </div>
           <p v-else class="border-t border-slate-900/5 px-5 py-8 text-center text-sm text-slate-400 dark:border-white/5 dark:text-zinc-500">
-            {{ keywords.length ? '暂无命中关键词的内容，系统持续采集中。' : '添加关键词后，这里会展示命中的最新内容。' }}
+            <template v-if="selectedKeyword">关键词「{{ selectedKeyword.keyword }}」暂无命中内容，系统持续采集中。</template>
+            <template v-else-if="keywords.length">暂无命中关键词的内容，系统持续采集中。</template>
+            <template v-else>添加关键词后，这里会展示命中的最新内容。</template>
           </p>
           <div v-if="(feed?.total ?? 0) > FEED_PAGE_SIZE" class="flex items-center justify-between border-t border-slate-900/5 px-5 py-2.5 text-xs text-slate-400 dark:border-white/5 dark:text-zinc-500">
             <span>共 {{ feed?.total }} 条 · 每页 {{ FEED_PAGE_SIZE }} 条</span>
@@ -392,7 +464,7 @@ async function changePassword() {
         </section>
       </div>
 
-      <!-- 右栏：通知 + 订阅 + 安全 -->
+      <!-- 右栏：通知 + 安全 -->
       <div class="space-y-5">
         <section class="panel p-5">
           <div class="flex items-center justify-between gap-3">
@@ -477,17 +549,28 @@ async function changePassword() {
         </section>
 
         <section class="panel p-5">
-          <h2 class="text-sm font-semibold">安全设置</h2>
-          <input v-model="oldPassword" type="password" autocomplete="current-password" placeholder="原密码"
-            class="mt-3 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-model="newPassword" type="password" autocomplete="new-password" placeholder="新密码（至少 8 位）"
-            class="mt-2.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <p v-if="securityErr" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ securityErr }}</p>
-          <p v-if="securityMsg" class="mt-2 text-xs text-emerald-600 dark:text-emerald-400">{{ securityMsg }}</p>
-          <button class="btn-primary mt-3 w-full px-4 py-2" :disabled="busy || !oldPassword || !newPassword" @click="changePassword">
-            {{ busy ? '提交中…' : '修改密码' }}
-          </button>
-          <p class="mt-2 text-center text-xs text-slate-400 dark:text-zinc-500">修改后其他设备将自动退出</p>
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="flex items-center gap-2 text-sm font-semibold"><KeyRound :size="15" /> 安全设置</h2>
+            <button
+              type="button"
+              class="rounded-md border border-slate-900/10 px-3 py-1.5 text-xs text-slate-600 transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+              @click="showSecurity = !showSecurity"
+            >
+              {{ showSecurity ? '收起' : '修改密码' }}
+            </button>
+          </div>
+          <p v-if="!showSecurity" class="mt-1 text-xs text-slate-400 dark:text-zinc-500">修改密码后其他登录会话将全部退出。</p>
+          <template v-else>
+            <input v-model="oldPassword" type="password" autocomplete="current-password" placeholder="原密码"
+              class="mt-3 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+            <input v-model="newPassword" type="password" autocomplete="new-password" placeholder="新密码（至少 8 位）"
+              class="mt-2.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+            <p v-if="securityErr" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ securityErr }}</p>
+            <p v-if="securityMsg" class="mt-2 text-xs text-emerald-600 dark:text-emerald-400">{{ securityMsg }}</p>
+            <button class="btn-primary mt-3 w-full px-4 py-2" :disabled="busy || !oldPassword || !newPassword" @click="changePassword">
+              {{ busy ? '提交中…' : '修改密码' }}
+            </button>
+          </template>
         </section>
       </div>
     </div>

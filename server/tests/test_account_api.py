@@ -41,11 +41,12 @@ async def test_keyword_crud_and_limit(client, session):
     # 列表 + 概览
     resp = await client.get("/api/account/keywords")
     assert len(resp.json()) == 1
+    assert resp.json()[0]["matches"] == 0  # 尚无命中内容
     resp = await client.get("/api/account/overview")
     body = resp.json()
     assert body["keywords_total"] == 1
     assert body["keywords_enabled"] == 0  # 已停用
-    assert body["subscription"]["plan"] == "free"
+    assert "subscription" not in body  # 订阅未上线，不再返回
 
     # 删除
     resp = await client.delete(f"/api/account/keywords/{kid}")
@@ -71,17 +72,53 @@ async def test_feed_matches_keywords(client, session):
             dict(VIDEO_RAW, bvid="BVf2", title="鸣潮3.6版本实机演示"),
         ],
     )
-    await client.post("/api/account/keywords", json={"keyword": "爱弥斯"})
+    resp = await client.post("/api/account/keywords", json={"keyword": "爱弥斯"})
+    kid = resp.json()["id"]
 
     resp = await client.get("/api/account/feed")
     body = resp.json()
     assert body["total"] == 1
     assert "爱弥斯" in body["items"][0]["title"]
     assert body["items"][0]["external_id"] == "BVf1"
+    assert body["items"][0]["matched_keywords"] == ["爱弥斯"]
+    assert body["new_today"] == 1  # 刚采集即计为近 24h
+
+    # 关键词列表带命中数
+    resp = await client.get("/api/account/keywords")
+    assert resp.json()[0]["matches"] == 1
+
+    # keyword_id 筛选：命中该关键词
+    resp = await client.get("/api/account/feed", params={"keyword_id": kid})
+    assert resp.json()["total"] == 1
+
+    # keyword_id 不属于当前用户 → 404
+    resp = await client.get("/api/account/feed", params={"keyword_id": 99999})
+    assert resp.status_code == 404
 
     # 概览统计同步
     resp = await client.get("/api/account/overview")
     assert resp.json()["feed_total"] == 1
+
+
+async def test_feed_keyword_filter_isolates(client, session):
+    """keyword_id 筛选只看该关键词，不受其他关键词干扰。"""
+    await _register_and_login(client, session, email="filter@t.com")
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [
+            dict(VIDEO_RAW, bvid="BVa", title="爱弥斯键盘联名开售"),
+            dict(VIDEO_RAW, bvid="BVb", title="菲比角色 PV 发布"),
+        ],
+    )
+    kid_a = (await client.post("/api/account/keywords", json={"keyword": "爱弥斯"})).json()["id"]
+    await client.post("/api/account/keywords", json={"keyword": "菲比"})
+
+    resp = await client.get("/api/account/feed", params={"keyword_id": kid_a})
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["external_id"] == "BVa"
+    assert body["items"][0]["matched_keywords"] == ["爱弥斯"]
 
 
 async def test_account_requires_login(client):

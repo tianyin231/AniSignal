@@ -111,6 +111,8 @@ class PublicContentItem(BaseModel):
 class PublicContentList(BaseModel):
     items: list[PublicContentItem]
     total: int
+    # 账号中心关注流附加：近 24 小时新采集的命中条数（公开接口不返回）
+    new_today: int | None = None
 
 
 class ContentMetricPoint(BaseModel):
