@@ -24,6 +24,8 @@ export interface PublicContentItem {
 export interface PublicContentList {
   items: PublicContentItem[]
   total: number
+  /** 账号中心关注流附加：近 24 小时新采集的命中条数 */
+  new_today?: number | null
 }
 
 export interface PublicSource {

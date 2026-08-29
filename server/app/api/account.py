@@ -1,12 +1,14 @@
 """账号中心 API：关键词监控 CRUD、个性化关注流、账号概览。"""
 
 import logging
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select, func
+from sqlalchemy import literal, or_, select, func, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
+from app.clock import utcnow
 from app.db import get_session
 from app.api.admin import get_queue
 from app.models import ContentVersion, NotificationDelivery, RawContent, Source, User, UserKeyword
@@ -21,12 +23,36 @@ router = APIRouter(prefix="/api/account", dependencies=[Depends(get_current_user
 MAX_KEYWORDS = 10
 
 
+def _title_condition(keyword: str):
+    return ContentVersion.title.like(f"%{keyword}%")
+
+
+async def _keyword_counts(
+    session: AsyncSession, keywords: list[UserKeyword]
+) -> dict[str, int]:
+    """每个关键词当前命中的内容条数（单次 union_all 查询）。"""
+    if not keywords:
+        return {}
+    queries = [
+        select(
+            literal(k.keyword).label("keyword"),
+            func.count(func.distinct(RawContent.id)).label("cnt"),
+        )
+        .select_from(RawContent)
+        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+        .where(_title_condition(k.keyword))
+        for k in keywords
+    ]
+    rows = await session.execute(union_all(*queries))
+    return {row.keyword: row.cnt for row in rows}
+
+
 @router.get("/overview")
 async def overview(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """账号中心首屏：基础信息 + 订阅状态 + 关键词统计。"""
+    """账号中心首屏：基础信息 + 关键词统计。"""
     keywords = list(
         (
             await session.execute(
@@ -38,16 +64,11 @@ async def overview(
     )
     feed_total = 0
     if any(k.enabled for k in keywords):
-        conditions = [
-            ContentVersion.title.like(f"%{k.keyword}%")
-            for k in keywords
-            if k.enabled
-        ]
         feed_total = (
             await session.scalar(
                 select(func.count(func.distinct(RawContent.id)))
                 .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-                .where(or_(*conditions))
+                .where(or_(*[_title_condition(k.keyword) for k in keywords if k.enabled]))
             )
             or 0
         )
@@ -59,11 +80,9 @@ async def overview(
         "is_verified": user.is_verified,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
-        "subscription": {"plan": "free", "label": "免费版", "expires_at": None},
         "keywords_total": len(keywords),
         "keywords_enabled": sum(1 for k in keywords if k.enabled),
         "feed_total": feed_total,
-        "notification_enabled": user.notification_enabled,
     }
 
 
@@ -174,8 +193,15 @@ async def list_keywords(
             )
         ).scalars()
     )
+    counts = await _keyword_counts(session, keywords)
     return [
-        {"id": k.id, "keyword": k.keyword, "enabled": k.enabled, "created_at": k.created_at}
+        {
+            "id": k.id,
+            "keyword": k.keyword,
+            "enabled": k.enabled,
+            "matches": counts.get(k.keyword, 0),
+            "created_at": k.created_at,
+        }
         for k in keywords
     ]
 
@@ -243,10 +269,14 @@ async def delete_keyword(
 async def my_feed(
     limit: int = Query(default=30, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    keyword_id: int | None = Query(default=None),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """我的关注流：命中任一启用关键词的最新内容（标题匹配）。"""
+    """我的关注流：命中启用关键词的最新内容（标题匹配）。
+
+    keyword_id 提供时只看该关键词（仍须属于当前用户）。
+    """
     keywords = list(
         (
             await session.execute(
@@ -256,15 +286,27 @@ async def my_feed(
             )
         ).scalars()
     )
+    if keyword_id is not None:
+        owned = await session.get(UserKeyword, keyword_id)
+        if owned is None or owned.user_id != user.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "关键词不存在")
+        keywords = [owned]
     if not keywords:
-        return PublicContentList(items=[], total=0)
+        return PublicContentList(items=[], total=0, new_today=0)
 
-    conditions = [ContentVersion.title.like(f"%{k.keyword}%") for k in keywords]
-    total = await session.scalar(
+    conditions = [_title_condition(k.keyword) for k in keywords]
+    joined = (
         select(func.count(func.distinct(RawContent.id)))
         .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
         .where(or_(*conditions))
-    ) or 0
+    )
+    total = await session.scalar(joined) or 0
+    new_today = (
+        await session.scalar(
+            joined.where(RawContent.collected_at >= utcnow() - timedelta(hours=24))
+        )
+        or 0
+    )
 
     rows = await session.execute(
         select(RawContent, Source, ContentVersion)
@@ -283,6 +325,9 @@ async def my_feed(
         seen.add(raw.id)
         normalized = version.normalized_json or {}
         media = normalized.get("media") or []
+        title = version.title or raw.external_id
+        lowered = title.lower()
+        matched_user_keywords = [k.keyword for k in keywords if k.keyword.lower() in lowered]
         items.append(
             PublicContentItem(
                 id=raw.id,
@@ -290,7 +335,7 @@ async def my_feed(
                 content_type=raw.content_type,
                 external_id=raw.external_id,
                 url=raw.url,
-                title=version.title or raw.external_id,
+                title=title,
                 text_excerpt=_excerpt(version.text or str(normalized.get("text") or "")),
                 published_at=raw.published_at,
                 collected_at=raw.collected_at,
@@ -303,9 +348,10 @@ async def my_feed(
                     if (version.text or str(normalized.get("text") or "")).strip()
                     else ("partial" if media else "external_only")
                 ),
+                matched_keywords=matched_user_keywords,
             )
         )
-    return PublicContentList(items=items, total=total)
+    return PublicContentList(items=items, total=total, new_today=new_today)
 
 
 def _excerpt(text: str) -> str | None:
