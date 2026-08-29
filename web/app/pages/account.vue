@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BellRing, CircleAlert, Clock3, KeyRound, Mail, Pencil, Plus, RotateCw, Sparkles, X } from 'lucide-vue-next'
+import { BellRing, CircleAlert, Clock3, KeyRound, Mail, Pencil, Plus, Sparkles, X } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 import { toRawItem } from '~/utils/public-utils'
@@ -55,37 +55,15 @@ const notificationError = ref('')
 let notificationPoll: ReturnType<typeof setTimeout> | undefined
 
 const notificationReady = computed(() => Boolean(
-  overview.value?.is_verified
-  && notificationInfo.value?.enabled
+  notificationInfo.value?.enabled
   && (overview.value?.keywords_enabled ?? 0) > 0,
 ))
 const notificationBlockReason = computed(() => {
-  if (!overview.value?.is_verified) return '请先完成邮箱验证，再启用通知。'
+  // 登录用户必然已验证（login/register 流程保证），此处只提示通知链路自身的前置条件
   if (!notificationInfo.value?.enabled) return '请先开启邮件通知，之后才能手动发送。'
   if (!(overview.value?.keywords_enabled ?? 0)) return '还没有启用关键词。先添加关键词，系统才有明确的筛选范围。'
   return ''
 })
-
-// ---------- 邮箱验证 ----------
-const resendBusy = ref(false)
-const resendMessage = ref('')
-
-async function resendVerification() {
-  if (resendBusy.value || !user.value?.email) return
-  resendBusy.value = true
-  resendMessage.value = ''
-  try {
-    const res = await $fetch<{ message: string }>('/api/auth/resend', {
-      method: 'POST',
-      body: { email: user.value.email },
-    })
-    resendMessage.value = res.message || '验证邮件已发送，请查收。'
-  } catch (exc: any) {
-    resendMessage.value = exc?.data?.detail ?? '发送失败，请稍后再试'
-  } finally {
-    resendBusy.value = false
-  }
-}
 
 // ---------- 关键词 ----------
 interface Keyword { id: number; keyword: string; enabled: boolean; matches: number }
@@ -325,23 +303,6 @@ async function changePassword() {
         </div>
       </div>
 
-      <!-- 未验证邮箱：重发入口 -->
-      <div v-if="overview && !overview.is_verified" class="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3">
-        <CircleAlert :size="15" class="shrink-0 text-amber-600 dark:text-amber-300" />
-        <p class="min-w-0 flex-1 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
-          邮箱还未验证，通知与早报功能不可用。验证邮件 15 分钟内有效，未收到可重发。
-        </p>
-        <button
-          class="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
-          :disabled="resendBusy"
-          @click="resendVerification"
-        >
-          <RotateCw :size="13" :class="resendBusy ? 'animate-spin' : ''" />
-          {{ resendBusy ? '发送中…' : '重发验证邮件' }}
-        </button>
-      </div>
-      <p v-if="resendMessage" class="mt-2 text-xs text-slate-500 dark:text-zinc-400">{{ resendMessage }}</p>
-
       <!-- 资料编辑 -->
       <div v-if="editingProfile" class="mt-5 rounded-xl border border-blue-500/30 bg-blue-500/5 p-4">
         <h3 class="text-sm font-semibold">编辑资料</h3>
@@ -479,7 +440,7 @@ async function changePassword() {
               :aria-label="notificationInfo?.enabled ? '关闭邮件通知' : '启用邮件通知'"
               class="relative h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               :class="notificationInfo?.enabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-zinc-700'"
-              :disabled="!!notificationBusy || !overview?.is_verified"
+              :disabled="!!notificationBusy"
               @click="toggleNotifications"
             >
               <span class="absolute left-1 top-1 size-5 rounded-full bg-white shadow-sm transition-transform duration-200" :class="notificationInfo?.enabled ? 'translate-x-5' : 'translate-x-0'" />
