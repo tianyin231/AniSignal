@@ -43,6 +43,17 @@ function duration(value: number | null) {
   return `${(value / 1000).toFixed(1)} s`
 }
 
+function statusLabel(status: string) {
+  return { running: '进行中', success: '成功', partial: '部分成功', failed: '失败' }[status] || status
+}
+
+function statusClass(status: string) {
+  if (status === 'running') return 'bg-blue-500/10 text-blue-700 dark:text-blue-300'
+  if (status === 'failed') return 'bg-red-500/10 text-red-600 dark:text-red-400'
+  if (status === 'partial') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+}
+
 function shortDate(value: string) {
   const [, month, day] = value.split('-')
   return `${month}/${day}`
@@ -354,8 +365,8 @@ useSeoMeta({ title: '数据统计' })
                 <td class="max-w-52 truncate px-3 py-2.5 font-medium text-slate-800 dark:text-zinc-200">{{ run.target }}</td>
                 <td class="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabel(run.platform) }}</td>
                 <td class="px-3 py-2.5">
-                  <span class="rounded px-1.5 py-0.5" :class="run.status === 'failed' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : run.status === 'partial' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'">
-                    {{ run.status === 'failed' ? '失败' : run.status === 'partial' ? '部分成功' : '成功' }}
+                  <span class="rounded px-1.5 py-0.5" :class="statusClass(run.status)">
+                    {{ statusLabel(run.status) }}
                   </span>
                 </td>
                 <td class="mono px-3 py-2.5 text-right">{{ run.items_fetched ?? '—' }}</td>
