@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from redis.asyncio import Redis
 
 from app.api.account import router as account_router
 from app.api.admin import router as admin_router
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     settings = get_settings()
+    app.state.redis = Redis.from_url(settings.redis_url, decode_responses=True)
     scheduler_task: asyncio.Task | None = None
     if settings.local_mode:
         # 本地测试模式：进程内队列 + 进程内调度循环（见 app/local.py 入口）
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
     yield
     if scheduler_task is not None:
         scheduler_task.cancel()
+    await app.state.redis.aclose()
     queue = getattr(app.state, "queue", None)
     if queue is not None:
         await queue.aclose()

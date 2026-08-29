@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 顶栏承载内容主栏目；侧栏只放二级页面（商品入口在顶栏与右栏）
 const tools = [
+  { to: '/stats', label: '数据统计' },
   { to: '/sources', label: '来源健康' },
   { to: '/watch', label: '订阅中心' },
 ]

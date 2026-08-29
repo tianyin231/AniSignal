@@ -107,6 +107,24 @@ async def test_public_stats(client, session):
     assert body["latest_collected_at"] is not None
 
 
+async def test_public_statistics_uses_daily_aggregates(client, session):
+    await _seed(session)
+    resp = await client.get("/api/statistics", params={"days": 30})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["totals"]["total_contents"] == 2
+    assert body["totals"]["official_contents"] == 1
+    assert body["totals"]["community_contents"] == 1
+    assert body["totals"]["period_new"] == 2
+    assert {item["platform"] for item in body["platforms"]} == {"bilibili", "kuro_global"}
+    assert len(body["trend"]) == 30
+
+
+async def test_public_statistics_rejects_unbounded_range(client):
+    resp = await client.get("/api/statistics", params={"days": 9999})
+    assert resp.status_code == 422
+
+
 async def test_public_contents_recent_window_and_identity_exclusion(client, session):
     await _seed(session)
     rows = list(await session.scalars(select(RawContent).order_by(RawContent.id)))

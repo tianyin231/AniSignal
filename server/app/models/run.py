@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.clock import utcnow
@@ -11,6 +11,9 @@ from app.models.base import Base
 
 class CollectRun(Base):
     __tablename__ = "collect_runs"
+    __table_args__ = (
+        Index("ix_collect_runs_started_status_target", "started_at", "status", "target_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     target_id: Mapped[int] = mapped_column(
@@ -23,5 +26,13 @@ class CollectRun(Base):
     error: Mapped[str | None] = mapped_column(Text)
     items_found: Mapped[int] = mapped_column(Integer, default=0)
     items_new: Mapped[int] = mapped_column(Integer, default=0)
+    # 0018 之前的历史记录无法还原这些细分指标，因此允许为空。
+    items_fetched: Mapped[int | None] = mapped_column(Integer)
+    items_filtered: Mapped[int | None] = mapped_column(Integer)
+    items_updated: Mapped[int | None] = mapped_column(Integer)
+    parse_failed: Mapped[int | None] = mapped_column(Integer)
+    official_items: Mapped[int | None] = mapped_column(Integer)
+    community_items: Mapped[int | None] = mapped_column(Integer)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
 
     target = relationship("CollectTarget")

@@ -5,7 +5,7 @@
 
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from app.schemas.api import (
     PublicSource,
     PublicSourceList,
     PublicStats,
+    StatisticsOverview,
 )
 
 router = APIRouter(prefix="/api")
@@ -475,3 +476,36 @@ async def stats(session: AsyncSession = Depends(get_session)):
         official_contents=official or 0,
         latest_collected_at=latest,
     )
+
+
+@router.get("/statistics", response_model=StatisticsOverview)
+async def statistics(
+    request: Request,
+    days: int = Query(default=30),
+    session: AsyncSession = Depends(get_session),
+):
+    """独立统计页数据；图表只读取预聚合表。"""
+    if days not in {7, 30, 90, 365}:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=422, detail="days must be one of 7, 30, 90, 365")
+
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = f"statistics:v1:{days}"
+    if cache is not None:
+        try:
+            cached = await cache.get(cache_key)
+            if cached:
+                return StatisticsOverview.model_validate_json(cached)
+        except Exception:  # noqa: BLE001 - Redis 不可用时降级读聚合表
+            pass
+
+    from app.services.statistics import build_statistics
+
+    result = await build_statistics(session, days)
+    if cache is not None:
+        try:
+            await cache.set(cache_key, result.model_dump_json(), ex=60)
+        except Exception:  # noqa: BLE001
+            pass
+    return result
