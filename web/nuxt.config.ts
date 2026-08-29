@@ -26,6 +26,10 @@ export default defineNuxtConfig({
     head: {
       htmlAttrs: { lang: 'zh-CN' },
       title: 'AniSignal · 鸣潮事件雷达',
+      link: [
+        { rel: 'icon', type: 'image/png', href: '/favicon.png' },
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      ],
       meta: [
         { name: 'description', content: '《鸣潮》跨平台事件聚合与商品履约追踪（原型演示数据）' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },

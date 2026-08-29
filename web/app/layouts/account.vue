@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { Radar } from 'lucide-vue-next'
 
 // 账号中心专属布局：极简头部 + 宽容器，与公开站点/认证页分离
 const { user, logout } = useAuth()
@@ -17,9 +16,7 @@ async function handleLogout() {
   <header class="glass sticky top-0 z-20">
       <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
         <NuxtLink to="/" class="flex items-center gap-2">
-          <span class="grid size-7 place-items-center rounded-md bg-blue-600 text-white">
-            <Radar :size="15" />
-          </span>
+          <img src="/icon.png" alt="" class="size-7 shrink-0">
           <span class="text-[15px] font-semibold tracking-tight">AniSignal</span>
           <span class="chip ml-1 bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300">账号中心</span>
         </NuxtLink>
