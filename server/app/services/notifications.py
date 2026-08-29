@@ -24,7 +24,7 @@ from app.models import (
     UserKeyword,
 )
 from app.services.classify import HIDDEN_CATEGORIES
-from app.services.email_templates import document
+from app.services.email_templates import document, notice_email
 from app.services.mailer import send_email
 
 logger = logging.getLogger(__name__)
@@ -553,6 +553,43 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
         await session.commit()
         return {"status": "skipped", "reason": "no_keywords"}
 
+    if delivery.kind == "morning" and delivery.source == "manual":
+        snapshot = await session.scalar(
+            select(NotificationDelivery)
+            .where(
+                NotificationDelivery.user_id == user.id,
+                NotificationDelivery.kind == "morning",
+                NotificationDelivery.source == "schedule",
+                NotificationDelivery.period_date == delivery.period_date,
+                NotificationDelivery.status == "sent",
+                NotificationDelivery.id != delivery.id,
+            )
+            .order_by(NotificationDelivery.sent_at.desc())
+        )
+        if snapshot is not None and snapshot.subject and snapshot.body:
+            html_body = snapshot.html_body or notice_email(
+                snapshot.subject,
+                snapshot.body,
+                preheader="今日关键词早报重发",
+            )
+            sent = await send_email(
+                user.email,
+                snapshot.subject,
+                snapshot.body,
+                smtp=await _smtp(session),
+                html_body=html_body,
+            )
+            delivery.subject = snapshot.subject
+            delivery.body = snapshot.body
+            delivery.html_body = html_body
+            delivery.matched_keywords = snapshot.matched_keywords or keywords
+            delivery.content_ids = snapshot.content_ids or []
+            delivery.status = "sent" if sent else "failed"
+            delivery.error = None if sent else "SMTP 发送失败，请查看服务端日志"
+            delivery.sent_at = utcnow() if sent else None
+            await session.commit()
+            return {"status": delivery.status, "items": len(delivery.content_ids)}
+
     if delivery.kind == "morning":
         start_at, end_at = morning_window(delivery.period_date)
     else:
@@ -601,6 +638,7 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
     )
     delivery.subject = subject
     delivery.body = body
+    delivery.html_body = html_body
     delivery.matched_keywords = sorted(
         {keyword for item in items for keyword in item["keywords"]}
     ) or keywords

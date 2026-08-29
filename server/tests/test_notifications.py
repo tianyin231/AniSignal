@@ -253,3 +253,40 @@ async def test_scheduled_batch_is_deduplicated(session, monkeypatch):
     assert sent == 1
     rows = list(await session.scalars(select(NotificationDelivery).where(NotificationDelivery.user_id == user.id)))
     assert len(rows) == 1
+
+
+async def test_manual_morning_resends_same_day_scheduled_snapshot(session, monkeypatch):
+    user = await _user_with_keyword(session, email="snapshot@t.com")
+    content = await _content(session, "爱弥斯官方角色预告")
+    sent: list[dict] = []
+
+    async def fake_send(to, subject, body, smtp=None, *, html_body=None):
+        sent.append({"subject": subject, "body": body, "html_body": html_body})
+        return True
+
+    async def fake_onepush(*args, **kwargs):
+        return {"ok": True, "status": "sent"}
+
+    monkeypatch.setattr(notifications, "send_email", fake_send)
+    monkeypatch.setattr("app.services.notifier.send_onepush", fake_onepush)
+    scheduled = await notifications.run_scheduled_morning(session)
+    assert scheduled["sent"] == 1
+
+    async def should_not_rebuild(*args, **kwargs):
+        raise AssertionError("同日手动早报不应重新读取候选")
+
+    monkeypatch.setattr(notifications, "load_candidates", should_not_rebuild)
+    delivery = await notifications.create_delivery(
+        session,
+        user.id,
+        "morning",
+        "manual",
+        day=notifications.beijing_today(),
+    )
+    result = await notifications.process_delivery(session, delivery.id)
+
+    assert result == {"status": "sent", "items": 1}
+    assert sent[1] == sent[0]
+    await session.refresh(delivery)
+    assert delivery.content_ids == [content.id]
+    assert delivery.html_body == sent[0]["html_body"]
