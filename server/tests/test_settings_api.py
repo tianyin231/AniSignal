@@ -129,7 +129,7 @@ async def test_texts_whitelist_and_defaults(client, admin_headers):
     resp = await client.get("/api/site-config")
     texts = resp.json()["texts"]
     assert texts["footer_note"] == "自定义页脚 · AniSignal"
-    assert "official_note" in texts  # 未改的用默认
+    assert set(texts) == {"footer_note"}
 
 
 async def test_ai_settings_masked_and_test(client, admin_headers):

@@ -81,8 +81,5 @@ const multiPlatform = computed(
         <span class="font-medium text-amber-600 dark:text-amber-400">已更正</span>
       </template>
     </div>
-    <p class="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-slate-500 dark:text-zinc-400">
-      {{ event.summary }}
-    </p>
   </NuxtLink>
 </template>

@@ -16,11 +16,6 @@ logger = logging.getLogger(__name__)
 # 可配置文案区域（key → 默认值）；前端 useSiteConfig 用同一组 key
 DEFAULT_TEXTS: dict[str, str] = {
     "footer_note": "AniSignal · 鸣潮事件雷达 · 不承诺全网覆盖",
-    "home_intro": "多平台官方内容自动归并为带证据链的事件；全站免费浏览，登录用于订阅与通知。",
-    "official_note": "已接入官方来源的原始内容流；跨平台重复公告的合并视图将在事件引擎上线后提供。",
-    "events_note": "事件由引擎自动聚合、人工复核修正；每条结论可回溯原始证据。",
-    "sources_note": "本页公开展示已接入来源、最近成功采集时间与不可用状态。全站任何「未发现」均指「在已接入来源中未发现」，不宣传全网覆盖。",
-    "watch_intro": "登录后可设置关键词并主动启用每日早报；所有邮件只包含明确命中的可追溯信息。",
 }
 
 DEFAULT_ANNOUNCEMENT = {

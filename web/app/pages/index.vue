@@ -40,7 +40,6 @@ const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 20
 
 const { api } = usePublicApi()
-const { t } = useSiteConfig()
 
 const eventsRequest = useAsyncData(
   () => `home-briefing-${page.value}`,
@@ -130,11 +129,6 @@ const recentCommunityVideos = computed(() => {
 })
 const loading = computed(() => (isBriefing.value ? eventsStatus.value : feedStatus.value) === 'pending')
 const refreshing = ref(false)
-const sectionHint = computed(() => ({
-  briefing: '官方发布优先展示；聚合结论与社区线索分层呈现，所有内容均可核对原文。',
-  official: '近 7 天官方账号与官网发布的内容；正文、图片与仅外链状态会明确标注。',
-  latest: '近 72 小时非官方来源内容，仅作线索，不代表事实结论。',
-})[tab.value])
 
 function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
@@ -191,19 +185,13 @@ useSeoMeta({ title: '近期情报' })
         {{ refreshing ? '刷新中…' : '刷新' }}
       </button>
     </section>
-    <p class="mb-1 px-1 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">{{ t('home_intro') }}</p>
-    <p class="mb-3 px-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">{{ sectionHint }}</p>
-
     <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
 
     <!-- 首页权重：官方发布 > 聚合结论 > 社区线索。 -->
     <template v-else-if="isBriefing">
       <section aria-labelledby="official-latest-title" class="mb-6">
         <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <div>
-            <h1 id="official-latest-title" class="text-lg font-semibold text-slate-900 dark:text-zinc-50">官方最新情报</h1>
-            <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">官网与认证账号优先，页面每 60 秒自动检查更新。</p>
-          </div>
+          <h1 id="official-latest-title" class="text-lg font-semibold text-slate-900 dark:text-zinc-50">官方最新情报</h1>
           <NuxtLink to="/?tab=official" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
             全部官方动态
           </NuxtLink>
@@ -229,16 +217,13 @@ useSeoMeta({ title: '近期情报' })
 
       <section aria-labelledby="briefing-title" class="mb-6">
         <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <div>
-            <h2 id="briefing-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">近期聚合结论</h2>
-            <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">近 7 天出现新证据的事件，结论均绑定原始来源。</p>
-          </div>
+          <h2 id="briefing-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">近期聚合结论</h2>
           <NuxtLink to="/events" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">查看事件库</NuxtLink>
         </header>
         <div class="panel overflow-hidden">
           <EventRow v-for="e in eventList" :key="e.id" :event="e" />
           <p v-if="!eventList.length" class="px-4 py-10 text-center text-sm text-slate-400">
-            近 7 天暂无可核对的新事件；可到“官方内容”查看同期内容。
+            近 7 天暂无新事件。
           </p>
           <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
             <span>共 {{ eventsData?.total ?? 0 }} 条</span>
@@ -253,10 +238,7 @@ useSeoMeta({ title: '近期情报' })
 
       <section v-if="recentCommunityVideos.length" aria-labelledby="community-title" class="panel p-4">
         <header class="mb-3 flex items-start justify-between gap-4">
-          <div>
-            <h2 id="community-title" class="text-sm font-semibold text-slate-800 dark:text-zinc-100">社区近期观察</h2>
-            <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">精选玩家内容仅作补充线索，不替代官方信息与聚合结论。</p>
-          </div>
+          <h2 id="community-title" class="text-sm font-semibold text-slate-800 dark:text-zinc-100">社区近期观察</h2>
           <NuxtLink to="/?tab=latest" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
             查看社区线索
           </NuxtLink>

@@ -29,7 +29,6 @@ export interface AppEvent {
   updatedAt: string
   important?: boolean
   confidence: '高' | '中' | '低'
-  confidenceReason: string
   conclusion: string
   statusChange?: string
   facts?: { label: string; value: string }[]
@@ -130,4 +129,3 @@ export interface RawItem {
   originalUrl?: string
   previewMode: 'full' | 'partial' | 'external_only'
 }
-

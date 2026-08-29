@@ -53,7 +53,6 @@ export function toAppEvent(e: ApiEvent): AppEvent {
     updatedAt: fmtTime(e.updated_at),
     important: e.importance || undefined,
     confidence: CONFIDENCE_LABEL[e.confidence] ?? '中',
-    confidenceReason: e.confidence_reason ?? '',
     conclusion: e.conclusion ?? '',
     statusChange: e.status_label ?? undefined,
     facts: e.facts ?? [],
