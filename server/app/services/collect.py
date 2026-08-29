@@ -120,14 +120,12 @@ async def run_collection(redis, target_id: int) -> dict:
                 )
             stats = await ingest_items(session, fetch_result.fetch_kind, fetch_result.items)
             match_stats = None
-            if target.platform in ("bilibili", "youtube") and (
-                stats.touched_content_ids or target.platform == "youtube"
-            ):
+            if stats.touched_content_ids:
                 from app.services.similarity import match_official_contents
 
                 try:
                     match_stats = await match_official_contents(
-                        session, stats.touched_content_ids or None
+                        session, stats.touched_content_ids
                     )
                     logger.info(
                         "official matching: candidates=%s decisions=%s positives=%s failed=%s",
@@ -151,9 +149,11 @@ async def run_collection(redis, target_id: int) -> dict:
                 if agg.touched_event_ids and hasattr(redis, "enqueue_job"):
                     for event_id in agg.touched_event_ids:
                         await redis.enqueue_job("summarize_event", event_id)
-                if target.platform == "youtube" and hasattr(redis, "enqueue_job"):
+                if target.platform in ("youtube", "kuro_global") and hasattr(redis, "enqueue_job"):
                     for content_id in stats.touched_content_ids:
                         await redis.enqueue_job("translate_content", content_id)
+                if stats.touched_content_ids and hasattr(redis, "enqueue_job"):
+                    await redis.enqueue_job("review_contents", stats.touched_content_ids)
         except Exception as exc:  # noqa: BLE001 - 任何失败都落到健康状态里
             error_text = f"{type(exc).__name__}: {exc}"
             logger.error("collect target %s failed: %s", target_id, error_text)

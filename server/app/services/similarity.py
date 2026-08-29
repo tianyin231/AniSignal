@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 MATCH_WINDOW = timedelta(hours=72)
 MATCH_CONFIDENCE = 0.9
 _LOOKBACK = timedelta(days=45)
-_MAX_CANDIDATES_PER_YOUTUBE = 8
+_MAX_CANDIDATES_PER_CONTENT = 8
 _PROMPT_BATCH_SIZE = 8
 
 
@@ -55,7 +55,7 @@ class MatchStats:
 async def match_official_contents(
     session: AsyncSession, content_ids: list[int] | None = None
 ) -> MatchStats:
-    """匹配近期 B 站/YouTube 官方内容；指定 content_ids 时重新判断相关旧配对。"""
+    """匹配近期跨平台官方内容；指定 content_ids 时重新判断相关旧配对。"""
     stats = MatchStats()
     config = await get_ai_config(session)
     if not ai_available(config):
@@ -154,7 +154,6 @@ async def _load_recent_official(session: AsyncSession) -> list[MatchContent]:
         .join(Source, RawContent.source_id == Source.id)
         .where(
             Source.identity == "official",
-            RawContent.platform.in_(("bilibili", "youtube")),
             RawContent.published_at.is_not(None),
             RawContent.published_at >= utcnow() - _LOOKBACK,
         )
@@ -178,7 +177,7 @@ def _candidate_pairs(
     pairs: list[tuple[timedelta, MatchPair]] = []
     for index, left in enumerate(rows):
         for right in rows[index + 1 :]:
-            if left.platform == right.platform or "youtube" not in (left.platform, right.platform):
+            if left.platform == right.platform:
                 continue
             if base_ids and left.id not in base_ids and right.id not in base_ids:
                 continue
@@ -187,23 +186,23 @@ def _candidate_pairs(
                 ordered = (left, right) if left.id < right.id else (right, left)
                 pairs.append((distance, MatchPair(*ordered)))
 
-    # 同一 YouTube 内容只送最接近的少量候选，避免把整段时间窗交给模型盲猜。
+    # 每条内容只送最接近的少量跨平台候选，避免把整段时间窗交给模型盲猜。
     selected: list[MatchPair] = []
     counts: dict[int, int] = {}
     seen: set[tuple[int, int]] = set()
     for _, pair in sorted(pairs, key=lambda item: item[0]):
         if pair.key in seen:
             continue
-        youtube_id = pair.left.id if pair.left.platform == "youtube" else pair.right.id
-        if counts.get(youtube_id, 0) >= _MAX_CANDIDATES_PER_YOUTUBE:
+        if any(counts.get(content_id, 0) >= _MAX_CANDIDATES_PER_CONTENT for content_id in pair.key):
             continue
-        counts[youtube_id] = counts.get(youtube_id, 0) + 1
+        for content_id in pair.key:
+            counts[content_id] = counts.get(content_id, 0) + 1
         seen.add(pair.key)
         selected.append(pair)
     return selected
 
 
-_MATCH_SYSTEM_PROMPT = """你是跨平台官方内容核对器。判断两条内容是否是同一次发布的同一公告、同一视频或同一素材。
+_MATCH_SYSTEM_PROMPT = """你是跨平台官方内容核对器。判断两条官方内容是否是同一次发布的同一公告、同一视频或同一素材。
 同角色、同版本、同活动但内容不同，必须判定为 false。只有标题翻译、文案翻译或平台转发形式不同，核心发布物一致时才判定为 true。
 只能依据给出的标题、正文和发布时间判断，不得补充外部事实。返回 JSON：
 {"matches":[{"left_id":1,"right_id":2,"same_event":true,"confidence":0.96,"reason":"简短证据"}]}

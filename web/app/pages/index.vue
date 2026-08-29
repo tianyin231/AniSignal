@@ -68,19 +68,12 @@ const feedRequest = useAsyncData(
       : Promise.resolve({ items: [], total: 0 }),
   { watch: [tab, officialPlatform, page] },
 )
-const officialHighlightsRequest = useAsyncData('home-official-highlights', () =>
-  api<PublicContentList>('/api/contents', {
-    query: { identity: 'official', published_within_hours: 168, limit: 12 },
-  }),
+const highlightsRequest = useAsyncData('home-highlights', () =>
+  api<PublicContentList>('/api/highlights', { query: { limit: 5 } }),
 )
-const communityYouTubeHighlightsRequest = useAsyncData('home-community-youtube-highlights', () =>
+const communityHighlightsRequest = useAsyncData('home-community-highlights', () =>
   api<PublicContentList>('/api/contents', {
-    query: { platform: 'youtube', exclude_identity: 'official', published_within_hours: 168, limit: 1 },
-  }),
-)
-const communityBilibiliHighlightsRequest = useAsyncData('home-community-bilibili-highlights', () =>
-  api<PublicContentList>('/api/contents', {
-    query: { platform: 'bilibili', exclude_identity: 'official', published_within_hours: 168, limit: 1 },
+    query: { exclude_identity: 'official', published_within_hours: 168, sort: 'hot', limit: 8 },
   }),
 )
 const statsRequest = useAsyncData('home-stats', () => api<PublicStats>('/api/stats'))
@@ -88,16 +81,14 @@ const statsRequest = useAsyncData('home-stats', () => api<PublicStats>('/api/sta
 const [
   { data: eventsData, status: eventsStatus },
   { data: feed, status: feedStatus },
-  { data: officialHighlightsData },
-  { data: communityYouTubeHighlightsData },
-  { data: communityBilibiliHighlightsData },
+  { data: highlightsData },
+  { data: communityHighlightsData },
   { data: stats },
 ] = await Promise.all([
   eventsRequest,
   feedRequest,
-  officialHighlightsRequest,
-  communityYouTubeHighlightsRequest,
-  communityBilibiliHighlightsRequest,
+  highlightsRequest,
+  communityHighlightsRequest,
   statsRequest,
 ])
 
@@ -107,23 +98,13 @@ const totalPages = computed(() =>
 )
 const eventList = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const list = computed(() => (feed.value?.items ?? []).map(toRawItem))
-const recentOfficialItems = computed(() =>
-  (officialHighlightsData.value?.items ?? []).map(toRawItem),
+const featuredHighlights = computed(() =>
+  (highlightsData.value?.items ?? []).map(toRawItem),
 )
-const featuredOfficial = computed(() =>
-  recentOfficialItems.value.find((item) => item.cover) ?? recentOfficialItems.value[0],
-)
-const latestOfficialUpdate = computed(() => {
-  const latest = recentOfficialItems.value[0]
-  return latest && latest.id !== featuredOfficial.value?.id ? latest : null
-})
 const recentCommunityVideos = computed(() => {
-  const rows = [
-    ...(communityYouTubeHighlightsData.value?.items ?? []),
-    ...(communityBilibiliHighlightsData.value?.items ?? []),
-  ]
-    .sort((a, b) => new Date(b.published_at || b.collected_at).getTime() - new Date(a.published_at || a.collected_at).getTime())
-  return rows
+  const featuredIds = new Set(featuredHighlights.value.map(item => item.id))
+  return (communityHighlightsData.value?.items ?? [])
+    .filter(item => !featuredIds.has(String(item.id)))
     .slice(0, 4)
     .map(toRawItem)
 })
@@ -141,9 +122,8 @@ async function refreshHome() {
     await Promise.all([
       eventsRequest.refresh(),
       feedRequest.refresh(),
-      officialHighlightsRequest.refresh(),
-      communityYouTubeHighlightsRequest.refresh(),
-      communityBilibiliHighlightsRequest.refresh(),
+      highlightsRequest.refresh(),
+      communityHighlightsRequest.refresh(),
       statsRequest.refresh(),
     ])
   }
@@ -187,31 +167,19 @@ useSeoMeta({ title: '近期情报' })
     </section>
     <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
 
-    <!-- 首页权重：官方发布 > 聚合结论 > 社区线索。 -->
+    <!-- 首页权重：官方与社区精选 > 聚合结论 > 社区线索。 -->
     <template v-else-if="isBriefing">
       <section aria-labelledby="official-latest-title" class="mb-6">
         <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <h1 id="official-latest-title" class="text-lg font-semibold text-slate-900 dark:text-zinc-50">官方最新情报</h1>
-          <NuxtLink to="/?tab=official" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-            全部官方动态
+          <h1 id="official-latest-title" class="text-lg font-semibold text-slate-900 dark:text-zinc-50">最新情报</h1>
+          <NuxtLink to="/contents" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            查看内容库
           </NuxtLink>
         </header>
 
-        <NuxtLink
-          v-if="latestOfficialUpdate"
-          :to="`/contents/${latestOfficialUpdate.id}`"
-          class="panel group mb-3 flex min-h-14 cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:border-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:border-blue-500/50"
-        >
-          <span class="shrink-0 rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white">最新发布</span>
-          <span class="min-w-0 flex-1 truncate text-sm font-medium text-slate-800 group-hover:text-blue-700 dark:text-zinc-100 dark:group-hover:text-blue-300">
-            {{ latestOfficialUpdate.title }}
-          </span>
-          <span class="mono hidden shrink-0 text-xs text-slate-400 sm:block">{{ latestOfficialUpdate.publishedAt }}</span>
-        </NuxtLink>
-
-        <OfficialFeatureCard v-if="featuredOfficial" :item="featuredOfficial" />
+        <FeaturedCarousel v-if="featuredHighlights.length" :items="featuredHighlights" />
         <div v-else class="panel px-4 py-10 text-center text-sm text-slate-400">
-          近 7 天暂无官方内容。
+          近 7 天暂无精选内容。
         </div>
       </section>
 

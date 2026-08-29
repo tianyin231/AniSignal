@@ -155,3 +155,26 @@ class ContentMatch(Base):
     model: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ContentReview(Base):
+    """AI 对内容相关性、推广属性和编辑价值的结构化候选判断。"""
+
+    __tablename__ = "content_reviews"
+    __table_args__ = (
+        Index("ix_content_reviews_eligible_score", "relevant", "promotional", "quality_score"),
+    )
+
+    raw_content_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_contents.id", ondelete="CASCADE"), primary_key=True
+    )
+    relevant: Mapped[bool] = mapped_column(Boolean, default=True)
+    promotional: Mapped[bool] = mapped_column(Boolean, default=False)
+    quality_score: Mapped[int] = mapped_column(Integer, default=0)
+    category_hint: Mapped[str | None] = mapped_column(String(32))
+    duplicate_of_raw_id: Mapped[int | None] = mapped_column(
+        ForeignKey("raw_contents.id", ondelete="SET NULL"), index=True
+    )
+    reason: Mapped[str | None] = mapped_column(String(500))
+    model: Mapped[str] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

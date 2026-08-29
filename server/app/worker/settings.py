@@ -38,6 +38,16 @@ async def translate_content(ctx, content_id: int) -> dict:
         return await run(session, content_id)
 
 
+async def review_contents(ctx, content_ids: list[int]) -> dict:
+    """AI 批量筛选与精选评分（失败不影响内容入库）。"""
+    from app.db import SessionLocal
+    from app.services.curation import review_contents as run
+
+    async with SessionLocal() as session:
+        stats = await run(session, content_ids)
+        return stats.__dict__
+
+
 async def send_user_notification(ctx, delivery_id: int) -> dict:
     """生成并发送一封用户主动请求的关键词邮件。"""
     from app.db import SessionLocal
@@ -70,6 +80,7 @@ class WorkerSettings:
         collect_target,
         summarize_event,
         translate_content,
+        review_contents,
         send_user_notification,
         send_morning_notifications,
     ]
