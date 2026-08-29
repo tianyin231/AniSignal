@@ -10,7 +10,7 @@ export interface SiteAnnouncement {
 }
 
 export const TEXT_DEFAULTS: Record<string, string> = {
-  footer_note: 'AniSignal · 鸣潮事件雷达 · 不承诺全网覆盖',
+  footer_note: 'AniSignal · 鸣潮事件雷达 · 定制化情报采集',
 }
 
 export function useSiteConfig() {
