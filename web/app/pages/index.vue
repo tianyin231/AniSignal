@@ -126,14 +126,72 @@ async function refreshHome() {
   }
 }
 
-let refreshTimer: ReturnType<typeof setInterval> | undefined
+// 温和的新内容探测：绝不自动改写正在看的列表，只在后台对比当前分区第一条，
+// 有差异时亮出「有新内容」提示，由用户决定何时更新。
+const pendingNewContent = ref(false)
+let updateTimer: ReturnType<typeof setInterval> | undefined
+
+function currentHeadId(): string | null {
+  if (isBriefing.value) {
+    const head = eventList.value[0]?.id
+    return head == null ? null : String(head)
+  }
+  const head = list.value[0]?.id
+  return head == null ? null : String(head)
+}
+
+async function checkForUpdates() {
+  if (document.visibilityState !== 'visible') return
+  if (pendingNewContent.value || loading.value || refreshing.value) return
+  try {
+    let head: string | null = null
+    if (isBriefing.value) {
+      const res = await $fetch<ApiEventList>('/api/events', {
+        query: { published_within_hours: 168, limit: 1 },
+      })
+      head = res.items[0]?.id != null ? String(res.items[0].id) : null
+    } else if (tab.value === 'official' || tab.value === 'latest') {
+      const res = await $fetch<PublicContentList>('/api/contents', {
+        query: {
+          limit: 1,
+          ...(tab.value === 'official'
+            ? {
+                identity: 'official',
+                published_within_hours: 168,
+                ...(officialPlatform.value !== 'all' ? { platform: officialPlatform.value } : {}),
+              }
+            : { exclude_identity: 'official', published_within_hours: 72 }),
+        },
+      })
+      head = res.items[0]?.id != null ? String(res.items[0].id) : null
+    } else {
+      return
+    }
+    const current = currentHeadId()
+    if (head && current && head !== current) pendingNewContent.value = true
+  } catch { /* 探测失败静默跳过 */ }
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') void checkForUpdates()
+}
+
+async function applyUpdates() {
+  pendingNewContent.value = false
+  await refreshHome()
+}
+
+watch([tab, officialPlatform, page], () => {
+  pendingNewContent.value = false
+})
+
 onMounted(() => {
-  refreshTimer = setInterval(() => {
-    if (document.visibilityState === 'visible') void refreshHome()
-  }, 60_000)
+  updateTimer = setInterval(checkForUpdates, 60_000)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 onBeforeUnmount(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
+  if (updateTimer) clearInterval(updateTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
 useSeoMeta({ title: '近期情报' })
@@ -144,10 +202,19 @@ useSeoMeta({ title: '近期情报' })
     <TabNav v-model="tab" :tabs="tabs">
       <template #actions>
         <button
+          v-if="pendingNewContent"
+          type="button"
+          class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-blue-600/10 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-600/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-400/15 dark:text-blue-300"
+          @click="applyUpdates"
+        >
+          <span class="size-1.5 animate-pulse rounded-full bg-blue-500" aria-hidden="true" />
+          有新内容
+        </button>
+        <button
           type="button"
           :disabled="refreshing"
           class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 py-1.5 text-xs text-slate-500 transition-colors hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60 dark:text-zinc-400 dark:hover:text-blue-300"
-          @click="refreshHome"
+          @click="pendingNewContent ? applyUpdates() : refreshHome()"
         >
           <RefreshCw :size="13" :class="{ 'animate-spin': refreshing }" aria-hidden="true" />
           {{ refreshing ? '刷新中…' : '刷新' }}
