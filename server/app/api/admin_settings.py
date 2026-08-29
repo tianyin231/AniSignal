@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_admin
 from app.db import get_session
 from app.services import settings as settings_service
+from app.services.email_templates import notice_email
 from app.services.mailer import send_email
 
 logger = logging.getLogger(__name__)
@@ -121,11 +122,13 @@ async def test_smtp(body: dict, session: AsyncSession = Depends(get_session)):
     if not to or "@" not in to:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请填写有效的收件邮箱")
     smtp = await settings_service.get_effective_smtp(session)
+    text = "这是一封来自 AniSignal 管理端的 SMTP 配置测试邮件。\n收到本邮件说明当前 SMTP 配置可用。"
     sent = await send_email(
         to,
         "AniSignal SMTP 测试邮件",
-        "这是一封来自 AniSignal 管理端的 SMTP 配置测试邮件。\n收到本邮件说明当前 SMTP 配置可用。",
+        text,
         smtp=smtp,
+        html_body=notice_email("SMTP 配置测试成功", text),
     )
     return {"sent": sent, "host": smtp["host"], "message": "测试邮件已发送，请查收" if sent else "发送失败：SMTP 未配置或不可用，查看服务端日志"}
 
