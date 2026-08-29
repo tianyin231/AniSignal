@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageOps
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -567,7 +567,7 @@ def _cache_base(url: str) -> str:
 def _transform_sync(raw: bytes, base: str) -> None:
     """原图 -> 限定边长的高清 WebP + 32px 模糊预览（CPU 密集，放线程池跑）。"""
     with PILImage.open(io.BytesIO(raw)) as img:
-        img = PILImage.exif_transpose(img).convert("RGB")
+        img = ImageOps.exif_transpose(img).convert("RGB")
         img.thumbnail((WALLPAPER_MAX_EDGE, WALLPAPER_MAX_EDGE))
         os.makedirs(WALLPAPER_CACHE_DIR, exist_ok=True)
         img.save(f"{base}.webp", "WEBP", quality=WALLPAPER_QUALITY, method=4)
