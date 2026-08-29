@@ -181,7 +181,11 @@ async def test_wallpaper_info_returns_fresh_url(client, monkeypatch):
     async def fake_resolve():
         return next(urls)
 
+    async def fake_transform(url, fut):
+        pass
+
     monkeypatch.setattr(public_module, "_resolve_wallpaper", fake_resolve)
+    monkeypatch.setattr(public_module, "_run_transform", fake_transform)
     first = (await client.get("/api/wallpaper")).json()
     second = (await client.get("/api/wallpaper")).json()
     assert first["url"].endswith("a.webp")
@@ -289,3 +293,57 @@ async def test_wallpaper_resolve_rejects_non_image(monkeypatch):
         pass
     assert await public_module._resolve_wallpaper() is None
     assert public_module._wallpaper_last_url is None  # 不缓存非图片结果
+
+
+def _webp_bytes() -> bytes:
+    import io as _io
+
+    from PIL import Image as PILImage
+
+    buf = _io.BytesIO()
+    PILImage.new("RGB", (4, 4), (200, 100, 50)).save(buf, "WEBP")
+    return buf.getvalue()
+
+
+async def test_wallpaper_image_and_preview_from_cache(client, monkeypatch, tmp_path):
+    """image/preview 端点从磁盘缓存返回，带长缓存头；未签发地址 404。"""
+    import asyncio as _asyncio
+    import os as _os
+    import time as _time
+
+    from app.api import public as public_module
+
+    monkeypatch.setattr(public_module, "WALLPAPER_CACHE_DIR", str(tmp_path))
+    url = "https://list.yppp.net/d/image/cached.webp"
+    public_module._wallpaper_issued[url] = _time.monotonic()
+    base = public_module._cache_base(url)
+    data = _webp_bytes()
+    with open(f"{base}.webp", "wb") as fh:
+        fh.write(data)
+    with open(f"{base}.preview.webp", "wb") as fh:
+        fh.write(_webp_bytes())
+    fut = _asyncio.get_running_loop().create_future()
+    fut.set_result(None)
+    public_module._wallpaper_transforms[url] = fut
+
+    from urllib.parse import quote
+
+    q = quote(url, safe="")
+    resp = await client.get("/api/wallpaper/image", params={"u": url})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("image/webp")
+    assert resp.headers["cache-control"] == "public, max-age=604800, immutable"
+    assert resp.content == data
+    resp = await client.get("/api/wallpaper/preview", params={"u": url})
+    assert resp.status_code == 200
+
+    # 未签发的地址 → 404
+    resp = await client.get("/api/wallpaper/image", params={"u": "https://evil.example/x.jpg"})
+    assert resp.status_code == 404
+
+    # 转换未完成（无 future 记录）→ 404
+    public_module._wallpaper_issued["https://list.yppp.net/d/image/gone.webp"] = _time.monotonic()
+    resp = await client.get(
+        "/api/wallpaper/image", params={"u": "https://list.yppp.net/d/image/gone.webp"}
+    )
+    assert resp.status_code == 404

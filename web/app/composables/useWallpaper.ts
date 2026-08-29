@@ -1,8 +1,7 @@
 /**
  * 随机壁纸背景：与浅色/深色主题同级的用户偏好（localStorage 持久化）。
- * 开启时向后端 /api/wallpaper 要一个新解析的原图地址（每次页面加载基本不同），
- * 直接热链显示；加载失败回退默认极光背景。下载走 /api/wallpaper/download?url=<当前地址>，
- * 服务端只转发自己签发过的地址，保证下载的就是当前展示的那张。
+ * 流式加载：/api/wallpaper 返回原图地址（下载用）+ 服务端压缩图 + 32px 模糊预览，
+ * 预览先出（~1KB），压缩图（几百 KB）随后流入，失败回退默认极光背景。
  */
 
 export type WallpaperStatus = 'off' | 'loading' | 'on' | 'failed'
@@ -11,28 +10,38 @@ const STORAGE_KEY = 'anisignal-wallpaper'
 
 export function useWallpaper() {
   const status = useState<WallpaperStatus>('wallpaper-status', () => 'off')
-  // 当前展示的原图地址（热链），同时用于下载
+  // 展示用压缩图地址（服务端转码缓存，带长 Cache-Control）
   const src = useState<string>('wallpaper-src', () => '')
+  // 模糊预览地址（先于高清图显示）
+  const preview = useState<string>('wallpaper-preview', () => '')
+  // 原图地址（仅用于下载链接）
+  const origin = useState<string>('wallpaper-origin', () => '')
 
   function apply() {
     status.value = 'loading'
     src.value = ''
-    $fetch<{ url?: string }>('/api/wallpaper')
+    preview.value = ''
+    origin.value = ''
+    $fetch<{ url?: string; image?: string; preview?: string }>('/api/wallpaper')
       .then((res) => {
-        const url = res?.url
-        if (!url || status.value !== 'loading') return
+        if (status.value !== 'loading' || !res?.url || !res.image) {
+          if (status.value === 'loading') status.value = 'failed'
+          return
+        }
+        origin.value = res.url
+        src.value = res.image
+        preview.value = res.preview ?? ''
+        // 预览层立即渲染（backdrop 在 loading 态即显示），压缩图加载完成再切 on
         const probe = new Image()
         probe.onload = () => {
           if (status.value !== 'loading') return
-          src.value = url
           status.value = 'on'
         }
         probe.onerror = () => {
           if (status.value !== 'loading') return
           status.value = 'failed'
         }
-        probe.referrerPolicy = 'no-referrer'
-        probe.src = url
+        probe.src = res.image
       })
       .catch(() => {
         if (status.value === 'loading') status.value = 'failed'
@@ -55,6 +64,8 @@ export function useWallpaper() {
     persist('0')
     status.value = 'off'
     src.value = ''
+    preview.value = ''
+    origin.value = ''
   }
 
   /** 页面加载时恢复用户上次的选择（由 client 插件调用一次）。 */
@@ -64,5 +75,5 @@ export function useWallpaper() {
     } catch { /* 无法读取时视为未开启 */ }
   }
 
-  return { status, src, enable, disable, restore }
+  return { status, src, preview, origin, enable, disable, restore }
 }

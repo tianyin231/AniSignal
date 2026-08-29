@@ -4,12 +4,17 @@
 """
 
 import asyncio
+import hashlib
+import io
 import logging
+import os
 import time
 from datetime import date, datetime, timedelta
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from PIL import Image as PILImage
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -514,18 +519,27 @@ async def statistics(
             pass
     return result
 
-
 # ---------- 随机壁纸背景（用户可关，失败回退默认背景）----------
+#
+# 加速策略：原图（2~8MB）只在服务端拉一次，转成 ~1920px WebP（几百 KB）+ 32px 模糊预览，
+# 磁盘缓存后以长 Cache-Control 下发；前端先出预览再流入高清图，下载仍取原图。
 
 WALLPAPER_API = "https://api.yppp.net/api.php"
 # 同一解析结果最短复用时间：防手速刷新打爆源站，同时保证"每次刷新基本换图"
 WALLPAPER_MIN_INTERVAL_SECONDS = 2.0
-# 签发记录保留时长：只有服务端签发过的地址才允许下载（防止变成开放代理）
+# 签发记录保留时长：只有服务端签发过的地址才允许取图/下载（防止变成开放代理）
 WALLPAPER_ISSUED_TTL_SECONDS = 900.0
+WALLPAPER_MAX_EDGE = 1920
+WALLPAPER_QUALITY = 78
+WALLPAPER_CACHE_DIR = os.environ.get("WALLPAPER_CACHE_DIR", "/tmp/anisignal-wallpaper")
+WALLPAPER_TRANSFORM_TIMEOUT_SECONDS = 90.0
+
 _wallpaper_last_resolve = 0.0
 _wallpaper_last_url: str | None = None
 _wallpaper_issued: dict[str, float] = {}
 _wallpaper_lock = asyncio.Lock()
+# 地址 -> 转换任务 Future（完成后磁盘缓存可用；失败时移除以便重试）
+_wallpaper_transforms: dict[str, asyncio.Future] = {}
 
 logger = logging.getLogger(__name__)
 
@@ -534,6 +548,67 @@ def _prune_issued(now: float) -> None:
     expired = [u for u, ts in _wallpaper_issued.items() if now - ts > WALLPAPER_ISSUED_TTL_SECONDS]
     for u in expired:
         _wallpaper_issued.pop(u, None)
+        _wallpaper_transforms.pop(u, None)
+
+
+def _ensure_issued(url: str) -> None:
+    now = time.monotonic()
+    _prune_issued(now)
+    issued_at = _wallpaper_issued.get(url)
+    if issued_at is None or now - issued_at > WALLPAPER_ISSUED_TTL_SECONDS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "壁纸地址已过期，请刷新页面后重试")
+
+
+def _cache_base(url: str) -> str:
+    digest = hashlib.sha256(url.encode()).hexdigest()[:24]
+    return os.path.join(WALLPAPER_CACHE_DIR, digest)
+
+
+def _transform_sync(raw: bytes, base: str) -> None:
+    """原图 -> 限定边长的高清 WebP + 32px 模糊预览（CPU 密集，放线程池跑）。"""
+    with PILImage.open(io.BytesIO(raw)) as img:
+        img = PILImage.exif_transpose(img).convert("RGB")
+        img.thumbnail((WALLPAPER_MAX_EDGE, WALLPAPER_MAX_EDGE))
+        os.makedirs(WALLPAPER_CACHE_DIR, exist_ok=True)
+        img.save(f"{base}.webp", "WEBP", quality=WALLPAPER_QUALITY, method=4)
+        thumb = img.copy()
+        thumb.thumbnail((32, 32))
+        thumb.save(f"{base}.preview.webp", "WEBP", quality=50, method=4)
+
+
+async def _run_transform(url: str, fut: asyncio.Future) -> None:
+    try:
+        base = _cache_base(url)
+        if not (os.path.exists(f"{base}.webp") and os.path.exists(f"{base}.preview.webp")):
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=httpx.Timeout(60.0)
+            ) as client:
+                resp = await client.get(url, headers={"User-Agent": "AniSignal/1.0 (wallpaper)"})
+            if resp.status_code != 200:
+                raise RuntimeError(f"origin status {resp.status_code}")
+            await asyncio.to_thread(_transform_sync, resp.content, base)
+        if not fut.done():
+            fut.set_result(None)
+    except Exception as exc:  # noqa: BLE001 - 失败后移除记录，下次请求重试
+        logger.warning("wallpaper transform failed: %s", exc)
+        if _wallpaper_transforms.get(url) is fut:
+            _wallpaper_transforms.pop(url, None)
+        if not fut.done():
+            fut.set_exception(exc)
+
+
+async def _await_transform(url: str) -> None:
+    fut = _wallpaper_transforms.get(url)
+    if fut is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "壁纸地址已过期，请刷新页面后重试")
+    try:
+        await asyncio.wait_for(asyncio.shield(fut), timeout=WALLPAPER_TRANSFORM_TIMEOUT_SECONDS)
+    except (asyncio.TimeoutError, TimeoutError):
+        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, "壁纸处理超时，请稍后重试") from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用") from None
 
 
 async def _resolve_wallpaper() -> str | None:
@@ -555,7 +630,7 @@ async def _resolve_wallpaper() -> str | None:
                 follow_redirects=True, timeout=httpx.Timeout(10.0)
             ) as client:
                 request = client.build_request("GET", WALLPAPER_API, headers=headers)
-                # 流式取响应头即够；1MB+ 的图片体不读到本地，立刻释放
+                # 流式取响应头即够；原图体不读到本地，立刻释放
                 resp = await client.send(request, stream=True)
                 final_url = str(resp.url)
                 content_type = resp.headers.get("content-type", "").lower()
@@ -576,14 +651,10 @@ async def _resolve_wallpaper() -> str | None:
 
 async def _fetch_wallpaper_bytes(url: str) -> tuple[bytes, str]:
     """下载指定壁纸原图，返回 (内容, content_type)。只允许服务端签发过的地址。"""
-    now = time.monotonic()
-    _prune_issued(now)
-    issued_at = _wallpaper_issued.get(url)
-    if issued_at is None or now - issued_at > WALLPAPER_ISSUED_TTL_SECONDS:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "壁纸地址已过期，请刷新页面后重试")
+    _ensure_issued(url)
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=httpx.Timeout(30.0)
+            follow_redirects=True, timeout=httpx.Timeout(60.0)
         ) as client:
             resp = await client.get(url, headers={"User-Agent": "AniSignal/1.0 (wallpaper)"})
     except Exception:  # noqa: BLE001
@@ -597,15 +668,52 @@ async def _fetch_wallpaper_bytes(url: str) -> tuple[bytes, str]:
 
 @router.get("/wallpaper")
 async def wallpaper_info():
-    """随机壁纸：解析并返回最终图片地址（每次调用基本不同）。
+    """随机壁纸：返回展示/预览/原图三个地址（每次调用基本不同）。
 
-    前端直接热链该地址做背景；下载时把同一地址带回 /wallpaper/download，
+    前端先出 1KB 级模糊预览，高清压缩图随后流入；下载仍取原图，
     服务端只转发自己签发过的地址，保证下载的就是当前展示的那张。
     """
     url = await _resolve_wallpaper()
     if url is None:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用")
-    return {"url": url}
+    fut = _wallpaper_transforms.get(url)
+    if fut is None:
+        fut = asyncio.get_running_loop().create_future()
+        _wallpaper_transforms[url] = fut
+        asyncio.create_task(_run_transform(url, fut))
+    quoted = quote(url, safe="")
+    return {
+        "url": url,
+        "image": f"/api/wallpaper/image?u={quoted}",
+        "preview": f"/api/wallpaper/preview?u={quoted}",
+    }
+
+
+async def _wallpaper_cache_response(url: str, suffix: str, media_type: str) -> Response:
+    _ensure_issued(url)
+    await _await_transform(url)
+    path = f"{_cache_base(url)}{suffix}"
+    if not os.path.exists(path):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用")
+    with open(path, "rb") as fh:
+        content = fh.read()
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=604800, immutable"},
+    )
+
+
+@router.get("/wallpaper/image")
+async def wallpaper_image(u: str = Query(...)):
+    """当前壁纸的高清压缩版（~1920px WebP）。"""
+    return await _wallpaper_cache_response(u, ".webp", "image/webp")
+
+
+@router.get("/wallpaper/preview")
+async def wallpaper_preview(u: str = Query(...)):
+    """当前壁纸的 32px 模糊预览（~1KB，先于高清图送达）。"""
+    return await _wallpaper_cache_response(u, ".preview.webp", "image/webp")
 
 
 @router.get("/wallpaper/download")
