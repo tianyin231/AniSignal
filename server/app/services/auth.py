@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models import EmailCode, User, UserSession
+from app.services.email_templates import code_email
 from app.services.mailer import send_email
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,7 @@ async def issue_code(session: AsyncSession, user: User, purpose: str) -> bool:
         f"你的验证码是：{code}\n{action}码 {_CODE_TTL_MINUTES} 分钟内有效。\n"
         f"如果这不是你本人的操作，请忽略本邮件。",
         smtp=await get_effective_smtp(session),
+        html_body=code_email(action, code, _CODE_TTL_MINUTES),
     )
     if not sent:
         row.code_plain = code  # SMTP 未配置/失败：管理端排查通道

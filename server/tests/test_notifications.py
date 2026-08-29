@@ -1,6 +1,6 @@
 """关键词通知：主动启用、精确匹配、异步入口与每日去重。"""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 
@@ -13,6 +13,33 @@ from app.scheduler.loop import _morning_due
 def test_morning_schedule_uses_beijing_time():
     assert _morning_due(datetime(2026, 8, 27, 23, 59))[0] is False
     assert _morning_due(datetime(2026, 8, 28, 0, 0)) == (True, "2026-08-28")
+
+
+def test_notification_html_escapes_external_content():
+    _, body, html = notifications.render_email(
+        "ai",
+        date(2026, 8, 28),
+        ["爱弥斯<script>"],
+        [
+            {
+                "title": "<script>alert(1)</script>新角色预告",
+                "summary": "官方发布了新角色预告。",
+                "identity": "official",
+                "keywords": ["爱弥斯<script>"],
+                "source": "鸣潮官方",
+                "platform": "bilibili",
+                "published_at": datetime(2026, 8, 28, 1, 0),
+                "url": "javascript:alert(1)",
+                "image": "javascript:alert(2)",
+                "importance": True,
+            }
+        ],
+    )
+
+    assert "今日结论" in body
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "javascript:" not in html
 
 
 async def _user_with_keyword(session, email="notice@t.com", enabled=True):
@@ -29,7 +56,13 @@ async def _user_with_keyword(session, email="notice@t.com", enabled=True):
     return user
 
 
-async def _content(session, title: str, text: str = "", identity: str = "official"):
+async def _content(
+    session,
+    title: str,
+    text: str = "",
+    identity: str = "official",
+    image: str | None = None,
+):
     day = notifications.beijing_today()
     start_at, _ = notifications.morning_window(day)
     source = Source(
@@ -60,7 +93,7 @@ async def _content(session, title: str, text: str = "", identity: str = "officia
             version=1,
             title=title,
             text=text,
-            normalized_json={},
+            normalized_json={"media": [image] if image else []},
             category="official_announce",
         )
     )
@@ -70,12 +103,16 @@ async def _content(session, title: str, text: str = "", identity: str = "officia
 
 async def test_manual_morning_only_contains_matching_content(session, monkeypatch):
     user = await _user_with_keyword(session)
-    matching = await _content(session, "爱弥斯联名键盘发货说明")
+    matching = await _content(
+        session,
+        "爱弥斯联名键盘发货说明",
+        image="http://i0.hdslb.com/example-cover.jpg",
+    )
     await _content(session, "其它角色活动公告")
     sent: dict = {}
 
-    async def fake_send(to, subject, body, smtp=None):
-        sent.update(to=to, subject=subject, body=body)
+    async def fake_send(to, subject, body, smtp=None, *, html_body=None):
+        sent.update(to=to, subject=subject, body=body, html_body=html_body)
         return True
 
     monkeypatch.setattr(notifications, "send_email", fake_send)
@@ -87,6 +124,10 @@ async def test_manual_morning_only_contains_matching_content(session, monkeypatc
     assert result == {"status": "sent", "items": 1}
     assert "爱弥斯联名键盘发货说明" in sent["body"]
     assert "其它角色活动公告" not in sent["body"]
+    assert "今日结论" in sent["body"]
+    assert "https://i0.hdslb.com/example-cover.jpg@672w_1e_1c.jpg" in sent["html_body"]
+    assert "查看原文" in sent["html_body"]
+    assert "width:100%" in sent["html_body"]
     await session.refresh(delivery)
     assert delivery.content_ids == [matching.id]
     assert delivery.matched_keywords == ["爱弥斯"]

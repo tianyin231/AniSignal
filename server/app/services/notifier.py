@@ -6,6 +6,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import settings as settings_service
+from app.services.email_templates import notice_email
 from app.services.mailer import send_email
 
 logger = logging.getLogger(__name__)
@@ -77,5 +78,6 @@ async def send_information(
             title,
             content,
             smtp=await settings_service.get_effective_smtp(session),
+            html_body=notice_email(title, content),
         )
     return {"onepush": onepush_result, "email": email_result}

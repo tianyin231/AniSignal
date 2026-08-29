@@ -7,7 +7,14 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-async def send_email(to: str, subject: str, body: str, smtp: dict | None = None) -> bool:
+async def send_email(
+    to: str,
+    subject: str,
+    body: str,
+    smtp: dict | None = None,
+    *,
+    html_body: str | None = None,
+) -> bool:
     """发送邮件；smtp 参数缺省时用 env 配置。返回是否真实发信（False=走落库通道）。"""
     config = smtp or _env_smtp()
     if not config.get("host"):
@@ -21,6 +28,8 @@ async def send_email(to: str, subject: str, body: str, smtp: dict | None = None)
     message["To"] = to
     message["Subject"] = subject
     message.set_content(body)
+    if html_body:
+        message.add_alternative(html_body, subtype="html")
     port = int(config.get("port") or 587)
     tls_mode = str(config.get("tls_mode") or "").lower()
     if tls_mode not in {"starttls", "tls", "none"}:
