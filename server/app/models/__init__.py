@@ -4,6 +4,7 @@ from app.models.collect_target import CollectTarget
 from app.models.content import (
     AiUsage,
     ContentMatch,
+    ContentReview,
     ContentTranslation,
     ContentVersion,
     MetricSnapshot,
@@ -43,6 +44,7 @@ __all__ = [
     "ContentTranslation",
     "AiUsage",
     "ContentMatch",
+    "ContentReview",
     "ClassificationRule",
     "Event",
     "Evidence",

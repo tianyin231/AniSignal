@@ -127,5 +127,6 @@ export interface RawItem {
   excerpt?: string
   cover?: string
   originalUrl?: string
+  metrics?: Record<string, number>
   previewMode: 'full' | 'partial' | 'external_only'
 }

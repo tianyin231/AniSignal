@@ -178,6 +178,19 @@ async def summarize_all(
     return {"attempted": len(ids), "ok": done, "skipped": skipped, "failed": failed}
 
 
+@router.post("/review-recent")
+async def review_recent(
+    limit: int = Query(default=40, ge=1, le=80),
+    only_missing: bool = True,
+    session: AsyncSession = Depends(get_session),
+):
+    """对近期带首图内容执行 AI 相关性与精选评分。"""
+    from app.services.curation import review_recent_contents
+
+    stats = await review_recent_contents(session, limit=limit, only_missing=only_missing)
+    return stats.__dict__
+
+
 @router.post("/translate-missing")
 async def translate_missing(session: AsyncSession = Depends(get_session)):
     """为外语内容（国际服公告 / YouTube）补机翻。"""

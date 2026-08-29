@@ -30,6 +30,18 @@ router = APIRouter(prefix="/api")
 _EXCERPT_LEN = 140
 
 
+@router.get("/highlights", response_model=PublicContentList)
+async def list_highlights(
+    limit: int = Query(default=5, ge=1, le=8),
+    session: AsyncSession = Depends(get_session),
+):
+    """首页精选：官方实质动态与高热度社区内容混排。"""
+    from app.services.curation import select_highlights
+
+    items = [PublicContentItem(**item) for item in await select_highlights(session, limit)]
+    return PublicContentList(items=items, total=len(items))
+
+
 def _preview_mode(text: str | None, media: list, url: str | None) -> str:
     if text and text.strip():
         return "full"
