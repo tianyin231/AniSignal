@@ -227,7 +227,7 @@ onBeforeUnmount(() => {
       <template v-if="hasMultiple">
         <button
           type="button"
-          class="pointer-events-none absolute left-3 top-28 z-10 grid size-11 -translate-y-1/2 cursor-pointer place-items-center rounded-xl border border-white/70 bg-white/85 text-slate-700 opacity-0 shadow-lg shadow-slate-900/10 backdrop-blur-md transition-[opacity,background-color,color] duration-200 hover:bg-white focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group-focus-within/carousel:pointer-events-auto group-focus-within/carousel:opacity-100 group-hover/carousel:pointer-events-auto group-hover/carousel:opacity-100 md:top-1/2 dark:border-white/10 dark:bg-zinc-900/80 dark:text-zinc-100 dark:hover:bg-zinc-800/90"
+          class="pointer-events-none absolute left-3 top-28 z-10 grid size-11 -translate-y-1/2 cursor-pointer place-items-center rounded-xl border border-white/70 bg-white/85 text-slate-700 opacity-0 shadow-lg shadow-slate-900/10 backdrop-blur-md transition-[opacity,background-color,color] duration-200 hover:bg-white/95 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group-focus-within/carousel:pointer-events-auto group-focus-within/carousel:opacity-100 group-hover/carousel:pointer-events-auto group-hover/carousel:opacity-100 md:top-1/2 dark:border-white/10 dark:bg-zinc-900/80 dark:text-zinc-100 dark:hover:bg-zinc-800/90"
           aria-label="上一条精选情报"
           @click="previous"
         >
@@ -235,7 +235,7 @@ onBeforeUnmount(() => {
         </button>
         <button
           type="button"
-          class="pointer-events-none absolute right-3 top-28 z-10 grid size-11 -translate-y-1/2 cursor-pointer place-items-center rounded-xl border border-white/70 bg-white/85 text-slate-700 opacity-0 shadow-lg shadow-slate-900/10 backdrop-blur-md transition-[opacity,background-color,color] duration-200 hover:bg-white focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group-focus-within/carousel:pointer-events-auto group-focus-within/carousel:opacity-100 group-hover/carousel:pointer-events-auto group-hover/carousel:opacity-100 md:top-1/2 dark:border-white/10 dark:bg-zinc-900/80 dark:text-zinc-100 dark:hover:bg-zinc-800/90"
+          class="pointer-events-none absolute right-3 top-28 z-10 grid size-11 -translate-y-1/2 cursor-pointer place-items-center rounded-xl border border-white/70 bg-white/85 text-slate-700 opacity-0 shadow-lg shadow-slate-900/10 backdrop-blur-md transition-[opacity,background-color,color] duration-200 hover:bg-white/95 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 group-focus-within/carousel:pointer-events-auto group-focus-within/carousel:opacity-100 group-hover/carousel:pointer-events-auto group-hover/carousel:opacity-100 md:top-1/2 dark:border-white/10 dark:bg-zinc-900/80 dark:text-zinc-100 dark:hover:bg-zinc-800/90"
           aria-label="下一条精选情报"
           @click="next"
         >

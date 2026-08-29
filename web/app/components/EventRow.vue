@@ -19,7 +19,7 @@ const multiPlatform = computed(
 <template>
   <NuxtLink
     :to="`/events/${event.id}`"
-    class="group block border-b border-slate-200/70 px-4 py-3.5 transition-colors last:border-b-0 hover:bg-slate-50 dark:border-zinc-800/60 dark:hover:bg-zinc-800/40"
+    class="group block border-b border-slate-200/70 px-4 py-3.5 transition-colors last:border-b-0 hover:bg-slate-900/[0.04] dark:border-zinc-800/60 dark:hover:bg-zinc-800/40"
   >
     <div class="flex items-start justify-between gap-4">
       <div class="min-w-0 flex-1">
