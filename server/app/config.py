@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     # 账号会话有效期（天）
     session_days: int = 30
 
+    # 公开站点地址：邮件里的品牌图标等静态资源用它拼绝对 URL
+    public_base_url: str = "http://154.40.58.230:8090"
+
     # AI 层（OpenAI 兼容接口；管理端 site_settings 优先于此处 env）
     ai_base_url: str = ""
     ai_api_key: str = ""
