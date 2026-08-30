@@ -3,8 +3,8 @@
 两条聚合线：
 1. 官方公告合并 —— 同类目、发布时间 72h 内、标题共享片段的官方内容并为一个事件；
    跨语言公告（中/英标题无共享词）v1 不合并，留给 AI 阶段。
-2. 商品履约 —— 命中商品 watch_terms 且类目属履约类的内容挂到对应商品事件；
-   开箱证据按送测/普通用户身份区分，独立账号数推进履约阶梯（§9.2）。
+2. 商品履约 —— 命中商品 watch_terms 且类目属履约类的内容挂到对应商品事件，
+   再同步为待逐条审核的结构化信号。
 
 ensure 语义：事件只在创建时由引擎写标题/结论等字段，之后仅追加证据、
 更新观测字段；manual_locked 的事件引擎完全跳过（§12 人工修正优先）。
@@ -29,7 +29,6 @@ from app.models import (
     EventRevision,
     Evidence,
     FULFILLMENT_CATEGORIES,
-    FULFILLMENT_STAGES,
     Product,
     RawContent,
     Source,
@@ -571,7 +570,10 @@ async def _aggregate_product(
             conclusion=_product_conclusion(category, items, product),
         )
 
-    await _advance_stage(session, product, contents, stats)
+    # 履约 V2：事件继续负责聚合，公开商品状态只读取经审核的结构化信号。
+    from app.services.fulfillment import sync_product_signals
+
+    await sync_product_signals(session, product.id)
 
 
 def _matches_product(row: ContentRow, product: Product) -> bool:
@@ -579,37 +581,9 @@ def _matches_product(row: ContentRow, product: Product) -> bool:
     return any(term and term in haystack for term in (product.watch_terms or []))
 
 
-def _distinct_user_sources(items: list[ContentRow]) -> list[str]:
-    return sorted(
-        {
-            row.source_external_id or f"{row.platform}:{row.external_id}"
-            for row in items
-            if row.identity == "user"
-        }
-    )
-
-
 def _product_confidence(category: str, items: list[ContentRow]) -> tuple[str, str]:
     if category in ("unboxing", "arrived"):
-        users = _distinct_user_sources(items)
-        if len(users) >= 5:
-            return "high", f"{len(users)} 个独立账号的证据"
-        if len(users) >= 3:
-            return "medium", f"{len(users)} 个独立账号的证据"
-        if len(users) >= 1:
-            return "low", "单一账号证据，需人工复核账号身份与商品对应关系（§9.2）"
-        if any(row.identity == "seeded" for row in items):
-            return "low", "仅有送测样品证据，不代表消费者订单履约"
-        unknown_count = len(
-            {
-                row.source_external_id or f"{row.platform}:{row.external_id}"
-                for row in items
-                if row.identity == "unknown"
-            }
-        )
-        if unknown_count:
-            return "low", f"{unknown_count} 个账号身份待核验，暂不作为消费者到货结论"
-        return "low", "暂无可作为普通用户到货结论的证据"
+        return "low", "到货内容仅作为候选信号，需逐条核验账号、获取方式与真实到货"
     if len(items) >= 2:
         return "medium", f"{len(items)} 条相关内容"
     return "low", "单一来源，待更多证据"
@@ -617,90 +591,8 @@ def _product_confidence(category: str, items: list[ContentRow]) -> tuple[str, st
 
 def _product_conclusion(category: str, items: list[ContentRow], product: Product) -> str:
     if category in ("unboxing", "arrived"):
-        users = _distinct_user_sources(items)
-        seeded = any(row.identity == "seeded" for row in items)
-        parts = []
-        if seeded:
-            parts.append("出现送测样品开箱（仅证明实物样品存在）")
-        if users:
-            parts.append(f"{len(users)} 个独立账号发布到货/开箱内容")
-        if parts:
-            return f"{product.name}：" + "；".join(parts)
+        return f"{product.name}：发现 {len(items)} 条到货/开箱候选内容，尚未形成履约结论"
     return _CATEGORY_CONCLUSION.get(category, "")
-
-
-async def _advance_stage(
-    session: AsyncSession, product: Product, contents: list[ContentRow], stats: AggStats
-) -> None:
-    """按开箱/到货证据推进阶梯；人工可覆盖，AI 结论不可压低规则证据。"""
-    unboxing = [
-        row
-        for row in contents
-        if row.category in ("unboxing", "arrived") and _matches_product(row, product)
-    ]
-    seeded = any(row.identity == "seeded" for row in unboxing)
-    users = _distinct_user_sources(unboxing)
-    stage = 0
-    if seeded:
-        stage = max(stage, 1)
-    if len(users) >= 1:
-        stage = max(stage, 2)
-    if len(users) >= 3:
-        stage = max(stage, 3)
-
-    if stage == product.computed_stage:
-        return
-
-    previous_stage = min(product.computed_stage, len(FULFILLMENT_STAGES) - 1)
-    product.computed_stage = stage
-    if stage > previous_stage:
-        stats.stage_advances += 1
-
-    events = list(
-        (
-            await session.execute(
-                select(Event).where(
-                    Event.category.in_(["unboxing", "arrived"]),
-                    Event.is_active.is_(True),
-                    Event.product_id == product.id,
-                )
-            )
-        ).scalars()
-    )
-    hint_source = product.stage_hint_source or (
-        "manual" if product.stage_hint >= 0 else None
-    )
-    manual_valid = bool(
-        hint_source == "manual"
-        and 0 < product.stage_hint <= 3
-        and (product.stage_hint_reason or "").strip()
-        and (product.stage_hint_evidence_ids or [])
-    )
-    ai_valid = bool(
-        hint_source == "ai"
-        and 0 <= product.stage_hint <= 3
-        and (product.stage_hint_reason or "").strip()
-        and (product.stage_hint == 0 or product.stage_hint_evidence_ids or [])
-    )
-    effective = (
-        product.stage_hint
-        if manual_valid
-        else max(stage, product.stage_hint) if ai_valid else stage
-    )
-    label = FULFILLMENT_STAGES[min(effective, len(FULFILLMENT_STAGES) - 1)]
-    for event in events:
-        event.last_updated_at = utcnow()
-        if event.manual_locked:
-            continue
-        event.status_label = label
-        if effective >= 2:
-            event.importance = True
-        note = (
-            f"履约状态推进：{FULFILLMENT_STAGES[previous_stage]} → {label}"
-            if previous_stage > 0 or product.computed_stage != effective
-            else f"履约状态初始化：{label}"
-        )
-        _add_revision(session, event, stats, note)
 
 
 async def _ensure_event(

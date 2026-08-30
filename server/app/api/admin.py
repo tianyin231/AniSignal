@@ -20,7 +20,6 @@ from app.models import (
     Event,
     EventRevision,
     Evidence,
-    FULFILLMENT_STAGES,
     MetricSnapshot,
     Product,
     RawContent,
@@ -41,6 +40,9 @@ from app.schemas.api import (
     ProductCreate,
     ProductListOut,
     ProductOut,
+    ProductSignalListOut,
+    ProductSignalOut,
+    ProductSignalUpdate,
     ProductUpdate,
     QueueStats,
     RuleCreate,
@@ -707,55 +709,16 @@ async def update_product(
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "product not found")
     changes = body.model_dump(exclude_unset=True)
-    stage = changes.pop("stage_hint", None)
-    reason = changes.pop("stage_hint_reason", None)
-    evidence_ids = changes.pop("stage_hint_evidence_ids", None)
-    if stage is None and (reason is not None or evidence_ids is not None):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "stage_hint is required")
-    if stage is not None:
-        from app.clock import utcnow
-
-        previous_label = FULFILLMENT_STAGES[
-            min(product.stage_hint if product.stage_hint >= 0 else product.computed_stage, 5)
-        ]
-        if stage == -1:
-            product.stage_hint = -1
-            product.stage_hint_source = None
-            product.stage_hint_reason = None
-            product.stage_hint_evidence_ids = []
-            product.stage_hint_updated_at = utcnow()
-        else:
-            await _validate_stage_evidence(
-                session, product.id, stage, reason or "", evidence_ids or []
-            )
-            product.stage_hint = stage
-            product.stage_hint_source = "manual"
-            product.stage_hint_reason = reason.strip()
-            product.stage_hint_evidence_ids = list(dict.fromkeys(evidence_ids))
-            product.stage_hint_updated_at = utcnow()
-        effective_stage = product.computed_stage if stage == -1 else stage
-        next_label = FULFILLMENT_STAGES[min(effective_stage, 5)]
-        events = list(
-            (
-                await session.execute(
-                    select(Event).where(
-                        Event.product_id == product.id,
-                        Event.is_active.is_(True),
-                        Event.category.in_(["unboxing", "arrived"]),
-                    )
-                )
-            ).scalars()
+    legacy_stage_fields = {
+        "stage_hint",
+        "stage_hint_reason",
+        "stage_hint_evidence_ids",
+    }
+    if legacy_stage_fields.intersection(changes):
+        raise HTTPException(
+            status.HTTP_410_GONE,
+            "整段履约阶段覆盖已停用，请改为审核具体履约信号",
         )
-        for event in events:
-            event.status_label = next_label
-            event.last_updated_at = utcnow()
-            session.add(
-                EventRevision(
-                    event_id=event.id,
-                    actor="admin",
-                    note=f"履约阶段审核：{previous_label} → {next_label}",
-                )
-            )
     for field, value in changes.items():
         setattr(product, field, value)
     if "watch_terms" in changes:
@@ -775,80 +738,51 @@ async def update_product(
 async def assess_product(
     product_id: int, session: AsyncSession = Depends(get_session)
 ):
-    from app.services.ai import assess_product_stage
-
-    result = await assess_product_stage(session, product_id)
-    reason = result.get("reason")
-    if result.get("status") != "ok":
-        status_code = (
-            status.HTTP_404_NOT_FOUND
-            if reason == "product_not_found"
-            else status.HTTP_422_UNPROCESSABLE_CONTENT
-        )
-        messages = {
-            "product_not_found": "product not found",
-            "no_evidences": "暂无已关联的到货/开箱内容，请先完成精确采集",
-            "ai_not_configured": "请先在 AI 层配置可用模型",
-            "model_output_invalid": "模型返回未通过证据校验，请重试或人工复核",
-        }
-        raise HTTPException(status_code, messages.get(reason, str(reason or "AI 判断失败")))
-    product = await session.get(Product, product_id)
-    return await product_to_out(session, product)
-
-
-async def _validate_stage_evidence(
-    session: AsyncSession,
-    product_id: int,
-    stage: int,
-    reason: str,
-    evidence_ids: list[int],
-) -> None:
-    if stage == 0:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "不能用缺少证据证明未发货，请恢复自动状态",
-        )
-    if stage >= 4:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "阶段 4/5 需要购买时间样本，当前暂不可确认",
-        )
-    if not reason.strip():
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "请填写审核理由")
-    selected = set(evidence_ids)
-    if not selected:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "请选择原始内容证据")
-
-    rows = list(
-        await session.execute(
-            select(Evidence, Event, RawContent, Source)
-            .join(Event, Evidence.event_id == Event.id)
-            .join(RawContent, Evidence.raw_content_id == RawContent.id)
-            .join(Source, RawContent.source_id == Source.id, isouter=True)
-            .where(
-                Event.product_id == product_id,
-                Event.is_active.is_(True),
-                Event.category.in_(["unboxing", "arrived"]),
-                Evidence.role != "excluded",
-                RawContent.id.in_(selected),
-            )
-        )
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        "AI 整体阶段判断已停用；模型输出只能进入候选信号，不能直接形成公开结论",
     )
-    found = {raw.id for _, _, raw, _ in rows}
-    if found != selected:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "所选证据不属于该商品的到货/开箱事件")
-    if stage >= 2:
-        accounts = {
-            source.external_id if source else f"{raw.platform}:{raw.external_id}"
-            for _, _, raw, source in rows
-            if (source.identity if source else "unknown") in ("user", "unknown")
-        }
-        required = 3 if stage == 3 else 1
-        if len(accounts) < required:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                f"该阶段至少需要 {required} 个独立普通账号证据",
-            )
+
+
+@router.get(
+    "/products/{product_id}/signals", response_model=ProductSignalListOut
+)
+async def list_product_signals_admin(
+    product_id: int, session: AsyncSession = Depends(get_session)
+):
+    from app.services.fulfillment import list_product_signals
+
+    if await session.get(Product, product_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "product not found")
+    items = await list_product_signals(session, product_id, include_rejected=True)
+    return ProductSignalListOut(items=items, total=len(items))
+
+
+@router.patch(
+    "/products/{product_id}/signals/{signal_id}", response_model=ProductSignalOut
+)
+async def update_product_signal(
+    product_id: int,
+    signal_id: int,
+    body: ProductSignalUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.fulfillment import list_product_signals, review_product_signal
+
+    try:
+        await review_product_signal(
+            session,
+            product_id,
+            signal_id,
+            **body.model_dump(),
+        )
+    except ValueError as exc:
+        if str(exc) in {"signal_not_found", "signal_evidence_not_found"}:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "signal not found") from exc
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    await session.commit()
+    items = await list_product_signals(session, product_id, include_rejected=True)
+    return next(item for item in items if item["id"] == signal_id)
 
 
 @router.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)

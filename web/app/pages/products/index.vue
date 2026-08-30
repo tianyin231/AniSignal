@@ -31,16 +31,15 @@ const products = computed(() => data.value?.items ?? [])
               {{ p.publisher || '—' }}{{ p.skus.length ? ` · ${p.skus.join(' / ')}` : '' }}
             </p>
           </div>
-          <span class="chip shrink-0 bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ p.stage_label }}</span>
+          <span class="chip shrink-0 bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ p.fulfillment.consumer.state_label }}</span>
         </div>
         <p v-if="p.price_note" class="mono mt-3 text-sm text-slate-600 dark:text-zinc-300">{{ p.price_note }}</p>
-        <div class="mt-3 grid gap-1.5 text-xs text-slate-500 dark:text-zinc-400">
-          <p><span class="text-slate-400">官方：</span>{{ p.official_status }}</p>
-          <p><span class="text-slate-400">消费者：</span>{{ p.consumer_status }}</p>
+        <div class="mt-3 grid gap-2 text-xs text-slate-500 dark:text-zinc-400">
+          <p><span class="text-slate-400">官方：</span>{{ p.fulfillment.official.state_label }}</p>
+          <p><span class="text-slate-400">消费者：</span>{{ p.fulfillment.consumer.state_label }}</p>
+          <p><span class="text-slate-400">质量：</span>{{ p.fulfillment.quality.state_label }}</p>
         </div>
-        <div class="mt-3">
-          <FulfillmentStepper :stages="p.stages" variant="rail" />
-        </div>
+        <p v-if="p.fulfillment.candidate_total" class="mt-3 text-[11px] text-amber-600 dark:text-amber-300">{{ p.fulfillment.candidate_total }} 条候选信号待核验</p>
       </NuxtLink>
     </div>
     <section v-else class="panel px-4 py-10 text-center text-sm text-slate-400">
