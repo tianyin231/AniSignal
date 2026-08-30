@@ -15,7 +15,6 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 <template>
   <div class="aurora-bg min-h-screen">
     <WallpaperBackdrop />
-    <AnnouncementBanner />
   <header class="glass sticky top-0 z-20">
       <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
         <NuxtLink to="/" class="flex items-center gap-2">
@@ -28,6 +27,7 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
         </NuxtLink>
       </div>
     </header>
+    <AnnouncementBanner />
 
     <main class="mx-auto grid max-w-5xl items-center gap-8 px-6 py-10 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:py-20">
       <div class="w-full max-w-sm justify-self-center lg:justify-self-start">
