@@ -338,6 +338,8 @@ class FulfillmentAxisOut(BaseModel):
     candidate_count: int = 0
     updated_at: datetime | None = None
     signal_ids: list[int] = Field(default_factory=list)
+    # 无核验数据时来自 AI 履约预判的候选概览（如"2 条自购开箱候选"）
+    ai_preview: str = ""
 
 
 class FulfillmentSnapshotOut(BaseModel):
