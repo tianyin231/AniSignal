@@ -204,3 +204,28 @@ async def test_content_moderation_flow(client, admin_headers, session):
     assert remaining is None
     resp = await client.get("/api/admin/contents", headers=admin_headers)
     assert not any(i["id"] == raw.id for i in resp.json()["items"])
+
+
+async def test_target_update_applies_thresholds(client, admin_headers):
+    """更新端点应生效 min_views/co_terms（分级策略依赖的门槛配置）。"""
+    resp = await client.post(
+        "/api/admin/collect-targets",
+        json={
+            "platform": "bilibili",
+            "target_type": "keyword_search",
+            "target_value": "门槛测试词",
+            "min_views": 0,
+            "tier": "general",
+        },
+        headers=admin_headers,
+    )
+    target_id = resp.json()["id"]
+    resp = await client.put(
+        f"/api/admin/collect-targets/{target_id}",
+        json={"min_views": 10000, "co_terms": ["版本", "共鸣"]},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["min_views"] == 10000
+    assert body["co_terms"] == ["版本", "共鸣"]
