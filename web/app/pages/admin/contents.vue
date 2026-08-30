@@ -41,8 +41,17 @@ async function refresh() {
   }
 }
 
+function applyFilters() {
+  page.value = 1
+  refresh()
+}
+
 onMounted(refresh)
-watch([platform, reviewFilter, hiddenOnly, tierFilter, page], refresh)
+// 翻页立即生效；筛选条件变更后需点击「查询」应用，避免无效查询压力
+watch([platform, reviewFilter, hiddenOnly, tierFilter], () => {
+  page.value = 1
+})
+watch(page, refresh)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
@@ -167,7 +176,6 @@ async function rereview(item: ContentItem) {
         <select
           v-model="tierFilter"
           class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
-          @change="page = 1; refresh()"
         >
           <option value="">全部分级</option>
           <option value="core">核心来源</option>
@@ -177,7 +185,6 @@ async function rereview(item: ContentItem) {
         <select
           v-model="reviewFilter"
           class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
-          @change="page = 1; refresh()"
         >
           <option value="">全部审核结果</option>
           <option value="violation">违规</option>
@@ -187,15 +194,17 @@ async function rereview(item: ContentItem) {
         <select
           v-model="platform"
           class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
-          @change="page = 1; refresh()"
         >
           <option value="">全部平台</option>
           <option v-for="(label, value) in platformLabels" :key="value" :value="value">{{ label }}</option>
         </select>
         <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
-          <input v-model="hiddenOnly" type="checkbox" class="size-4 accent-blue-600" @change="page = 1; refresh()">
+          <input v-model="hiddenOnly" type="checkbox" class="size-4 accent-blue-600">
           仅看已下架
         </label>
+        <button class="btn-primary px-4 py-2 text-sm" :disabled="loading" @click="applyFilters">
+          {{ loading ? '查询中…' : '查询' }}
+        </button>
       </div>
     </div>
 
