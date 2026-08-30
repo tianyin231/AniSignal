@@ -244,13 +244,13 @@ onBeforeUnmount(() => {
       </template>
     </div>
 
-    <nav v-if="hasMultiple" class="flex items-center justify-center border-t border-slate-200/80 px-4 py-2.5 dark:border-zinc-800" aria-label="精选情报分页">
+    <nav v-if="hasMultiple" class="flex items-center justify-center border-t border-slate-200/80 px-4 py-1 dark:border-zinc-800" aria-label="精选情报分页">
       <div class="flex items-center gap-1">
         <button
           v-for="(item, index) in items"
           :key="item.id"
           type="button"
-          class="grid size-11 cursor-pointer place-items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          class="grid size-7 cursor-pointer place-items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           :aria-label="`查看第 ${index + 1} 条精选情报`"
           :aria-current="index === activeIndex ? 'true' : undefined"
           @click="goTo(index)"
