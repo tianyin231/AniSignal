@@ -471,6 +471,11 @@ _LINK_SOCIAL_HOSTS = (
 )
 # 模板链接判定：同一条 URL 在扫描窗口内出现 ≥3 次（下载页/官网首页每条视频都带）
 _LINK_BOILERPLATE_MIN_HITS = 3
+# 视频页面链接是内容互推（官方转发视频），不是活动/奖励/H5 页面
+_LINK_VIDEO_PATTERNS = (
+    "bilibili.com/video/", "m.bilibili.com/video/", "bilibili.com/opus/",
+    "b23.tv/", "youtube.com/watch", "youtu.be/", "youtube.com/shorts/",
+)
 
 
 def _clean_url(value: str) -> str | None:
@@ -483,6 +488,8 @@ def _clean_url(value: str) -> str | None:
     if any(host in lowered for host in _LINK_SOCIAL_HOSTS):
         return None
     if lowered.split("?")[0].endswith(_LINK_PATH_BLOCKLIST):
+        return None
+    if any(pattern in lowered for pattern in _LINK_VIDEO_PATTERNS):
         return None
     return url
 
