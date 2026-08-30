@@ -86,6 +86,8 @@ class ContentItemOut(BaseModel):
     version: int | None = None
     latest_metrics: dict | None = None
     hidden: bool = False
+    tier: str = "none"
+    matched_keywords: list[str] = []
     review: dict | None = None
 
 

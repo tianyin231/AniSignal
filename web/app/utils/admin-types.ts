@@ -37,6 +37,8 @@ export interface ContentItem {
   version: number | null
   latest_metrics: Record<string, number> | null
   hidden: boolean
+  tier: 'core' | 'general' | 'none'
+  matched_keywords: string[]
   review: {
     relevant: boolean
     promotional: boolean
