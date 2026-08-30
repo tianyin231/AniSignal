@@ -25,6 +25,14 @@ DEFAULT_ANNOUNCEMENT = {
     "link": "",
 }
 
+# 媒体可见性：按平台控制图片/视频展示（show=正常 / link=仅链接 / hide=不显示）
+# default 为全站默认；platforms 覆盖单平台
+MEDIA_STATES = {"show", "link", "hide"}
+DEFAULT_MEDIA_VISIBILITY = {
+    "default": {"image": "show", "video": "show"},
+    "platforms": {},
+}
+
 
 async def get_setting(session: AsyncSession, key: str) -> dict | None:
     row = await session.get(SiteSetting, key)
@@ -43,6 +51,40 @@ async def set_setting(session: AsyncSession, key: str, value: dict) -> None:
 async def get_texts(session: AsyncSession) -> dict[str, str]:
     stored = await get_setting(session, "texts") or {}
     return {**DEFAULT_TEXTS, **{k: v for k, v in stored.items() if k in DEFAULT_TEXTS}}
+
+
+def _normalize_media_visibility(stored: dict) -> dict:
+    """合并默认值并校验状态枚举，非法键值丢弃。"""
+    merged = {
+        "default": {**DEFAULT_MEDIA_VISIBILITY["default"], **(stored.get("default") or {})},
+        "platforms": dict(stored.get("platforms") or {}),
+    }
+    for key in ("image", "video"):
+        if merged["default"].get(key) not in MEDIA_STATES:
+            merged["default"][key] = "show"
+    clean_platforms = {}
+    for platform, modes in merged["platforms"].items():
+        if not isinstance(modes, dict):
+            continue
+        clean = {k: v for k, v in modes.items() if k in ("image", "video") and v in MEDIA_STATES}
+        if clean:
+            clean_platforms[platform] = clean
+    merged["platforms"] = clean_platforms
+    return merged
+
+
+def hidden_platforms(visibility: dict) -> list[str]:
+    """图片与视频都设为 hide 的平台：公开内容列表整体排除。"""
+    return sorted(
+        platform
+        for platform, modes in visibility.get("platforms", {}).items()
+        if modes.get("image") == "hide" and modes.get("video") == "hide"
+    )
+
+
+async def get_media_visibility(session: AsyncSession) -> dict:
+    stored = await get_setting(session, "media_visibility") or {}
+    return _normalize_media_visibility(stored)
 
 
 async def get_announcement(session: AsyncSession) -> dict:

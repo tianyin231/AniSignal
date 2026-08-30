@@ -29,6 +29,7 @@ async def get_all_settings(session: AsyncSession = Depends(get_session)):
         "ai": _public_view(await get_ai_config(session)),
         "announcement": await settings_service.get_announcement(session),
         "texts": await settings_service.get_texts(session),
+        "media_visibility": await settings_service.get_media_visibility(session),
     }
 
 
@@ -197,6 +198,24 @@ async def put_announcement(body: dict, session: AsyncSession = Depends(get_sessi
     }
     await settings_service.set_setting(session, "announcement", value)
     return value
+
+
+@router.put("/media-visibility")
+async def put_media_visibility(body: dict, session: AsyncSession = Depends(get_session)):
+    """保存媒体可见性策略：default + platforms（按平台覆盖）。"""
+    stored = await settings_service.get_media_visibility(session)
+    default_in = body.get("default") or {}
+    merged_platforms = {**stored.get("platforms", {}), **(body.get("platforms") or {})}
+    value = {
+        "default": {
+            "image": str(default_in.get("image") or stored.get("default", {}).get("image") or "show"),
+            "video": str(default_in.get("video") or stored.get("default", {}).get("video") or "show"),
+        },
+        "platforms": merged_platforms,
+    }
+    normalized = settings_service._normalize_media_visibility(value)
+    await settings_service.set_setting(session, "media_visibility", normalized)
+    return normalized
 
 
 @router.put("/texts")
