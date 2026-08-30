@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # 可配置文案区域（key → 默认值）；前端 useSiteConfig 用同一组 key
 DEFAULT_TEXTS: dict[str, str] = {
-    "footer_note": "AniSignal · 鸣潮事件雷达 · 定制化情报采集",
+    "footer_note": "AniSignal · 定制化情报采集",
 }
 
 DEFAULT_ANNOUNCEMENT = {
