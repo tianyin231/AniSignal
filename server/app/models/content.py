@@ -180,5 +180,7 @@ class ContentReview(Base):
         ForeignKey("raw_contents.id", ondelete="SET NULL"), index=True
     )
     reason: Mapped[str | None] = mapped_column(String(500))
+    # AI 提取的正文外链（活动/奖励/H5/新闻页）：[{url, label}]，规则提取作为未审核内容的回退
+    links: Mapped[list | None] = mapped_column(JSON, default=None)
     model: Mapped[str] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

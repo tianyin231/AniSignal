@@ -350,3 +350,47 @@ async def test_official_links_aggregation(client, session, admin_headers):
     assert "https://aki-gm-resources.aki-game.net/h5/contest" not in [
         item["url"] for item in resp.json()["items"]
     ]
+
+
+async def test_official_links_prefers_ai_labels(client, session, admin_headers):
+    """AI 审核提取的链接带中文名称且优先展示；AI 决定不收的链接不再走规则回退。"""
+    from copy import deepcopy
+
+    from sqlalchemy import select
+
+    from app.models import ContentReview, RawContent
+    from app.services.ingest import ingest_items
+
+    notice = deepcopy(KURO_ITEM)
+    notice["entry"] = dict(notice["entry"], id="ai-link-hero")
+    notice["detail"] = {
+        "noticeId": 50556,
+        "textContent": (
+            '<p>活动详情 <a href="https://aki-gm-resources.aki-game.net/h5/contest">H5 活动</a></p>'
+            "<p>奖励领取：https://aki-gm-resources.aki-game.net/reward，</p>"
+        ),
+    }
+    await ingest_items(session, "kuro_notices", [notice])
+    raw = await session.scalar(select(RawContent).where(RawContent.external_id == "ai-link-hero"))
+    session.add(
+        ContentReview(
+            raw_content_id=raw.id,
+            relevant=True,
+            promotional=False,
+            violation=False,
+            quality_score=80,
+            model="test",
+            links=[{"url": "https://aki-gm-resources.aki-game.net/h5/contest", "label": "H5 签到活动"}],
+        )
+    )
+    await session.commit()
+    # 与生产一致：审核写入新链接后失效聚合缓存
+    from app.api.public import invalidate_official_links_cache
+
+    invalidate_official_links_cache()
+
+    resp = await client.get("/api/official-links")
+    by_url = {item["url"]: item for item in resp.json()["items"]}
+    assert by_url["https://aki-gm-resources.aki-game.net/h5/contest"]["label"] == "H5 签到活动"
+    # AI 决定只收 H5 链接，奖励链接不应经规则回退混入
+    assert "https://aki-gm-resources.aki-game.net/reward" not in by_url
