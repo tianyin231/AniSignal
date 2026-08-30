@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
@@ -103,6 +103,62 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
     return kept, filtered
 
 
+async def _backfill_empty_draw_dynamics(
+    session: AsyncSession, collector, limit: int = 5
+) -> int:
+    """自愈回填：为匿名详情补全曾瞬时失败的空 DRAW 动态重试。
+
+    成功的动态以新版本入库（保留原 author/统计），空卡片的琥珀提示随之消失。
+    """
+    import json as _json
+
+    cutoff = utcnow() - timedelta(days=7)
+    rows = (await session.execute(text(
+        "SELECT rc.id, rc.external_id, rc.raw_json "
+        "FROM raw_contents rc JOIN content_versions cv ON cv.raw_content_id=rc.id "
+        "AND cv.version=(SELECT MAX(version) FROM content_versions WHERE raw_content_id=rc.id) "
+        "WHERE rc.content_type='dynamic' AND rc.platform='bilibili' "
+        "AND COALESCE(LENGTH(cv.text),0)=0 "
+        "AND rc.collected_at > :cutoff "
+        "ORDER BY rc.id DESC LIMIT :lim"
+    ), {"cutoff": cutoff, "lim": limit})).fetchall()
+    if not rows:
+        return 0
+
+    enriched_items: list[dict] = []
+    touched: list[int] = []
+    for rid, external_id, raw_json in rows:
+        if not external_id:
+            continue
+        try:
+            rich = await collector._fetch_draw_detail(external_id)
+        except Exception:  # noqa: BLE001 - 单条失败跳过
+            continue
+        if not ((rich.get("text") or "").strip() or rich.get("pics")):
+            continue
+        raw = raw_json or {}
+        if isinstance(raw, str):
+            import json as _json
+
+            try:
+                raw = _json.loads(raw)
+            except ValueError:
+                raw = {}
+        if not isinstance(raw, dict):
+            raw = {}
+        item = dict(raw)
+        item.update({"id": external_id, "text": rich.get("text") or "", "pics": rich.get("pics") or []})
+        enriched_items.append(item)
+        touched.append(rid)
+    if enriched_items:
+        await ingest_items(session, "bilibili_dynamics", enriched_items)
+        logger.info(
+            "backfilled %s empty DRAW dynamics with anonymous detail: %s",
+            len(enriched_items), touched,
+        )
+    return len(enriched_items)
+
+
 async def run_collection(redis, target_id: int) -> dict:
     """执行一次采集。redis 为 arq Redis 池（复用连接，也用于平台间隔）。"""
     settings = get_settings()
@@ -146,6 +202,11 @@ async def run_collection(redis, target_id: int) -> dict:
                     target.id, filtered_out,
                 )
             stats = await ingest_items(session, fetch_result.fetch_kind, fetch_result.items)
+            if fetch_result.fetch_kind == "bilibili_dynamics":
+                try:
+                    await _backfill_empty_draw_dynamics(session, collector_factory())
+                except Exception:  # noqa: BLE001 - 回填失败不影响本轮采集
+                    logger.warning("empty DRAW backfill failed", exc_info=True)
             match_stats = None
             if stats.touched_content_ids:
                 from app.services.similarity import match_official_contents
