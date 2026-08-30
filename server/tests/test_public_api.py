@@ -291,3 +291,56 @@ async def test_wallpaper_resolve_rejects_non_image(monkeypatch):
     assert public_module._wallpaper_last_url is None  # 不缓存非图片结果
 
 
+
+
+async def test_official_links_aggregation(client, session, admin_headers):
+    """官方动态正文里的外链被聚合去重；已下架内容的外链不出现。"""
+    from copy import deepcopy
+
+    from sqlalchemy import select
+
+    from app.models import RawContent
+    from app.services.ingest import ingest_items
+
+    notice = deepcopy(KURO_ITEM)
+    notice["entry"] = dict(notice["entry"], id="link-hero")
+    notice["detail"] = {
+        "noticeId": 50554,
+        "textContent": (
+            '<p>活动详情 <a href="https://aki-gm-resources.aki-game.net/h5/contest">H5 活动</a></p>'
+            "<p>奖励领取：https://aki-gm-resources.aki-game.net/reward，</p>"
+        ),
+    }
+    await ingest_items(session, "kuro_notices", [notice])
+
+    # 同一链接再次出现（另一条官方内容）→ 去重
+    dup = deepcopy(KURO_ITEM)
+    dup["entry"] = dict(notice["entry"], id="link-dup")
+    dup["detail"] = dict(notice["detail"], noticeId=50555)
+    await ingest_items(session, "kuro_notices", [dup])
+
+    rows = list(await session.scalars(select(RawContent)))
+    hero_id = next(r.id for r in rows if r.id)
+
+    resp = await client.get("/api/official-links")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    urls = [item["url"] for item in items]
+    assert "https://aki-gm-resources.aki-game.net/h5/contest" in urls
+    assert "https://aki-gm-resources.aki-game.net/reward" in urls
+    assert urls.count("https://aki-gm-resources.aki-game.net/h5/contest") == 1
+    assert all(item["category"] == "kuro" for item in items)
+    assert items[0]["title"]
+
+    # 下架后外链不再出现（管理端动作会失效聚合缓存）；两条都下架（链接相同）
+    for content_id in (hero_id, hero_id + 1):
+        resp = await client.patch(
+            f"/api/admin/contents/{content_id}/visibility",
+            json={"hidden": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+    resp = await client.get("/api/official-links")
+    assert "https://aki-gm-resources.aki-game.net/h5/contest" not in [
+        item["url"] for item in resp.json()["items"]
+    ]

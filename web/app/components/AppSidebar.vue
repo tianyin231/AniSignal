@@ -23,5 +23,6 @@ const tools = [
         </li>
       </ul>
     </div>
+    <OfficialLinks variant="list" />
   </nav>
 </template>
