@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { identityMeta, platformMeta, regionMeta, type AppEvent } from '~/utils/data'
+import { identityMeta, platformMeta, type AppEvent } from '~/utils/data'
 
 const props = defineProps<{ event: AppEvent }>()
 
 const identity = computed(() => identityMeta[props.event.identity])
-const regionsText = computed(() => props.event.regions.map((r) => regionMeta[r]).join(' + '))
 const eventPlatforms = computed(() =>
   [...new Set(props.event.sources.map((s) => s.platform))].map((platform) => ({
     key: platform,
@@ -14,6 +13,13 @@ const eventPlatforms = computed(() =>
 const multiPlatform = computed(
   () => new Set(props.event.sources.map((s) => s.platform)).size > 1,
 )
+// 来源账号去重；过多时折叠计数，详情页可见全部
+const sourceNames = computed(() => {
+  const names = [...new Set(props.event.sources.map((s) => s.account).filter(Boolean))]
+  if (names.length === 0) return ''
+  if (names.length <= 2) return names.join('、')
+  return `${names.slice(0, 2).join('、')} 等 ${names.length} 个来源`
+})
 </script>
 
 <template>
@@ -51,22 +57,9 @@ const multiPlatform = computed(
     </div>
     <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400 dark:text-zinc-500">
       <span class="font-medium" :class="identity.text">{{ identity.label }}</span>
-      <span aria-hidden="true">·</span>
-      <span>{{ event.category }}</span>
-      <template v-if="event.regions.length > 1">
+      <template v-if="sourceNames">
         <span aria-hidden="true">·</span>
-        <span>{{ regionsText }}</span>
-      </template>
-      <span v-if="event.regionNote" class="text-amber-600 dark:text-amber-400">{{ event.regionNote }}</span>
-      <span aria-hidden="true">·</span>
-      <span class="mono">{{ event.evidenceCount }} 条证据</span>
-      <span aria-hidden="true">·</span>
-      <span>可信度 {{ event.confidence }}</span>
-      <template v-if="event.matchedKeywords?.length">
-        <span aria-hidden="true">·</span>
-        <span class="inline-flex flex-wrap gap-1">
-          <span v-for="k in event.matchedKeywords" :key="k" class="rounded bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-700 dark:text-blue-300">{{ k }}</span>
-        </span>
+        <span class="truncate">{{ sourceNames }}</span>
       </template>
       <template v-if="event.statusChange">
         <span aria-hidden="true">·</span>
