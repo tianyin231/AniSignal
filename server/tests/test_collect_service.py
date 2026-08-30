@@ -132,8 +132,8 @@ def test_community_youtube_rss_filters_by_title_case_insensitively():
     assert "Wuthering Waves" in kept[0]["_matched_keywords"]
 
 
-async def test_core_tier_bypasses_thresholds(session):
-    """core 级目标全量入库：低播放、不命中共现词的内容都保留（强及时性）。"""
+async def test_core_tier_semantics(session):
+    """core 级：共现词豁免；min_views=0 全量入库，>0 时作为兜底门槛。"""
     from app.models import CollectTarget
 
     target = CollectTarget(
@@ -141,7 +141,7 @@ async def test_core_tier_bypasses_thresholds(session):
         target_type="keyword_search",
         target_value="爱弥斯",
         co_terms=["联名"],
-        min_views=10000,
+        min_views=0,
         tier="core",
     )
     items = [
@@ -149,11 +149,16 @@ async def test_core_tier_bypasses_thresholds(session):
         {"title": "爱弥斯联名键盘开箱", "view_count": 50000, "_matched_keywords": ["旧标"]},
     ]
     kept, filtered = collect_module.filter_relevant(items, target)
-    assert filtered == 0
-    assert len(kept) == 2
+    assert filtered == 0 and len(kept) == 2
     assert "爱弥斯" in kept[0]["_matched_keywords"]
-    # 命中的共现词仍会追加溯源
     assert "联名" in kept[1]["_matched_keywords"]
+
+    # min_views > 0 时核心词也走兜底门槛
+    target.min_views = 10000
+    low = {"title": "随手拍的爱弥斯键盘", "view_count": 120}
+    high = {"title": "爱弥斯联名键盘开箱", "view_count": 50000}
+    kept, filtered = collect_module.filter_relevant([low, high], target)
+    assert [i["view_count"] for i in kept] == [50000]
 
 
 async def test_general_tier_keeps_thresholds(session):
