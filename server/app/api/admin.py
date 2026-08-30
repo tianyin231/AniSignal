@@ -253,6 +253,7 @@ async def list_contents(
     rows = await session.execute(
         select(RawContent, Source.name)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
         .where(*conditions)
         .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
         .limit(2000 if tier is not None else limit)
@@ -338,7 +339,9 @@ async def list_contents(
         items = items[offset:offset + limit]
     else:
         total = await session.scalar(
-            select(func.count(RawContent.id)).where(*conditions)
+            select(func.count(RawContent.id))
+            .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
+            .where(*conditions)
         ) or 0
     return ContentListOut(items=items, total=total)
 

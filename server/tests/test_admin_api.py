@@ -283,3 +283,57 @@ async def test_contents_tier_and_runs_fields(client, admin_headers, session):
     resp = await client.get("/api/admin/runs?limit=5", headers=admin_headers)
     run = resp.json()[0]
     assert "items_fetched" in run and "items_filtered" in run
+
+
+async def test_contents_review_filter_accuracy(client, admin_headers, session):
+    """审核结果筛选必须精确：violation 只返回违规内容，不产生笛卡尔积膨胀。"""
+    from sqlalchemy import select
+
+    from app.models import ContentReview, RawContent
+    from app.services.ingest import ingest_items
+    from tests.test_parsers_bilibili import VIDEO_RAW
+
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [
+            dict(VIDEO_RAW, bvid="BVfilt-v", title="违规测试内容"),
+            dict(VIDEO_RAW, bvid="BVfilt-ok", title="正常测试内容"),
+            dict(VIDEO_RAW, bvid="BVfilt-nr", title="无审核内容"),
+        ],
+    )
+    rows = {r.external_id: r.id for r in await session.scalars(select(RawContent))}
+    session.add(
+        ContentReview(
+            raw_content_id=rows["BVfilt-v"], relevant=True, promotional=False,
+            violation=True, quality_score=10, model="test",
+        )
+    )
+    session.add(
+        ContentReview(
+            raw_content_id=rows["BVfilt-ok"], relevant=True, promotional=False,
+            violation=False, quality_score=80, model="test",
+        )
+    )
+    # 无审核内容不给 review 行
+    await session.commit()
+
+    resp = await client.get(
+        "/api/admin/contents", params={"review": "violation", "limit": 200}, headers=admin_headers
+    )
+    items = resp.json()["items"]
+    assert resp.json()["total"] == 1
+    assert items[0]["external_id"] == "BVfilt-v"
+    assert items[0]["review"]["violation"] is True
+
+    resp = await client.get(
+        "/api/admin/contents", params={"review": "ok", "limit": 200}, headers=admin_headers
+    )
+    assert resp.json()["total"] == 1
+    assert resp.json()["items"][0]["external_id"] == "BVfilt-ok"
+
+    # 无审核行的内容不被 ok/violation 命中
+    resp = await client.get(
+        "/api/admin/contents", params={"review": "irrelevant", "limit": 200}, headers=admin_headers
+    )
+    assert resp.json()["total"] == 0
