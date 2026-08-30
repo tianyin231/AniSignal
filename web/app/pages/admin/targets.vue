@@ -106,10 +106,33 @@ async function remove(target: CollectTarget) {
     await api(`/api/admin/collect-targets/${target.id}`, { method: 'DELETE' })
     toast.ok('目标已删除')
     await refresh()
+    await refreshRuns()
   } finally {
     busyId.value = null
   }
 }
+
+// 最近采集运行：分级/门槛策略的过滤效果在这里可见
+interface RunItem {
+  id: number
+  target_id: number
+  started_at: string | null
+  status: string
+  items_found: number | null
+  items_new: number | null
+  items_fetched: number | null
+  items_filtered: number | null
+}
+const runs = ref<RunItem[]>([])
+const targetName = (targetId: number) =>
+  targets.value.find((t) => t.id === targetId)?.display_name || `#${targetId}`
+
+async function refreshRuns() {
+  try {
+    runs.value = await api<RunItem[]>('/api/admin/runs', { query: { limit: 8 } })
+  } catch { /* 运行记录失败不影响主表 */ }
+}
+onMounted(refreshRuns)
 </script>
 
 <template>
@@ -188,5 +211,29 @@ async function remove(target: CollectTarget) {
         </tbody>
       </table>
     </div>
+
+    <section class="panel overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3">
+        <h2 class="text-sm font-semibold">最近采集运行</h2>
+        <p class="text-xs text-slate-400">抓取 → 过滤（分级/门槛） → 入库</p>
+      </div>
+      <table class="w-full text-sm">
+        <tbody>
+          <tr v-for="run in runs" :key="run.id" class="border-t border-slate-900/5 text-xs dark:border-white/5">
+            <td class="px-4 py-2 text-slate-600 dark:text-zinc-300">{{ targetName(run.target_id) }}</td>
+            <td class="mono px-4 py-2 text-slate-400">{{ fmtTime(run.started_at) }}</td>
+            <td class="px-4 py-2">
+              <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-slate-500/10 text-slate-500'">{{ run.status }}</span>
+            </td>
+            <td class="mono px-4 py-2 text-slate-500 dark:text-zinc-400">
+              抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 入库 {{ run.items_new ?? 0 }}
+            </td>
+          </tr>
+          <tr v-if="!runs.length">
+            <td colspan="4" class="px-4 py-6 text-center text-sm text-slate-400">暂无运行记录。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
   </div>
 </template>

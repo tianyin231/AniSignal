@@ -209,6 +209,7 @@ async def list_contents(
     hidden: bool | None = Query(default=None),
     review: str | None = Query(default=None, description="violation / irrelevant / ok"),
     q: str | None = Query(default=None, description="标题关键词"),
+    tier: str | None = Query(default=None, description="core / general / none（来源分级）"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -235,16 +236,41 @@ async def list_contents(
             ContentReview.violation.is_(False) & ContentReview.relevant.is_(True)
         )
 
+    core_terms: set[str] = set()
+    core_rows = await session.scalars(
+        select(CollectTarget).where(CollectTarget.tier == "core")
+    )
+    for target in core_rows:
+        if target.target_type == "keyword_search" and target.target_value:
+            core_terms.add(target.target_value)
+        if target.display_name:
+            core_terms.add(target.display_name)
+        for term in target.co_terms or []:
+            if term:
+                core_terms.add(term)
+
     rows = await session.execute(
         select(RawContent, Source.name)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(*conditions)
         .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
-        .limit(limit)
+        .limit(400 if tier else limit)
         .offset(offset)
     )
-    page = [(raw, name) for raw, name in rows]
-    content_ids = [raw.id for raw, _ in page]
+    page = []
+    for raw, name in rows:
+        keywords = raw.matched_keywords or []
+        content_tier = (
+            "core"
+            if any(str(k) in core_terms for k in keywords)
+            else "general"
+            if keywords
+            else "none"
+        )
+        if tier is not None and content_tier != tier:
+            continue
+        page.append((raw, name, content_tier))
+    content_ids = [raw.id for raw, _, _ in page]
 
     reviews: dict[int, ContentReview] = {}
     if content_ids:
@@ -285,6 +311,8 @@ async def list_contents(
             version=latest_versions[raw.id].version if raw.id in latest_versions else None,
             latest_metrics=latest_metrics.get(raw.id),
             hidden=raw.hidden,
+            tier=content_tier,
+            matched_keywords=(raw.matched_keywords or [])[:8],
             review=(
                 {
                     "relevant": review.relevant,
@@ -298,11 +326,12 @@ async def list_contents(
                 else None
             ),
         )
-        for raw, name in page
+        for raw, name, content_tier in page
     ]
 
-    count_sq = select(func.count(RawContent.id)).where(*conditions)
-    total = await session.scalar(count_sq) or 0
+    total = len(items) if tier is not None else await session.scalar(
+        select(func.count(RawContent.id)).where(*conditions)
+    ) or 0
     return ContentListOut(items=items, total=total)
 
 
@@ -439,6 +468,9 @@ async def list_runs(
             "error": run.error,
             "items_found": run.items_found,
             "items_new": run.items_new,
+            "items_fetched": run.items_fetched,
+            "items_filtered": run.items_filtered,
+            "parse_failed": run.parse_failed,
         }
         for run in result.scalars()
     ]

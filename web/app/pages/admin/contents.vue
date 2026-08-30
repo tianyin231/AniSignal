@@ -12,6 +12,7 @@ const items = ref<ContentItem[]>([])
 const total = ref(0)
 const platform = ref<string>('')
 const reviewFilter = ref<string>('')
+const tierFilter = ref<string>('')
 const hiddenOnly = ref(false)
 const q = ref('')
 const page = ref(1)
@@ -28,6 +29,7 @@ async function refresh() {
     if (platform.value) query.platform = platform.value
     if (reviewFilter.value) query.review = reviewFilter.value
     if (hiddenOnly.value) query.hidden = true
+    if (tierFilter.value) query.tier = tierFilter.value
     if (q.value.trim()) query.q = q.value.trim()
     const data = await api<ContentList>('/api/admin/contents', { query })
     items.value = data.items
@@ -40,7 +42,7 @@ async function refresh() {
 }
 
 onMounted(refresh)
-watch([platform, reviewFilter, hiddenOnly, page], refresh)
+watch([platform, reviewFilter, hiddenOnly, tierFilter, page], refresh)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
@@ -163,6 +165,16 @@ async function rereview(item: ContentItem) {
           @keyup.enter="page = 1; refresh()"
         >
         <select
+          v-model="tierFilter"
+          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          @change="page = 1; refresh()"
+        >
+          <option value="">全部分级</option>
+          <option value="core">核心来源</option>
+          <option value="general">泛关键词</option>
+          <option value="none">无匹配词</option>
+        </select>
+        <select
           v-model="reviewFilter"
           class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
           @change="page = 1; refresh()"
@@ -195,6 +207,7 @@ async function rereview(item: ContentItem) {
           <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
             <th class="px-4 py-2.5 font-medium">标题</th>
             <th class="px-4 py-2.5 font-medium">平台</th>
+            <th class="px-4 py-2.5 font-medium">来源分级</th>
             <th class="px-4 py-2.5 font-medium">审核</th>
             <th class="px-4 py-2.5 font-medium">状态</th>
             <th class="px-4 py-2.5 font-medium">采集</th>
@@ -211,6 +224,13 @@ async function rereview(item: ContentItem) {
               <p v-if="item.review?.reason" class="mt-0.5 truncate text-xs text-slate-400 dark:text-zinc-500" :title="item.review.reason">AI：{{ item.review.reason }}</p>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabels[item.platform] ?? item.platform }}</td>
+            <td class="whitespace-nowrap px-4 py-2.5">
+              <span
+                class="chip"
+                :class="item.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300' : item.tier === 'general' ? 'bg-slate-500/10 text-slate-500 dark:text-zinc-400' : 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400'"
+                :title="(item.matched_keywords || []).join('、')"
+              >{{ item.tier === 'core' ? '核心来源' : item.tier === 'general' ? '泛关键词' : '无匹配' }}</span>
+            </td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <span
                 v-if="reviewBadge(item)"
@@ -263,7 +283,7 @@ async function rereview(item: ContentItem) {
             </td>
           </tr>
           <tr v-if="items.length === 0 && !loading">
-            <td colspan="7" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">
+            <td colspan="8" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">
               暂无内容；创建目标并触发采集后，这里会出现数据。
             </td>
           </tr>

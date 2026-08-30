@@ -229,3 +229,57 @@ async def test_target_update_applies_thresholds(client, admin_headers):
     body = resp.json()
     assert body["min_views"] == 10000
     assert body["co_terms"] == ["版本", "共鸣"]
+
+
+async def test_contents_tier_and_runs_fields(client, admin_headers, session):
+    """内容列表带来源分级与筛选；运行端点带过滤细分字段。"""
+    from sqlalchemy import select
+
+    from app.models import CollectRun, CollectTarget, RawContent
+    from app.services.ingest import ingest_items
+    from tests.test_parsers_bilibili import VIDEO_RAW
+
+    session.add(
+        CollectTarget(
+            platform="bilibili",
+            target_type="keyword_search",
+            target_value="爱弥斯",
+            tier="core",
+        )
+    )
+    await session.commit()
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [dict(VIDEO_RAW, bvid="BVtier1", title="爱弥斯键盘实拍", matched_keywords=None)],
+    )
+    raw = await session.scalar(select(RawContent).where(RawContent.external_id == "BVtier1"))
+    raw.matched_keywords = ["爱弥斯"]
+    await session.commit()
+
+    resp = await client.get("/api/admin/contents", headers=admin_headers)
+    item = next(i for i in resp.json()["items"] if i["id"] == raw.id)
+    assert item["tier"] == "core"
+    assert "爱弥斯" in item["matched_keywords"]
+
+    resp = await client.get("/api/admin/contents", params={"tier": "core"}, headers=admin_headers)
+    assert any(i["id"] == raw.id for i in resp.json()["items"])
+    resp = await client.get("/api/admin/contents", params={"tier": "general"}, headers=admin_headers)
+    assert not any(i["id"] == raw.id for i in resp.json()["items"])
+
+    # runs 端点带过滤细分字段
+    session.add(
+        CollectRun(
+            target_id=(await session.scalar(select(CollectTarget.id).limit(1))),
+            started_at=__import__("app.clock", fromlist=["utcnow"]).utcnow(),
+            status="success",
+            items_found=20,
+            items_new=5,
+            items_fetched=25,
+            items_filtered=5,
+        )
+    )
+    await session.commit()
+    resp = await client.get("/api/admin/runs?limit=5", headers=admin_headers)
+    run = resp.json()[0]
+    assert "items_fetched" in run and "items_filtered" in run
