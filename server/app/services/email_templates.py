@@ -1,6 +1,15 @@
-"""AniSignal 邮件模板：兼容邮件客户端的内联样式与纯文本降级。"""
+"""AniSignal 邮件模板：兼容邮件客户端的内联样式与纯文本降级。
+
+视觉与站点对齐：白卡片、论坛蓝 (#2563eb) 点缀、slate 文字、吉祥物品牌头。
+"""
 
 from html import escape
+
+from app.config import get_settings
+
+
+def _icon_url() -> str:
+    return f"{get_settings().public_base_url.rstrip('/')}/icon.png"
 
 
 def document(
@@ -32,6 +41,8 @@ def document(
       .email-bg {{ background: #09090b !important; }}
       .email-card {{ background: #18181b !important; border-color: #27272a !important; }}
       .email-text {{ color: #f4f4f5 !important; }}
+      .email-title {{ color: #f4f4f5 !important; }}
+      .email-brand {{ color: #f4f4f5 !important; }}
       .email-muted {{ color: #a1a1aa !important; }}
       .email-panel {{ background: #27272a !important; border-color: #3f3f46 !important; }}
     }}
@@ -44,16 +55,22 @@ def document(
       <td align="center" style="padding:28px 12px;">
         <table role="presentation" class="email-shell email-card" width="640" cellspacing="0" cellpadding="0" border="0" style="width:640px;max-width:640px;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
           <tr>
-            <td class="email-pad" style="padding:26px 32px;background-color:#1d4ed8;background-image:linear-gradient(135deg,#2563eb,#0f4bb8);">
+            <td style="height:4px;background-image:linear-gradient(90deg,#2563eb,#0ea5e9);font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td class="email-pad" style="padding:24px 32px 0;">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                 <tr>
-                  <td width="44" valign="middle">
-                    <div style="width:36px;height:36px;line-height:36px;text-align:center;border-radius:10px;background:#ffffff;color:#1d4ed8;font-size:18px;font-weight:800;">A</div>
+                  <td width="52" valign="middle">
+                    <img src="{_icon_url()}" width="40" height="40" alt="AniSignal" style="display:block;width:40px;height:40px;border-radius:12px;border:1px solid #e2e8f0;">
                   </td>
-                  <td valign="middle" style="padding-left:10px;color:#dbeafe;font-size:12px;line-height:18px;font-weight:700;letter-spacing:1.5px;">{safe_eyebrow}</td>
+                  <td valign="middle" style="padding-left:12px;">
+                    <div class="email-brand" style="color:#0f172a;font-size:17px;line-height:22px;font-weight:800;letter-spacing:0.2px;">AniSignal</div>
+                    <div style="margin-top:2px;color:#64748b;font-size:11px;line-height:16px;font-weight:700;letter-spacing:1.5px;">{safe_eyebrow}</div>
+                  </td>
                 </tr>
               </table>
-              <h1 class="email-title" style="margin:18px 0 0;color:#ffffff;font-size:28px;line-height:36px;font-weight:750;">{safe_title}</h1>
+              <h1 class="email-title" style="margin:20px 0 0;color:#0f172a;font-size:26px;line-height:34px;font-weight:750;">{safe_title}</h1>
             </td>
           </tr>
           <tr>
@@ -63,7 +80,7 @@ def document(
           </tr>
           <tr>
             <td class="email-pad email-muted" style="padding:20px 32px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:20px;">
-              AniSignal · 鸣潮跨平台事件雷达<br>
+              AniSignal · 定制化情报采集<br>
               这是一封系统服务邮件，请勿直接回复。
             </td>
           </tr>
