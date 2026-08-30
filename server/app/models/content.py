@@ -182,5 +182,7 @@ class ContentReview(Base):
     reason: Mapped[str | None] = mapped_column(String(500))
     # AI 提取的正文外链（活动/奖励/H5/新闻页）：[{url, label}]，规则提取作为未审核内容的回退
     links: Mapped[list | None] = mapped_column(JSON, default=None)
+    # AI 商品履约预判：{kind, confidence, reason}（kind: self_purchase/pr_sample/forward/none）
+    fulfillment: Mapped[dict | None] = mapped_column(JSON, default=None)
     model: Mapped[str] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

@@ -188,6 +188,7 @@ export interface ApiProductSignal {
   signal_label: string
   actor_type: string
   review_status: 'candidate' | 'verified' | 'rejected' | 'conflict'
+  ai_hint?: { kind: string; confidence: number; reason: string } | null
   occurred_at: string | null
   summary: string
   confidence: number
@@ -234,6 +235,12 @@ export interface ApiProduct {
   evidences: ApiProductEvidence[]
   stages: ApiProductStage[]
   fulfillment: FulfillmentSnapshot
+  latest_candidate?: {
+    summary: string
+    signal_label: string
+    occurred_at: string | null
+    content_id: number
+  } | null
   updated_at: string | null
 }
 

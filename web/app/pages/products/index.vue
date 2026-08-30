@@ -39,6 +39,9 @@ const products = computed(() => data.value?.items ?? [])
           <p><span class="text-slate-400">消费者：</span>{{ p.fulfillment.consumer.state_label }}</p>
           <p><span class="text-slate-400">质量：</span>{{ p.fulfillment.quality.state_label }}</p>
         </div>
+        <p v-if="p.latest_candidate" class="mt-3 truncate text-[11px] text-slate-500 dark:text-zinc-400" :title="p.latest_candidate.summary">
+          最新候选：{{ p.latest_candidate.summary }}（未核验）
+        </p>
         <p v-if="p.fulfillment.candidate_total" class="mt-3 text-[11px] text-amber-600 dark:text-amber-300">{{ p.fulfillment.candidate_total }} 条候选信号待核验</p>
       </NuxtLink>
     </div>

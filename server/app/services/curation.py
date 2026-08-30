@@ -22,6 +22,7 @@ from app.models import (
     ContentVersion,
     Evidence,
     MetricSnapshot,
+    Product,
     RawContent,
     Source,
 )
@@ -75,7 +76,8 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
         stats.skipped_reason = "ai_not_configured"
         return stats
 
-    candidates = await _review_candidates(session, ids)
+    tracked_products = await _load_tracked_products(session)
+    candidates = await _review_candidates(session, ids, tracked_products)
     stats.candidates = len(candidates)
     semaphore = asyncio.Semaphore(REVIEW_CONCURRENCY)
 
@@ -120,6 +122,7 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
         row.category_hint = decision["category_hint"]
         row.reason = decision["reason"]
         row.links = decision["links"]
+        row.fulfillment = decision.get("fulfillment")
         row.model = config["model"]
         row.updated_at = utcnow()
         raw = await session.get(RawContent, content_id)
@@ -391,7 +394,9 @@ def _latest_version_subquery():
     )
 
 
-async def _review_candidates(session: AsyncSession, ids: list[int]) -> list[dict]:
+async def _review_candidates(
+    session: AsyncSession, ids: list[int], tracked_products: list[dict]
+) -> list[dict]:
     latest = _latest_version_subquery()
     rows = await session.execute(
         select(RawContent, ContentVersion, Source)
@@ -412,21 +417,47 @@ async def _review_candidates(session: AsyncSession, ids: list[int]) -> list[dict
         normalized = version.normalized_json or {}
         media = normalized.get("media") or []
         cover = next((item for item in media if isinstance(item, str) and item), None)
+        text_plain = _plain(version.text or "")
         candidates.append(
             {
                 "id": raw.id,
                 "platform": raw.platform,
                 "identity": source.identity if source else "unknown",
                 "title": (version.title or raw.external_id)[:240],
-                "text": _plain(version.text or "")[:1200],
+                "text": text_plain[:1200],
                 "rule_category": version.category,
                 "metrics": metrics.get(raw.id),
                 "cover": cover,
                 "matched_keywords": (raw.matched_keywords or [])[:12],
                 "known_terms": known_terms,
+                "product_context": _match_product_context(
+                    tracked_products, version.title or "", text_plain, raw.matched_keywords or []
+                ),
             }
         )
     return candidates
+
+
+def _match_product_context(
+    tracked_products: list[dict], title: str, text: str, matched_keywords: list
+) -> dict | None:
+    """内容命中在售商品的匹配词时，附带商品上下文供 AI 做履约预判。"""
+    haystack = f"{title} {text} {' '.join(str(k) for k in matched_keywords)}"
+    for product in tracked_products:
+        hits = [term for term in product["terms"] if term and term in haystack]
+        if hits:
+            return {"name": product["name"], "matched_terms": hits[:6]}
+    return None
+
+
+async def _load_tracked_products(session: AsyncSession) -> list[dict]:
+    rows = await session.execute(select(Product.id, Product.name, Product.watch_terms))
+    products = []
+    for pid, name, terms in rows:
+        term_list = [t for t in (terms or []) if isinstance(t, str) and len(t.strip()) >= 2]
+        if term_list:
+            products.append({"id": pid, "name": name, "terms": term_list})
+    return products
 
 
 async def _load_known_terms(session: AsyncSession) -> list[str]:
@@ -516,6 +547,16 @@ def _parse_review(response: str, content_id: int) -> dict | None:
         label = unescape(str(link.get("label") or "").strip()[:40])
         if url.startswith(("http://", "https://")):
             links.append({"url": url, "label": label})
+    parsed_fulfillment = None
+    fulfillment = item.get("fulfillment")
+    if isinstance(fulfillment, dict):
+        kind = fulfillment.get("kind")
+        if kind in {"self_purchase", "pr_sample", "forward", "none"}:
+            parsed_fulfillment = {
+                "kind": kind,
+                "confidence": max(0, min(100, int(fulfillment.get("confidence") or 0))),
+                "reason": str(fulfillment.get("reason") or "")[:80],
+            }
     return {
         "relevant": relevant,
         "promotional": promotional,
@@ -524,6 +565,7 @@ def _parse_review(response: str, content_id: int) -> dict | None:
         "category_hint": category,
         "reason": str(item.get("reason") or "")[:500],
         "links": links,
+        "fulfillment": parsed_fulfillment,
     }
 
 
@@ -564,4 +606,8 @@ _REVIEW_SYSTEM_PROMPT = """你是《鸣潮》主题情报站的编辑兼内容�
 - quality_score 为 0 到 100 的编辑价值：官方版本、角色、活动、维护和实质公告优先；社区内容重视明确主题、信息量和独立表达，播放量只代表热度。
 - category_hint 只能是 official_announce/version_update/presale/balance/delay/shipping/arrived/unboxing/review/quality/promotion/chat/other 或 null。
 - links：从正文中提取的站外链接数组，只收有实际内容的页面（网页活动、H5 小游戏、奖励领取、新闻详情等），忽略社媒主页、下载页、官网首页和视频页；每项 {"url":"原文中的完整链接","label":"不超过 12 字的简体中文名称，说明该链接是什么（如 B站主题收藏集、H5 签到活动）"}；没有则返回空数组 []。label 必须是简体中文。
+- 若输入包含 product_context（内容命中了在售联名商品的匹配词），追加输出商品履约预判：
+  "fulfillment":{"kind":"...","confidence":0-100,"reason":"不超过 60 字的简体中文依据"}。
+  kind 只能是 self_purchase（自购开箱/到货晒单/订单截图）、pr_sample（官方送测/样品/共创）、forward（转发剪辑/非实拍内容）、none（普通资讯，与商品履约无关）。
+  依据要点：实拍图、订单或收货信息、开箱时间线指向 self_purchase；提到送测、样品、官方寄送、共创指向 pr_sample；明显转发他人视频或二剪指向 forward；拿不准时 confidence 不超过 40。
 - 若输入附带封面图，须结合图片与文字综合判断：图片低俗或违规记 violation=true；图文完全无关可作为参考，但相关性仍按词表规则定。不得补充外部事实。"""

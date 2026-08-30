@@ -269,9 +269,21 @@ async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> 
         quality_label = "发现单例质量反馈"
         quality_summary = "当前只有一个已核验来源，暂不能推断为普遍问题"
     else:
-        quality_state = "no_verified_issue"
-        quality_label = "暂无已核验质量风险"
-        quality_summary = "候选质量反馈尚未形成可公开结论"
+        quality_candidate_sources = {
+            evidence.independent_source_key
+            for signal, evidence in candidates
+            if signal.signal_type == "quality_issue"
+        }
+        if len(quality_candidate_sources) >= 2:
+            quality_state = "candidate_attention"
+            quality_label = "多账号反馈质量问题"
+            quality_summary = (
+                f"已有 {len(quality_candidate_sources)} 个独立来源的质量候选，尚未核验"
+            )
+        else:
+            quality_state = "no_verified_issue"
+            quality_label = "暂无已核验质量风险"
+            quality_summary = "候选质量反馈尚未形成可公开结论"
     quality_times = [
         s.occurred_at or s.updated_at for s, _ in verified if s.id in quality_ids
     ]
@@ -317,9 +329,21 @@ async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> 
 async def list_product_signals(
     session: AsyncSession, product_id: int, *, include_rejected: bool = False
 ) -> list[dict]:
+    from app.models import ContentReview
+
     rows = await _active_signal_rows(session, product_id)
     last_notes: dict[int, str] = {}
     signal_ids = [signal.id for signal, _, _, _ in rows]
+    ai_hints: dict[int, dict] = {}
+    if signal_ids:
+        raw_ids = {evidence.raw_content_id for _, evidence, _, _ in rows}
+        review_rows = await session.execute(
+            select(ContentReview.raw_content_id, ContentReview.fulfillment).where(
+                ContentReview.raw_content_id.in_(raw_ids),
+                ContentReview.fulfillment.is_not(None),
+            )
+        )
+        ai_hints = {rid: hint for rid, hint in review_rows}
     if signal_ids:
         revisions = await session.scalars(
             select(ProductSignalRevision)
@@ -355,6 +379,7 @@ async def list_product_signals(
                 "account": source.name if source else None,
                 "url": raw.url,
                 "review_note": last_notes.get(signal.id),
+                "ai_hint": ai_hints.get(raw.id),
                 "updated_at": signal.updated_at,
             }
         )
