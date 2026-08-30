@@ -192,28 +192,31 @@ onMounted(refreshRuns)
 
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
-    <div class="panel overflow-x-auto">
-      <table class="w-full min-w-3xl text-sm">
+    <div class="panel overflow-hidden">
+      <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
-            <th class="px-4 py-2.5 font-medium">目标</th>
-            <th class="px-4 py-2.5 font-medium">平台</th>
-            <th class="px-4 py-2.5 font-medium">分级</th>
-            <th class="px-4 py-2.5 font-medium">播放门槛</th>
-            <th class="px-4 py-2.5 font-medium">类型</th>
-            <th class="px-4 py-2.5 font-medium">频率</th>
-            <th class="px-4 py-2.5 font-medium">最近错误</th>
-            <th class="px-4 py-2.5 text-right font-medium">操作</th>
+            <th class="px-3 py-2.5 font-medium">目标</th>
+            <th class="px-2.5 py-2.5 font-medium">平台 · 类型</th>
+            <th class="px-2.5 py-2.5 font-medium">分级</th>
+            <th class="px-2.5 py-2.5 font-medium">播放门槛</th>
+            <th class="px-2.5 py-2.5 font-medium">频率</th>
+            <th class="px-3 py-2.5 font-medium">最近错误</th>
+            <th class="px-3 py-2.5 text-right font-medium">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="target in targets" :key="target.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5">
-            <td class="px-4 py-2.5">
-              <span class="font-medium">{{ target.display_name || target.target_value }}</span>
-              <span class="mono ml-2 text-xs text-slate-400">{{ target.target_value }}</span>
+            <td class="px-3 py-2.5">
+              <span class="font-medium">{{ target.display_name && target.display_name !== target.target_value ? target.display_name : target.target_value }}</span>
+              <span v-if="target.display_name && target.display_name !== target.target_value" class="mono ml-1.5 text-xs text-slate-400">{{ target.target_value }}</span>
             </td>
-            <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabels[target.platform] ?? target.platform }}</td>
-            <td class="px-4 py-2.5">
+            <td class="whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-zinc-300">
+              {{ platformLabels[target.platform] ?? target.platform }}
+              <span class="text-slate-400">·</span>
+              {{ targetTypeLabels[target.target_type] ?? target.target_type }}
+            </td>
+            <td class="whitespace-nowrap px-2.5 py-2.5">
               <button
                 class="chip cursor-pointer whitespace-nowrap transition-colors"
                 :class="target.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
@@ -224,22 +227,21 @@ onMounted(refreshRuns)
                 {{ target.tier === 'core' ? '核心' : '泛关键词' }}
               </button>
             </td>
-            <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ targetTypeLabels[target.target_type] ?? target.target_type }}</td>
-            <td class="mono px-4 py-2.5">{{ target.interval_minutes }}min</td>
-            <td class="mono whitespace-nowrap px-4 py-2.5 text-xs text-slate-500 dark:text-zinc-400">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
-            <td class="max-w-64 truncate px-4 py-2.5 text-xs text-slate-400" :title="target.last_error ?? ''">
+            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-slate-500 dark:text-zinc-400">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
+            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-zinc-300">{{ target.interval_minutes }}min</td>
+            <td class="max-w-40 truncate px-3 py-2.5 text-xs text-slate-400" :title="target.last_error ?? ''">
               {{ target.last_error ?? '—' }}
             </td>
-            <td class="whitespace-nowrap px-4 py-2.5 text-right">
-              <button class="rounded px-2 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id" @click="runNow(target)">立即采集</button>
-              <button class="rounded px-2 py-1 text-xs text-slate-500 hover:underline dark:text-zinc-400" :disabled="busyId === target.id" @click="toggle(target)">
+            <td class="whitespace-nowrap px-3 py-2.5 text-right">
+              <button class="rounded px-1.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id" @click="runNow(target)">立即采集</button>
+              <button class="rounded px-1.5 py-1 text-xs text-slate-500 hover:underline dark:text-zinc-400" :disabled="busyId === target.id" @click="toggle(target)">
                 {{ target.enabled ? '停用' : '启用' }}
               </button>
-              <button class="rounded px-2 py-1 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busyId === target.id" @click="remove(target)">删除</button>
+              <button class="rounded px-1.5 py-1 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busyId === target.id" @click="remove(target)">删除</button>
             </td>
           </tr>
           <tr v-if="targets.length === 0">
-            <td colspan="8" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
+            <td colspan="7" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
           </tr>
         </tbody>
       </table>
