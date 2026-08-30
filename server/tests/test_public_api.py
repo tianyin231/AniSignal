@@ -309,6 +309,7 @@ async def test_official_links_aggregation(client, session, admin_headers):
         "textContent": (
             '<p>活动详情 <a href="https://aki-gm-resources.aki-game.net/h5/contest">H5 活动</a></p>'
             "<p>奖励领取：https://aki-gm-resources.aki-game.net/reward，</p>"
+            '<p>相关视频：<a href="https://www.bilibili.com/video/BVfake123">转发视频</a></p>'
         ),
     }
     await ingest_items(session, "kuro_notices", [notice])
@@ -329,6 +330,8 @@ async def test_official_links_aggregation(client, session, admin_headers):
     assert "https://aki-gm-resources.aki-game.net/h5/contest" in urls
     assert "https://aki-gm-resources.aki-game.net/reward" in urls
     assert urls.count("https://aki-gm-resources.aki-game.net/h5/contest") == 1
+    # 视频页面链接是内容互推，不属于活动链接
+    assert not any("bilibili.com/video/" in u for u in urls)
     assert all(item["category"] == "kuro" for item in items)
     assert items[0]["title"]
     by_url = {item["url"]: item for item in items}
