@@ -170,6 +170,7 @@ export interface FulfillmentAxis {
   candidate_count: number
   updated_at: string | null
   signal_ids: number[]
+  ai_preview: string
 }
 
 export interface FulfillmentSnapshot {

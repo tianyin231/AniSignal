@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models import (
+    ContentReview,
     ContentVersion,
     Event,
     Evidence,
@@ -176,6 +177,39 @@ async def _active_signal_rows(session: AsyncSession, product_id: int) -> list[tu
     )
 
 
+KIND_PREVIEW_LABELS = {
+    "self_purchase": "自购开箱",
+    "pr_sample": "送测样品",
+    "forward": "转发剪辑",
+}
+
+
+def _ai_preview(
+    candidates: list[tuple], ai_hints: dict[int, dict], signal_type: str
+) -> str:
+    """未核验候选的 AI 预判概览（如"2 条自购开箱候选（依据…）"）。"""
+    counts: dict[str, int] = {}
+    reason = ""
+    for signal, evidence in candidates:
+        if signal.signal_type != signal_type:
+            continue
+        hint = ai_hints.get(evidence.raw_content_id)
+        if not hint or hint.get("kind") in (None, "none"):
+            continue
+        kind = hint["kind"]
+        counts[kind] = counts.get(kind, 0) + 1
+        if not reason and hint.get("reason"):
+            reason = hint["reason"]
+    if not counts:
+        return ""
+    parts = [
+        f"{count} 条{KIND_PREVIEW_LABELS.get(kind, kind)}"
+        for kind, count in sorted(counts.items(), key=lambda item: -item[1])
+    ]
+    text = "、".join(parts) + "候选"
+    return f"{text}（{reason}）" if reason else text
+
+
 def _axis(
     key: str,
     label: str,
@@ -185,8 +219,10 @@ def _axis(
     verified_ids: set[int],
     candidate_ids: set[int],
     updated_at,
+    ai_preview: str = "",
 ) -> dict:
     return {
+        "ai_preview": ai_preview,
         "key": key,
         "label": label,
         "state": state,
@@ -203,6 +239,18 @@ async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> 
     rows = await _active_signal_rows(session, product_id)
     verified = [(s, e) for s, e, _, _ in rows if s.review_status == "verified"]
     candidates = [(s, e) for s, e, _, _ in rows if s.review_status == "candidate"]
+
+    # 候选信号的 AI 履约预判（未核验时三轴的补充结论）
+    ai_hints: dict[int, dict] = {}
+    candidate_raw_ids = {e.raw_content_id for _, e in candidates}
+    if candidate_raw_ids:
+        hint_rows = await session.execute(
+            select(ContentReview.raw_content_id, ContentReview.fulfillment).where(
+                ContentReview.raw_content_id.in_(candidate_raw_ids),
+                ContentReview.fulfillment.is_not(None),
+            )
+        )
+        ai_hints = {rid: hint for rid, hint in hint_rows}
 
     official = [(s, e) for s, e in verified if s.actor_type == "official" and s.signal_type in OFFICIAL_TYPES]
     official_candidates = {s.id for s, _ in candidates if s.signal_type in OFFICIAL_TYPES}
@@ -299,6 +347,9 @@ async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> 
             {s.id for s, _ in official},
             official_candidates,
             official_updated,
+            _ai_preview(candidates, ai_hints, "presale_open")
+            + _ai_preview(candidates, ai_hints, "shipping_started")
+            + _ai_preview(candidates, ai_hints, "balance_open"),
         ),
         "consumer": _axis(
             "consumer",
@@ -309,6 +360,7 @@ async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> 
             receipt_ids,
             receipt_candidates,
             max(receipt_times, default=None),
+            _ai_preview(candidates, ai_hints, "consumer_received"),
         ),
         "quality": _axis(
             "quality",
@@ -319,6 +371,7 @@ async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> 
             quality_ids,
             quality_candidates,
             max(quality_times, default=None),
+            _ai_preview(candidates, ai_hints, "quality_issue"),
         ),
         "sample_count": len(sample_sources),
         "candidate_total": len({s.id for s, _ in candidates}),
