@@ -27,7 +27,8 @@ const form = reactive({
   display_name: '',
   interval_minutes: 30,
   co_terms: '',
-  min_views: 0,
+  min_views: 10000,
+  tier: 'general',
 })
 const creating = ref(false)
 const formError = ref<string | null>(null)
@@ -59,12 +60,14 @@ async function create() {
         interval_minutes: Number(form.interval_minutes) || 30,
         co_terms: form.co_terms.split(/[,，]/).map((x: string) => x.trim()).filter(Boolean),
         min_views: Number(form.min_views) || 0,
+        tier: form.tier,
       },
     })
     form.target_value = ''
     form.display_name = ''
     form.co_terms = ''
-    form.min_views = 0
+    form.min_views = 10000
+    form.tier = 'general'
     await refresh()
   } catch (exc: any) {
     formError.value = exc?.statusCode === 409 ? '该目标已存在' : `创建失败：${exc?.data?.detail ?? exc?.message ?? exc}`
@@ -175,8 +178,12 @@ onMounted(refreshRuns)
         class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
       >
       <input v-model.number="form.interval_minutes" type="number" min="5" max="1440" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-      <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5">
-      <input v-model.number="form.min_views" type="number" min="0" placeholder="最低播放量（0 不过滤）" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <select v-model="form.tier" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5" title="核心关键词：商品/联名等特定内容，全量入库强及时；泛关键词：社区泛话题，走共现词与热度门槛">
+        <option value="core">准入分级：核心关键词（全量入库，强及时）</option>
+        <option value="general">准入分级：泛关键词（走共现词与热度门槛）</option>
+      </select>
+      <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5">
+      <input v-model.number="form.min_views" type="number" min="0" :placeholder="form.tier === 'core' ? '最低播放量（核心分级可选，0 不过滤）' : '最低播放量（默认 10000；0 不过滤）'" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
         {{ creating ? '创建中…' : '新增目标' }}
       </button>
@@ -192,6 +199,7 @@ onMounted(refreshRuns)
             <th class="px-4 py-2.5 font-medium">目标</th>
             <th class="px-4 py-2.5 font-medium">平台</th>
             <th class="px-4 py-2.5 font-medium">分级</th>
+            <th class="px-4 py-2.5 font-medium">播放门槛</th>
             <th class="px-4 py-2.5 font-medium">类型</th>
             <th class="px-4 py-2.5 font-medium">频率</th>
             <th class="px-4 py-2.5 font-medium">最近错误</th>
@@ -207,7 +215,7 @@ onMounted(refreshRuns)
             <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabels[target.platform] ?? target.platform }}</td>
             <td class="px-4 py-2.5">
               <button
-                class="chip cursor-pointer transition-colors"
+                class="chip cursor-pointer whitespace-nowrap transition-colors"
                 :class="target.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
                 :title="target.tier === 'core' ? '核心关键词：全量入库，强及时。点击切换为泛关键词' : '泛关键词：走共现词与热度门槛。点击切换为核心关键词'"
                 :disabled="busyId === target.id"
@@ -218,6 +226,7 @@ onMounted(refreshRuns)
             </td>
             <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ targetTypeLabels[target.target_type] ?? target.target_type }}</td>
             <td class="mono px-4 py-2.5">{{ target.interval_minutes }}min</td>
+            <td class="mono whitespace-nowrap px-4 py-2.5 text-xs text-slate-500 dark:text-zinc-400">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
             <td class="max-w-64 truncate px-4 py-2.5 text-xs text-slate-400" :title="target.last_error ?? ''">
               {{ target.last_error ?? '—' }}
             </td>
@@ -230,7 +239,7 @@ onMounted(refreshRuns)
             </td>
           </tr>
           <tr v-if="targets.length === 0">
-            <td colspan="7" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
+            <td colspan="8" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
           </tr>
         </tbody>
       </table>
