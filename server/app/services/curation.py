@@ -1,6 +1,7 @@
 """首页精选 + 入库审核：AI 逐条多模态评估（标题/正文/封面），违规与不相关内容自动下架。"""
 
 import asyncio
+import base64
 import json
 import logging
 import math
@@ -141,26 +142,76 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
     return stats
 
 
+async def _cover_data_url(url: str) -> str | None:
+    """服务端抓取封面转 base64 数据图。
+
+    AI 网关无法抓取远程图片 URL（一律 500），必须在本地转成数据图内嵌。
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0), follow_redirects=True
+        ) as client:
+            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AniSignal/1.0)"})
+        if resp.status_code != 200 or len(resp.content) > 4 * 1024 * 1024:
+            return None
+        mime = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+        if not mime.startswith("image/"):
+            return None
+        return f"data:{mime};base64," + base64.b64encode(resp.content).decode()
+    except Exception:  # noqa: BLE001 - 封面抓不到就退回纯文本审核
+        return None
+
+
 async def _review_one(
     config: dict, candidate: dict
 ) -> tuple[dict | None, dict | None, bool, int]:
-    """单条审核：文本 JSON + 封面图（多模态）。返回 (判定, usage, 是否失败, 耗时)。"""
+    """单条审核：文本 JSON + 封面数据图（多模态）。返回 (判定, usage, 是否失败, 耗时)。
+
+    带图调用失败时降级为纯文本重试一次，保证审核不因图片中断。
+    """
     started = time.monotonic()
     usage = None
-    try:
-        cover = candidate.get("cover")
-        text_payload = {key: value for key, value in candidate.items() if key != "cover"}
-        if cover:
-            user_content: "str | list" = [
-                {"type": "text", "text": json.dumps(text_payload, ensure_ascii=False)},
-                {"type": "image_url", "image_url": {"url": cover}},
-            ]
+
+    def text_payload() -> str:
+        return json.dumps(
+            {key: value for key, value in candidate.items() if key != "cover"},
+            ensure_ascii=False,
+        )
+
+    async def attempt(with_image: bool) -> tuple[str, dict | None]:
+        cover_url = candidate.get("cover")
+        if with_image and cover_url:
+            data_url = await _cover_data_url(cover_url)
+            if data_url:
+                content: "str | list" = [
+                    {"type": "text", "text": text_payload()},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]
+            else:
+                content = text_payload()  # 封面抓取失败 → 纯文本
         else:
-            user_content = json.dumps(text_payload, ensure_ascii=False)
+            content = text_payload()
+        return await chat(config, _REVIEW_SYSTEM_PROMPT, content, json_mode=True)
+
+    try:
+        raw_response, usage = await attempt(with_image=True)
+        decision = _parse_review(raw_response, candidate["id"])
+        if decision is None:
+            raise ValueError("model returned no valid review")
+        return decision, usage, False, int((time.monotonic() - started) * 1000)
+    except Exception as first_exc:  # noqa: BLE001 - 带图失败降级纯文本重试
+        logger.info(
+            "content review with cover failed for %s (%r), retrying text-only",
+            candidate.get("id"), first_exc,
+        )
+    try:
+        candidate_text_only = {k: v for k, v in candidate.items() if k != "cover"}
         raw_response, usage = await chat(
             config,
             _REVIEW_SYSTEM_PROMPT,
-            user_content,
+            json.dumps(candidate_text_only, ensure_ascii=False),
             json_mode=True,
         )
         decision = _parse_review(raw_response, candidate["id"])

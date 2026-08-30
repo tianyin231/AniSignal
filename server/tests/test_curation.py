@@ -159,6 +159,11 @@ async def test_ai_review_auto_hides_violation_and_irrelevant(client, session, mo
         "BVok": {"relevant": True, "promotional": False, "violation": False, "quality_score": 85, "category_hint": "version_update", "reason": "版本解读"},
     }
 
+    async def fake_cover(url):
+        return None  # 封面抓取失败走纯文本
+
+    monkeypatch.setattr(curation, "_cover_data_url", fake_cover)
+
     async def fake_chat(config, system, user, *, json_mode=False):
         import json as _json
 
@@ -209,6 +214,9 @@ async def test_ai_review_multimodal_cover(client, session, monkeypatch):
     raw = await session.scalar(select(RawContent))
     seen_shapes = []
 
+    async def fake_cover(url):
+        return "data:image/jpeg;base64,ZmFrZQ=="
+
     async def fake_chat(config, system, user, *, json_mode=False):
         seen_shapes.append(user)
         return (
@@ -216,6 +224,7 @@ async def test_ai_review_multimodal_cover(client, session, monkeypatch):
             '"quality_score":80,"category_hint":"unboxing","reason":"开箱分享"}}'
         ), None
 
+    monkeypatch.setattr(curation, "_cover_data_url", fake_cover)
     monkeypatch.setattr(curation, "chat", fake_chat)
     stats = await curation.review_contents(session, [raw.id])
     assert stats.reviewed == 1
@@ -223,7 +232,7 @@ async def test_ai_review_multimodal_cover(client, session, monkeypatch):
     kinds = {part["type"] for part in seen_shapes[0]}
     assert kinds == {"text", "image_url"}
     image_part = next(part for part in seen_shapes[0] if part["type"] == "image_url")
-    assert image_part["image_url"]["url"].startswith("https://")
+    assert image_part["image_url"]["url"].startswith("data:image/")  # 内嵌数据图，网关无需抓取
 
 
 async def test_official_content_not_hidden_by_relevance(session, monkeypatch):
@@ -240,6 +249,11 @@ async def test_official_content_not_hidden_by_relevance(session, monkeypatch):
     await ingest_items(session, "kuro_notices", [notice])
     raw = await session.scalar(select(RawContent))
     assert raw.hidden is False
+
+    async def fake_cover(url):
+        return None
+
+    monkeypatch.setattr(curation, "_cover_data_url", fake_cover)
 
     async def fake_chat(config, system, user, *, json_mode=False):
         # 模拟模型知识库不认识新角色而误判不相关
@@ -278,6 +292,11 @@ async def test_review_prompt_carries_known_terms(session, monkeypatch):
     await session.commit()
     seen_payloads = []
 
+    async def fake_cover(url):
+        return None  # 封面抓取失败走纯文本
+
+    monkeypatch.setattr(curation, "_cover_data_url", fake_cover)
+
     async def fake_chat(config, system, user, *, json_mode=False):
         import json as _json
 
@@ -296,3 +315,64 @@ async def test_review_prompt_carries_known_terms(session, monkeypatch):
     assert any("鸣潮" in term for term in seen_payloads[0]["known_terms"])
     # 提示词包含词表规则说明
     assert "known_terms" in seen_payloads[0]
+
+
+async def test_ai_review_cover_fetch_failure_falls_back_to_text(client, session, monkeypatch):
+    """封面抓取失败时第一次尝试即为纯文本，审核不中断。"""
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "review-model", "api_key": "x"},
+    )
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    raw = await session.scalar(select(RawContent))
+    seen_users = []
+
+    async def fake_cover(url):
+        return None  # 抓取失败 → 第一次尝试就不带图
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        seen_users.append(user)
+        return (
+            '{"review":{"relevant":true,"promotional":false,"violation":false,'
+            '"quality_score":70,"category_hint":null,"reason":"纯文本判定"}}'
+        ), None
+
+    monkeypatch.setattr(curation, "_cover_data_url", fake_cover)
+    monkeypatch.setattr(curation, "chat", fake_chat)
+    stats = await curation.review_contents(session, [raw.id])
+    assert stats.reviewed == 1
+    assert len(seen_users) == 1
+    assert isinstance(seen_users[0], str)  # 纯文本 JSON
+
+
+async def test_ai_review_image_gateway_failure_retries_text_only(client, session, monkeypatch):
+    """网关拒绝图片调用（如 500）时，降级纯文本重试一次并成功。"""
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "review-model", "api_key": "x"},
+    )
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    raw = await session.scalar(select(RawContent))
+    seen_users = []
+
+    async def fake_cover(url):
+        return "data:image/jpeg;base64,ZmFrZQ=="
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        seen_users.append(user)
+        if isinstance(user, list):
+            raise RuntimeError("gateway 500 on image")  # 模拟网关拒绝图片调用
+        return (
+            '{"review":{"relevant":true,"promotional":false,"violation":false,'
+            '"quality_score":70,"category_hint":null,"reason":"纯文本降级判定"}}'
+        ), None
+
+    monkeypatch.setattr(curation, "_cover_data_url", fake_cover)
+    monkeypatch.setattr(curation, "chat", fake_chat)
+    stats = await curation.review_contents(session, [raw.id])
+    assert stats.reviewed == 1
+    assert len(seen_users) == 2  # 带图失败 → 纯文本重试
+    assert isinstance(seen_users[0], list)
+    assert isinstance(seen_users[1], str)
