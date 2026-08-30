@@ -100,6 +100,13 @@ async def list_contents(
     if published_within_hours:
         conditions.append(RawContent.published_at >= utcnow() - timedelta(hours=published_within_hours))
     conditions.append(RawContent.hidden.is_(False))
+    from app.services import settings as settings_service
+
+    hidden_platforms = settings_service.hidden_platforms(
+        await settings_service.get_media_visibility(session)
+    )
+    if hidden_platforms:
+        conditions.append(RawContent.platform.notin_(hidden_platforms))
     if not include_chat:
         conditions.append(ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None))
     if q:
@@ -699,6 +706,7 @@ async def site_config(session: AsyncSession = Depends(get_session)):
     return {
         "announcement": await settings_service.get_announcement(session),
         "texts": await settings_service.get_texts(session),
+        "media_visibility": await settings_service.get_media_visibility(session),
     }
 
 
