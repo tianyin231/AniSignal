@@ -8,6 +8,9 @@ export interface CollectTarget {
   display_name: string | null
   interval_minutes: number
   enabled: boolean
+  tier: 'core' | 'general'
+  co_terms: string[]
+  min_views: number
   next_run_at: string | null
   last_run_at: string | null
   last_success_at: string | null

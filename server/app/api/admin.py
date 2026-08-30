@@ -109,6 +109,7 @@ async def create_target(
         enabled=body.enabled,
         co_terms=body.co_terms,
         min_views=body.min_views,
+        tier=body.tier,
         next_run_at=utcnow() if body.enabled else None,
     )
     session.add(target)
@@ -144,6 +145,8 @@ async def update_target(
         if duplicate is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "target already exists")
         target.target_value = body.target_value
+    if body.tier is not None:
+        target.tier = body.tier
     if body.enabled is not None:
         was_disabled = not target.enabled
         target.enabled = body.enabled

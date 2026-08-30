@@ -150,6 +150,7 @@ async function remove(target: CollectTarget) {
           <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
             <th class="px-4 py-2.5 font-medium">目标</th>
             <th class="px-4 py-2.5 font-medium">平台</th>
+            <th class="px-4 py-2.5 font-medium">分级</th>
             <th class="px-4 py-2.5 font-medium">类型</th>
             <th class="px-4 py-2.5 font-medium">频率</th>
             <th class="px-4 py-2.5 font-medium">最近错误</th>
@@ -163,6 +164,11 @@ async function remove(target: CollectTarget) {
               <span class="mono ml-2 text-xs text-slate-400">{{ target.target_value }}</span>
             </td>
             <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabels[target.platform] ?? target.platform }}</td>
+            <td class="px-4 py-2.5">
+              <span class="chip" :class="target.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'" :title="target.tier === 'core' ? '核心关键词：全量入库，强及时' : '泛关键词：走共现词与热度门槛'">
+                {{ target.tier === 'core' ? '核心' : '泛关键词' }}
+              </span>
+            </td>
             <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ targetTypeLabels[target.target_type] ?? target.target_type }}</td>
             <td class="mono px-4 py-2.5">{{ target.interval_minutes }}min</td>
             <td class="max-w-64 truncate px-4 py-2.5 text-xs text-slate-400" :title="target.last_error ?? ''">
@@ -177,7 +183,7 @@ async function remove(target: CollectTarget) {
             </td>
           </tr>
           <tr v-if="targets.length === 0">
-            <td colspan="6" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
+            <td colspan="7" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
           </tr>
         </tbody>
       </table>
