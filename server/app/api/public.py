@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.clock import utcnow
-from app.models import CollectTarget, ContentVersion, Evidence, RawContent, Source
+from app.models import CollectTarget, ContentReview, ContentVersion, Evidence, RawContent, Source
 from app.schemas.api import (
     ContentDetailOut,
     EventListOut,
@@ -554,9 +554,11 @@ async def _collect_official_links(session: AsyncSession) -> list[dict]:
             & (ContentVersion.version == latest_sq.c.v),
         )
         .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
         .where(
             Source.identity == "official",
             RawContent.hidden.is_(False),
+            ContentReview.links.is_(None),  # AI 已提取过的内容不再走规则回退
             publication_time >= utcnow() - timedelta(days=30),
         )
         .order_by(publication_time.desc(), RawContent.id.desc())
@@ -605,13 +607,67 @@ def invalidate_official_links_cache() -> None:
     _official_links_cache["expires"] = 0.0
 
 
+async def _ai_official_links(session: AsyncSession) -> list[dict]:
+    """AI 审核时提取的外链（已带简体中文名称）。"""
+    latest_sq = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("v"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
+    publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
+    rows = await session.execute(
+        select(RawContent, ContentReview)
+        .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
+        .where(
+            ContentReview.links.is_not(None),
+            RawContent.hidden.is_(False),
+            publication_time >= utcnow() - timedelta(days=30),
+        )
+        .order_by(publication_time.desc(), RawContent.id.desc())
+        .limit(300)
+    )
+    items: list[dict] = []
+    seen: set[str] = set()
+    for raw, review in rows:
+        for link in review.links or []:
+            url = _clean_url(str(link.get("url") or ""))
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            items.append(
+                {
+                    "url": url,
+                    "category": _link_category(url),
+                    "label": (str(link.get("label") or "").strip() or url)[:80],
+                    "title": "",
+                    "platform": raw.platform,
+                    "published_at": raw.published_at or raw.collected_at,
+                }
+            )
+    return items
+
+
 @router.get("/official-links")
 async def official_links(session: AsyncSession = Depends(get_session)):
-    """官方动态中指向活动/奖励/H5 的站外链接，去重去模板后按最新排序。"""
+    """官方动态中指向活动/奖励/H5 的站外链接，去重去模板后按最新排序。
+
+    优先用 AI 审核提取的链接（带简体中文名称）；尚未审核的内容退回规则提取。
+    """
     now = time.monotonic()
     if _official_links_cache["data"] is not None and now < _official_links_cache["expires"]:
         return {"items": _official_links_cache["data"]}
-    items = await _collect_official_links(session)
+    items = await _ai_official_links(session)
+    seen = {item["url"] for item in items}
+    for item in await _collect_official_links(session):
+        if item["url"] not in seen:
+            seen.add(item["url"])
+            items.append(item)
+        if len(items) >= 30:
+            break
     _official_links_cache["data"] = items
     _official_links_cache["expires"] = now + _OFFICIAL_LINKS_TTL_SECONDS
     return {"items": items}

@@ -117,6 +117,7 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
         row.quality_score = decision["quality_score"]
         row.category_hint = decision["category_hint"]
         row.reason = decision["reason"]
+        row.links = decision["links"]
         row.model = config["model"]
         row.updated_at = utcnow()
         raw = await session.get(RawContent, content_id)
@@ -131,6 +132,10 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
                 hidden_ids.append(content_id)
             raw.hidden = should_hide
     await session.commit()
+    # 审核带出了 AI 提取的外链中文名，外链聚合面板需要重建
+    from app.api.public import invalidate_official_links_cache
+
+    invalidate_official_links_cache()
     if hidden_ids:
         logger.info("content review auto-hidden %s items: %s", len(hidden_ids), hidden_ids)
     return stats
@@ -452,6 +457,12 @@ def _parse_review(response: str, content_id: int) -> dict | None:
     category = item.get("category_hint")
     if category not in _ALLOWED_CATEGORIES:
         category = None
+    links: list[dict] = []
+    for link in (item.get("links") or [])[:12]:
+        url = str(link.get("url") or "").strip()
+        label = str(link.get("label") or "").strip()[:40]
+        if url.startswith(("http://", "https://")):
+            links.append({"url": url, "label": label})
     return {
         "relevant": relevant,
         "promotional": promotional,
@@ -459,6 +470,7 @@ def _parse_review(response: str, content_id: int) -> dict | None:
         "quality_score": max(0, min(100, int(item.get("quality_score") or 0))),
         "category_hint": category,
         "reason": str(item.get("reason") or "")[:500],
+        "links": links,
     }
 
 
@@ -498,4 +510,5 @@ _REVIEW_SYSTEM_PROMPT = """你是《鸣潮》主题情报站的编辑兼内容�
 - violation 表示违规：色情低俗、政治敏感、赌博诈骗、钓鱼链接、严重不实谣言或引战辱骂等不适合公开展示的内容；判定要克制，仅对明显违规给 true。
 - quality_score 为 0 到 100 的编辑价值：官方版本、角色、活动、维护和实质公告优先；社区内容重视明确主题、信息量和独立表达，播放量只代表热度。
 - category_hint 只能是 official_announce/version_update/presale/balance/delay/shipping/arrived/unboxing/review/quality/promotion/chat/other 或 null。
+- links：从正文中提取的站外链接数组，只收有实际内容的页面（网页活动、H5 小游戏、奖励领取、新闻详情等），忽略社媒主页、下载页、官网首页和视频页；每项 {"url":"原文中的完整链接","label":"不超过 12 字的简体中文名称，说明该链接是什么（如 B站主题收藏集、H5 签到活动）"}；没有则返回空数组 []。label 必须是简体中文。
 - 若输入附带封面图，须结合图片与文字综合判断：图片低俗或违规记 violation=true；图文完全无关可作为参考，但相关性仍按词表规则定。不得补充外部事实。"""
