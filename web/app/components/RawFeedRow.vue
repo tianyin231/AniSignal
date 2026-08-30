@@ -7,6 +7,9 @@ const detailTo = computed(() => props.to ?? `/contents/${props.item.id}`)
 const coverFailed = ref(false)
 watch(() => props.item.cover, () => (coverFailed.value = false))
 
+// 图片展示策略：show=封面图 / link=仅图片链接 / hide=不显示
+const imageMode = computed(() => mediaMode(props.item.platform, 'image'))
+
 </script>
 
 <template>
@@ -18,8 +21,15 @@ watch(() => props.item.cover, () => (coverFailed.value = false))
       >
         {{ platformMeta[item.platform].short }}
       </span>
+      <a
+        v-if="item.cover && imageMode === 'link'"
+        :href="item.cover"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="hidden shrink-0 self-center rounded-md border border-slate-900/10 px-2 py-1.5 text-[11px] text-slate-500 hover:text-blue-700 sm:block dark:border-white/15 dark:text-zinc-400"
+      >图片 ↗</a>
       <img
-        v-if="item.cover && !coverFailed"
+        v-if="item.cover && !coverFailed && imageMode === 'show'"
         :src="item.cover"
         alt=""
         referrerpolicy="no-referrer"
