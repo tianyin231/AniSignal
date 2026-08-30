@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import json
+from html import unescape
 import logging
 import math
 import re
@@ -510,8 +511,9 @@ def _parse_review(response: str, content_id: int) -> dict | None:
         category = None
     links: list[dict] = []
     for link in (item.get("links") or [])[:12]:
-        url = str(link.get("url") or "").strip()
-        label = str(link.get("label") or "").strip()[:40]
+        # 模型可能照抄正文里的 HTML 实体（&amp;），还原为真实 URL
+        url = unescape(str(link.get("url") or "").strip())
+        label = unescape(str(link.get("label") or "").strip()[:40])
         if url.startswith(("http://", "https://")):
             links.append({"url": url, "label": label})
     return {
