@@ -16,7 +16,7 @@ const nav = [
   { to: '/admin/rules', label: '分类词典' },
   { to: '/admin/ai', label: 'AI 层' },
   { to: '/admin/settings', label: '站点设置' },
-  { to: '/admin/contents', label: '内容浏览' },
+  { to: '/admin/contents', label: '内容管理' },
 ]
 
 const showingLogin = computed(() => route.path === '/admin/login')
