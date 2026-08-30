@@ -463,14 +463,24 @@ _URL_PATTERN = re.compile(r"https?://[^\s<>\"'）)\]}】」]+")
 # 纯静态资源与站内图片不入链接清单
 _LINK_HOST_BLOCKLIST = ("hdslb.com", "bilivideo", "ytimg.com", "ggpht.com", "static.", "akamaized.net")
 _LINK_PATH_BLOCKLIST = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".css", ".js", ".json")
+# 官方简介里的固定社媒/频道链接是"关注我们"模板，不是活动链接
+_LINK_SOCIAL_HOSTS = (
+    "facebook.com", "twitter.com", "x.com", "discord", "reddit.com", "tiktok",
+    "instagram.com", "t.me", "whatsapp", "weibo.com", "youtube.com/c/",
+    "youtube.com/channel/", "hoYoLAB".lower(),
+)
+# 模板链接判定：同一条 URL 在扫描窗口内出现 ≥3 次（下载页/官网首页每条视频都带）
+_LINK_BOILERPLATE_MIN_HITS = 3
 
 
 def _clean_url(value: str) -> str | None:
-    url = value.rstrip(".,、;:!?'\"“”…—-，！？：；。）")
+    url = value.rstrip('.,、;:!?"“”…—-，！？：；。）')
     if not url.startswith(("http://", "https://")):
         return None
     lowered = url.lower()
     if any(host in lowered for host in _LINK_HOST_BLOCKLIST):
+        return None
+    if any(host in lowered for host in _LINK_SOCIAL_HOSTS):
         return None
     if lowered.split("?")[0].endswith(_LINK_PATH_BLOCKLIST):
         return None
@@ -490,7 +500,35 @@ def _link_category(url: str) -> str:
     return "web"
 
 
+def _link_label(raw_text: str, clean_text: str, url: str) -> str:
+    """链接的可读名称：优先锚文本，其次 URL 前最近的说明短语。"""
+    def _tidy(value: str) -> str:
+        value = re.sub(r"^[\W_]+|[\W_]+$", "", value.strip(), flags=re.UNICODE)
+        return value if len(value) >= 4 else ""
+
+    anchor = re.search(re.escape(url) + r'"[^>]*>([^<]{2,40})<', raw_text)
+    if anchor:
+        tidied = _tidy(anchor.group(1))
+        if tidied:
+            return tidied
+    for text in (clean_text, raw_text):
+        idx = text.find(url)
+        if idx < 0:
+            continue
+        context = text[max(0, idx - 30):idx]
+        # 中文无空格分词：按标点与空白切分，取 URL 前最近的说明短语
+        segments = [seg for seg in re.split(r"[：:，,。.!！？?；;（）()【】\[\]\s]+", context) if seg]
+        for seg in reversed(segments):
+            tidied = _tidy(seg)
+            if tidied:
+                return tidied
+    return ""
+
+
 async def _collect_official_links(session: AsyncSession) -> list[dict]:
+    import bleach
+    from html import unescape
+
     latest_sq = (
         select(
             ContentVersion.raw_content_id.label("rid"),
@@ -517,28 +555,40 @@ async def _collect_official_links(session: AsyncSession) -> list[dict]:
         .order_by(publication_time.desc(), RawContent.id.desc())
         .limit(300)
     )
-    seen_urls: set[str] = set()
-    items: list[dict] = []
+    occurrences: dict[str, list[tuple[RawContent, ContentVersion, str]]] = {}
     for raw, version, source in rows:
-        text = version.text or str((version.normalized_json or {}).get("text") or "")
-        if "http" not in text:
+        raw_text = version.text or str((version.normalized_json or {}).get("text") or "")
+        if "http" not in raw_text:
             continue
-        for match in _URL_PATTERN.finditer(text):
+        clean_text = re.sub(r"\s+", " ", bleach.clean(unescape(raw_text), tags=[], strip=True))
+        raw_url = raw.url or ""
+        for match in _URL_PATTERN.finditer(raw_text):
             url = _clean_url(match.group(0))
-            if not url or url in seen_urls or url == raw.url:
+            if not url or url == raw_url:
                 continue
-            seen_urls.add(url)
-            items.append(
-                {
-                    "url": url,
-                    "category": _link_category(url),
-                    "title": (version.title or raw.external_id)[:80],
-                    "platform": raw.platform,
-                    "published_at": raw.published_at or raw.collected_at,
-                }
+            occurrences.setdefault(url, []).append(
+                (raw, version, _link_label(raw_text, clean_text, url))
             )
-            if len(items) >= 30:
-                return items
+
+    items: list[dict] = []
+    for url, hits in occurrences.items():
+        # 出现在大量不同官方内容里的固定链接（下载页/官网/社媒块）不是活动链接
+        if len(hits) >= _LINK_BOILERPLATE_MIN_HITS:
+            continue
+        raw, version, label = hits[0]
+        title = (version.title or raw.external_id)[:80]
+        items.append(
+            {
+                "url": url,
+                "category": _link_category(url),
+                "label": label or title[:40],
+                "title": title,
+                "platform": raw.platform,
+                "published_at": raw.published_at or raw.collected_at,
+            }
+        )
+        if len(items) >= 30:
+            break
     return items
 
 
@@ -550,7 +600,7 @@ def invalidate_official_links_cache() -> None:
 
 @router.get("/official-links")
 async def official_links(session: AsyncSession = Depends(get_session)):
-    """官方动态中出现的站外链接（活动/奖励/H5 等），去重后按最新排序。"""
+    """官方动态中指向活动/奖励/H5 的站外链接，去重去模板后按最新排序。"""
     now = time.monotonic()
     if _official_links_cache["data"] is not None and now < _official_links_cache["expires"]:
         return {"items": _official_links_cache["data"]}

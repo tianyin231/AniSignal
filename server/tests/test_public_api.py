@@ -331,6 +331,9 @@ async def test_official_links_aggregation(client, session, admin_headers):
     assert urls.count("https://aki-gm-resources.aki-game.net/h5/contest") == 1
     assert all(item["category"] == "kuro" for item in items)
     assert items[0]["title"]
+    by_url = {item["url"]: item for item in items}
+    assert by_url["https://aki-gm-resources.aki-game.net/h5/contest"]["label"] == "H5 活动"
+    assert by_url["https://aki-gm-resources.aki-game.net/reward"]["label"] == "奖励领取"
 
     # 下架后外链不再出现（管理端动作会失效聚合缓存）；两条都下架（链接相同）
     for content_id in (hero_id, hero_id + 1):
