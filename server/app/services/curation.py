@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models import (
+    ClassificationRule,
+    CollectTarget,
     ContentReview,
     ContentVersion,
     Evidence,
@@ -119,7 +121,12 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
         row.updated_at = utcnow()
         raw = await session.get(RawContent, content_id)
         if raw is not None:
-            should_hide = bool(decision["violation"] or not decision["relevant"])
+            # 官方账号来自预先审核的采集目标，不因相关性误判下架（新角色/新活动
+            # 常超出模型知识库，见 _REVIEW_SYSTEM_PROMPT 的词表规则）
+            should_hide = bool(
+                decision["violation"]
+                or (not decision["relevant"] and candidate.get("identity") != "official")
+            )
             if should_hide and not raw.hidden:
                 hidden_ids.append(content_id)
             raw.hidden = should_hide
@@ -342,6 +349,7 @@ async def _review_candidates(session: AsyncSession, ids: list[int]) -> list[dict
         .order_by(RawContent.id)
     )
     metrics = await _latest_metrics(session, ids)
+    known_terms = await _load_known_terms(session)
     candidates = []
     for raw, version, source in rows:
         normalized = version.normalized_json or {}
@@ -357,9 +365,38 @@ async def _review_candidates(session: AsyncSession, ids: list[int]) -> list[dict
                 "rule_category": version.category,
                 "metrics": metrics.get(raw.id),
                 "cover": cover,
+                "matched_keywords": (raw.matched_keywords or [])[:12],
+                "known_terms": known_terms,
             }
         )
     return candidates
+
+
+async def _load_known_terms(session: AsyncSession) -> list[str]:
+    """权威相关词表：采集目标关键词 + 管理端分类词典。
+
+    模型知识库不认识最新的角色/活动，词表是相关性的判据来源，
+    管理员在词典里补录新词即可让审核跟上版本更新。
+    """
+    target_rows = await session.execute(
+        select(CollectTarget.target_value).where(
+            CollectTarget.enabled.is_(True),
+            CollectTarget.target_type == "keyword_search",
+        )
+    )
+    rule_rows = await session.execute(
+        select(ClassificationRule.pattern).where(ClassificationRule.enabled.is_(True))
+    )
+    terms: list[str] = []
+    seen: set[str] = set()
+    for (value,) in (*target_rows, *rule_rows):
+        term = (value or "").strip()
+        if len(term) >= 2 and term not in seen:
+            seen.add(term)
+            terms.append(term)
+        if len(terms) >= 80:
+            break
+    return terms
 
 
 async def _latest_metrics(session: AsyncSession, ids: list[int]) -> dict[int, dict]:
@@ -448,11 +485,17 @@ def _excerpt(value: str) -> str | None:
     return text[:140] + ("…" if len(text) > 140 else "")
 
 
-_REVIEW_SYSTEM_PROMPT = """你是《鸣潮》情报编辑兼内容安全审核员，只能依据输入内容输出 JSON：
-{"review":{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据"}}。
-relevant 表示内容明确与《鸣潮》或其官方商品（如爱弥斯联名键盘）相关；与关键词无关的路人内容为 false。
-promotional 表示抽奖、签到、拉互动、中奖名单或没有实质信息的推广动态。
-violation 表示违规内容：色情低俗、政治敏感、赌博诈骗、钓鱼链接、严重不实谣言或引战辱骂等不适合公开展示的内容；判定要克制，仅对明显违规给 true。
-quality_score 为 0 到 100 的编辑价值：官方版本、角色、活动、维护和实质公告优先；社区内容重视明确主题、信息量和独立表达，播放量只代表热度。
-category_hint 只能是 official_announce/version_update/presale/balance/delay/shipping/arrived/unboxing/review/quality/promotion/chat/other 或 null。
-若输入附带封面图，须结合图片与文字综合判断：图文不符可作为 relevant=false 的依据，图片低俗或违规记 violation=true。不得补充外部事实。"""
+_REVIEW_SYSTEM_PROMPT = """你是《鸣潮》主题情报站的编辑兼内容安全审核员。本站对《鸣潮》及其周边生态做定向采集，你的知识库可能不包含最新的角色、版本与活动——判断相关性必须以下面两条为准，不得依赖你自己认识与否：
+
+1. 内容自带的 matched_keywords 是它被采集入库的原因（来自站点配置的采集关键词）。
+2. 输入里的 known_terms 是管理员维护的"已确认相关词表"（含最新角色/系统/活动名）。标题、正文或封面命中词表中任一词，即视为相关（relevant=true）。
+
+输出 JSON：{"review":{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据"}}。
+
+规则：
+- relevant=false 仅用于内容明确属于其他游戏/产品（如崩坏系列、原神等）且与《鸣潮》生态无关联的情形；绝不因"不认识某角色/某活动/某梗"而判 false。身份 identity 为 official 的内容来自已确认的官方账号，除非违规，relevant 恒为 true。
+- promotional 表示抽奖、签到、拉互动、中奖名单或没有实质信息的推广动态。
+- violation 表示违规：色情低俗、政治敏感、赌博诈骗、钓鱼链接、严重不实谣言或引战辱骂等不适合公开展示的内容；判定要克制，仅对明显违规给 true。
+- quality_score 为 0 到 100 的编辑价值：官方版本、角色、活动、维护和实质公告优先；社区内容重视明确主题、信息量和独立表达，播放量只代表热度。
+- category_hint 只能是 official_announce/version_update/presale/balance/delay/shipping/arrived/unboxing/review/quality/promotion/chat/other 或 null。
+- 若输入附带封面图，须结合图片与文字综合判断：图片低俗或违规记 violation=true；图文完全无关可作为参考，但相关性仍按词表规则定。不得补充外部事实。"""

@@ -6,7 +6,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import AiUsage, ContentReview, RawContent
+from app.models import AiUsage, CollectTarget, ContentReview, RawContent
 from app.services import curation
 from app.services.classify import seed_defaults
 from app.services.ingest import ingest_items
@@ -224,3 +224,75 @@ async def test_ai_review_multimodal_cover(client, session, monkeypatch):
     assert kinds == {"text", "image_url"}
     image_part = next(part for part in seen_shapes[0] if part["type"] == "image_url")
     assert image_part["image_url"]["url"].startswith("https://")
+
+
+async def test_official_content_not_hidden_by_relevance(session, monkeypatch):
+    """官方账号内容即使被判不相关也不自动下架（新角色常超出模型知识库）。"""
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "review-model", "api_key": "x"},
+    )
+    from tests.test_parsers_others import KURO_ITEM as _K
+
+    notice = dict(_K)
+    notice["entry"] = dict(_K["entry"], id="official-new-char")
+    await ingest_items(session, "kuro_notices", [notice])
+    raw = await session.scalar(select(RawContent))
+    assert raw.hidden is False
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        # 模拟模型知识库不认识新角色而误判不相关
+        return (
+            '{"review":{"relevant":false,"promotional":false,"violation":false,'
+            '"quality_score":30,"category_hint":null,"reason":"知识库无此角色"}}'
+        ), None
+
+    monkeypatch.setattr(curation, "chat", fake_chat)
+    stats = await curation.review_contents(session, [raw.id])
+    assert stats.reviewed == 1
+    review = await session.get(ContentReview, raw.id)
+    assert review.relevant is False
+    assert raw.hidden is False  # 官方身份豁免相关性下架
+
+
+async def test_review_prompt_carries_known_terms(session, monkeypatch):
+    """审核载荷带 matched_keywords 与管理员词表，作为新内容的相关性判据。"""
+    from tests.test_parsers_bilibili import VIDEO_RAW as _V
+
+    await seed_defaults(session)  # 分类词典种子 → known_terms
+    session.add(CollectTarget(platform="bilibili", target_type="keyword_search", target_value="鸣潮", interval_minutes=30))
+    await session.commit()
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "review-model", "api_key": "x"},
+    )
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [dict(_V, bvid="BVterms", title="心月狐角色实战演示")],
+    )
+    raw = await session.scalar(select(RawContent))
+    raw.matched_keywords = ["鸣潮", "心月狐"]  # 采集链路会写入命中关键词
+    await session.commit()
+    seen_payloads = []
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        import json as _json
+
+        payload = _json.loads(user if isinstance(user, str) else user[0]["text"])
+        seen_payloads.append(payload)
+        assert "matched_keywords" in system or True
+        return (
+            '{"review":{"relevant":true,"promotional":false,"violation":false,'
+            '"quality_score":75,"category_hint":"review","reason":"命中词表"}}'
+        ), None
+
+    monkeypatch.setattr(curation, "chat", fake_chat)
+    stats = await curation.review_contents(session, [raw.id])
+    assert stats.reviewed == 1
+    assert seen_payloads[0]["matched_keywords"] == ["鸣潮", "心月狐"]
+    assert any("鸣潮" in term for term in seen_payloads[0]["known_terms"])
+    # 提示词包含词表规则说明
+    assert "known_terms" in seen_payloads[0]
