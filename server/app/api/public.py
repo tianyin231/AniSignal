@@ -97,6 +97,7 @@ async def list_contents(
         conditions.append((Source.identity != exclude_identity) | Source.identity.is_(None))
     if published_within_hours:
         conditions.append(RawContent.published_at >= utcnow() - timedelta(hours=published_within_hours))
+    conditions.append(RawContent.hidden.is_(False))
     if not include_chat:
         conditions.append(ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None))
     if q:
@@ -260,7 +261,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         select(RawContent, ContentVersion, Source)
         .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id, isouter=True)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(RawContent.id == content_id)
+.where(RawContent.id == content_id, RawContent.hidden.is_(False))
         .order_by(ContentVersion.version.desc())
         .limit(1)
     )
@@ -362,7 +363,7 @@ async def list_events(
             ).label("latest_evidence_at"),
         )
         .join(RawContent, RawContent.id == Evidence.raw_content_id)
-        .where(Evidence.role != "excluded")
+        .where(Evidence.role != "excluded", RawContent.hidden.is_(False))
         .group_by(Evidence.event_id)
         .subquery()
     )
@@ -383,6 +384,7 @@ async def list_events(
             .where(
                 RawContent.published_at >= cutoff,
                 Evidence.role != "excluded",
+                RawContent.hidden.is_(False),
             )
         )
         conditions.append(EventModel.id.in_(recent_event_ids))

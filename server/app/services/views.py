@@ -45,7 +45,7 @@ async def events_to_out(
         select(Evidence, RawContent, Source)
         .join(RawContent, Evidence.raw_content_id == RawContent.id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(Evidence.event_id.in_(event_ids))
+        .where(Evidence.event_id.in_(event_ids), RawContent.hidden.is_(False))
         .order_by(Evidence.event_id, RawContent.published_at.asc())
     )
     evidences_by_event: dict[int, list[EventSourceOut]] = {}

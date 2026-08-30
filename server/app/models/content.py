@@ -47,6 +47,8 @@ class RawContent(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64))
     # 命中关键词溯源（采集目标关键词 + 命中的共现词，多个共同命中一起记录）
     matched_keywords: Mapped[list] = mapped_column(JSON, default=list)
+    # 内容审核下架：AI 判定违规/不相关自动置位，管理端可随时切换
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     versions: Mapped[list["ContentVersion"]] = relationship(
         back_populates="raw_content",
@@ -170,6 +172,8 @@ class ContentReview(Base):
     )
     relevant: Mapped[bool] = mapped_column(Boolean, default=True)
     promotional: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 违规判定：色情/政治敏感/欺诈钓鱼/严重谣言等，判定成立时自动隐藏内容
+    violation: Mapped[bool] = mapped_column(Boolean, default=False)
     quality_score: Mapped[int] = mapped_column(Integer, default=0)
     category_hint: Mapped[str | None] = mapped_column(String(32))
     duplicate_of_raw_id: Mapped[int | None] = mapped_column(
