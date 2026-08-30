@@ -103,8 +103,8 @@ export const platformMeta: Record<Platform, { label: string; short: string; badg
   web: { label: '官网', short: '网', badge: 'bg-sky-600' },
   kuro: { label: '库街区', short: '库', badge: 'bg-teal-600' },
   miyoushe: { label: '米游社', short: '米', badge: 'bg-sky-500' },
-  kuro_cn: { label: '官网·国服', short: '官', badge: 'bg-sky-600' },
-  kuro_global: { label: '官网·国际服', short: '际', badge: 'bg-cyan-600' },
+  kuro_cn: { label: '库街区·国服', short: '库', badge: 'bg-sky-600' },
+  kuro_global: { label: '库街区·国际服', short: '际', badge: 'bg-cyan-600' },
 }
 
 export const regionMeta: Record<Region, string> = {

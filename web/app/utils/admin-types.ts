@@ -52,8 +52,8 @@ export interface ContentList {
 export const platformLabels: Record<string, string> = {
   bilibili: 'B站',
   miyoushe: '米游社',
-  kuro_cn: '官网·国服',
-  kuro_global: '官网·国际服',
+  kuro_cn: '库街区·国服',
+  kuro_global: '库街区·国际服',
   youtube: 'YouTube',
 }
 
