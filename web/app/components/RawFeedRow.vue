@@ -3,6 +3,7 @@ import { ArrowUpRight } from 'lucide-vue-next'
 import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
 
 const props = defineProps<{ item: RawItem; to?: string }>()
+const { mediaMode } = useSiteConfig()
 const detailTo = computed(() => props.to ?? `/contents/${props.item.id}`)
 const coverFailed = ref(false)
 watch(() => props.item.cover, () => (coverFailed.value = false))
