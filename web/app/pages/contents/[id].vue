@@ -17,7 +17,11 @@ if (error.value || !detail.value)
   throw createError({ statusCode: 404, statusMessage: '内容不存在', fatal: true })
 
 const d = computed(() => detail.value!)
+const { mediaMode } = useSiteConfig()
+const videoMode = computed(() => mediaMode(d.value.platform, 'video'))
+const imageMode = computed(() => mediaMode(d.value.platform, 'image'))
 const player = computed(() => {
+  if (videoMode.value !== 'show') return null
   if (d.value.platform === 'bilibili' && d.value.content_type === 'video' && d.value.external_id.startsWith('BV')) {
     return {
       url: `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(d.value.external_id)}&autoplay=0&danmaku=0`,
@@ -133,12 +137,15 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         </section>
 
         <!-- 媒体 -->
-        <section v-if="d.media.length" class="panel p-4 sm:p-5">
+        <section v-if="d.media.length && imageMode !== 'hide'" class="panel p-4 sm:p-5">
           <h2 class="text-sm font-semibold">媒体（{{ d.media.length }}）</h2>
           <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <button v-for="m in d.media" :key="m" type="button" class="group relative overflow-hidden rounded-lg border border-slate-900/5 dark:border-white/10" @click="lightbox = m">
-              <img :src="m" referrerpolicy="no-referrer" loading="lazy" class="aspect-video w-full object-cover transition-opacity group-hover:opacity-90" >
-            </button>
+            <template v-for="m in d.media" :key="m">
+              <button v-if="imageMode === 'show'" type="button" class="group relative overflow-hidden rounded-lg border border-slate-900/5 dark:border-white/10" @click="lightbox = m">
+                <img :src="m" referrerpolicy="no-referrer" loading="lazy" class="aspect-video w-full object-cover transition-opacity group-hover:opacity-90" >
+              </button>
+              <a v-else :href="m" target="_blank" rel="noopener noreferrer" class="block truncate rounded-lg border border-slate-900/5 px-3 py-2 text-xs text-slate-500 hover:text-blue-700 dark:border-white/10 dark:text-zinc-400">图片链接：{{ m }}</a>
+            </template>
           </div>
           <p class="mt-2 text-xs text-slate-400 dark:text-zinc-500">点击图片站内放大预览；图片直链自平台 CDN。</p>
         </section>

@@ -48,6 +48,49 @@ const aiTestResult = ref('')
 // ---------- 公告 ----------
 const announcement = reactive({ enabled: false, level: 'info', text: '', link: '' })
 
+// ---------- 媒体可见性 ----------
+interface MediaModesView { image: string; video: string }
+const PLATFORM_MEDIA: { key: string; label: string }[] = [
+  { key: 'bilibili', label: 'B站' },
+  { key: 'youtube', label: 'YouTube' },
+  { key: 'kuro_cn', label: '库街区·国服' },
+  { key: 'kuro_global', label: '库街区·国际服' },
+  { key: 'miyoushe', label: '米游社' },
+]
+const mediaVisibility = reactive({
+  default: { image: 'show', video: 'show' },
+  platforms: {} as Record<string, MediaModesView>,
+})
+const platformMode = (key: string, kind: 'image' | 'video'): string =>
+  mediaVisibility.platforms[key]?.[kind] ?? 'inherit'
+const setPlatformMode = (key: string, kind: 'image' | 'video', event: Event) => {
+  const value = (event.target as HTMLSelectElement).value
+  if (value === 'inherit') {
+    const cur = { ...mediaVisibility.platforms[key] }
+    delete cur[kind]
+    if (Object.keys(cur).length) mediaVisibility.platforms[key] = cur
+    else delete mediaVisibility.platforms[key]
+  } else {
+    mediaVisibility.platforms[key] = { ...mediaVisibility.platforms[key], [kind]: value }
+  }
+}
+
+async function saveMediaVisibility() {
+  startBusy('saveMediaVisibility')
+  error.value = notice.value = ''
+  try {
+    await api('/api/admin/settings/media-visibility', {
+      method: 'PUT',
+      body: JSON.parse(JSON.stringify(mediaVisibility)),
+    })
+    toast.ok('媒体可见性已保存，公开页即时生效')
+  } catch (exc: any) {
+    error.value = exc?.data?.detail ?? '保存失败'
+  } finally {
+    endBusy()
+  }
+}
+
 // ---------- 文案 ----------
 const TEXT_LABELS: Record<string, string> = {
   footer_note: '页脚说明',
@@ -70,6 +113,9 @@ async function refresh() {
   onepush.config_yaml = ''
   Object.assign(announcement, data.announcement)
   texts.value = { ...data.texts }
+  const mv = data.media_visibility ?? { default: { image: 'show', video: 'show' }, platforms: {} }
+  mediaVisibility.default = { image: mv.default?.image ?? 'show', video: mv.default?.video ?? 'show' }
+  mediaVisibility.platforms = mv.platforms ?? {}
 }
 
 async function saveOnepush() {
@@ -277,6 +323,75 @@ async function saveTexts() {
         <span v-if="testResult" class="text-xs" :class="testResult.includes('失败') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ testResult }}</span>
       </div>
     </section>
+    <section class="panel p-5">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-semibold">媒体可见性</h2>
+          <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">
+            按平台控制封面图片与来源链接的展示；全站默认对未单独设置的平台生效，保存即生效。
+          </p>
+        </div>
+        <button class="btn-primary px-4 py-2 text-sm" :disabled="busy" @click="saveMediaVisibility">
+          <Save :size="14" class="mr-1 inline" />{{ busyWhat === 'saveMediaVisibility' ? '保存中…' : '保存媒体可见性' }}
+        </button>
+      </div>
+      <table class="mt-4 w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+            <th class="px-3 py-2 font-medium">范围</th>
+            <th class="px-3 py-2 font-medium">图片</th>
+            <th class="px-3 py-2 font-medium">视频/来源链接</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="border-b border-slate-900/5 dark:border-white/10">
+            <td class="px-3 py-2 font-medium text-slate-700 dark:text-zinc-200">全站默认</td>
+            <td class="px-3 py-2">
+              <select v-model="mediaVisibility.default.image" class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-xs dark:border-white/15 dark:bg-white/5">
+                <option value="show">显示图片</option>
+                <option value="link">仅展示链接</option>
+                <option value="hide">不显示</option>
+              </select>
+            </td>
+            <td class="px-3 py-2">
+              <select v-model="mediaVisibility.default.video" class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-xs dark:border-white/15 dark:bg-white/5">
+                <option value="show">显示视频来源</option>
+                <option value="link">仅展示链接</option>
+                <option value="hide">不显示</option>
+              </select>
+            </td>
+          </tr>
+          <tr v-for="p in PLATFORM_MEDIA" :key="p.key" class="border-b border-slate-900/5 last:border-0 dark:border-white/10">
+            <td class="px-3 py-2 text-slate-700 dark:text-zinc-200">{{ p.label }}</td>
+            <td class="px-3 py-2">
+              <select
+                :value="platformMode(p.key, 'image')"
+                class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-xs dark:border-white/15 dark:bg-white/5"
+                @change="setPlatformMode(p.key, 'image', $event)"
+              >
+                <option value="inherit">跟随全站默认</option>
+                <option value="show">显示图片</option>
+                <option value="link">仅展示链接</option>
+                <option value="hide">不显示</option>
+              </select>
+            </td>
+            <td class="px-3 py-2">
+              <select
+                :value="platformMode(p.key, 'video')"
+                class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-xs dark:border-white/15 dark:bg-white/5"
+                @change="setPlatformMode(p.key, 'video', $event)"
+              >
+                <option value="inherit">跟随全站默认</option>
+                <option value="show">显示来源</option>
+                <option value="link">仅展示链接</option>
+                <option value="hide">不显示</option>
+              </select>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
 
     <!-- OnePush -->
     <section class="panel p-5">
