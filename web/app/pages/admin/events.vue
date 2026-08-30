@@ -211,57 +211,49 @@ async function splitSelectedEvidence() {
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
     <div class="grid gap-6 xl:grid-cols-[1fr_360px]">
-      <div class="panel overflow-x-auto">
-        <table class="w-full min-w-2xl text-sm">
-          <thead>
-            <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
-              <th class="px-4 py-2.5 font-medium">标题</th>
-              <th class="px-3 py-2.5 font-medium">类目</th>
-              <th class="px-3 py-2.5 font-medium">可信度</th>
-              <th class="px-3 py-2.5 font-medium">证据</th>
-              <th class="px-3 py-2.5 font-medium">摘要</th>
-              <th class="px-3 py-2.5 font-medium">锁定</th>
-              <th class="px-3 py-2.5 font-medium">更新</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="event in events"
-              :key="event.id"
-              class="cursor-pointer border-b border-slate-900/5 last:border-0 dark:border-white/5"
-              :class="selected?.id === event.id ? 'bg-blue-500/5' : 'hover:bg-slate-900/5 dark:hover:bg-white/5'"
-              @click="pick(event)"
-            >
-              <td class="max-w-72 truncate px-4 py-2.5">
-                <span class="font-medium">{{ event.title }}</span>
-                <span v-if="event.importance" class="chip ml-1.5 bg-red-500/10 text-red-600 dark:text-red-400">重要</span>
-                <span class="mono ml-1.5 text-xs text-slate-400">#{{ event.id }}</span>
-              </td>
-              <td class="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-zinc-300">{{ categoryMeta[event.category]?.label ?? event.category }}</td>
-              <td class="px-3 py-2.5">
-                <button class="mr-1 rounded px-1.5 py-0.5 text-xs hover:underline" :class="event.importance ? 'text-red-500 dark:text-red-400' : 'text-slate-400'" :disabled="busy" :title="event.importance ? '点击取消置顶' : '置顶到要闻最前'" @click.stop="togglePin(event)">
-                  {{ event.importance ? '★ 已置顶' : '☆ 置顶' }}
-                </button>
-                <span class="chip" :class="{ 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400': event.confidence === 'high', 'bg-sky-500/10 text-sky-600 dark:text-sky-400': event.confidence === 'medium', 'bg-amber-500/10 text-amber-600 dark:text-amber-400': event.confidence === 'low' }">
-                  {{ event.confidence }}
-                </span>
-              </td>
-              <td class="mono px-3 py-2.5">{{ event.evidence_count }}</td>
-              <td class="whitespace-nowrap px-3 py-2.5 text-xs">
-                <span
-                  class="chip"
-                  :class="event.summary_status === 'fallback' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : event.summary_status === 'ai' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
-                >{{ summaryLabels[event.summary_status ?? ''] ?? '未生成' }}</span>
-              </td>
-              <td class="px-3 py-2.5">
-                <button class="text-xs" :class="event.manual_locked ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400 hover:underline'" :disabled="busy" @click.stop="toggleLock(event)">
-                  {{ event.manual_locked ? '已锁定 解锁' : '未锁定' }}
-                </button>
-              </td>
-              <td class="mono whitespace-nowrap px-3 py-2.5 text-xs text-slate-500 dark:text-zinc-400">{{ fmtTime(event.updated_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="panel divide-y divide-slate-900/5 dark:divide-white/10">
+        <div
+          v-for="event in events"
+          :key="event.id"
+          class="cursor-pointer px-4 py-3 transition-colors"
+          :class="selected?.id === event.id ? 'bg-blue-500/5' : 'hover:bg-slate-900/[0.04] dark:hover:bg-white/5'"
+          @click="pick(event)"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <p class="min-w-0 truncate text-sm font-medium text-slate-800 dark:text-zinc-200">
+              {{ event.title }}
+              <span v-if="event.importance" class="chip ml-1 bg-red-500/10 text-red-600 dark:text-red-400">重要</span>
+              <span class="mono ml-1 text-xs font-normal text-slate-400">#{{ event.id }}</span>
+            </p>
+            <span class="mono shrink-0 text-xs text-slate-400">{{ fmtTime(event.updated_at) }}</span>
+          </div>
+          <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400 dark:text-zinc-500">
+            <span class="text-slate-600 dark:text-zinc-300">{{ categoryMeta[event.category]?.label ?? event.category }}</span>
+            <span aria-hidden="true">·</span>
+            <span>证据 {{ event.evidence_count }}</span>
+            <span aria-hidden="true">·</span>
+            <span
+              class="rounded px-1.5 py-0.5"
+              :class="event.confidence === 'high' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : event.confidence === 'medium' ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'"
+            >可信度 {{ event.confidence }}</span>
+            <span aria-hidden="true">·</span>
+            <span
+              class="rounded px-1.5 py-0.5"
+              :class="event.summary_status === 'fallback' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : event.summary_status === 'ai' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+            >{{ summaryLabels[event.summary_status ?? ''] ?? '未生成' }}</span>
+            <span aria-hidden="true">·</span>
+            <button class="hover:underline" :class="event.importance ? 'text-red-500 dark:text-red-400' : 'text-slate-400'" :disabled="busy" :title="event.importance ? '点击取消置顶' : '置顶到要闻最前'" @click.stop="togglePin(event)">
+              {{ event.importance ? '★ 已置顶' : '☆ 置顶' }}
+            </button>
+            <span aria-hidden="true">·</span>
+            <button class="hover:underline" :class="event.manual_locked ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'" :disabled="busy" @click.stop="toggleLock(event)">
+              {{ event.manual_locked ? '已锁定 解锁' : '未锁定' }}
+            </button>
+          </div>
+        </div>
+        <div v-if="!events.length" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">
+          暂无事件。
+        </div>
       </div>
 
       <div v-if="selected" class="panel h-fit space-y-3 p-4">
