@@ -632,9 +632,12 @@ async def _ai_official_links(session: AsyncSession) -> list[dict]:
     )
     items: list[dict] = []
     seen: set[str] = set()
+    from html import unescape
+
     for raw, review in rows:
         for link in review.links or []:
-            url = _clean_url(str(link.get("url") or ""))
+            # 历史数据可能存有 HTML 实体（&amp;），setAttribute 不解码，必须还原
+            url = _clean_url(unescape(str(link.get("url") or "")))
             if not url or url in seen:
                 continue
             seen.add(url)
