@@ -99,6 +99,24 @@ async function runNow(target: CollectTarget) {
   }
 }
 
+async function toggleTier(target: CollectTarget) {
+  if (busyId.value) return
+  busyId.value = target.id
+  try {
+    const next = target.tier === 'core' ? 'general' : 'core'
+    const data = await api<CollectTarget>(`/api/admin/collect-targets/${target.id}`, {
+      method: 'PUT',
+      body: { tier: next },
+    })
+    target.tier = data.tier
+    toast.ok(`${target.display_name || target.target_value} 已切换为${next === 'core' ? '核心关键词' : '泛关键词'}`)
+  } catch (exc: any) {
+    toast.err(`切换失败：${exc?.message ?? exc}`)
+  } finally {
+    busyId.value = null
+  }
+}
+
 async function remove(target: CollectTarget) {
   if (!confirm(`删除目标「${target.display_name || target.target_value}」及其运行记录？`)) return
   busyId.value = target.id
@@ -188,9 +206,15 @@ onMounted(refreshRuns)
             </td>
             <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabels[target.platform] ?? target.platform }}</td>
             <td class="px-4 py-2.5">
-              <span class="chip" :class="target.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'" :title="target.tier === 'core' ? '核心关键词：全量入库，强及时' : '泛关键词：走共现词与热度门槛'">
+              <button
+                class="chip cursor-pointer transition-colors"
+                :class="target.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+                :title="target.tier === 'core' ? '核心关键词：全量入库，强及时。点击切换为泛关键词' : '泛关键词：走共现词与热度门槛。点击切换为核心关键词'"
+                :disabled="busyId === target.id"
+                @click="toggleTier(target)"
+              >
                 {{ target.tier === 'core' ? '核心' : '泛关键词' }}
-              </span>
+              </button>
             </td>
             <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ targetTypeLabels[target.target_type] ?? target.target_type }}</td>
             <td class="mono px-4 py-2.5">{{ target.interval_minutes }}min</td>
