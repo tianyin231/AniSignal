@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowUpRight } from 'lucide-vue-next'
-import { identityMeta, platformMeta, regionMeta, type RawItem } from '~/utils/data'
+import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
 
 const props = defineProps<{ item: RawItem; to?: string }>()
 const detailTo = computed(() => props.to ?? `/contents/${props.item.id}`)
@@ -43,12 +43,6 @@ const previewLabel = computed(() => ({
         </p>
         <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400 dark:text-zinc-500">
         <span>{{ platformMeta[item.platform].label }} · {{ item.account }}</span>
-        <span aria-hidden="true">·</span>
-        <span>{{ regionMeta[item.region] }}</span>
-        <template v-if="item.category">
-          <span aria-hidden="true">·</span>
-          <span>{{ item.category }}</span>
-        </template>
         <span aria-hidden="true">·</span>
         <span :class="identityMeta[item.identity].text">{{ identityMeta[item.identity].label }}</span>
         <span
