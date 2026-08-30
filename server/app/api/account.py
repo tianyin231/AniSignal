@@ -40,7 +40,7 @@ async def _keyword_counts(
         )
         .select_from(RawContent)
         .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-        .where(_title_condition(k.keyword))
+        .where(_title_condition(k.keyword), RawContent.hidden.is_(False))
         for k in keywords
     ]
     rows = await session.execute(union_all(*queries))
@@ -68,7 +68,10 @@ async def overview(
             await session.scalar(
                 select(func.count(func.distinct(RawContent.id)))
                 .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-                .where(or_(*[_title_condition(k.keyword) for k in keywords if k.enabled]))
+                .where(
+                    or_(*[_title_condition(k.keyword) for k in keywords if k.enabled]),
+                    RawContent.hidden.is_(False),
+                )
             )
             or 0
         )
@@ -298,7 +301,7 @@ async def my_feed(
     joined = (
         select(func.count(func.distinct(RawContent.id)))
         .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-        .where(or_(*conditions))
+        .where(or_(*conditions), RawContent.hidden.is_(False))
     )
     total = await session.scalar(joined) or 0
     new_today = (
@@ -312,7 +315,7 @@ async def my_feed(
         select(RawContent, Source, ContentVersion)
         .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(or_(*conditions))
+        .where(or_(*conditions), RawContent.hidden.is_(False))
         .order_by(RawContent.collected_at.desc(), RawContent.id.desc(), ContentVersion.version.desc())
         .limit(limit * 3)
         .offset(offset)

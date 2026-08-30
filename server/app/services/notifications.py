@@ -136,6 +136,7 @@ async def load_candidates(
     rows = await session.execute(
         select(RawContent, ContentVersion, Source, ContentTranslation)
         .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .where(RawContent.hidden.is_(False))
         .join(
             ContentVersion,
             (ContentVersion.raw_content_id == latest_sq.c.rid)

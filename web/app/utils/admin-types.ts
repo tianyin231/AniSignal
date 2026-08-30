@@ -33,6 +33,15 @@ export interface ContentItem {
   title: string | null
   version: number | null
   latest_metrics: Record<string, number> | null
+  hidden: boolean
+  review: {
+    relevant: boolean
+    promotional: boolean
+    violation: boolean
+    quality_score: number
+    reason: string | null
+    updated_at: string | null
+  } | null
 }
 
 export interface ContentList {

@@ -133,3 +133,94 @@ def test_official_similarity_candidates_cover_all_cross_platforms():
     ]
     pairs = _candidate_pairs(rows, {1})
     assert [pair.key for pair in pairs] == [(1, 2)]
+
+
+async def test_ai_review_auto_hides_violation_and_irrelevant(client, session, monkeypatch):
+    """违规或不相关的内容自动下架；公开侧不可见，管理端可恢复。"""
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "review-model", "api_key": "x"},
+    )
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [
+            dict(VIDEO_RAW, bvid="BVviol", title="鸣潮相关但封面低俗"),
+            dict(VIDEO_RAW, bvid="BVirrel", title="与鸣潮无关的数码测评"),
+            dict(VIDEO_RAW, bvid="BVok", title="鸣潮版本更新深度解读"),
+        ],
+    )
+    rows = {raw.external_id: raw for raw in await session.scalars(select(RawContent))}
+    ids = [raw.id for raw in rows.values()]
+    decisions = {
+        "BVviol": {"relevant": True, "promotional": False, "violation": True, "quality_score": 10, "category_hint": None, "reason": "封面低俗"},
+        "BVirrel": {"relevant": False, "promotional": False, "violation": False, "quality_score": 40, "category_hint": "other", "reason": "与鸣潮无关"},
+        "BVok": {"relevant": True, "promotional": False, "violation": False, "quality_score": 85, "category_hint": "version_update", "reason": "版本解读"},
+    }
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        import json as _json
+
+        payload = _json.loads(user if isinstance(user, str) else user[0]["text"])
+        decision = decisions[
+            next(bvid for bvid, raw in rows.items() if raw.id == payload["id"])
+        ]
+        return '{"review":%s}' % _json.dumps(decision, ensure_ascii=False), {
+            "prompt_tokens": 50, "completion_tokens": 15, "total_tokens": 65,
+        }
+
+    monkeypatch.setattr(curation, "chat", fake_chat)
+    stats = await curation.review_contents(session, ids)
+    assert stats.reviewed == 3
+
+    assert rows["BVviol"].hidden is True
+    assert rows["BVirrel"].hidden is True
+    assert rows["BVok"].hidden is False
+
+    # 公开内容流只展示未下架且相关的
+    resp = await client.get("/api/contents")
+    titles = " ".join(item["title"] or "" for item in resp.json()["items"])
+    assert "封面低俗" not in titles
+    assert "数码测评" not in titles
+    assert "深度解读" in titles
+
+    # 管理端恢复不相关内容后重新可见
+    admin_headers = {"X-Admin-Token": "test-admin-token"}
+    resp = await client.patch(
+        f"/api/admin/contents/{rows['BVirrel'].id}/visibility",
+        json={"hidden": False},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    resp = await client.get("/api/contents")
+    titles = " ".join(item["title"] or "" for item in resp.json()["items"])
+    assert "数码测评" in titles
+
+
+async def test_ai_review_multimodal_cover(client, session, monkeypatch):
+    """带封面的内容审核走多模态：user 消息包含文本分片与图片分片。"""
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "review-model", "api_key": "x"},
+    )
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    raw = await session.scalar(select(RawContent))
+    seen_shapes = []
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        seen_shapes.append(user)
+        return (
+            '{"review":{"relevant":true,"promotional":false,"violation":false,'
+            '"quality_score":80,"category_hint":"unboxing","reason":"开箱分享"}}'
+        ), None
+
+    monkeypatch.setattr(curation, "chat", fake_chat)
+    stats = await curation.review_contents(session, [raw.id])
+    assert stats.reviewed == 1
+    assert isinstance(seen_shapes[0], list)
+    kinds = {part["type"] for part in seen_shapes[0]}
+    assert kinds == {"text", "image_url"}
+    image_part = next(part for part in seen_shapes[0] if part["type"] == "image_url")
+    assert image_part["image_url"]["url"].startswith("https://")

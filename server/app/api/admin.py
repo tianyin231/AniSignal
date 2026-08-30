@@ -14,6 +14,7 @@ from app.models import (
     ClassificationRule,
     CollectRun,
     CollectTarget,
+    ContentReview,
     ContentVersion,
     Event,
     EventRevision,
@@ -195,6 +196,9 @@ async def overview(
 @router.get("/contents", response_model=ContentListOut)
 async def list_contents(
     platform: str | None = Query(default=None),
+    hidden: bool | None = Query(default=None),
+    review: str | None = Query(default=None, description="violation / irrelevant / ok"),
+    q: str | None = Query(default=None, description="标题关键词"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -202,6 +206,24 @@ async def list_contents(
     conditions = []
     if platform:
         conditions.append(RawContent.platform == platform)
+    if hidden is not None:
+        conditions.append(RawContent.hidden.is_(hidden))
+    if q:
+        conditions.append(
+            RawContent.id.in_(
+                select(ContentVersion.raw_content_id).where(
+                    ContentVersion.title.like(f"%{q}%")
+                )
+            )
+        )
+    if review == "violation":
+        conditions.append(ContentReview.violation.is_(True))
+    elif review == "irrelevant":
+        conditions.append(ContentReview.relevant.is_(False))
+    elif review == "ok":
+        conditions.append(
+            ContentReview.violation.is_(False) & ContentReview.relevant.is_(True)
+        )
 
     rows = await session.execute(
         select(RawContent, Source.name)
@@ -213,6 +235,13 @@ async def list_contents(
     )
     page = [(raw, name) for raw, name in rows]
     content_ids = [raw.id for raw, _ in page]
+
+    reviews: dict[int, ContentReview] = {}
+    if content_ids:
+        review_rows = await session.execute(
+            select(ContentReview).where(ContentReview.raw_content_id.in_(content_ids))
+        )
+        reviews = {row.raw_content_id: row for row in review_rows.scalars()}
 
     latest_versions: dict[int, ContentVersion] = {}
     latest_metrics: dict[int, dict] = {}
@@ -245,6 +274,19 @@ async def list_contents(
             title=latest_versions[raw.id].title if raw.id in latest_versions else None,
             version=latest_versions[raw.id].version if raw.id in latest_versions else None,
             latest_metrics=latest_metrics.get(raw.id),
+            hidden=raw.hidden,
+            review=(
+                {
+                    "relevant": review.relevant,
+                    "promotional": review.promotional,
+                    "violation": review.violation,
+                    "quality_score": review.quality_score,
+                    "reason": review.reason,
+                    "updated_at": review.updated_at,
+                }
+                if (review := reviews.get(raw.id))
+                else None
+            ),
         )
         for raw, name in page
     ]
@@ -252,6 +294,116 @@ async def list_contents(
     count_sq = select(func.count(RawContent.id)).where(*conditions)
     total = await session.scalar(count_sq) or 0
     return ContentListOut(items=items, total=total)
+
+
+async def _get_content_or_404(session: AsyncSession, content_id: int) -> RawContent:
+    raw = await session.get(RawContent, content_id)
+    if raw is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "content not found")
+    return raw
+
+
+@router.patch("/contents/{content_id}/visibility")
+async def set_content_visibility(
+    content_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """人工下架/恢复：公开侧立即排除 hidden 内容，AI 不会再自动改动人工状态。"""
+    raw = await _get_content_or_404(session, content_id)
+    raw.hidden = bool(body.get("hidden"))
+    await session.commit()
+    return {"id": raw.id, "hidden": raw.hidden}
+
+
+@router.delete("/contents/{content_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_content(
+    content_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """彻底删除内容（版本/指标/审核/证据随 FK 级联清除；事件本身保留）。"""
+    raw = await _get_content_or_404(session, content_id)
+    await session.delete(raw)
+    await session.commit()
+
+
+@router.get("/contents/{content_id}/detail")
+async def content_edit_detail(
+    content_id: int,
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """编辑表单数据：最新版本的标题与正文。"""
+    raw = await _get_content_or_404(session, content_id)
+    version = await session.scalar(
+        select(ContentVersion)
+        .where(ContentVersion.raw_content_id == content_id)
+        .order_by(ContentVersion.version.desc())
+        .limit(1)
+    )
+    return {
+        "id": raw.id,
+        "hidden": raw.hidden,
+        "title": version.title if version else None,
+        "text": version.text if version else None,
+        "version": version.version if version else None,
+    }
+
+
+@router.patch("/contents/{content_id}")
+async def edit_content(
+    content_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    _: None = Depends(require_admin),
+):
+    """人工修订标题/正文：按设计原则产生新版本，不改写既有版本与原始数据。"""
+    title = str(body.get("title") or "").strip() or None
+    text = str(body.get("text") or "").strip() or None
+    if title is None and text is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "标题与正文不能同时为空")
+    raw = await _get_content_or_404(session, content_id)
+    latest_version = await session.scalar(
+        select(ContentVersion)
+        .where(ContentVersion.raw_content_id == content_id)
+        .order_by(ContentVersion.version.desc())
+        .limit(1)
+    )
+    if latest_version is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "该内容暂无可编辑的解析版本")
+    new_version = ContentVersion(
+        raw_content_id=content_id,
+        version=latest_version.version + 1,
+        title=title if title is not None else latest_version.title,
+        text=text if text is not None else latest_version.text,
+        normalized_json=latest_version.normalized_json,
+        parser_version=f"{latest_version.parser_version}+admin",
+        category=latest_version.category,
+    )
+    session.add(new_version)
+    await session.commit()
+    return {"id": content_id, "version": new_version.version}
+
+
+@router.post("/contents/{content_id}/review")
+async def rereview_content(
+    content_id: int,
+    session: AsyncSession = Depends(get_session),
+    queue=Depends(get_queue),
+    _: None = Depends(require_admin),
+):
+    """手动重审：忽略既有判定，重新走多模态审核（结论会覆盖并重新计算下架状态）。"""
+    await _get_content_or_404(session, content_id)
+    await session.execute(
+        ContentReview.__table__.delete().where(ContentReview.raw_content_id == content_id)
+    )
+    await session.commit()
+    job_id = await queue.enqueue_review([content_id])
+    if job_id is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "任务队列暂时不可用")
+    return {"id": content_id, "status": "queued"}
 
 
 @router.get("/runs")

@@ -1,5 +1,6 @@
-"""首页精选：规则缩小候选，AI 评估相关性与编辑价值，公开接口稳定回退。"""
+"""首页精选 + 入库审核：AI 逐条多模态评估（标题/正文/封面），违规与不相关内容自动下架。"""
 
+import asyncio
 import json
 import logging
 import math
@@ -24,7 +25,7 @@ from app.models.enums import Category
 from app.services.ai import ai_available, chat, get_ai_config, record_usage
 from app.services.classify import HIDDEN_CATEGORIES
 
-REVIEW_BATCH_SIZE = 10
+REVIEW_CONCURRENCY = 4
 HIGHLIGHT_WINDOW = timedelta(days=7)
 COMMUNITY_MIN_VIEWS = 10_000
 _PROMOTION_TERMS = (
@@ -57,7 +58,10 @@ class HighlightCandidate:
 
 
 async def review_contents(session: AsyncSession, content_ids: list[int]) -> ReviewStats:
-    """批量保存 AI 候选判断；模型失败时保留旧结果并让首页走规则回退。"""
+    """逐条多模态审核（标题/正文/封面）；违规或不相关的内容自动下架，管理端可恢复。
+
+    AI 判定并发执行（限流），结果顺序落库；单条失败不影响其余内容。
+    """
     stats = ReviewStats()
     ids = list(dict.fromkeys(int(item) for item in content_ids if item))
     if not ids:
@@ -69,74 +73,101 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
 
     candidates = await _review_candidates(session, ids)
     stats.candidates = len(candidates)
-    for start in range(0, len(candidates), REVIEW_BATCH_SIZE):
-        batch = candidates[start : start + REVIEW_BATCH_SIZE]
-        allowed_ids = {item["id"] for item in batch}
-        started = time.monotonic()
-        usage = None
-        try:
-            raw_response, usage = await chat(
-                config,
-                _REVIEW_SYSTEM_PROMPT,
-                json.dumps({"contents": batch}, ensure_ascii=False),
-                json_mode=True,
-            )
-            decisions = _parse_reviews(raw_response, allowed_ids)
-            if not decisions:
-                raise ValueError("model returned no valid reviews")
-        except Exception as exc:  # noqa: BLE001 - 精选失败不阻断采集和公开页
+    semaphore = asyncio.Semaphore(REVIEW_CONCURRENCY)
+
+    async def run_one(candidate: dict):
+        async with semaphore:
+            return await _review_one(config, candidate)
+
+    outcomes = list(await asyncio.gather(*(run_one(candidate) for candidate in candidates)))
+
+    hidden_ids: list[int] = []
+    for candidate, (decision, usage, failed, duration_ms) in zip(candidates, outcomes):
+        content_id = candidate["id"]
+        if failed or decision is None:
             stats.failed_batches += 1
-            logger.warning("content review failed for batch starting %s: %r", batch[0]["id"], exc)
             await record_usage(
                 session,
                 task="review_content",
                 config=config,
                 usage=usage,
-                duration_ms=int((time.monotonic() - started) * 1000),
-                ref_id=batch[0]["id"],
+                duration_ms=duration_ms,
+                ref_id=content_id,
                 status="failed",
             )
             continue
-
+        stats.reviewed += 1
         await record_usage(
             session,
             task="review_content",
             config=config,
             usage=usage,
-            duration_ms=int((time.monotonic() - started) * 1000),
-            ref_id=batch[0]["id"],
+            duration_ms=duration_ms,
+            ref_id=content_id,
         )
-        for content_id, decision in decisions.items():
-            row = await session.get(ContentReview, content_id)
-            if row is None:
-                row = ContentReview(raw_content_id=content_id, model=config["model"])
-                session.add(row)
-            row.relevant = decision["relevant"]
-            row.promotional = decision["promotional"]
-            row.quality_score = decision["quality_score"]
-            row.category_hint = decision["category_hint"]
-            row.duplicate_of_raw_id = decision["duplicate_of"]
-            row.reason = decision["reason"]
-            row.model = config["model"]
-            row.updated_at = utcnow()
-            stats.reviewed += 1
-        await session.commit()
+        row = await session.get(ContentReview, content_id)
+        if row is None:
+            row = ContentReview(raw_content_id=content_id, model=config["model"])
+            session.add(row)
+        row.relevant = decision["relevant"]
+        row.promotional = decision["promotional"]
+        row.violation = decision["violation"]
+        row.quality_score = decision["quality_score"]
+        row.category_hint = decision["category_hint"]
+        row.reason = decision["reason"]
+        row.model = config["model"]
+        row.updated_at = utcnow()
+        raw = await session.get(RawContent, content_id)
+        if raw is not None:
+            should_hide = bool(decision["violation"] or not decision["relevant"])
+            if should_hide and not raw.hidden:
+                hidden_ids.append(content_id)
+            raw.hidden = should_hide
+    await session.commit()
+    if hidden_ids:
+        logger.info("content review auto-hidden %s items: %s", len(hidden_ids), hidden_ids)
     return stats
+
+
+async def _review_one(
+    config: dict, candidate: dict
+) -> tuple[dict | None, dict | None, bool, int]:
+    """单条审核：文本 JSON + 封面图（多模态）。返回 (判定, usage, 是否失败, 耗时)。"""
+    started = time.monotonic()
+    usage = None
+    try:
+        cover = candidate.get("cover")
+        text_payload = {key: value for key, value in candidate.items() if key != "cover"}
+        if cover:
+            user_content: "str | list" = [
+                {"type": "text", "text": json.dumps(text_payload, ensure_ascii=False)},
+                {"type": "image_url", "image_url": {"url": cover}},
+            ]
+        else:
+            user_content = json.dumps(text_payload, ensure_ascii=False)
+        raw_response, usage = await chat(
+            config,
+            _REVIEW_SYSTEM_PROMPT,
+            user_content,
+            json_mode=True,
+        )
+        decision = _parse_review(raw_response, candidate["id"])
+        if decision is None:
+            raise ValueError("model returned no valid review")
+        return decision, usage, False, int((time.monotonic() - started) * 1000)
+    except Exception as exc:  # noqa: BLE001 - 单条失败不阻断其余内容
+        logger.warning("content review failed for %s: %r", candidate.get("id"), exc)
+        return None, usage, True, int((time.monotonic() - started) * 1000)
 
 
 async def review_recent_contents(
     session: AsyncSession, *, limit: int = 40, only_missing: bool = True
 ) -> ReviewStats:
-    """重算近期带首图内容，供部署回填和管理端手动触发。"""
+    """重算近期内容，供部署回填和管理端手动触发。"""
     latest = _latest_version_subquery()
     query = (
-        select(RawContent.id, ContentVersion.normalized_json, ContentReview.raw_content_id)
+        select(RawContent.id, ContentReview.raw_content_id)
         .join(latest, latest.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest.c.rid)
-            & (ContentVersion.version == latest.c.version),
-        )
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
         .where(
             func.coalesce(RawContent.published_at, RawContent.collected_at)
@@ -147,12 +178,10 @@ async def review_recent_contents(
     )
     rows = await session.execute(query)
     ids = []
-    for content_id, normalized, reviewed_id in rows:
+    for content_id, reviewed_id in rows:
         if only_missing and reviewed_id is not None:
             continue
-        media = (normalized or {}).get("media") or []
-        if media:
-            ids.append(content_id)
+        ids.append(content_id)
         if len(ids) >= limit:
             break
     return await review_contents(session, ids)
@@ -171,11 +200,14 @@ async def select_highlights(session: AsyncSession, limit: int = 5) -> list[dict]
                 (ContentVersion.raw_content_id == latest.c.rid)
                 & (ContentVersion.version == latest.c.version),
             )
-            .join(Source, RawContent.source_id == Source.id, isouter=True)
-            .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
-            .where(publication_time >= utcnow() - HIGHLIGHT_WINDOW)
-            .order_by(publication_time.desc(), RawContent.id.desc())
-            .limit(200)
+        .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
+        .where(
+            publication_time >= utcnow() - HIGHLIGHT_WINDOW,
+            RawContent.hidden.is_(False),
+        )
+        .order_by(publication_time.desc(), RawContent.id.desc())
+        .limit(200)
         )
     )
     if not rows:
@@ -310,18 +342,24 @@ async def _review_candidates(session: AsyncSession, ids: list[int]) -> list[dict
         .order_by(RawContent.id)
     )
     metrics = await _latest_metrics(session, ids)
-    return [
-        {
-            "id": raw.id,
-            "platform": raw.platform,
-            "identity": source.identity if source else "unknown",
-            "title": (version.title or raw.external_id)[:240],
-            "text": _plain(version.text or "")[:1200],
-            "rule_category": version.category,
-            "metrics": metrics.get(raw.id),
-        }
-        for raw, version, source in rows
-    ]
+    candidates = []
+    for raw, version, source in rows:
+        normalized = version.normalized_json or {}
+        media = normalized.get("media") or []
+        cover = next((item for item in media if isinstance(item, str) and item), None)
+        candidates.append(
+            {
+                "id": raw.id,
+                "platform": raw.platform,
+                "identity": source.identity if source else "unknown",
+                "title": (version.title or raw.external_id)[:240],
+                "text": _plain(version.text or "")[:1200],
+                "rule_category": version.category,
+                "metrics": metrics.get(raw.id),
+                "cover": cover,
+            }
+        )
+    return candidates
 
 
 async def _latest_metrics(session: AsyncSession, ids: list[int]) -> dict[int, dict]:
@@ -354,36 +392,37 @@ async def _event_groups(session: AsyncSession, ids: list[int]) -> dict[int, int]
     return groups
 
 
-def _parse_reviews(response: str, allowed_ids: set[int]) -> dict[int, dict]:
+def _parse_review(response: str, content_id: int) -> dict | None:
+    """解析单条审核判定；接受 {"review": {...}} 或 {"reviews": [{...}]} 两种形状。"""
     cleaned = response.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.I)
     data = json.loads(cleaned)
-    result = {}
-    for item in data.get("reviews") or []:
-        content_id = int(item.get("id") or 0)
-        if content_id not in allowed_ids:
-            continue
-        relevant = item.get("relevant")
-        promotional = item.get("promotional")
-        if not isinstance(relevant, bool) or not isinstance(promotional, bool):
-            continue
-        category = item.get("category_hint")
-        if category not in _ALLOWED_CATEGORIES:
-            category = None
-        duplicate = item.get("duplicate_of")
-        duplicate = int(duplicate) if duplicate else None
-        if duplicate not in allowed_ids or duplicate == content_id:
-            duplicate = None
-        result[content_id] = {
-            "relevant": relevant,
-            "promotional": promotional,
-            "quality_score": max(0, min(100, int(item.get("quality_score") or 0))),
-            "category_hint": category,
-            "duplicate_of": duplicate,
-            "reason": str(item.get("reason") or "")[:500],
-        }
-    return result
+    item = data.get("review")
+    if item is None and isinstance(data.get("reviews"), list):
+        for candidate in data["reviews"]:
+            if int(candidate.get("id") or 0) == content_id:
+                item = candidate
+                break
+    if not isinstance(item, dict):
+        return None
+    relevant = item.get("relevant")
+    promotional = item.get("promotional")
+    violation = item.get("violation")
+    if not isinstance(relevant, bool) or not isinstance(promotional, bool):
+        return None
+    violation = bool(violation) if isinstance(violation, bool) else False
+    category = item.get("category_hint")
+    if category not in _ALLOWED_CATEGORIES:
+        category = None
+    return {
+        "relevant": relevant,
+        "promotional": promotional,
+        "violation": violation,
+        "quality_score": max(0, min(100, int(item.get("quality_score") or 0))),
+        "category_hint": category,
+        "reason": str(item.get("reason") or "")[:500],
+    }
 
 
 def _views(metrics: dict | None) -> int:
@@ -409,9 +448,11 @@ def _excerpt(value: str) -> str | None:
     return text[:140] + ("…" if len(text) > 140 else "")
 
 
-_REVIEW_SYSTEM_PROMPT = """你是《鸣潮》情报编辑，只能依据输入内容输出 JSON：
-{"reviews":[{"id":1,"relevant":true,"promotional":false,"quality_score":80,"category_hint":"version_update","duplicate_of":null,"reason":"简短依据"}]}。
-必须逐项返回所有输入 id。relevant 表示内容明确与《鸣潮》或目标商品有关；promotional 表示抽奖、签到、拉互动、中奖名单或没有实质信息的推广动态。
+_REVIEW_SYSTEM_PROMPT = """你是《鸣潮》情报编辑兼内容安全审核员，只能依据输入内容输出 JSON：
+{"review":{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据"}}。
+relevant 表示内容明确与《鸣潮》或其官方商品（如爱弥斯联名键盘）相关；与关键词无关的路人内容为 false。
+promotional 表示抽奖、签到、拉互动、中奖名单或没有实质信息的推广动态。
+violation 表示违规内容：色情低俗、政治敏感、赌博诈骗、钓鱼链接、严重不实谣言或引战辱骂等不适合公开展示的内容；判定要克制，仅对明显违规给 true。
 quality_score 为 0 到 100 的编辑价值：官方版本、角色、活动、维护和实质公告优先；社区内容重视明确主题、信息量和独立表达，播放量只代表热度。
 category_hint 只能是 official_announce/version_update/presale/balance/delay/shipping/arrived/unboxing/review/quality/promotion/chat/other 或 null。
-只有输入批次中两条内容明确属于同一发布物或同一事件时才填写 duplicate_of；同角色、同版本但主题不同不能判重复。不得补充外部事实。"""
+若输入附带封面图，须结合图片与文字综合判断：图文不符可作为 relevant=false 的依据，图片低俗或违规记 violation=true。不得补充外部事实。"""

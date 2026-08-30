@@ -80,8 +80,14 @@ async def record_usage(
     await session.commit()
 
 
-async def chat(config: dict, system: str, user: str, *, json_mode: bool = False) -> tuple[str, dict | None]:
-    """OpenAI 兼容 chat/completions；返回 (回复文本, usage)。"""
+async def chat(
+    config: dict, system: str, user: "str | list", *, json_mode: bool = False
+) -> tuple[str, dict | None]:
+    """OpenAI 兼容 chat/completions；返回 (回复文本, usage)。
+
+    user 为 str 时是纯文本；为 list 时是 OpenAI 多模态 content 分片
+    （如 [{"type": "text", ...}, {"type": "image_url", ...}]），原样透传。
+    """
     import asyncio
 
     body: dict = {

@@ -82,6 +82,8 @@ class ContentItemOut(BaseModel):
     title: str | None = None
     version: int | None = None
     latest_metrics: dict | None = None
+    hidden: bool = False
+    review: dict | None = None
 
 
 class ContentListOut(BaseModel):

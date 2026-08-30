@@ -10,6 +10,7 @@ class _FakeQueue:
     def __init__(self) -> None:
         self.enqueued: list[int] = []
         self.notifications: list[int] = []
+        self.reviewed: list[int] = []
 
     async def enqueue_collect(self, target_id: int) -> str | None:
         self.enqueued.append(target_id)
@@ -24,6 +25,10 @@ class _FakeQueue:
 
     async def enqueue_morning(self) -> str | None:
         return "fake-morning-job"
+
+    async def enqueue_review(self, content_ids: list[int]) -> str | None:
+        self.reviewed.extend(content_ids)
+        return "fake-review-job"
 
 
 async def test_healthz_open(client):
@@ -121,3 +126,81 @@ async def test_contents_listing_after_ingest(client, admin_headers, session):
     assert item["title"] == "视频标题"
     assert item["source_name"] == "UP主名称"
     assert item["latest_metrics"]["view"] == 680
+
+
+async def test_content_moderation_flow(client, admin_headers, session):
+    """管理端内容治理：下架/恢复、公开侧过滤、修订产生新版本、删除、重审入队。"""
+    from sqlalchemy import select
+
+    from app.models import RawContent, ContentVersion
+    from app.services.ingest import ingest_items
+    from tests.test_parsers_bilibili import VIDEO_RAW
+
+    await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, bvid="BVmod", title="鸣潮联动活动情报")])
+    raw = await session.scalar(select(RawContent).where(RawContent.external_id == "BVmod"))
+    assert raw is not None
+
+    # 管理列表带 hidden 与审核字段
+    resp = await client.get("/api/admin/contents", headers=admin_headers)
+    item = next(i for i in resp.json()["items"] if i["id"] == raw.id)
+    assert item["hidden"] is False
+    assert item["review"] is None
+
+    # 公开侧可见
+    resp = await client.get("/api/contents")
+    assert any(i["id"] == raw.id for i in resp.json()["items"])
+
+    # 下架 → 公开列表与详情都排除
+    resp = await client.patch(
+        f"/api/admin/contents/{raw.id}/visibility", json={"hidden": True}, headers=admin_headers
+    )
+    assert resp.status_code == 200 and resp.json()["hidden"] is True
+    resp = await client.get("/api/contents")
+    assert not any(i["id"] == raw.id for i in resp.json()["items"])
+    resp = await client.get(f"/api/contents/{raw.id}")
+    assert resp.status_code == 404
+
+    # 管理端筛选 hidden=true
+    resp = await client.get("/api/admin/contents", params={"hidden": "true"}, headers=admin_headers)
+    assert any(i["id"] == raw.id for i in resp.json()["items"])
+
+    # 恢复
+    await client.patch(
+        f"/api/admin/contents/{raw.id}/visibility", json={"hidden": False}, headers=admin_headers
+    )
+    resp = await client.get(f"/api/contents/{raw.id}")
+    assert resp.status_code == 200
+
+    # 修订标题 → 新版本，公开详情展示新标题
+    resp = await client.patch(
+        f"/api/admin/contents/{raw.id}",
+        json={"title": "鸣潮联动活动情报（已修订）", "text": None},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    new_version = resp.json()["version"]
+    assert new_version >= 2
+    versions = await session.scalars(
+        select(ContentVersion).where(ContentVersion.raw_content_id == raw.id)
+    )
+    assert len(list(versions)) == new_version  # 旧版本保留
+    resp = await client.get(f"/api/contents/{raw.id}")
+    assert resp.json()["title"] == "鸣潮联动活动情报（已修订）"
+
+    # 重审：清掉旧判定并入队
+    resp = await client.post(f"/api/admin/contents/{raw.id}/review", headers=admin_headers)
+    assert resp.status_code == 200
+    from tests.test_admin_api import _FakeQueue
+
+    fake = api_main.app.state.queue
+    assert raw.id in fake.reviewed
+
+    # 删除 → 管理端与公开侧都消失
+    resp = await client.delete(f"/api/admin/contents/{raw.id}", headers=admin_headers)
+    assert resp.status_code == 204
+    remaining = await session.scalar(
+        select(RawContent.id).where(RawContent.id == raw.id)
+    )
+    assert remaining is None
+    resp = await client.get("/api/admin/contents", headers=admin_headers)
+    assert not any(i["id"] == raw.id for i in resp.json()["items"])
