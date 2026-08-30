@@ -21,6 +21,7 @@ from app.models.enums import (
     TargetType,
 )
 from app.models.event import Event, EventRevision, Evidence
+from app.models.fulfillment import ProductSignal, ProductSignalEvidence, ProductSignalRevision
 from app.models.product import FULFILLMENT_STAGES, Product
 from app.models.run import CollectRun
 from app.models.setting import SiteSetting
@@ -52,6 +53,9 @@ __all__ = [
     "Event",
     "Evidence",
     "EventRevision",
+    "ProductSignal",
+    "ProductSignalEvidence",
+    "ProductSignalRevision",
     "Product",
     "FULFILLMENT_STAGES",
     "Platform",

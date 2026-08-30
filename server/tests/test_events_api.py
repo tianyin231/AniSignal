@@ -131,13 +131,12 @@ async def test_public_products_with_stages(client, session):
     assert len(body["items"]) == 1
     product = body["items"][0]
     assert product["slug"] == "kb"
-    assert product["current_stage"] == 2  # 1 个独立用户开箱 → 首位普通用户到货
-    labels = [s["label"] for s in product["stages"]]
-    assert labels[0] == "暂无可靠到货证据"
-    current = next(s for s in product["stages"] if s["state"] == "current")
-    assert current["label"] == "首位普通用户到货"
-    assert product["consumer_evidence_count"] == 1
-    assert product["stage_source"] == "automatic"
+    assert product["current_stage"] == 0
+    assert product["consumer_evidence_count"] == 0
+    assert product["stage_source"] == "signals"
+    assert product["fulfillment"]["consumer"]["state"] == "no_verified_receipt"
+    assert product["fulfillment"]["consumer"]["candidate_count"] == 1
+    assert product["fulfillment"]["official"]["verified_count"] >= 1
 
     resp = await client.get("/api/products/kb")
     assert resp.status_code == 200
@@ -295,7 +294,7 @@ async def test_admin_products_crud(client, session, admin_headers):
     resp = await client.put(
         f"/api/admin/products/{pid}", json={"stage_hint": 3}, headers=admin_headers
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 410
     resp = await client.delete(f"/api/admin/products/{pid}", headers=admin_headers)
     assert resp.status_code == 204
 
@@ -313,52 +312,16 @@ async def test_admin_product_quick_create_generates_slug(client, session, admin_
     )
 
 
-async def test_admin_ai_assesses_product_with_audited_evidence(
-    client, session, admin_headers, monkeypatch
-):
-    from app.services import ai as ai_service
-    from app.services.settings import set_setting
-
+async def test_admin_ai_stage_assessment_is_retired(client, session, admin_headers):
     await _prepare(session)
     product = await session.scalar(select(Product))
-    event = await session.scalar(
-        select(Event).where(Event.product_id == product.id, Event.category == "unboxing")
-    )
-    evidence = await session.scalar(select(Evidence).where(Evidence.event_id == event.id))
-    await set_setting(
-        session,
-        "ai",
-        {"base_url": "https://api.example.com/v1", "model": "m", "api_key": "sk-x"},
-    )
-
-    async def fake_chat(config, system, user, *, json_mode=False):
-        assert "普通购买者" in system
-        assert "unknown 仅表示系统尚未人工标注" in system
-        assert "不要出现 identity_hint" in system
-        assert f'"id": {evidence.raw_content_id}' in user
-        return (
-            '{"stage":2,"reason":"一名独立普通用户明确发布该商品开箱内容",'
-            f'"evidence_ids":[{evidence.raw_content_id}]}}',
-            {"prompt_tokens": 10, "completion_tokens": 5},
-        )
-
-    monkeypatch.setattr(ai_service, "chat", fake_chat)
     resp = await client.post(
         f"/api/admin/products/{product.id}/assess", headers=admin_headers
     )
-
-    assert resp.status_code == 200
-    assert resp.json()["stage_source"] == "ai"
-    assert resp.json()["stage_evidence_ids"] == [evidence.raw_content_id]
-    revision = await session.scalar(
-        select(EventRevision)
-        .where(EventRevision.event_id == event.id, EventRevision.actor == "ai")
-        .order_by(EventRevision.id.desc())
-    )
-    assert revision is not None
+    assert resp.status_code == 410
 
 
-async def test_admin_stage_review_requires_reason_and_evidence(client, session, admin_headers):
+async def test_admin_stage_override_is_retired(client, session, admin_headers):
     await _prepare(session)
     product = await session.scalar(select(Product))
     event = await session.scalar(
@@ -371,7 +334,7 @@ async def test_admin_stage_review_requires_reason_and_evidence(client, session, 
         json={"stage_hint": 2, "stage_hint_reason": "", "stage_hint_evidence_ids": [evidence.raw_content_id]},
         headers=admin_headers,
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 410
 
     resp = await client.put(
         f"/api/admin/products/{product.id}",
@@ -382,9 +345,46 @@ async def test_admin_stage_review_requires_reason_and_evidence(client, session, 
         },
         headers=admin_headers,
     )
-    assert resp.status_code == 200
-    assert resp.json()["stage_source"] == "manual"
-    assert resp.json()["stage_evidence_ids"] == [evidence.raw_content_id]
+    assert resp.status_code == 410
+
+
+async def test_admin_reviews_signal_before_public_receipt_advances(
+    client, session, admin_headers
+):
+    await _prepare(session)
+    product = await session.scalar(select(Product))
+    response = await client.get(
+        f"/api/admin/products/{product.id}/signals", headers=admin_headers
+    )
+    assert response.status_code == 200
+    receipt = next(
+        item
+        for item in response.json()["items"]
+        if item["signal_type"] == "consumer_received"
+    )
+    assert receipt["review_status"] == "candidate"
+
+    response = await client.patch(
+        f"/api/admin/products/{product.id}/signals/{receipt['id']}",
+        headers=admin_headers,
+        json={
+            "review_status": "verified",
+            "actor_type": "user",
+            "acquisition_type": "self_purchase",
+            "summary": "普通用户自购订单已到货",
+            "claim_quote": "爱弥斯键盘开箱体验",
+            "note": "核对账号历史与原文，确认为自购",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["review_status"] == "verified"
+
+    public_product = (await client.get("/api/products/kb")).json()
+    assert public_product["fulfillment"]["consumer"]["state"] == "first_receipt"
+    assert public_product["fulfillment"]["consumer"]["verified_count"] == 1
+    assert public_product["consumer_evidence_count"] == 1
+    public_signals = (await client.get("/api/products/kb/signals")).json()["items"]
+    assert any(item["id"] == receipt["id"] for item in public_signals)
 
 
 async def test_admin_rules_crud_and_recompute(client, session, admin_headers):

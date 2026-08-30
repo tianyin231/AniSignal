@@ -23,6 +23,7 @@ from app.schemas.api import (
     EventOut,
     ProductListOut,
     ProductOut,
+    ProductSignalListOut,
     PublicContentItem,
     PublicContentList,
     PublicSource,
@@ -453,6 +454,20 @@ async def get_product(slug: str, session: AsyncSession = Depends(get_session)):
     if product is None:
         raise HTTPException(status_code=404, detail="product not found")
     return await product_to_out(session, product)
+
+
+@router.get("/products/{slug}/signals", response_model=ProductSignalListOut)
+async def get_product_signals(
+    slug: str, session: AsyncSession = Depends(get_session)
+):
+    from app.models import Product as ProductModel
+    from app.services.fulfillment import list_product_signals
+
+    product = await session.scalar(select(ProductModel).where(ProductModel.slug == slug))
+    if product is None:
+        raise HTTPException(status_code=404, detail="product not found")
+    items = await list_product_signals(session, product.id)
+    return ProductSignalListOut(items=items, total=len(items))
 
 
 # ---------- 官方动态外链聚合（活动/奖励/H5 直达） ----------

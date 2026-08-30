@@ -9,6 +9,7 @@ from app.models import (
     EventRevision,
     Evidence,
     Product,
+    ProductSignal,
     RawContent,
 )
 from app.services.classify import classify_content, seed_defaults
@@ -91,7 +92,7 @@ async def test_aggregation_idempotent(session):
     assert revisions_2 == revisions_1
 
 
-async def test_product_fulfillment_ladder(session):
+async def test_product_contents_become_candidates_instead_of_stage(session):
     await _seed_rules(session)
     session.add(
         Product(
@@ -102,7 +103,7 @@ async def test_product_fulfillment_ladder(session):
     )
     await session.commit()
 
-    # 送测开箱 1 条 + 已核验普通用户开箱 3 条
+    # 来源身份只是规则线索，不能替代“自购 + 真实到货”的逐条审核。
     seeded = dict(VIDEO_RAW, bvid="BVseed", title="爱弥斯键盘开箱：官方送测样品", owner_mid=500, owner_name="送测UP")
     users = [
         await _video("BVu1", "爱弥斯键盘开箱第一天", owner_mid=601, owner="用户甲"),
@@ -122,8 +123,7 @@ async def test_product_fulfillment_ladder(session):
     await session.commit()
 
     product = await session.scalar(select(Product))
-    # 3 个已核验独立用户账号 → 阶段 3（多名独立用户到货）
-    assert product.computed_stage == 3
+    assert product.computed_stage == 0
 
     unboxing_events = list(
         (await session.execute(select(Event).where(Event.category == "unboxing"))).scalars()
@@ -131,9 +131,16 @@ async def test_product_fulfillment_ladder(session):
     assert len(unboxing_events) == 1
     event = unboxing_events[0]
     assert event.product_id == product.id
-    assert event.status_label == "多名独立用户到货"
-    assert event.importance is True
-    assert "3 个独立账号" in event.conclusion or "独立账号" in event.conclusion
+    assert event.status_label is None
+    assert event.confidence == "low"
+    assert "候选内容" in event.conclusion
+    signals = list(
+        await session.scalars(
+            select(ProductSignal).where(ProductSignal.product_id == product.id)
+        )
+    )
+    assert len(signals) == 4
+    assert {signal.review_status for signal in signals} == {"candidate"}
 
 
 async def test_manual_locked_event_skipped(session):

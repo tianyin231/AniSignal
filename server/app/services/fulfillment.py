@@ -1,0 +1,431 @@
+"""结构化商品履约信号：规则同步、人工审核与三轴状态投影。"""
+
+import re
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.clock import utcnow
+from app.models import (
+    ContentVersion,
+    Event,
+    Evidence,
+    ProductSignal,
+    ProductSignalEvidence,
+    ProductSignalRevision,
+    RawContent,
+    Source,
+)
+
+CATEGORY_TO_SIGNAL = {
+    "presale": "presale_open",
+    "balance": "balance_open",
+    "delay": "delayed",
+    "shipping": "shipping_started",
+    "arrived": "consumer_received",
+    "unboxing": "consumer_received",
+    "quality": "quality_issue",
+}
+
+SIGNAL_LABELS = {
+    "presale_open": "开启预售",
+    "balance_open": "开启尾款",
+    "delayed": "延期",
+    "shipping_started": "开始发货",
+    "aftersales_notice": "售后说明",
+    "consumer_received": "消费者到货",
+    "quality_issue": "质量问题",
+}
+
+OFFICIAL_TYPES = {
+    "presale_open",
+    "balance_open",
+    "delayed",
+    "shipping_started",
+    "aftersales_notice",
+}
+REVIEW_STATUSES = {"candidate", "verified", "rejected", "conflict"}
+ACQUISITION_TYPES = {"unknown", "self_purchase", "seeded"}
+ACTOR_TYPES = {"official", "user", "seeded", "media", "merchant", "unknown"}
+
+
+def _plain(value: str | None) -> str:
+    import bleach
+
+    return re.sub(r"\s+", " ", bleach.clean(value or "", tags=[], strip=True)).strip()
+
+
+def _source_key(raw: RawContent, source: Source | None) -> str:
+    if source and source.external_id:
+        return f"{raw.platform}:{source.external_id}"
+    return f"{raw.platform}:content:{raw.external_id}"
+
+
+async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
+    """把当前有效商品事件同步为候选信号；已人工审核的字段不覆盖。"""
+    latest = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("version"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
+    rows = list(
+        await session.execute(
+            select(Event, RawContent, Source, ContentVersion)
+            .join(Evidence, Evidence.event_id == Event.id)
+            .join(RawContent, RawContent.id == Evidence.raw_content_id)
+            .join(Source, Source.id == RawContent.source_id, isouter=True)
+            .join(latest, latest.c.rid == RawContent.id)
+            .join(
+                ContentVersion,
+                (ContentVersion.raw_content_id == latest.c.rid)
+                & (ContentVersion.version == latest.c.version),
+            )
+            .where(
+                Event.product_id == product_id,
+                Event.is_active.is_(True),
+                Evidence.role == "support",
+                RawContent.hidden.is_(False),
+                Event.category.in_(tuple(CATEGORY_TO_SIGNAL)),
+            )
+        )
+    )
+
+    existing_rows = list(
+        await session.execute(
+            select(ProductSignal, ProductSignalEvidence)
+            .join(ProductSignalEvidence, ProductSignalEvidence.signal_id == ProductSignal.id)
+            .where(ProductSignal.product_id == product_id)
+        )
+    )
+    existing = {
+        (evidence.raw_content_id, signal.signal_type): (signal, evidence)
+        for signal, evidence in existing_rows
+    }
+    for signal, _ in existing_rows:
+        if signal.source_method == "rule":
+            signal.active = False
+
+    created = 0
+    for event, raw, source, version in rows:
+        signal_type = CATEGORY_TO_SIGNAL[event.category]
+        key = (raw.id, signal_type)
+        actor = source.identity if source else "unknown"
+        is_official = actor == "official" and signal_type in OFFICIAL_TYPES
+        title = _plain(version.title or event.title or raw.external_id)
+        quote = _plain(version.text or version.title or event.title)[:500] or title
+        current = existing.get(key)
+        if current:
+            signal, evidence = current
+            signal.active = True
+            if not signal.locked:
+                signal.actor_type = actor
+                signal.occurred_at = raw.published_at or raw.collected_at
+                signal.summary = title
+                signal.confidence = 1.0 if is_official else 0.5
+                signal.review_status = "verified" if is_official else "candidate"
+                evidence.claim_quote = quote
+                evidence.independent_source_key = _source_key(raw, source)
+                evidence.acquisition_type = "seeded" if actor == "seeded" else "unknown"
+            continue
+
+        signal = ProductSignal(
+            product_id=product_id,
+            signal_type=signal_type,
+            actor_type=actor,
+            review_status="verified" if is_official else "candidate",
+            occurred_at=raw.published_at or raw.collected_at,
+            summary=title,
+            confidence=1.0 if is_official else 0.5,
+            details={"legacy_event_id": event.id, "legacy_category": event.category},
+            source_method="rule",
+            active=True,
+        )
+        session.add(signal)
+        await session.flush()
+        evidence = ProductSignalEvidence(
+            signal_id=signal.id,
+            raw_content_id=raw.id,
+            claim_quote=quote,
+            acquisition_type="seeded" if actor == "seeded" else "unknown",
+            independent_source_key=_source_key(raw, source),
+        )
+        session.add(evidence)
+        existing[key] = (signal, evidence)
+        created += 1
+    return created
+
+
+async def _active_signal_rows(session: AsyncSession, product_id: int) -> list[tuple]:
+    return list(
+        await session.execute(
+            select(ProductSignal, ProductSignalEvidence, RawContent, Source)
+            .join(ProductSignalEvidence, ProductSignalEvidence.signal_id == ProductSignal.id)
+            .join(RawContent, RawContent.id == ProductSignalEvidence.raw_content_id)
+            .join(Source, Source.id == RawContent.source_id, isouter=True)
+            .where(
+                ProductSignal.product_id == product_id,
+                ProductSignal.active.is_(True),
+                RawContent.hidden.is_(False),
+                ProductSignalEvidence.role != "excluded",
+            )
+            .order_by(ProductSignal.occurred_at.desc(), ProductSignal.id.desc())
+        )
+    )
+
+
+def _axis(
+    key: str,
+    label: str,
+    state: str,
+    state_label: str,
+    summary: str,
+    verified_ids: set[int],
+    candidate_ids: set[int],
+    updated_at,
+) -> dict:
+    return {
+        "key": key,
+        "label": label,
+        "state": state,
+        "state_label": state_label,
+        "summary": summary,
+        "verified_count": len(verified_ids),
+        "candidate_count": len(candidate_ids),
+        "updated_at": updated_at,
+        "signal_ids": sorted(verified_ids),
+    }
+
+
+async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> dict:
+    rows = await _active_signal_rows(session, product_id)
+    verified = [(s, e) for s, e, _, _ in rows if s.review_status == "verified"]
+    candidates = [(s, e) for s, e, _, _ in rows if s.review_status == "candidate"]
+
+    official = [(s, e) for s, e in verified if s.actor_type == "official" and s.signal_type in OFFICIAL_TYPES]
+    official_candidates = {s.id for s, _ in candidates if s.signal_type in OFFICIAL_TYPES}
+    if official:
+        latest_official, _ = max(official, key=lambda item: item[0].occurred_at or item[0].updated_at)
+        official_state = latest_official.signal_type
+        official_label = SIGNAL_LABELS[latest_official.signal_type]
+        official_summary = latest_official.summary
+        official_updated = latest_official.occurred_at or latest_official.updated_at
+    else:
+        latest_official = None
+        official_state = "no_verified_signal"
+        official_label = "暂无已核验官方履约"
+        official_summary = "未发现已核验的官方履约信息"
+        official_updated = None
+
+    receipt_by_source = {}
+    for signal, evidence in verified:
+        if (
+            signal.signal_type == "consumer_received"
+            and evidence.acquisition_type == "self_purchase"
+        ):
+            receipt_by_source.setdefault(evidence.independent_source_key, signal)
+    receipt_sources = set(receipt_by_source)
+    receipt_ids = {signal.id for signal in receipt_by_source.values()}
+    receipt_candidates = {s.id for s, _ in candidates if s.signal_type == "consumer_received"}
+    if len(receipt_sources) >= 3:
+        consumer_state = "multiple_receipts"
+        consumer_label = "多名独立用户到货"
+        consumer_summary = f"已核验 {len(receipt_sources)} 个独立自购账号的到货证据"
+    elif receipt_sources:
+        consumer_state = "first_receipt" if len(receipt_sources) == 1 else "growing_receipts"
+        consumer_label = "首位普通用户到货" if len(receipt_sources) == 1 else "已有消费者到货"
+        consumer_summary = f"已核验 {len(receipt_sources)} 个独立自购账号的到货证据"
+    else:
+        consumer_state = "no_verified_receipt"
+        consumer_label = "暂无已核验消费者到货"
+        consumer_summary = "候选内容需确认是否为自购订单及真实到货"
+    receipt_times = [
+        s.occurred_at or s.updated_at
+        for s, e in verified
+        if s.id in receipt_ids
+    ]
+
+    sample_sources = {
+        evidence.independent_source_key
+        for signal, evidence in verified
+        if signal.signal_type == "consumer_received" and evidence.acquisition_type == "seeded"
+    }
+
+    quality_by_source = {}
+    for signal, evidence in verified:
+        if signal.signal_type == "quality_issue":
+            quality_by_source.setdefault(evidence.independent_source_key, signal)
+    quality_sources = set(quality_by_source)
+    quality_ids = {signal.id for signal in quality_by_source.values()}
+    quality_candidates = {s.id for s, _ in candidates if s.signal_type == "quality_issue"}
+    if len(quality_sources) >= 2:
+        quality_state = "repeated_issue"
+        quality_label = "发现重复质量问题"
+        quality_summary = f"已核验 {len(quality_sources)} 个独立来源的质量反馈"
+    elif quality_sources:
+        quality_state = "isolated_issue"
+        quality_label = "发现单例质量反馈"
+        quality_summary = "当前只有一个已核验来源，暂不能推断为普遍问题"
+    else:
+        quality_state = "no_verified_issue"
+        quality_label = "暂无已核验质量风险"
+        quality_summary = "候选质量反馈尚未形成可公开结论"
+    quality_times = [
+        s.occurred_at or s.updated_at for s, _ in verified if s.id in quality_ids
+    ]
+
+    verified_times = [s.occurred_at or s.updated_at for s, _ in verified]
+    return {
+        "official": _axis(
+            "official",
+            "官方履约",
+            official_state,
+            official_label,
+            official_summary,
+            {s.id for s, _ in official},
+            official_candidates,
+            official_updated,
+        ),
+        "consumer": _axis(
+            "consumer",
+            "消费者样本",
+            consumer_state,
+            consumer_label,
+            consumer_summary,
+            receipt_ids,
+            receipt_candidates,
+            max(receipt_times, default=None),
+        ),
+        "quality": _axis(
+            "quality",
+            "质量风险",
+            quality_state,
+            quality_label,
+            quality_summary,
+            quality_ids,
+            quality_candidates,
+            max(quality_times, default=None),
+        ),
+        "sample_count": len(sample_sources),
+        "candidate_total": len({s.id for s, _ in candidates}),
+        "last_verified_at": max(verified_times, default=None),
+    }
+
+
+async def list_product_signals(
+    session: AsyncSession, product_id: int, *, include_rejected: bool = False
+) -> list[dict]:
+    rows = await _active_signal_rows(session, product_id)
+    last_notes: dict[int, str] = {}
+    signal_ids = [signal.id for signal, _, _, _ in rows]
+    if signal_ids:
+        revisions = await session.scalars(
+            select(ProductSignalRevision)
+            .where(ProductSignalRevision.signal_id.in_(signal_ids))
+            .order_by(ProductSignalRevision.signal_id, ProductSignalRevision.id.desc())
+        )
+        for revision in revisions:
+            last_notes.setdefault(revision.signal_id, revision.note)
+
+    result = []
+    seen: set[int] = set()
+    for signal, evidence, raw, source in rows:
+        if signal.id in seen or (signal.review_status == "rejected" and not include_rejected):
+            continue
+        seen.add(signal.id)
+        result.append(
+            {
+                "id": signal.id,
+                "product_id": signal.product_id,
+                "signal_type": signal.signal_type,
+                "signal_label": SIGNAL_LABELS.get(signal.signal_type, signal.signal_type),
+                "actor_type": signal.actor_type,
+                "review_status": signal.review_status,
+                "occurred_at": signal.occurred_at,
+                "summary": signal.summary,
+                "confidence": signal.confidence,
+                "source_method": signal.source_method,
+                "acquisition_type": evidence.acquisition_type,
+                "claim_quote": evidence.claim_quote,
+                "content_id": raw.id,
+                "content_title": signal.summary,
+                "platform": raw.platform,
+                "account": source.name if source else None,
+                "url": raw.url,
+                "review_note": last_notes.get(signal.id),
+                "updated_at": signal.updated_at,
+            }
+        )
+    return result
+
+
+async def review_product_signal(
+    session: AsyncSession,
+    product_id: int,
+    signal_id: int,
+    *,
+    review_status: str,
+    actor_type: str | None,
+    acquisition_type: str | None,
+    summary: str | None,
+    claim_quote: str | None,
+    note: str,
+) -> None:
+    if review_status not in REVIEW_STATUSES:
+        raise ValueError("invalid_review_status")
+    signal = await session.scalar(
+        select(ProductSignal).where(
+            ProductSignal.id == signal_id,
+            ProductSignal.product_id == product_id,
+            ProductSignal.active.is_(True),
+        )
+    )
+    if signal is None:
+        raise ValueError("signal_not_found")
+    evidence = await session.scalar(
+        select(ProductSignalEvidence).where(ProductSignalEvidence.signal_id == signal.id)
+    )
+    if evidence is None:
+        raise ValueError("signal_evidence_not_found")
+    if acquisition_type is not None and acquisition_type not in ACQUISITION_TYPES:
+        raise ValueError("invalid_acquisition_type")
+    if actor_type is not None and actor_type not in ACTOR_TYPES:
+        raise ValueError("invalid_actor_type")
+
+    next_actor = actor_type or signal.actor_type
+    next_acquisition = acquisition_type or evidence.acquisition_type
+    next_summary = (summary or signal.summary).strip()
+    next_quote = (claim_quote or evidence.claim_quote or "").strip()
+    if review_status == "verified":
+        if not next_summary or not next_quote:
+            raise ValueError("verified_signal_requires_summary_and_quote")
+        if signal.signal_type == "consumer_received" and next_acquisition == "unknown":
+            raise ValueError("receipt_requires_acquisition_type")
+        if (
+            signal.signal_type == "consumer_received"
+            and next_acquisition == "self_purchase"
+            and next_actor != "user"
+        ):
+            raise ValueError("self_purchase_receipt_requires_user_actor")
+        if signal.signal_type in OFFICIAL_TYPES and next_actor != "official":
+            raise ValueError("official_signal_requires_official_actor")
+
+    previous = signal.review_status
+    signal.review_status = review_status
+    signal.actor_type = next_actor
+    signal.summary = next_summary
+    signal.locked = review_status != "candidate"
+    signal.updated_at = utcnow()
+    evidence.acquisition_type = next_acquisition
+    evidence.claim_quote = next_quote or None
+    session.add(
+        ProductSignalRevision(
+            signal_id=signal.id,
+            actor="admin",
+            previous_status=previous,
+            next_status=review_status,
+            note=note.strip() or f"履约信号审核：{previous} → {review_status}",
+        )
+    )

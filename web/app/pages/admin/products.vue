@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import type { ApiProduct, ApiProductList } from '~/composables/usePublicApi'
-import { categoryMeta } from '~/utils/public-utils'
+import type { ApiProduct, ApiProductList, ApiProductSignal, ApiProductSignalList } from '~/composables/usePublicApi'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '商品管理 · AniSignal 管理看板' })
@@ -9,7 +8,6 @@ const { api } = useAdminApi()
 const products = ref<ApiProduct[]>([])
 const error = ref<string | null>(null)
 const busy = ref(false)
-const assessingId = ref<number | null>(null)
 const toast = useAdminToast()
 
 const form = reactive({
@@ -29,20 +27,25 @@ const form = reactive({
 const editing = ref<ApiProduct | null>(null)
 const termsTouched = ref(false)
 
-const reviewing = ref<ApiProduct | null>(null)
-const review = reactive({ stage: 1, reason: '', evidence_ids: [] as number[] })
-const reviewEvidences = computed(() =>
-  (reviewing.value?.evidences ?? []).filter((item) => ['unboxing', 'arrived'].includes(item.category ?? '')),
-)
+const signalProduct = ref<ApiProduct | null>(null)
+const signals = ref<ApiProductSignal[]>([])
+const signalsBusy = ref(false)
+const editingSignal = ref<ApiProductSignal | null>(null)
+const signalForm = reactive({
+  review_status: 'candidate',
+  actor_type: 'unknown',
+  acquisition_type: 'unknown',
+  summary: '',
+  claim_quote: '',
+  note: '',
+})
 
-const identityLabel: Record<string, string> = {
-  official: '官方',
-  seeded: '送测',
-  user: '普通用户',
-  unknown: '身份待核验',
-  media: '媒体',
-  merchant: '商家',
-}
+const signalStatusLabel = {
+  candidate: '待核验',
+  verified: '已核验',
+  rejected: '已驳回',
+  conflict: '证据冲突',
+} as const
 
 function suggestedTerms(name: string) {
   const full = name.replace(/\s+/g, '').trim()
@@ -62,8 +65,8 @@ async function refresh() {
   try {
     const data = await api<ApiProductList>('/api/admin/products')
     products.value = data.items
-    if (reviewing.value)
-      reviewing.value = data.items.find((item) => item.id === reviewing.value?.id) ?? null
+    if (signalProduct.value)
+      signalProduct.value = data.items.find((item) => item.id === signalProduct.value?.id) ?? null
   } catch (exc: any) {
     error.value = exc?.message ?? String(exc)
   }
@@ -157,66 +160,58 @@ async function remove(product: ApiProduct) {
   }
 }
 
-function startReview(product: ApiProduct) {
-  reviewing.value = product
-  review.stage = product.stage_hint >= 1 && product.stage_hint <= 3 ? product.stage_hint : 1
-  review.reason = product.stage_source === 'manual' ? product.stage_reason : ''
-  review.evidence_ids = product.stage_source === 'manual'
-    ? [...product.stage_evidence_ids]
-    : []
+async function openSignals(product: ApiProduct) {
+  signalProduct.value = product
+  editingSignal.value = null
+  signalsBusy.value = true
+  try {
+    const data = await api<ApiProductSignalList>(`/api/admin/products/${product.id}/signals`)
+    signals.value = [...data.items].sort((left, right) =>
+      Number(right.review_status === 'candidate') - Number(left.review_status === 'candidate'),
+    )
+  } catch (exc: any) {
+    error.value = `读取信号失败：${exc?.data?.detail ?? exc?.message}`
+    toast.err(error.value)
+  } finally {
+    signalsBusy.value = false
+  }
 }
 
-async function saveReview() {
-  if (!reviewing.value || !review.reason.trim() || !review.evidence_ids.length) return
-  busy.value = true
-  error.value = null
+function startSignalReview(signal: ApiProductSignal) {
+  editingSignal.value = signal
+  Object.assign(signalForm, {
+    review_status: signal.review_status,
+    actor_type: signal.actor_type,
+    acquisition_type: signal.acquisition_type,
+    summary: signal.summary,
+    claim_quote: signal.claim_quote ?? '',
+    note: signal.review_note ?? '',
+  })
+}
+
+async function saveSignal() {
+  if (!signalProduct.value || !editingSignal.value) return
+  signalsBusy.value = true
   try {
-    await api(`/api/admin/products/${reviewing.value.id}`, {
-      method: 'PUT',
+    await api(`/api/admin/products/${signalProduct.value.id}/signals/${editingSignal.value.id}`, {
+      method: 'PATCH',
       body: {
-        stage_hint: review.stage,
-        stage_hint_reason: review.reason.trim(),
-        stage_hint_evidence_ids: review.evidence_ids,
+        ...signalForm,
+        summary: signalForm.summary.trim(),
+        claim_quote: signalForm.claim_quote.trim() || null,
+        note: signalForm.note.trim(),
       },
     })
-    toast.ok('履约阶段审核已保存')
-    reviewing.value = null
+    toast.ok('履约信号审核已保存')
+    editingSignal.value = null
     await refresh()
+    if (signalProduct.value)
+      await openSignals(signalProduct.value)
   } catch (exc: any) {
     error.value = `审核失败：${exc?.data?.detail ?? exc?.message}`
     toast.err(error.value)
   } finally {
-    busy.value = false
-  }
-}
-
-async function restoreAutomatic() {
-  if (!reviewing.value) return
-  busy.value = true
-  try {
-    await api(`/api/admin/products/${reviewing.value.id}`, { method: 'PUT', body: { stage_hint: -1 } })
-    toast.ok('已恢复按已核验证据自动计算')
-    reviewing.value = null
-    await refresh()
-  } catch (exc: any) {
-    toast.err(`恢复失败：${exc?.data?.detail ?? exc?.message}`)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function assess(product: ApiProduct) {
-  assessingId.value = product.id
-  error.value = null
-  try {
-    const result = await api<ApiProduct>(`/api/admin/products/${product.id}/assess`, { method: 'POST' })
-    toast.ok(`AI 判断完成：${result.stage_label}`)
-    await refresh()
-  } catch (exc: any) {
-    error.value = `AI 判断失败：${exc?.data?.detail ?? exc?.message}`
-    toast.err(error.value)
-  } finally {
-    assessingId.value = null
+    signalsBusy.value = false
   }
 }
 </script>
@@ -226,7 +221,7 @@ async function assess(product: ApiProduct) {
     <div>
       <h1 class="text-lg font-semibold">商品管理</h1>
       <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
-        新增时只填商品名称即可；系统自动生成精确匹配词并创建采集，AI 仅根据已关联原文判断阶段。
+        新增时只填商品名称即可；系统自动生成精确匹配词并创建采集。规则或 AI 只生成候选信号，公开结论必须逐条核验。
       </p>
     </div>
 
@@ -278,43 +273,71 @@ async function assess(product: ApiProduct) {
       </div>
     </form>
 
-    <section v-if="reviewing" class="panel p-5">
+    <section v-if="signalProduct" class="panel p-5">
       <div class="flex items-start justify-between gap-3">
         <div>
-          <h2 class="text-sm font-semibold">审核履约阶段：{{ reviewing.name }}</h2>
-          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">只列出已关联的到货/开箱原文；阶段 4/5 缺少购买时间样本，暂不可确认。</p>
+          <h2 class="text-sm font-semibold">审核履约信号：{{ signalProduct.name }}</h2>
+          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">逐条确认主体、获取方式与原文摘录；只有“已核验”信号会影响公开三轴状态。</p>
         </div>
-        <button class="text-xs text-slate-400 hover:text-slate-600" @click="reviewing = null">关闭</button>
+        <button class="min-h-11 px-2 text-xs text-slate-400 hover:text-slate-600" @click="signalProduct = null; editingSignal = null">关闭</button>
       </div>
-      <div class="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <div>
-          <label class="text-xs text-slate-500">确认阶段</label>
-          <select v-model.number="review.stage" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white px-3 py-2 text-sm dark:border-white/15 dark:bg-zinc-900">
-            <option :value="1">出现送测样品</option>
-            <option :value="2">首位普通用户到货</option>
-            <option :value="3">多名独立用户到货</option>
-          </select>
-          <label class="mt-3 block text-xs text-slate-500">审核理由</label>
-          <textarea v-model="review.reason" rows="4" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" placeholder="说明如何判断账号身份、商品对应关系与到货事实"></textarea>
+      <p v-if="signalsBusy && !signals.length" class="py-8 text-center text-sm text-slate-400">读取中…</p>
+      <div v-else-if="signals.length" class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div class="max-h-[34rem] space-y-2 overflow-y-auto pr-1">
+          <button
+            v-for="signal in signals"
+            :key="signal.id"
+            type="button"
+            class="min-h-11 w-full rounded-lg border p-3 text-left transition-colors hover:bg-slate-500/5 dark:border-white/10"
+            :class="editingSignal?.id === signal.id ? 'border-blue-500/40 bg-blue-500/5' : 'border-slate-900/10'"
+            @click="startSignalReview(signal)"
+          >
+            <span class="flex flex-wrap items-center gap-2">
+              <span class="chip bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ signal.signal_label }}</span>
+              <span class="chip" :class="signal.review_status === 'verified' ? 'bg-emerald-500/10 text-emerald-700' : signal.review_status === 'candidate' ? 'bg-amber-500/10 text-amber-700' : 'bg-slate-500/10 text-slate-500'">{{ signalStatusLabel[signal.review_status] }}</span>
+            </span>
+            <span class="mt-2 block text-sm text-slate-700 dark:text-zinc-200">{{ signal.summary }}</span>
+            <span class="mt-1 block text-xs text-slate-400">{{ signal.account || signal.platform }} · 原文 #{{ signal.content_id }}</span>
+          </button>
         </div>
-        <div>
-          <p class="text-xs text-slate-500">选择原始证据（{{ review.evidence_ids.length }}）</p>
-          <div v-if="reviewEvidences.length" class="mt-1.5 max-h-64 space-y-2 overflow-y-auto">
-            <label v-for="item in reviewEvidences" :key="item.content_id" class="flex cursor-pointer gap-2 rounded-lg border border-slate-900/10 p-2.5 hover:bg-slate-500/5 dark:border-white/10">
-              <input v-model="review.evidence_ids" type="checkbox" :value="item.content_id" class="mt-0.5 accent-blue-600">
-              <span class="min-w-0">
-                <span class="block truncate text-sm text-slate-700 dark:text-zinc-200">{{ item.title || `内容 #${item.content_id}` }}</span>
-                <span class="mt-0.5 block text-xs text-slate-400">{{ item.account || item.platform }} · {{ identityLabel[item.identity] || item.identity }} · {{ categoryMeta[item.category || '']?.label || item.category }}</span>
-              </span>
+
+        <form v-if="editingSignal" class="rounded-lg border border-slate-900/10 p-4 dark:border-white/10" @submit.prevent="saveSignal">
+          <p class="text-sm font-medium">审核 #{{ editingSignal.id }}</p>
+          <div class="mt-3 grid gap-3">
+            <label class="text-xs text-slate-500">审核状态
+              <select v-model="signalForm.review_status" class="mt-1 min-h-11 w-full rounded-md border border-slate-900/10 bg-white px-3 text-sm dark:border-white/15 dark:bg-zinc-900">
+                <option value="candidate">待核验</option><option value="verified">已核验</option><option value="rejected">驳回</option><option value="conflict">证据冲突</option>
+              </select>
+            </label>
+            <div class="grid grid-cols-2 gap-3">
+              <label class="text-xs text-slate-500">主体
+                <select v-model="signalForm.actor_type" class="mt-1 min-h-11 w-full rounded-md border border-slate-900/10 bg-white px-2 text-sm dark:border-white/15 dark:bg-zinc-900">
+                  <option value="unknown">待确认</option><option value="official">官方</option><option value="user">普通用户</option><option value="seeded">送测账号</option><option value="media">媒体</option><option value="merchant">商家</option>
+                </select>
+              </label>
+              <label class="text-xs text-slate-500">获取方式
+                <select v-model="signalForm.acquisition_type" class="mt-1 min-h-11 w-full rounded-md border border-slate-900/10 bg-white px-2 text-sm dark:border-white/15 dark:bg-zinc-900">
+                  <option value="unknown">待确认</option><option value="self_purchase">自购</option><option value="seeded">送测</option>
+                </select>
+              </label>
+            </div>
+            <label class="text-xs text-slate-500">事实摘要
+              <textarea v-model="signalForm.summary" rows="2" required class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"></textarea>
+            </label>
+            <label class="text-xs text-slate-500">原文摘录
+              <textarea v-model="signalForm.claim_quote" rows="3" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"></textarea>
+            </label>
+            <label class="text-xs text-slate-500">审核备注
+              <textarea v-model="signalForm.note" rows="2" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"></textarea>
             </label>
           </div>
-          <p v-else class="mt-1.5 rounded-lg border border-dashed border-slate-900/15 p-4 text-sm text-slate-400 dark:border-white/15">暂无关联的到货/开箱证据，不能人工确认阶段。</p>
-        </div>
+          <div class="mt-4 flex items-center gap-3">
+            <button type="submit" class="btn-primary min-h-11 px-4" :disabled="signalsBusy || !signalForm.summary.trim() || (signalForm.review_status === 'verified' && !signalForm.claim_quote.trim())">{{ signalsBusy ? '保存中…' : '保存审核' }}</button>
+            <NuxtLink :to="`/contents/${editingSignal.content_id}`" target="_blank" class="link min-h-11 inline-flex items-center text-xs">查看原文</NuxtLink>
+          </div>
+        </form>
       </div>
-      <div class="mt-4 flex flex-wrap gap-2">
-        <button class="btn-primary px-4 py-2" :disabled="busy || !review.reason.trim() || !review.evidence_ids.length" @click="saveReview">保存审核结论</button>
-        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm text-slate-500 hover:bg-slate-500/5 dark:border-white/15 dark:text-zinc-400" :disabled="busy" @click="restoreAutomatic">恢复自动计算</button>
-      </div>
+      <p v-else class="mt-4 rounded-lg border border-dashed border-slate-900/15 p-6 text-center text-sm text-slate-400 dark:border-white/15">暂无履约信号。先采集并聚合该商品的官方、到货或质量内容。</p>
     </section>
 
     <div class="panel overflow-x-auto">
@@ -323,9 +346,9 @@ async function assess(product: ApiProduct) {
           <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
             <th class="px-4 py-2.5 font-medium">商品</th>
             <th class="px-3 py-2.5 font-medium">监控词</th>
-            <th class="px-3 py-2.5 font-medium">官方进度</th>
+            <th class="px-3 py-2.5 font-medium">官方履约</th>
             <th class="px-3 py-2.5 font-medium">消费者样本</th>
-            <th class="px-3 py-2.5 font-medium">履约阶段</th>
+            <th class="px-3 py-2.5 font-medium">质量风险</th>
             <th class="px-4 py-2.5 text-right font-medium">操作</th>
           </tr>
         </thead>
@@ -336,17 +359,13 @@ async function assess(product: ApiProduct) {
               <span class="mono ml-2 text-xs text-slate-400">{{ p.slug }}</span>
             </td>
             <td class="max-w-48 truncate px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.watch_terms.join(' / ') || '—' }}</td>
-            <td class="max-w-48 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.official_status }}</td>
-            <td class="max-w-52 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.consumer_status }}</td>
-            <td class="px-3 py-3">
-              <span class="chip bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ p.stage_label }}</span>
-              <span class="mt-1 block text-[11px] text-slate-400">{{ p.stage_source === 'manual' ? '人工审核' : p.stage_source === 'ai' ? 'AI 证据判断' : p.stage_source === 'automatic' ? '自动计算' : '未形成结论' }}</span>
-            </td>
+            <td class="max-w-48 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.fulfillment.official.state_label }}</td>
+            <td class="max-w-52 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.fulfillment.consumer.state_label }}</td>
+            <td class="max-w-48 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.fulfillment.quality.state_label }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right">
-              <button class="rounded px-2 py-1 text-xs text-emerald-700 hover:underline disabled:opacity-50 dark:text-emerald-300" :disabled="assessingId !== null" @click="assess(p)">{{ assessingId === p.id ? '判断中…' : 'AI 判断' }}</button>
-              <button class="rounded px-2 py-1 text-xs text-emerald-700 hover:underline dark:text-emerald-300" @click="startReview(p)">人工复核</button>
-              <button class="rounded px-2 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="startEdit(p)">编辑</button>
-              <button class="rounded px-2 py-1 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busy" @click="remove(p)">删除</button>
+              <button class="min-h-11 rounded px-2 text-xs text-emerald-700 hover:underline dark:text-emerald-300" @click="openSignals(p)">审核信号<span v-if="p.fulfillment.candidate_total">（{{ p.fulfillment.candidate_total }}）</span></button>
+              <button class="min-h-11 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="startEdit(p)">编辑</button>
+              <button class="min-h-11 rounded px-2 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busy" @click="remove(p)">删除</button>
             </td>
           </tr>
           <tr v-if="!products.length">

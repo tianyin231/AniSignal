@@ -328,6 +328,63 @@ class ProductEvidenceOut(BaseModel):
     url: str | None = None
 
 
+class FulfillmentAxisOut(BaseModel):
+    key: str
+    label: str
+    state: str
+    state_label: str
+    summary: str
+    verified_count: int = 0
+    candidate_count: int = 0
+    updated_at: datetime | None = None
+    signal_ids: list[int] = Field(default_factory=list)
+
+
+class FulfillmentSnapshotOut(BaseModel):
+    official: FulfillmentAxisOut
+    consumer: FulfillmentAxisOut
+    quality: FulfillmentAxisOut
+    sample_count: int = 0
+    candidate_total: int = 0
+    last_verified_at: datetime | None = None
+
+
+class ProductSignalOut(BaseModel):
+    id: int
+    product_id: int
+    signal_type: str
+    signal_label: str
+    actor_type: str
+    review_status: str
+    occurred_at: datetime | None = None
+    summary: str
+    confidence: float
+    source_method: str
+    acquisition_type: str
+    claim_quote: str | None = None
+    content_id: int
+    content_title: str | None = None
+    platform: str
+    account: str | None = None
+    url: str | None = None
+    review_note: str | None = None
+    updated_at: datetime | None = None
+
+
+class ProductSignalListOut(BaseModel):
+    items: list[ProductSignalOut]
+    total: int
+
+
+class ProductSignalUpdate(BaseModel):
+    review_status: str
+    actor_type: str | None = None
+    acquisition_type: str | None = None
+    summary: str | None = None
+    claim_quote: str | None = None
+    note: str = Field(default="", max_length=1000)
+
+
 class ProductOut(BaseModel):
     id: int
     slug: str
@@ -343,7 +400,7 @@ class ProductOut(BaseModel):
     stage_hint: int = -1
     current_stage: int
     stage_label: str
-    stage_source: str  # unverified / automatic / ai / manual
+    stage_source: str  # signals（旧值仅兼容历史客户端）
     stage_reason: str
     stage_updated_at: datetime | None = None
     stage_evidence_ids: list[int] = []
@@ -353,6 +410,7 @@ class ProductOut(BaseModel):
     consumer_evidence_count: int = 0
     evidences: list[ProductEvidenceOut] = []
     stages: list[ProductStageOut]
+    fulfillment: FulfillmentSnapshotOut
     updated_at: datetime | None
 
 

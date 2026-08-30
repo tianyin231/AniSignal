@@ -160,6 +160,54 @@ export interface ApiProductStage {
   note: string | null
 }
 
+export interface FulfillmentAxis {
+  key: 'official' | 'consumer' | 'quality'
+  label: string
+  state: string
+  state_label: string
+  summary: string
+  verified_count: number
+  candidate_count: number
+  updated_at: string | null
+  signal_ids: number[]
+}
+
+export interface FulfillmentSnapshot {
+  official: FulfillmentAxis
+  consumer: FulfillmentAxis
+  quality: FulfillmentAxis
+  sample_count: number
+  candidate_total: number
+  last_verified_at: string | null
+}
+
+export interface ApiProductSignal {
+  id: number
+  product_id: number
+  signal_type: string
+  signal_label: string
+  actor_type: string
+  review_status: 'candidate' | 'verified' | 'rejected' | 'conflict'
+  occurred_at: string | null
+  summary: string
+  confidence: number
+  source_method: string
+  acquisition_type: 'unknown' | 'self_purchase' | 'seeded'
+  claim_quote: string | null
+  content_id: number
+  content_title: string | null
+  platform: string
+  account: string | null
+  url: string | null
+  review_note: string | null
+  updated_at: string | null
+}
+
+export interface ApiProductSignalList {
+  items: ApiProductSignal[]
+  total: number
+}
+
 export interface ApiProduct {
   id: number
   slug: string
@@ -175,7 +223,7 @@ export interface ApiProduct {
   stage_hint: number
   current_stage: number
   stage_label: string
-  stage_source: 'unverified' | 'automatic' | 'ai' | 'manual'
+  stage_source: 'signals' | 'unverified' | 'automatic' | 'ai' | 'manual'
   stage_reason: string
   stage_updated_at: string | null
   stage_evidence_ids: number[]
@@ -185,6 +233,7 @@ export interface ApiProduct {
   consumer_evidence_count: number
   evidences: ApiProductEvidence[]
   stages: ApiProductStage[]
+  fulfillment: FulfillmentSnapshot
   updated_at: string | null
 }
 
