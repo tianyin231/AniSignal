@@ -376,3 +376,53 @@ async def test_ai_review_image_gateway_failure_retries_text_only(client, session
     assert len(seen_users) == 2  # 带图失败 → 纯文本重试
     assert isinstance(seen_users[0], list)
     assert isinstance(seen_users[1], str)
+
+
+async def test_ai_review_stores_fulfillment_prejudgment(session, monkeypatch):
+    """命中商品匹配词的内容会带 product_context，AI 履约预判落库。"""
+    from app.models import Product
+
+    session.add(
+        Product(
+            slug="aymiss-keyboard",
+            name="爱弥斯联名机械键盘",
+            watch_terms=["爱弥斯", "联名键盘"],
+        )
+    )
+    await session.commit()
+    await set_setting(
+        session,
+        "ai",
+        {"base_url": "https://api.example.com/v1", "model": "review-model", "api_key": "x"},
+    )
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [dict(VIDEO_RAW, bvid="BVfulfil", title="爱弥斯键盘到货开箱，订单截图展示")],
+    )
+    raw = await session.scalar(select(RawContent))
+    seen_payloads = []
+
+    async def fake_cover(url):
+        return None
+
+    async def fake_chat(config, system, user, *, json_mode=False):
+        import json as _json
+
+        payload = _json.loads(user if isinstance(user, str) else user[0]["text"])
+        seen_payloads.append(payload)
+        assert payload["product_context"]["name"] == "爱弥斯联名机械键盘"
+        assert "爱弥斯" in payload["product_context"]["matched_terms"]
+        return (
+            '{"review":{"relevant":true,"promotional":false,"violation":false,'
+            '"quality_score":78,"category_hint":"arrived","reason":"自购到货开箱",'
+            '"fulfillment":{"kind":"self_purchase","confidence":85,"reason":"含订单截图与开箱实拍"}}}'
+        ), None
+
+    monkeypatch.setattr(curation, "_cover_data_url", fake_cover)
+    monkeypatch.setattr(curation, "chat", fake_chat)
+    stats = await curation.review_contents(session, [raw.id])
+    assert stats.reviewed == 1
+    review = await session.get(ContentReview, raw.id)
+    assert review.fulfillment["kind"] == "self_purchase"
+    assert review.fulfillment["confidence"] == 85

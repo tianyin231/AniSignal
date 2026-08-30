@@ -369,6 +369,7 @@ class ProductSignalOut(BaseModel):
     url: str | None = None
     review_note: str | None = None
     updated_at: datetime | None = None
+    ai_hint: dict | None = None
 
 
 class ProductSignalListOut(BaseModel):
@@ -410,6 +411,7 @@ class ProductOut(BaseModel):
     consumer_evidence_count: int = 0
     evidences: list[ProductEvidenceOut] = []
     stages: list[ProductStageOut]
+    latest_candidate: dict | None = None
     fulfillment: FulfillmentSnapshotOut
     updated_at: datetime | None
 

@@ -196,6 +196,20 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
                 )
             )
 
+    latest_candidate_signal = next(
+        (s for s in signals if s["review_status"] == "candidate"), None
+    )
+    latest_candidate = (
+        {
+            "summary": latest_candidate_signal["summary"],
+            "signal_label": latest_candidate_signal["signal_label"],
+            "occurred_at": latest_candidate_signal["occurred_at"],
+            "content_id": latest_candidate_signal["content_id"],
+        }
+        if latest_candidate_signal
+        else None
+    )
+
     consumer = fulfillment["consumer"]
     verified_count = consumer["verified_count"]
     effective = 3 if verified_count >= 3 else 2 if verified_count else 1 if fulfillment["sample_count"] else 0
@@ -250,5 +264,6 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         evidences=evidence_items,
         stages=stages,
         fulfillment=fulfillment,
+        latest_candidate=latest_candidate,
         updated_at=product.updated_at,
     )

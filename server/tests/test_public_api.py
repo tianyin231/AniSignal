@@ -394,3 +394,43 @@ async def test_official_links_prefers_ai_labels(client, session, admin_headers):
     assert by_url["https://aki-gm-resources.aki-game.net/h5/contest"]["label"] == "H5 签到活动"
     # AI 决定只收 H5 链接，奖励链接不应经规则回退混入
     assert "https://aki-gm-resources.aki-game.net/reward" not in by_url
+
+
+async def test_product_list_includes_latest_candidate(client, session):
+    """商品列表带最新候选信号摘要（未核验），与三轴"暂无"并存。"""
+    from app.models import Product, ProductSignal, ProductSignalEvidence
+    from app.services.ingest import ingest_items
+    from tests.test_parsers_bilibili import VIDEO_RAW
+
+    product = Product(slug="latest-cand", name="最新候选测试键盘", watch_terms=["最新候选"])
+    session.add(product)
+    await session.flush()
+    await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, bvid="BVcand", title="最新候选测试键盘到货")])
+    raw = await session.scalar(select(RawContent).where(RawContent.external_id == "BVcand"))
+    signal = ProductSignal(
+        product_id=product.id,
+        signal_type="consumer_received",
+        actor_type="user",
+        review_status="candidate",
+        summary="最新候选测试键盘到货",
+        details={},
+        source_method="rule",
+        active=True,
+    )
+    session.add(signal)
+    await session.flush()
+    session.add(
+        ProductSignalEvidence(
+            signal_id=signal.id,
+            raw_content_id=raw.id,
+            claim_quote="到货",
+            acquisition_type="unknown",
+            independent_source_key="user-1",
+        )
+    )
+    await session.commit()
+
+    resp = await client.get("/api/products")
+    item = next(i for i in resp.json()["items"] if i["slug"] == "latest-cand")
+    assert item["latest_candidate"]["summary"] == "最新候选测试键盘到货"
+    assert item["latest_candidate"]["content_id"] == raw.id

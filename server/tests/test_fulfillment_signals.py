@@ -122,3 +122,59 @@ async def test_snapshot_deduplicates_sources_and_separates_seeded_samples(sessio
     snapshot = await build_fulfillment_snapshot(session, product.id)
     assert snapshot["consumer"]["verified_count"] == 0
     assert snapshot["consumer"]["state"] == "no_verified_receipt"
+
+
+async def test_quality_candidate_attention_needs_two_independent_sources(session):
+    """未核验质量候选达到 2 个独立来源 → 进入候选关注态；单来源不触发。"""
+    from app.models import ContentReview
+
+    product = Product(slug="quality-attention", name="质量关注测试", watch_terms=["质量关注"])
+    session.add(product)
+    await session.flush()
+    source = Source(platform="bilibili", external_id="src-q", name="src-q", identity="user", raw_json={})
+    session.add(source)
+    await session.flush()
+
+    raw1 = await _raw(session, "qraw-1", source)
+    await _signal(session, product.id, raw1, "quality_issue", "account-1", review_status="candidate")
+
+    snapshot = await build_fulfillment_snapshot(session, product.id)
+    assert snapshot["quality"]["state"] == "no_verified_issue"  # 单来源不触发
+
+    raw2 = await _raw(session, "qraw-2", source)
+    await _signal(session, product.id, raw2, "quality_issue", "account-2", review_status="candidate")
+    snapshot = await build_fulfillment_snapshot(session, product.id)
+    assert snapshot["quality"]["state"] == "candidate_attention"
+    assert "尚未核验" in snapshot["quality"]["summary"]
+
+
+async def test_signal_list_carries_ai_fulfillment_hint(session):
+    """信号列表带对应内容的 AI 履约预判，供管理端排序与公开侧标注。"""
+    from app.models import ContentReview
+
+    product = Product(slug="ai-hint", name="AI 提示测试", watch_terms=["AI 提示"])
+    session.add(product)
+    await session.flush()
+    source = Source(platform="bilibili", external_id="src-h", name="src-h", identity="user", raw_json={})
+    session.add(source)
+    await session.flush()
+    raw = await _raw(session, "hraw-1", source)
+    await _signal(session, product.id, raw, "consumer_received", "account-h", review_status="candidate")
+    session.add(
+        ContentReview(
+            raw_content_id=raw.id,
+            relevant=True,
+            promotional=False,
+            violation=False,
+            quality_score=80,
+            model="test",
+            fulfillment={"kind": "self_purchase", "confidence": 90, "reason": "含订单截图"},
+        )
+    )
+    await session.commit()
+
+    from app.services.fulfillment import list_product_signals
+
+    signals = await list_product_signals(session, product.id)
+    assert signals[0]["ai_hint"]["kind"] == "self_purchase"
+    assert signals[0]["ai_hint"]["confidence"] == 90

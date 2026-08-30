@@ -8,6 +8,20 @@ const { data } = await useAsyncData('status-product', () =>
   api<ApiProductList>('/api/products'),
 )
 const product = computed(() => data.value?.items?.[0])
+
+const candidates = ref<{ id: number; summary: string; occurred_at: string | null }[]>([])
+watch(product, async (p) => {
+  if (!p?.slug) return
+  try {
+    const data = await api<{ items: { id: number; summary: string; review_status: string; occurred_at: string | null }[] }>(
+      `/api/products/${p.slug}/signals`,
+    )
+    candidates.value = data.items
+      .filter((s) => s.review_status === 'candidate')
+      .slice(0, 2)
+      .map((s) => ({ id: s.id, summary: s.summary, occurred_at: s.occurred_at }))
+  } catch { /* 候选预览失败不影响主卡 */ }
+})
 </script>
 
 <template>
@@ -39,6 +53,15 @@ const product = computed(() => data.value?.items?.[0])
         <p class="mt-1 text-xs font-medium text-slate-700 dark:text-zinc-200">{{ product.fulfillment.quality.state_label }}</p>
         <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">{{ product.fulfillment.quality.summary }}</p>
       </div>
+    </div>
+    <div v-if="candidates.length" class="mt-2.5 border-t border-slate-100 pt-2.5 dark:border-zinc-800">
+      <p class="text-xs font-medium text-slate-500 dark:text-zinc-400">最新候选信号（未核验）</p>
+      <ul class="mt-1.5 space-y-1">
+        <li v-for="c in candidates" :key="c.id" class="truncate text-xs text-slate-500 dark:text-zinc-400">
+          <span class="chip bg-amber-500/10 text-amber-700 dark:text-amber-300">未核验</span>
+          {{ c.summary }}
+        </li>
+      </ul>
     </div>
     <div class="mt-2 border-t border-slate-100 pt-2.5 dark:border-zinc-800">
       <div class="flex flex-wrap items-center gap-1.5">

@@ -5,6 +5,13 @@ definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '商品管理 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
+
+const fulfillmentKindLabels: Record<string, string> = {
+  self_purchase: '自购开箱',
+  pr_sample: '送测样品',
+  forward: '转发剪辑',
+  none: '普通资讯',
+}
 const products = ref<ApiProduct[]>([])
 const error = ref<string | null>(null)
 const busy = ref(false)
@@ -166,9 +173,15 @@ async function openSignals(product: ApiProduct) {
   signalsBusy.value = true
   try {
     const data = await api<ApiProductSignalList>(`/api/admin/products/${product.id}/signals`)
-    signals.value = [...data.items].sort((left, right) =>
-      Number(right.review_status === 'candidate') - Number(left.review_status === 'candidate'),
-    )
+    signals.value = [...data.items].sort((left, right) => {
+      const candidateDiff =
+        Number(right.review_status === 'candidate') - Number(left.review_status === 'candidate')
+      if (candidateDiff) return candidateDiff
+      // AI 判自购开箱的候选最可能核验通过，置顶减少人工翻找
+      const kindWeight = (s: ApiProductSignal) =>
+        s.ai_hint?.kind === 'self_purchase' ? 1 : s.ai_hint?.kind === 'pr_sample' ? 0.5 : 0
+      return kindWeight(right) - kindWeight(left)
+    })
   } catch (exc: any) {
     error.value = `读取信号失败：${exc?.data?.detail ?? exc?.message}`
     toast.err(error.value)
@@ -295,6 +308,11 @@ async function saveSignal() {
             <span class="flex flex-wrap items-center gap-2">
               <span class="chip bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ signal.signal_label }}</span>
               <span class="chip" :class="signal.review_status === 'verified' ? 'bg-emerald-500/10 text-emerald-700' : signal.review_status === 'candidate' ? 'bg-amber-500/10 text-amber-700' : 'bg-slate-500/10 text-slate-500'">{{ signalStatusLabel[signal.review_status] }}</span>
+              <span
+                v-if="signal.review_status === 'candidate' && signal.ai_hint && signal.ai_hint.kind !== 'none'"
+                class="chip bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                :title="signal.ai_hint.reason"
+              >AI：{{ fulfillmentKindLabels[signal.ai_hint.kind] ?? signal.ai_hint.kind }} {{ signal.ai_hint.confidence }}%</span>
             </span>
             <span class="mt-2 block text-sm text-slate-700 dark:text-zinc-200">{{ signal.summary }}</span>
             <span class="mt-1 block text-xs text-slate-400">{{ signal.account || signal.platform }} · 原文 #{{ signal.content_id }}</span>
