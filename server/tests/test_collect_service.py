@@ -200,3 +200,43 @@ async def test_create_target_with_tier_roundtrip(client, admin_headers):
     assert resp.json()["tier"] == "core"
     resp = await client.get("/api/admin/collect-targets", headers=admin_headers)
     assert any(t["tier"] == "core" for t in resp.json())
+
+
+async def test_backfill_empty_draw_dynamics(session):
+    """空 DRAW 动态重试匿名详情补全：成功后以新版本入库且作者信息保留。"""
+    from sqlalchemy import select
+
+    from app.collectors.bilibili import BilibiliCollector
+    from app.models import ContentVersion, RawContent
+    from app.services.collect import _backfill_empty_draw_dynamics
+    from app.services.ingest import ingest_items
+    from tests.test_parsers_bilibili import DYNAMIC_RAW
+
+    await ingest_items(
+        session,
+        "bilibili_dynamics",
+        [dict(DYNAMIC_RAW, id="1241836553225896086", text="", pics=[])],
+    )
+    raw = await session.scalar(
+        select(RawContent).where(RawContent.external_id == "1241836553225896086")
+    )
+    assert raw is not None
+    author_mid_before = raw.raw_json.get("author_mid")
+
+    class StubCollector:
+        async def _fetch_draw_detail(self, dynamic_id):
+            return {"text": "补全的动态正文，含现场图", "pics": ["https://example.com/p1.jpg"]}
+
+    backfilled = await _backfill_empty_draw_dynamics(session, StubCollector(), limit=5)
+    assert backfilled == 1
+
+    versions = await session.scalars(
+        select(ContentVersion)
+        .where(ContentVersion.raw_content_id == raw.id)
+        .order_by(ContentVersion.version)
+    )
+    versions = list(versions)
+    assert len(versions) == 2  # 空版本 + 补全新版本
+    assert "补全的动态正文" in versions[-1].text
+    # 作者信息从 raw_json 保留，不会变成 unknown
+    assert versions[-1].normalized_json["author"]["external_id"] == str(author_mid_before)
