@@ -12,9 +12,6 @@ const shown = computed(() =>
     .slice(0, 6)
     .map((s) => ({ ...s, ok: s.consecutive_failures === 0 })),
 )
-const failCount = computed(
-  () => (data.value?.items ?? []).filter((s) => s.enabled && s.consecutive_failures > 0).length,
-)
 </script>
 
 <template>
@@ -32,8 +29,5 @@ const failCount = computed(
         <span class="mono shrink-0 text-slate-400">{{ fmtTime(s.last_success_at) }}</span>
       </li>
     </ul>
-    <p v-if="failCount" class="mt-2.5 text-xs leading-relaxed text-amber-600 dark:text-amber-400">
-      {{ failCount }} 个来源不可用，其范围内「未发现」不代表无消息。
-    </p>
   </section>
 </template>
