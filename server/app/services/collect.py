@@ -49,6 +49,19 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
     """
     if target.target_type == "notices":
         return items, 0
+    if getattr(target, "tier", "general") == "core":
+        # 核心关键词目标（商品/联名等特定内容）：全量入库，强及时性
+        kept = []
+        co_terms = [t for t in (target.co_terms or []) if t]
+        for item in items:
+            keywords = [target.target_value] if target.target_type == "keyword_search" else [
+                target.display_name or target.target_value
+            ]
+            haystack = str(item.get("title") or "").casefold()
+            hit_terms = [t for t in co_terms if t.casefold() in haystack]
+            item["_matched_keywords"] = sorted({*keywords, *hit_terms})
+            kept.append(item)
+        return kept, 0
     co_terms = [t for t in (target.co_terms or []) if t]
     min_views = target.min_views or 0
     kept: list[dict] = []

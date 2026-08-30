@@ -20,6 +20,7 @@ class CollectTargetCreate(BaseModel):
     enabled: bool = True
     co_terms: list[str] = Field(default_factory=list)
     min_views: int = Field(default=0, ge=0, le=10_000_000)
+    tier: str = Field(default="general", pattern="^(core|general)$")
 
 
 class CollectTargetUpdate(BaseModel):
@@ -29,6 +30,7 @@ class CollectTargetUpdate(BaseModel):
     target_value: str | None = Field(default=None, min_length=1, max_length=255)
     co_terms: list[str] | None = None
     min_views: int | None = Field(default=None, ge=0, le=10_000_000)
+    tier: str | None = Field(default=None, pattern="^(core|general)$")
 
 
 class CollectTargetOut(BaseModel):
@@ -41,6 +43,7 @@ class CollectTargetOut(BaseModel):
     enabled: bool
     co_terms: list[str] = []
     min_views: int = 0
+    tier: str = "general"
     next_run_at: datetime | None
 
     @field_validator("co_terms", mode="before")

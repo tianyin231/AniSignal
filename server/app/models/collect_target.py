@@ -25,6 +25,8 @@ class CollectTarget(Base):
     # 相关性过滤：共现词（标题需至少含一个，空 = 不过滤）与热度门槛（0 = 不过滤）
     co_terms: Mapped[list] = mapped_column(JSON, default=list)
     min_views: Mapped[int] = mapped_column(Integer, default=0)
+    # 采集分级：core = 特定关键词（商品/联名等，全量入库强及时）；general = 泛关键词（走热度门槛）
+    tier: Mapped[str] = mapped_column(String(16), default="general")
 
     # 调度字段（naive UTC）
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime)
