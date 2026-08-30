@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
+from app.api.public import invalidate_official_links_cache
 from app.config import get_settings
 from app.db import get_session
 from app.models import (
@@ -314,6 +315,7 @@ async def set_content_visibility(
     raw = await _get_content_or_404(session, content_id)
     raw.hidden = bool(body.get("hidden"))
     await session.commit()
+    invalidate_official_links_cache()
     return {"id": raw.id, "hidden": raw.hidden}
 
 
@@ -327,6 +329,7 @@ async def delete_content(
     raw = await _get_content_or_404(session, content_id)
     await session.delete(raw)
     await session.commit()
+    invalidate_official_links_cache()
 
 
 @router.get("/contents/{content_id}/detail")
@@ -384,6 +387,7 @@ async def edit_content(
     )
     session.add(new_version)
     await session.commit()
+    invalidate_official_links_cache()
     return {"id": content_id, "version": new_version.version}
 
 

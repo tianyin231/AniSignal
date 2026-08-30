@@ -221,6 +221,7 @@ useSeoMeta({ title: '近期情报' })
         </button>
       </template>
     </TabNav>
+    <OfficialLinks variant="strip" />
     <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
 
     <!-- 首页权重：官方与社区精选 > 聚合结论 > 社区线索。 -->
