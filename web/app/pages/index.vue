@@ -14,7 +14,7 @@ const officialPlatformTabs = [
   { key: 'all', label: '全部' },
   { key: 'bilibili', label: 'B站' },
   { key: 'youtube', label: 'YouTube' },
-  { key: 'kuro', label: '官网' },
+  { key: 'kuro', label: '库街区' },
 ]
 const validOfficialPlatforms = new Set(officialPlatformTabs.map((item) => item.key))
 const route = useRoute()

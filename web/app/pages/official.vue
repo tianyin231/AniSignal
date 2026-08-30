@@ -9,7 +9,7 @@ const tabs = [
   { key: 'global', label: '国际服' },
   { key: 'bilibili', label: 'B站' },
   { key: 'miyoushe', label: '米游社' },
-  { key: 'kuro', label: '官网' },
+  { key: 'kuro', label: '库街区' },
   { key: 'youtube', label: 'YouTube' },
 ]
 const route = useRoute()
