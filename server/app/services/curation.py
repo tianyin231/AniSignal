@@ -550,7 +550,16 @@ def _parse_review(response: str, content_id: int) -> dict | None:
     parsed_fulfillment = None
     fulfillment = item.get("fulfillment")
     if isinstance(fulfillment, dict):
-        kind = fulfillment.get("kind")
+        # 模型常用类目词（unboxing/arrived 等）描述履约类型，映射回标准 kind
+        kind_alias = {
+            "unboxing": "self_purchase", "arrived": "self_purchase",
+            "received": "self_purchase", "order": "self_purchase", "self": "self_purchase",
+            "sample": "pr_sample", "seeded": "pr_sample",
+            "repost": "forward", "video": "forward",
+            "normal": "none", "other": "none", "unknown": "none",
+        }
+        kind = str(fulfillment.get("kind") or "").strip().lower()
+        kind = kind_alias.get(kind, kind)
         if kind in {"self_purchase", "pr_sample", "forward", "none"}:
             parsed_fulfillment = {
                 "kind": kind,
@@ -606,8 +615,8 @@ _REVIEW_SYSTEM_PROMPT = """你是《鸣潮》主题情报站的编辑兼内容�
 - quality_score 为 0 到 100 的编辑价值：官方版本、角色、活动、维护和实质公告优先；社区内容重视明确主题、信息量和独立表达，播放量只代表热度。
 - category_hint 只能是 official_announce/version_update/presale/balance/delay/shipping/arrived/unboxing/review/quality/promotion/chat/other 或 null。
 - links：从正文中提取的站外链接数组，只收有实际内容的页面（网页活动、H5 小游戏、奖励领取、新闻详情等），忽略社媒主页、下载页、官网首页和视频页；每项 {"url":"原文中的完整链接","label":"不超过 12 字的简体中文名称，说明该链接是什么（如 B站主题收藏集、H5 签到活动）"}；没有则返回空数组 []。label 必须是简体中文。
-- 若输入包含 product_context（内容命中了在售联名商品的匹配词），追加输出商品履约预判：
-  "fulfillment":{"kind":"...","confidence":0-100,"reason":"不超过 60 字的简体中文依据"}。
+- 若输入包含 product_context（内容命中了在售联名商品的匹配词），必须输出商品履约预判字段：
+  "fulfillment":{"kind":"...","confidence":0-100,"reason":"不超过 60 字的简体中文依据"}，缺省该字段视为输出错误。
   kind 只能是 self_purchase（自购开箱/到货晒单/订单截图）、pr_sample（官方送测/样品/共创）、forward（转发剪辑/非实拍内容）、none（普通资讯，与商品履约无关）。
   依据要点：实拍图、订单或收货信息、开箱时间线指向 self_purchase；提到送测、样品、官方寄送、共创指向 pr_sample；明显转发他人视频或二剪指向 forward；拿不准时 confidence 不超过 40。
 - 若输入附带封面图，须结合图片与文字综合判断：图片低俗或违规记 violation=true；图文完全无关可作为参考，但相关性仍按词表规则定。不得补充外部事实。"""
