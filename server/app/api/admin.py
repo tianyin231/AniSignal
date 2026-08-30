@@ -147,6 +147,10 @@ async def update_target(
         target.target_value = body.target_value
     if body.tier is not None:
         target.tier = body.tier
+    if body.min_views is not None:
+        target.min_views = body.min_views
+    if body.co_terms is not None:
+        target.co_terms = body.co_terms
     if body.enabled is not None:
         was_disabled = not target.enabled
         target.enabled = body.enabled
