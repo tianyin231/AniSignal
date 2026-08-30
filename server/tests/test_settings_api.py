@@ -265,3 +265,54 @@ async def test_ai_summary_uses_latest_plain_evidence_and_rejects_unsupported_gam
     assert result["summary_status"] == "fallback"
     assert event.facts == deterministic_facts
     assert ai_mod._summary_supported("《鸣潮》活动《先约电台》现已开启", "[先约电台]活动说明")
+
+
+async def test_media_visibility_roundtrip_and_platform_exclusion(client, admin_headers, session):
+    """媒体可见性策略：按平台配置图片/视频展示；双 hide 平台内容从公开列表排除。"""
+    from sqlalchemy import select
+
+    from app.models import CollectTarget, RawContent
+    from app.services.ingest import ingest_items
+    from tests.test_parsers_bilibili import VIDEO_RAW
+
+    # bilibili 目标（bilibili 平台内容）
+    session.add(
+        CollectTarget(platform="bilibili", target_type="keyword_search", target_value="鸣潮")
+    )
+    await session.commit()
+    await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, bvid="BVmedia1", title="鸣潮媒体测试")])
+
+    # 默认：可见
+    resp = await client.get("/api/contents")
+    assert any(i["external_id"] == "BVmedia1" for i in resp.json()["items"])
+
+    # bilibili 图片+视频都 hide → 公开列表排除
+    resp = await client.put(
+        "/api/admin/settings/media-visibility",
+        json={"default": {"image": "show", "video": "show"}, "platforms": {"bilibili": {"image": "hide", "video": "hide"}}},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    resp = await client.get("/api/contents")
+    assert not any(i["external_id"] == "BVmedia1" for i in resp.json()["items"])
+
+    # 仅图片 hide（视频正常）→ 内容仍可见
+    resp = await client.put(
+        "/api/admin/settings/media-visibility",
+        json={"platforms": {"bilibili": {"image": "hide", "video": "link"}}},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    resp = await client.get("/api/contents")
+    assert any(i["external_id"] == "BVmedia1" for i in resp.json()["items"])
+
+    # 公开 site-config 暴露策略
+    resp = await client.get("/api/site-config")
+    assert resp.json()["media_visibility"]["platforms"]["bilibili"]["video"] == "link"
+
+    # 清理：恢复默认
+    await client.put(
+        "/api/admin/settings/media-visibility",
+        json={"default": {"image": "show", "video": "show"}, "platforms": {}},
+        headers=admin_headers,
+    )
