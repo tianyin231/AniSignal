@@ -201,7 +201,9 @@ async def _review_one(
 
     try:
         raw_response, usage = await attempt(with_image=True)
-        decision = _parse_review(raw_response, candidate["id"])
+        decision = _parse_review(
+            raw_response, candidate["id"], bool(candidate.get("product_context"))
+        )
         if decision is None:
             raise ValueError("model returned no valid review")
         return decision, usage, False, int((time.monotonic() - started) * 1000)
@@ -218,7 +220,9 @@ async def _review_one(
             json.dumps(candidate_text_only, ensure_ascii=False),
             json_mode=True,
         )
-        decision = _parse_review(raw_response, candidate["id"])
+        decision = _parse_review(
+            raw_response, candidate["id"], bool(candidate.get("product_context"))
+        )
         if decision is None:
             raise ValueError("model returned no valid review")
         return decision, usage, False, int((time.monotonic() - started) * 1000)
@@ -517,7 +521,9 @@ async def _event_groups(session: AsyncSession, ids: list[int]) -> dict[int, int]
     return groups
 
 
-def _parse_review(response: str, content_id: int) -> dict | None:
+def _parse_review(
+    response: str, content_id: int, product_context_present: bool = False
+) -> dict | None:
     """解析单条审核判定；接受 {"review": {...}} 或 {"reviews": [{...}]} 两种形状。"""
     cleaned = response.strip()
     if cleaned.startswith("```"):
@@ -566,6 +572,20 @@ def _parse_review(response: str, content_id: int) -> dict | None:
                 "confidence": max(0, min(100, int(fulfillment.get("confidence") or 0))),
                 "reason": str(fulfillment.get("reason") or "")[:80],
             }
+    if parsed_fulfillment is None and product_context_present:
+        # 小模型常丢尾部字段：从它自己的类目与理由做确定性推导（宁低置信不下架判断）
+        reason_text = str(item.get("reason") or "")
+        if category in {"unboxing", "arrived"}:
+            # 先看自购正向词（理由里"非官方送测"这类否定语境不作为送测依据）
+            if any(term in reason_text for term in ("自购", "订单", "入手", "自己买")):
+                kind = "self_purchase"
+            elif any(term in reason_text for term in ("送测", "样品", "寄送", "官方提供")):
+                kind = "pr_sample"
+            else:
+                kind = "self_purchase"  # 开箱/到货类目默认自购概率更高
+            parsed_fulfillment = {"kind": kind, "confidence": 60, "reason": reason_text[:80] or "开箱/到货类目候选"}
+        elif category == "quality":
+            parsed_fulfillment = {"kind": "none", "confidence": 30, "reason": "质量反馈，履约方式未知"}
     return {
         "relevant": relevant,
         "promotional": promotional,
@@ -606,7 +626,8 @@ _REVIEW_SYSTEM_PROMPT = """你是《鸣潮》主题情报站的编辑兼内容�
 1. 内容自带的 matched_keywords 是它被采集入库的原因（来自站点配置的采集关键词）。
 2. 输入里的 known_terms 是管理员维护的"已确认相关词表"（含最新角色/系统/活动名）。标题、正文或封面命中词表中任一词，即视为相关（relevant=true）。
 
-输出 JSON：{"review":{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据"}}。
+输出 JSON 的每个字段都必须包含（product_context 存在时 fulfillment 不可省略）：
+{"review":{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据","fulfillment":{"kind":"none","confidence":30,"reason":"不涉及商品履约"}}}。
 
 规则：
 - relevant=false 仅用于内容明确属于其他游戏/产品（如崩坏系列、原神等）且与《鸣潮》生态无关联的情形；绝不因"不认识某角色/某活动/某梗"而判 false。身份 identity 为 official 的内容来自已确认的官方账号，除非违规，relevant 恒为 true。
