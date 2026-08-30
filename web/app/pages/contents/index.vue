@@ -42,7 +42,6 @@ function applyQuery(patch: Record<string, string | undefined>) {
 <template>
   <div>
     <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <p class="text-xs text-slate-400 dark:text-zinc-500">全站采集内容的整合检索库；点击查看站内解析详情。</p>
       <form class="flex items-center gap-2" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
         <div class="flex items-center gap-1.5 rounded-md border border-slate-900/10 bg-white/70 px-2.5 py-1.5 dark:border-white/15 dark:bg-white/5">
           <Search :size="13" class="text-slate-400" />

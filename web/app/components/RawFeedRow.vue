@@ -7,11 +7,6 @@ const detailTo = computed(() => props.to ?? `/contents/${props.item.id}`)
 const coverFailed = ref(false)
 watch(() => props.item.cover, () => (coverFailed.value = false))
 
-const previewLabel = computed(() => ({
-  full: '可站内预览',
-  partial: '图片预览',
-  external_only: '仅外链可读',
-})[props.item.previewMode])
 </script>
 
 <template>
@@ -43,12 +38,10 @@ const previewLabel = computed(() => ({
         </p>
         <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400 dark:text-zinc-500">
         <span>{{ platformMeta[item.platform].label }} · {{ item.account }}</span>
-        <span aria-hidden="true">·</span>
-        <span :class="identityMeta[item.identity].text">{{ identityMeta[item.identity].label }}</span>
-        <span
-          class="rounded px-1.5 py-0.5 text-[11px]"
-          :class="item.previewMode === 'external_only' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
-        >{{ previewLabel }}</span>
+        <template v-if="item.identity !== 'unknown'">
+          <span aria-hidden="true">·</span>
+          <span :class="identityMeta[item.identity].text">{{ identityMeta[item.identity].label }}</span>
+        </template>
         <template v-if="item.translated">
           <span aria-hidden="true">·</span>
           <span class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>
