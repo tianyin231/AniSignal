@@ -4,8 +4,11 @@ import type { ApiProductList } from '~/composables/usePublicApi'
 useSeoMeta({ title: '商品' })
 
 const { api } = usePublicApi()
-const { data, status } = await useAsyncData('products', () =>
-  api<ApiProductList>('/api/products'),
+const { community } = useGameSection()
+const { data, status } = await useAsyncData(
+  () => `products-${community.value}`,
+  () => api<ApiProductList>('/api/products', { query: { community: community.value } }),
+  { watch: [community] },
 )
 const products = computed(() => data.value?.items ?? [])
 </script>

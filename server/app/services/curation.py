@@ -185,6 +185,7 @@ async def _review_one(
         )
 
     async def attempt(with_image: bool) -> tuple[str, dict | None]:
+        system_prompt = _review_system_prompt(candidate.get("community") or "wuwa")
         cover_url = candidate.get("cover")
         if with_image and cover_url:
             data_url = await _cover_data_url(cover_url)
@@ -197,7 +198,7 @@ async def _review_one(
                 content = text_payload()  # 封面抓取失败 → 纯文本
         else:
             content = text_payload()
-        return await chat(config, _REVIEW_SYSTEM_PROMPT, content, json_mode=True)
+        return await chat(config, system_prompt, content, json_mode=True)
 
     try:
         raw_response, usage = await attempt(with_image=True)
@@ -216,7 +217,7 @@ async def _review_one(
         candidate_text_only = {k: v for k, v in candidate.items() if k != "cover"}
         raw_response, usage = await chat(
             config,
-            _REVIEW_SYSTEM_PROMPT,
+            _review_system_prompt(candidate.get("community") or "wuwa"),
             json.dumps(candidate_text_only, ensure_ascii=False),
             json_mode=True,
         )
@@ -258,7 +259,9 @@ async def review_recent_contents(
     return await review_contents(session, ids)
 
 
-async def select_highlights(session: AsyncSession, limit: int = 5) -> list[dict]:
+async def select_highlights(
+    session: AsyncSession, limit: int = 5, community: str = "wuwa"
+) -> list[dict]:
     """返回官方与社区混排精选；AI 结果缺失时使用可解释的规则分数。"""
     latest = _latest_version_subquery()
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
@@ -276,6 +279,7 @@ async def select_highlights(session: AsyncSession, limit: int = 5) -> list[dict]
         .where(
             publication_time >= utcnow() - HIGHLIGHT_WINDOW,
             RawContent.hidden.is_(False),
+            RawContent.community == community,
         )
         .order_by(publication_time.desc(), RawContent.id.desc())
         .limit(200)
@@ -402,30 +406,40 @@ async def _review_candidates(
     session: AsyncSession, ids: list[int], tracked_products: list[dict]
 ) -> list[dict]:
     latest = _latest_version_subquery()
-    rows = await session.execute(
-        select(RawContent, ContentVersion, Source)
-        .join(latest, latest.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest.c.rid)
-            & (ContentVersion.version == latest.c.version),
-        )
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(RawContent.id.in_(ids))
-        .order_by(RawContent.id)
+    rows = list(
+        (
+            await session.execute(
+                select(RawContent, ContentVersion, Source)
+                .join(latest, latest.c.rid == RawContent.id)
+                .join(
+                    ContentVersion,
+                    (ContentVersion.raw_content_id == latest.c.rid)
+                    & (ContentVersion.version == latest.c.version),
+                )
+                .join(Source, RawContent.source_id == Source.id, isouter=True)
+                .where(RawContent.id.in_(ids))
+                .order_by(RawContent.id)
+            )
+        ).all()
     )
     metrics = await _latest_metrics(session, ids)
-    known_terms = await _load_known_terms(session)
+    # 词表按分区加载：审核提示词与已知词都限定在内容所属分区内
+    communities = {getattr(raw, "community", None) or "wuwa" for raw, _, _ in rows}
+    terms_by_community = {
+        community: await _load_known_terms(session, community) for community in communities
+    }
     candidates = []
     for raw, version, source in rows:
         normalized = version.normalized_json or {}
         media = normalized.get("media") or []
         cover = next((item for item in media if isinstance(item, str) and item), None)
         text_plain = _plain(version.text or "")
+        community = getattr(raw, "community", None) or "wuwa"
         candidates.append(
             {
                 "id": raw.id,
                 "platform": raw.platform,
+                "community": community,
                 "identity": source.identity if source else "unknown",
                 "title": (version.title or raw.external_id)[:240],
                 "text": text_plain[:1200],
@@ -433,9 +447,13 @@ async def _review_candidates(
                 "metrics": metrics.get(raw.id),
                 "cover": cover,
                 "matched_keywords": (raw.matched_keywords or [])[:12],
-                "known_terms": known_terms,
+                "known_terms": terms_by_community[community],
                 "product_context": _match_product_context(
-                    tracked_products, version.title or "", text_plain, raw.matched_keywords or []
+                    tracked_products,
+                    community,
+                    version.title or "",
+                    text_plain,
+                    raw.matched_keywords or [],
                 ),
             }
         )
@@ -443,11 +461,13 @@ async def _review_candidates(
 
 
 def _match_product_context(
-    tracked_products: list[dict], title: str, text: str, matched_keywords: list
+    tracked_products: list[dict], community: str, title: str, text: str, matched_keywords: list
 ) -> dict | None:
-    """内容命中在售商品的匹配词时，附带商品上下文供 AI 做履约预判。"""
+    """内容命中所属分区在售商品的匹配词时，附带商品上下文供 AI 做履约预判。"""
     haystack = f"{title} {text} {' '.join(str(k) for k in matched_keywords)}"
     for product in tracked_products:
+        if (product.get("community") or "wuwa") != community:
+            continue
         hits = [term for term in product["terms"] if term and term in haystack]
         if hits:
             return {"name": product["name"], "matched_terms": hits[:6]}
@@ -455,17 +475,19 @@ def _match_product_context(
 
 
 async def _load_tracked_products(session: AsyncSession) -> list[dict]:
-    rows = await session.execute(select(Product.id, Product.name, Product.watch_terms))
+    rows = await session.execute(select(Product.id, Product.name, Product.watch_terms, Product.community))
     products = []
-    for pid, name, terms in rows:
+    for pid, name, terms, community in rows:
         term_list = [t for t in (terms or []) if isinstance(t, str) and len(t.strip()) >= 2]
         if term_list:
-            products.append({"id": pid, "name": name, "terms": term_list})
+            products.append(
+                {"id": pid, "name": name, "terms": term_list, "community": community or "wuwa"}
+            )
     return products
 
 
-async def _load_known_terms(session: AsyncSession) -> list[str]:
-    """权威相关词表：采集目标关键词 + 管理端分类词典。
+async def _load_known_terms(session: AsyncSession, community: str = "wuwa") -> list[str]:
+    """权威相关词表：所属分区的采集目标关键词 + 适用的分类词典。
 
     模型知识库不认识最新的角色/活动，词表是相关性的判据来源，
     管理员在词典里补录新词即可让审核跟上版本更新。
@@ -474,10 +496,15 @@ async def _load_known_terms(session: AsyncSession) -> list[str]:
         select(CollectTarget.target_value).where(
             CollectTarget.enabled.is_(True),
             CollectTarget.target_type == "keyword_search",
+            CollectTarget.community == community,
         )
     )
     rule_rows = await session.execute(
-        select(ClassificationRule.pattern).where(ClassificationRule.enabled.is_(True))
+        select(ClassificationRule.pattern).where(
+            ClassificationRule.enabled.is_(True),
+            # community 为空的规则全分区通用
+            (ClassificationRule.community.is_(None)) | (ClassificationRule.community == community),
+        )
     )
     terms: list[str] = []
     seen: set[str] = set()
@@ -621,23 +648,29 @@ def _excerpt(value: str) -> str | None:
     return text[:140] + ("…" if len(text) > 140 else "")
 
 
-_REVIEW_SYSTEM_PROMPT = """你是《鸣潮》主题情报站的编辑兼内容安全审核员。本站对《鸣潮》及其周边生态做定向采集，你的知识库可能不包含最新的角色、版本与活动——判断相关性必须以下面两条为准，不得依赖你自己认识与否：
+def _review_system_prompt(community: str = "wuwa") -> str:
+    """审核提示词按分区模板化：游戏名与"其他游戏"示例随分区变化。"""
+    if community == "blhx":
+        game, other_games = "《碧蓝航线》", "（如鸣潮、崩坏系列、原神等）"
+    else:
+        game, other_games = "《鸣潮》", "（如崩坏系列、原神、碧蓝航线等）"
+    return f"""你是{game}主题情报站的编辑兼内容安全审核员。本站对{game}及其周边生态做定向采集，你的知识库可能不包含最新的角色、版本与活动——判断相关性必须以下面两条为准，不得依赖你自己认识与否：
 
 1. 内容自带的 matched_keywords 是它被采集入库的原因（来自站点配置的采集关键词）。
 2. 输入里的 known_terms 是管理员维护的"已确认相关词表"（含最新角色/系统/活动名）。标题、正文或封面命中词表中任一词，即视为相关（relevant=true）。
 
 输出 JSON 的每个字段都必须包含（product_context 存在时 fulfillment 不可省略）：
-{"review":{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据","fulfillment":{"kind":"none","confidence":30,"reason":"不涉及商品履约"}}}。
+{{"review":{{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据","fulfillment":{{"kind":"none","confidence":30,"reason":"不涉及商品履约"}}}}}}。
 
 规则：
-- relevant=false 仅用于内容明确属于其他游戏/产品（如崩坏系列、原神等）且与《鸣潮》生态无关联的情形；绝不因"不认识某角色/某活动/某梗"而判 false。身份 identity 为 official 的内容来自已确认的官方账号，除非违规，relevant 恒为 true。
+- relevant=false 仅用于内容明确属于其他游戏/产品{other_games}且与{game}生态无关联的情形；绝不因"不认识某角色/某活动/某梗"而判 false。身份 identity 为 official 的内容来自已确认的官方账号，除非违规，relevant 恒为 true。
 - promotional 表示抽奖、签到、拉互动、中奖名单或没有实质信息的推广动态。
 - violation 表示违规：色情低俗、政治敏感、赌博诈骗、钓鱼链接、严重不实谣言或引战辱骂等不适合公开展示的内容；判定要克制，仅对明显违规给 true。
 - quality_score 为 0 到 100 的编辑价值：官方版本、角色、活动、维护和实质公告优先；社区内容重视明确主题、信息量和独立表达，播放量只代表热度。
 - category_hint 只能是 official_announce/version_update/presale/balance/delay/shipping/arrived/unboxing/review/quality/promotion/chat/other 或 null。
-- links：从正文中提取的站外链接数组，只收有实际内容的页面（网页活动、H5 小游戏、奖励领取、新闻详情等），忽略社媒主页、下载页、官网首页和视频页；每项 {"url":"原文中的完整链接","label":"不超过 12 字的简体中文名称，说明该链接是什么（如 B站主题收藏集、H5 签到活动）"}；没有则返回空数组 []。label 必须是简体中文。
+- links：从正文中提取的站外链接数组，只收有实际内容的页面（网页活动、H5 小游戏、奖励领取、新闻详情等），忽略社媒主页、下载页、官网首页和视频页；每项 {{"url":"原文中的完整链接","label":"不超过 12 字的简体中文名称，说明该链接是什么（如 B站主题收藏集、H5 签到活动）"}}；没有则返回空数组 []。label 必须是简体中文。
 - 若输入包含 product_context（内容命中了在售联名商品的匹配词），必须输出商品履约预判字段：
-  "fulfillment":{"kind":"...","confidence":0-100,"reason":"不超过 60 字的简体中文依据"}，缺省该字段视为输出错误。
+  "fulfillment":{{"kind":"...","confidence":0-100,"reason":"不超过 60 字的简体中文依据"}}，缺省该字段视为输出错误。
   kind 只能是 self_purchase（自购开箱/到货晒单/订单截图）、pr_sample（官方送测/样品/共创）、forward（转发剪辑/非实拍内容）、none（普通资讯，与商品履约无关）。
   依据要点：实拍图、订单或收货信息、开箱时间线指向 self_purchase；提到送测、样品、官方寄送、共创指向 pr_sample；明显转发他人视频或二剪指向 forward；拿不准时 confidence 不超过 40。
 - 若输入附带封面图，须结合图片与文字综合判断：图片低俗或违规记 violation=true；图文完全无关可作为参考，但相关性仍按词表规则定。不得补充外部事实。"""

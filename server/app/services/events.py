@@ -64,6 +64,7 @@ class ContentRow:
     identity: str
     source_name: str | None
     source_external_id: str | None
+    community: str = "wuwa"
 
 
 @dataclass
@@ -145,6 +146,7 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
                 identity=(source.identity if source else "unknown"),
                 source_name=(source.name if source else None),
                 source_external_id=(source.external_id if source else None),
+                community=(raw.community or "wuwa"),
             )
         )
     return result
@@ -153,6 +155,8 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
 _TITLE_BOILERPLATE = (
     "《鸣潮》",
     "鸣潮",
+    "《碧蓝航线》",
+    "碧蓝航线",
     "先约电台",
     "官方",
     "公告",
@@ -353,7 +357,11 @@ async def _backfill_facts(session: AsyncSession, stats: AggStats) -> None:
 async def _aggregate_official(
     session: AsyncSession, contents: list[ContentRow], stats: AggStats
 ) -> None:
-    """按当前聚类结果精确对账官方事件，允许移除历史误挂证据。"""
+    """按当前聚类结果精确对账官方事件，允许移除历史误挂证据。
+
+    分区先行：鸣潮/碧蓝航线的官方内容分别聚类、分别对账各自分区的事件，
+    跨分区的证据与 AI 匹配关系不会互相影响。
+    """
     official_all = [row for row in contents if row.identity == "official"]
     official_ids = {row.raw_id for row in official_all}
     semantic_pairs: set[tuple[int, int]] = set()
@@ -371,10 +379,28 @@ async def _aggregate_official(
         semantic_pairs = {
             tuple(sorted((left_id, right_id))) for left_id, right_id in pair_rows
         }
+
+    communities = sorted({row.community for row in official_all} | {"wuwa"})
+    for community in communities:
+        official = [row for row in official_all if row.community == community]
+        await _aggregate_official_community(
+            session, community, official, semantic_pairs, stats
+        )
+
+
+async def _aggregate_official_community(
+    session: AsyncSession,
+    community: str,
+    official: list[ContentRow],
+    semantic_pairs: set[tuple[int, int]],
+    stats: AggStats,
+) -> None:
+    """单个分区内的官方公告聚类与事件对账（证据可跨平台、不跨分区）。"""
+    official_ids = {row.raw_id for row in official}
     semantically_linked_ids = {content_id for pair in semantic_pairs for content_id in pair}
-    official = [
+    rows = [
         row
-        for row in official_all
+        for row in official
         if row.category in ANNOUNCE_CATEGORIES or row.raw_id in semantically_linked_ids
     ]
 
@@ -384,6 +410,7 @@ async def _aggregate_official(
                 Event.is_active.is_(True),
                 Event.product_id.is_(None),
                 Event.category.in_(ANNOUNCE_CATEGORIES),
+                Event.community == community,
             )
         )
     )
@@ -401,15 +428,15 @@ async def _aggregate_official(
         *(evidence_by_event[event.id] for event in existing if event.manual_locked)
     ) if any(event.manual_locked for event in existing) else set()
     if locked_raw_ids:
-        official = [row for row in official if row.raw_id not in locked_raw_ids]
-        remaining_ids = {row.raw_id for row in official}
+        rows = [row for row in rows if row.raw_id not in locked_raw_ids]
+        remaining_ids = {row.raw_id for row in rows}
         semantic_pairs = {
             pair for pair in semantic_pairs if pair[0] in remaining_ids and pair[1] in remaining_ids
         }
 
     unlocked = [event for event in existing if not event.manual_locked]
     used_event_ids: set[int] = set()
-    for cluster in cluster_announcements(official, semantic_pairs):
+    for cluster in cluster_announcements(rows, semantic_pairs):
         category = _cluster_category(cluster)
         raw_ids = {row.raw_id for row in cluster}
         has_semantic_match = any(
@@ -441,6 +468,7 @@ async def _aggregate_official(
                 category=category,
                 product_id=None,
                 identity="official",
+                community=community,
                 confidence="high",
                 confidence_reason=confidence_reason,
                 conclusion=_CATEGORY_CONCLUSION.get(category, "官方公告"),
@@ -547,7 +575,9 @@ async def _aggregate_product(
     matched = [
         row
         for row in contents
-        if row.category in FULFILLMENT_CATEGORIES and _matches_product(row, product)
+        if row.community == (product.community or "wuwa")
+        and row.category in FULFILLMENT_CATEGORIES
+        and _matches_product(row, product)
     ]
     by_category: dict[str, list[ContentRow]] = {}
     for row in matched:
@@ -560,6 +590,7 @@ async def _aggregate_product(
             session,
             category=category,
             product_id=product.id,
+            community=product.community or "wuwa",
             cluster=items,
             stats=stats,
             product=product,
@@ -600,6 +631,7 @@ async def _ensure_event(
     *,
     category: str,
     product_id: int | None,
+    community: str,
     cluster: list[ContentRow],
     stats: AggStats,
     title: str,
@@ -610,7 +642,7 @@ async def _ensure_event(
     conclusion: str,
 ) -> None:
     raw_ids = {row.raw_id for row in cluster}
-    event = await _find_active_event(session, category, product_id, raw_ids)
+    event = await _find_active_event(session, category, product_id, community, raw_ids)
 
     created = False
     if event is None:
@@ -619,6 +651,7 @@ async def _ensure_event(
             title=title[:255],
             category=category,
             product_id=product_id,
+            community=community,
             identity=identity,
             confidence=confidence,
             confidence_reason=confidence_reason,
@@ -664,9 +697,13 @@ async def _ensure_event(
 
 
 async def _find_active_event(
-    session: AsyncSession, category: str, product_id: int | None, raw_ids: set[int]
+    session: AsyncSession,
+    category: str,
+    product_id: int | None,
+    community: str,
+    raw_ids: set[int],
 ) -> Event | None:
-    """同类目同范围的活跃事件中，找证据有交集的那个。
+    """同分区同类目同范围的活跃事件中，找证据有交集的那个。
 
     只按证据重叠合并：不同主题的公告即使同类目也各自成事件（宁缺勿滥）；
     商品事件同类目本就单一，靠重叠即可延续。
@@ -680,6 +717,7 @@ async def _find_active_event(
                 select(Event).where(
                     Event.category == category,
                     Event.is_active.is_(True),
+                    Event.community == community,
                     product_filter,
                 )
             )
@@ -765,6 +803,7 @@ async def split_event(
         title=first.title[:255],
         category=event.category,
         product_id=event.product_id,
+        community=event.community or "wuwa",
         identity=event.identity,
         importance=event.importance,
         confidence=event.confidence,

@@ -34,15 +34,20 @@ const summaryLabels: Record<string, string> = {
   legacy: '历史摘要',
 }
 
+const communityFilter = ref<'' | 'wuwa' | 'blhx'>('')
+
 async function refresh() {
   try {
-    const data = await api<ApiEventList>('/api/admin/events', { query: { limit: 100 } })
+    const query: Record<string, string | number> = { limit: 100 }
+    if (communityFilter.value) query.community = communityFilter.value
+    const data = await api<ApiEventList>('/api/admin/events', { query })
     events.value = data.items
     total.value = data.total
   } catch (exc: any) {
     error.value = exc?.message ?? String(exc)
   }
 }
+watch(communityFilter, refresh)
 onMounted(refresh)
 
 function pick(event: ApiEvent) {
@@ -205,7 +210,17 @@ async function splitSelectedEvidence() {
           引擎自动聚合，人工复核后编辑会自动锁定（引擎不再覆盖）。共 {{ total }} 条。
         </p>
       </div>
-      <button class="btn-primary px-4 py-2" :disabled="busy" @click="recompute">{{ busy ? '重算中…' : '重算事件' }}</button>
+      <div class="flex items-center gap-2">
+        <select
+          v-model="communityFilter"
+          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+        >
+          <option value="">全部分区</option>
+          <option value="wuwa">鸣潮</option>
+          <option value="blhx">碧蓝航线</option>
+        </select>
+        <button class="btn-primary px-4 py-2" :disabled="busy" @click="recompute">{{ busy ? '重算中…' : '重算事件' }}</button>
+      </div>
     </div>
 
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>

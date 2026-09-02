@@ -10,18 +10,32 @@ const tabs = [
   { key: 'bilibili', label: 'B站' },
   { key: 'miyoushe', label: '米游社' },
   { key: 'kuro', label: '库街区' },
-  { key: 'youtube', label: 'YouTube' },
+  { key: 'youtube', label: 'YouTube' }
 ]
 const route = useRoute()
 const router = useRouter()
+const { community } = useGameSection()
+// 平台筛选随分区变化：碧蓝航线当前只有 B 站官方动态
+const visibleTabs = computed(() => {
+  if (community.value === 'blhx') return tabs.filter(t => ['all', 'bilibili'].includes(t.key))
+  return tabs
+})
 const tab = computed({
   get: () => String(route.query.tab || 'all'),
   set: (v: string) => router.replace({ query: { ...route.query, tab: v } }),
 })
+watch(community, () => {
+  if (!visibleTabs.value.some(t => t.key === tab.value)) tab.value = 'all'
+})
 
 const { api } = usePublicApi()
-const { data, status } = await useAsyncData('official-feed', () =>
-  api<PublicContentList>('/api/contents', { query: { identity: 'official', limit: 100 } }),
+const { data, status } = await useAsyncData(
+  () => `official-feed-${community.value}`,
+  () =>
+    api<PublicContentList>('/api/contents', {
+      query: { community: community.value, identity: 'official', limit: 100 },
+    }),
+  { watch: [community] },
 )
 
 function toRow(item: PublicContentItem): RawItem {
@@ -44,7 +58,7 @@ useSeoMeta({ title: '官方动态' })
 
 <template>
   <div>
-    <TabNav v-model="tab" :tabs="tabs" />
+    <TabNav v-model="tab" :tabs="visibleTabs" />
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…

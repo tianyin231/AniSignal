@@ -4,8 +4,10 @@ import { fmtTime } from '~/utils/admin-types'
 // 官方动态外链直达：variant="list" 用于桌面侧栏，variant="strip" 用于移动端横滑条（lg 以下显示）
 const props = withDefaults(defineProps<{ variant?: 'list' | 'strip' }>(), { variant: 'list' })
 
+const { community } = useGameSection()
 const { items, fetchOnce } = useOfficialLinks()
-onMounted(fetchOnce)
+onMounted(() => fetchOnce(community.value))
+watch(community, (value) => fetchOnce(value))
 
 const categoryLabels: Record<string, string> = {
   kuro: '库洛',

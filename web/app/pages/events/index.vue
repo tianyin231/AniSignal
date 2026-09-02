@@ -22,17 +22,19 @@ const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
 
 const { api } = usePublicApi()
+const { community } = useGameSection()
 const { data, status } = await useAsyncData(
-  () => `events-${tab.value}-${page.value}`,
+  () => `events-${community.value}-${tab.value}-${page.value}`,
   () =>
     api<ApiEventList>('/api/events', {
       query: {
+        community: community.value,
         limit: pageSize,
         offset: (page.value - 1) * pageSize,
         ...(tab.value !== 'all' ? { category: tab.value } : {}),
       },
     }),
-  { watch: [tab, page] },
+  { watch: [community, tab, page] },
 )
 
 const list = computed<AppEvent[]>(() => (data.value?.items ?? []).map(toAppEvent))

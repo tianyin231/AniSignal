@@ -11,6 +11,8 @@ const links = [
 ]
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
 
+const { community, communityQuery, setCommunity, communities } = useGameSection()
+
 const { user, logout } = useAuth()
 const menuOpen = ref(false)
 const menuRoot = ref<HTMLElement | null>(null)
@@ -36,10 +38,28 @@ async function handleLogout() {
         <span class="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-zinc-50">AniSignal</span>
       </NuxtLink>
       <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-sm [scrollbar-width:none]">
+        <div class="mr-1.5 flex shrink-0 items-center rounded-[10px] bg-slate-200/60 p-0.5 dark:bg-zinc-800/70" role="tablist" aria-label="游戏分区">
+          <button
+            v-for="c in communities"
+            :key="c.key"
+            type="button"
+            role="tab"
+            :aria-selected="community === c.key"
+            class="cursor-pointer whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-all"
+            :class="
+              community === c.key
+                ? 'bg-white text-blue-700 shadow-sm dark:bg-zinc-900 dark:text-blue-300'
+                : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+            "
+            @click="setCommunity(c.key)"
+          >
+            {{ c.label }}
+          </button>
+        </div>
         <NuxtLink
           v-for="l in links"
           :key="l.to"
-          :to="l.to"
+          :to="{ path: l.to, query: communityQuery }"
           class="whitespace-nowrap rounded-md px-2.5 py-1.5 transition-colors"
           :class="
             isActive(l.to)

@@ -11,6 +11,20 @@ class Platform(StrEnum):
     YOUTUBE = "youtube"
 
 
+class Community(StrEnum):
+    """游戏分区：目标/内容/事件/商品按分区隔离，公开站大标签页切换（2026-09-02）。"""
+
+    WUWA = "wuwa"  # 鸣潮（默认分区，存量数据回填值）
+    BLHX = "blhx"  # 碧蓝航线
+
+
+# 分区展示名（AI 提示词与前端 tabs 共用的唯一权威；前端 data.ts 与之保持一致）
+COMMUNITY_LABELS = {
+    Community.WUWA: "鸣潮",
+    Community.BLHX: "碧蓝航线",
+}
+
+
 class TargetType(StrEnum):
     KEYWORD_SEARCH = "keyword_search"
     ACCOUNT_VIDEOS = "account_videos"

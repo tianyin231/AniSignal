@@ -28,6 +28,7 @@ const form = reactive({
   original_ship_at: '',
   ship_note: '',
   watch_terms: '',
+  community: 'wuwa',
   create_bilibili_target: true,
   monitor_keyword: '',
 })
@@ -86,7 +87,7 @@ function resetForm() {
   Object.assign(form, {
     slug: '', name: '', publisher: '', skus: '', price_note: '', presale_at: '',
     balance_window: '', original_ship_at: '', ship_note: '', watch_terms: '',
-    create_bilibili_target: true, monitor_keyword: '',
+    community: 'wuwa', create_bilibili_target: true, monitor_keyword: '',
   })
 }
 
@@ -128,6 +129,7 @@ async function submit() {
     original_ship_at: form.original_ship_at.trim() || null,
     ship_note: form.ship_note.trim() || null,
     watch_terms: listValue(form.watch_terms),
+    community: form.community,
   }
   try {
     if (editing.value) {
@@ -266,6 +268,10 @@ async function saveSignal() {
             <input v-model="form.watch_terms" required class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" placeholder="逗号分隔" @input="termsTouched = true">
             <span class="mt-1 block text-[11px] text-slate-400">已按商品名自动生成；避免改成角色名等过宽词。</span>
           </label>
+          <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="所属游戏分区：履约证据从对应分区的内容池匹配">
+            <option value="wuwa">分区：鸣潮</option>
+            <option value="blhx">分区：碧蓝航线</option>
+          </select>
           <input v-model="form.slug" :disabled="!!editing" placeholder="URL 标识，留空自动生成" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm disabled:opacity-50 dark:border-white/15 dark:bg-white/5">
           <input v-model="form.publisher" placeholder="发行方" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
           <input v-model="form.skus" placeholder="SKU（逗号分隔）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">

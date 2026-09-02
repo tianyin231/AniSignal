@@ -208,11 +208,16 @@ async def summarize_event(
     if used_fallback:
         summary = _fallback_summary(event, len(evidences))
     else:
+        community = getattr(event, "community", None) or "wuwa"
+        if community == "blhx":
+            game, game_note = "《碧蓝航线》", "不要把《碧蓝航线》写成其它游戏；"
+        else:
+            game, game_note = "库洛游戏《鸣潮》", "不要把《鸣潮》写成其它游戏；"
         system = (
-            "你是库洛游戏《鸣潮》的情报编辑，只能根据给定证据输出 JSON："
+            f"你是{game}的情报编辑，只能根据给定证据输出 JSON："
             '{"summary": "100字以内中文结论摘要"}。'
             "禁止补充证据中没有的游戏名、角色、时间、奖励或结论；"
-            "不要把《鸣潮》写成其它游戏；区分官方信息与用户反馈；存疑时明确说明。"
+            f"{game_note}区分官方信息与用户反馈；存疑时明确说明。"
         )
         user = (
             f"事件标题：{event.title}\n类目：{event.category}\n"

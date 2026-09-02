@@ -53,7 +53,9 @@ class IngestStats:
     touched_content_ids: list[int] = field(default_factory=list)
 
 
-async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]) -> IngestStats:
+async def ingest_items(
+    session: AsyncSession, fetch_kind: str, items: list[dict], community: str = "wuwa"
+) -> IngestStats:
     if fetch_kind not in PARSERS:
         raise ValueError(f"no parser registered for fetch_kind={fetch_kind}")
     parse, parser_version = PARSERS[fetch_kind]
@@ -71,7 +73,7 @@ async def ingest_items(session: AsyncSession, fetch_kind: str, items: list[dict]
             continue
         try:
             is_new, changed, content_id, identity = await _ingest_one(
-                session, normalized, raw, parser_version, rules
+                session, normalized, raw, parser_version, rules, community
             )
             stats.items_new += int(is_new)
             stats.items_updated += int(changed)
@@ -101,6 +103,7 @@ async def _ingest_one(
     raw: dict,
     parser_version: str,
     rules: list,
+    community: str = "wuwa",
 ) -> tuple[bool, bool, int, str]:
     """返回 (is_new, fingerprint_changed, content_id, source_identity)。"""
     from app.services.statistics import record_content_stat
@@ -119,6 +122,7 @@ async def _ingest_one(
             platform=normalized.platform,
             content_type=normalized.content_type,
             external_id=normalized.external_id,
+            community=community,
             source_id=source_id,
             url=normalized.url,
             published_at=to_naive_utc(normalized.published_at) if normalized.published_at else None,
@@ -130,7 +134,7 @@ async def _ingest_one(
         )
         session.add(content)
         await session.flush()  # 拿到 id 供 version/snapshot 外键使用
-        _add_version(session, content, 1, normalized, parser_version, rules)
+        _add_version(session, content, 1, normalized, parser_version, rules, community)
         _add_snapshot(session, content, normalized)
         await record_content_stat(
             session,
@@ -226,6 +230,7 @@ def _add_version(
     normalized: NormalizedContent,
     parser_version: str,
     rules: list,
+    community: str | None = None,
 ) -> None:
     session.add(
         ContentVersion(
@@ -236,7 +241,10 @@ def _add_version(
             text=normalized.text,
             normalized_json=normalized.model_dump(mode="json"),
             parser_version=parser_version,
-            category=classify_content(normalized, rules),
+            # 分区缺省时按内容自身归属（重算路径）
+            category=classify_content(
+                normalized, rules, community or getattr(content, "community", None) or "wuwa"
+            ),
         )
     )
 
@@ -297,7 +305,7 @@ async def reparse_contents(
             .order_by(ContentVersion.version.desc())
             .limit(1)
         )
-        category = classify_content(normalized, rules)
+        category = classify_content(normalized, rules, content.community)
         fingerprint = content_fingerprint(normalized)
         if (
             fingerprint == content.content_hash

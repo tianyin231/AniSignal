@@ -13,20 +13,32 @@ export interface OfficialLinkItem {
 
 export function useOfficialLinks() {
   const items = useState<OfficialLinkItem[]>('official-links', () => [])
-  const loaded = useState('official-links-loaded', () => false)
+  const loadedCommunity = useState<string>('official-links-loaded', () => '')
   const loading = useState('official-links-loading', () => false)
+  const pendingCommunity = useState<string>('official-links-pending', () => '')
 
-  async function fetchOnce() {
-    if (loaded.value || loading.value) return
+  /** 拉取指定分区的官方外链；分区变化后自动重新拉取。 */
+  async function fetchOnce(community: string = 'wuwa') {
+    if (loadedCommunity.value === community) return
+    if (loading.value) {
+      // 正在拉别的分区时先记下最新意图，结束后补拉
+      pendingCommunity.value = community
+      return
+    }
     loading.value = true
     try {
-      const res = await $fetch<{ items: OfficialLinkItem[] }>('/api/official-links')
+      const res = await $fetch<{ items: OfficialLinkItem[] }>('/api/official-links', {
+        query: { community },
+      })
       items.value = res.items
-      loaded.value = true
+      loadedCommunity.value = community
     } catch { /* 链接聚合失败不影响主内容 */ } finally {
       loading.value = false
+      const next = pendingCommunity.value
+      pendingCommunity.value = ''
+      if (next && next !== loadedCommunity.value) void fetchOnce(next)
     }
   }
 
-  return { items, loaded, fetchOnce }
+  return { items, fetchOnce }
 }

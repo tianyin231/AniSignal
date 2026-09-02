@@ -17,6 +17,8 @@ class ClassificationRule(Base):
     pattern: Mapped[str] = mapped_column(String(64))
     # 空串 = 全平台；否则限定平台
     platform: Mapped[str | None] = mapped_column(String(32), default=None)
+    # NULL = 全分区通用（履约类词典等）；否则限定分区（鸣潮/碧蓝航线专属词）
+    community: Mapped[str | None] = mapped_column(String(16), default=None)
     # 数值越小越先匹配（同词典内按 priority, id 排序）
     priority: Mapped[int] = mapped_column(Integer, default=100)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

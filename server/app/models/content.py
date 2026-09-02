@@ -32,6 +32,8 @@ class RawContent(Base):
     platform: Mapped[str] = mapped_column(String(32))
     content_type: Mapped[str] = mapped_column(String(16))
     external_id: Mapped[str] = mapped_column(String(64))
+    # 所属游戏分区：首次入库时由采集目标写入，此后不随其他目标的采集翻转
+    community: Mapped[str] = mapped_column(String(16), default="wuwa", index=True)
     source_id: Mapped[int | None] = mapped_column(
         ForeignKey("sources.id", name="fk_raw_contents_source_id_sources")
     )

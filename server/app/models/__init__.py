@@ -13,6 +13,8 @@ from app.models.content import (
 from app.models.enums import (
     ANNOUNCE_CATEGORIES,
     Category,
+    COMMUNITY_LABELS,
+    Community,
     ContentType,
     FULFILLMENT_CATEGORIES,
     Identity,
@@ -64,6 +66,8 @@ __all__ = [
     "Identity",
     "RunStatus",
     "Category",
+    "Community",
+    "COMMUNITY_LABELS",
     "ANNOUNCE_CATEGORIES",
     "FULFILLMENT_CATEGORIES",
 ]

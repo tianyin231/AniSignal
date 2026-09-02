@@ -3,8 +3,11 @@ import type { PublicSource } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 
 const { api } = usePublicApi()
-const { data } = await useAsyncData('rail-sources', () =>
-  api<{ items: PublicSource[] }>('/api/sources'),
+const { community } = useGameSection()
+const { data } = await useAsyncData(
+  () => `rail-sources-${community.value}`,
+  () => api<{ items: PublicSource[] }>('/api/sources', { query: { community: community.value } }),
+  { watch: [community] },
 )
 const shown = computed(() =>
   (data.value?.items ?? [])

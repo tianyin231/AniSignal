@@ -36,16 +36,25 @@ router = APIRouter(prefix="/api")
 
 _EXCERPT_LEN = 140
 
+# 公开分区参数：默认鸣潮（存量主分区）
+COMMUNITY_QUERY = Query(
+    default="wuwa", pattern="^(wuwa|blhx)$", description="游戏分区（wuwa=鸣潮, blhx=碧蓝航线）"
+)
+
 
 @router.get("/highlights", response_model=PublicContentList)
 async def list_highlights(
     limit: int = Query(default=5, ge=1, le=8),
+    community: str = COMMUNITY_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     """首页精选：官方实质动态与高热度社区内容混排。"""
     from app.services.curation import select_highlights
 
-    items = [PublicContentItem(**item) for item in await select_highlights(session, limit)]
+    items = [
+        PublicContentItem(**item)
+        for item in await select_highlights(session, limit, community=community)
+    ]
     return PublicContentList(items=items, total=len(items))
 
 
@@ -60,6 +69,7 @@ def _preview_mode(text: str | None, media: list, url: str | None) -> str:
 @router.get("/contents", response_model=PublicContentList)
 async def list_contents(
     platform: str | None = Query(default=None),
+    community: str = COMMUNITY_QUERY,
     content_type: str | None = Query(default=None),
     identity: str | None = Query(default=None, description="official/user/... 来源身份过滤"),
     exclude_identity: str | None = Query(default=None, max_length=32, description="排除指定来源身份"),
@@ -84,7 +94,7 @@ async def list_contents(
         .group_by(ContentVersion.raw_content_id)
         .subquery()
     )
-    conditions = []
+    conditions = [RawContent.community == community]
     if platform:
         conditions.append(
             RawContent.platform.in_(("kuro_cn", "kuro_global"))
@@ -217,13 +227,18 @@ def _excerpt(text: str) -> str | None:
 
 
 @router.get("/sources", response_model=PublicSourceList)
-async def list_sources(session: AsyncSession = Depends(get_session)):
+async def list_sources(
+    community: str = COMMUNITY_QUERY,
+    session: AsyncSession = Depends(get_session),
+):
     """公开的来源健康：已接入来源、最近成功采集时间与不可用状态（设计文档 §6/§16）。
 
     不暴露 last_error 等内部细节。
     """
     rows = await session.execute(
-        select(CollectTarget).order_by(CollectTarget.platform, CollectTarget.id)
+        select(CollectTarget)
+        .where(CollectTarget.community == community)
+        .order_by(CollectTarget.platform, CollectTarget.id)
     )
     items = [
         PublicSource(
@@ -233,6 +248,7 @@ async def list_sources(session: AsyncSession = Depends(get_session)):
             enabled=target.enabled,
             last_success_at=target.last_success_at,
             consecutive_failures=target.consecutive_failures,
+            community=getattr(target, "community", None) or "wuwa",
         )
         for target in rows.scalars()
     ]
@@ -349,6 +365,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
 @router.get("/events", response_model=EventListOut)
 async def list_events(
     category: str | None = Query(default=None),
+    community: str = COMMUNITY_QUERY,
     product_slug: str | None = Query(default=None),
     importance: bool | None = Query(default=None),
     published_within_hours: int | None = Query(
@@ -363,7 +380,7 @@ async def list_events(
     from app.models import Product as ProductModel
     from app.services.views import events_to_out
 
-    conditions = [EventModel.is_active.is_(True)]
+    conditions = [EventModel.is_active.is_(True), EventModel.community == community]
     latest_evidence_sq = (
         select(
             Evidence.event_id.label("event_id"),
@@ -437,12 +454,21 @@ async def get_event(event_id: int, session: AsyncSession = Depends(get_session))
 
 
 @router.get("/products", response_model=ProductListOut)
-async def list_products(session: AsyncSession = Depends(get_session)):
+async def list_products(
+    community: str = COMMUNITY_QUERY,
+    session: AsyncSession = Depends(get_session),
+):
     from app.models import Product as ProductModel
     from app.services.views import product_to_out
 
     products = list(
-        (await session.execute(select(ProductModel).order_by(ProductModel.id))).scalars()
+        (
+            await session.execute(
+                select(ProductModel)
+                .where(ProductModel.community == community)
+                .order_by(ProductModel.id)
+            )
+        ).scalars()
     )
     items = [await product_to_out(session, p) for p in products]
     return ProductListOut(items=items)
@@ -480,7 +506,8 @@ async def get_product_signals(
 # ---------- 官方动态外链聚合（活动/奖励/H5 直达） ----------
 
 _OFFICIAL_LINKS_TTL_SECONDS = 300.0
-_official_links_cache: dict = {"data": None, "expires": 0.0}
+# 每个分区一份缓存（鸣潮/碧蓝航线的外链面板独立）
+_official_links_cache: dict[str, dict] = {}
 _URL_PATTERN = re.compile(r"https?://[^\s<>\"'）)\]}】」]+")
 # 纯静态资源与站内图片不入链接清单
 _LINK_HOST_BLOCKLIST = ("hdslb.com", "bilivideo", "ytimg.com", "ggpht.com", "static.", "akamaized.net")
@@ -554,7 +581,7 @@ def _link_label(raw_text: str, clean_text: str, url: str) -> str:
     return ""
 
 
-async def _collect_official_links(session: AsyncSession) -> list[dict]:
+async def _collect_official_links(session: AsyncSession, community: str) -> list[dict]:
     import bleach
     from html import unescape
 
@@ -580,6 +607,7 @@ async def _collect_official_links(session: AsyncSession) -> list[dict]:
         .where(
             Source.identity == "official",
             RawContent.hidden.is_(False),
+            RawContent.community == community,
             ContentReview.links.is_(None),  # AI 已提取过的内容不再走规则回退
             publication_time >= utcnow() - timedelta(days=30),
         )
@@ -625,11 +653,10 @@ async def _collect_official_links(session: AsyncSession) -> list[dict]:
 
 def invalidate_official_links_cache() -> None:
     """内容下架/删除/修订后由管理端调用，让外链聚合立即反映变化。"""
-    _official_links_cache["data"] = None
-    _official_links_cache["expires"] = 0.0
+    _official_links_cache.clear()
 
 
-async def _ai_official_links(session: AsyncSession) -> list[dict]:
+async def _ai_official_links(session: AsyncSession, community: str) -> list[dict]:
     """AI 审核时提取的外链（已带简体中文名称）。"""
     latest_sq = (
         select(
@@ -647,6 +674,7 @@ async def _ai_official_links(session: AsyncSession) -> list[dict]:
         .where(
             ContentReview.links.is_not(None),
             RawContent.hidden.is_(False),
+            RawContent.community == community,
             publication_time >= utcnow() - timedelta(days=30),
         )
         .order_by(publication_time.desc(), RawContent.id.desc())
@@ -677,35 +705,46 @@ async def _ai_official_links(session: AsyncSession) -> list[dict]:
 
 
 @router.get("/official-links")
-async def official_links(session: AsyncSession = Depends(get_session)):
+async def official_links(
+    community: str = COMMUNITY_QUERY,
+    session: AsyncSession = Depends(get_session),
+):
     """官方动态中指向活动/奖励/H5 的站外链接，去重去模板后按最新排序。
 
     优先用 AI 审核提取的链接（带简体中文名称）；尚未审核的内容退回规则提取。
     """
     now = time.monotonic()
-    if _official_links_cache["data"] is not None and now < _official_links_cache["expires"]:
-        return {"items": _official_links_cache["data"]}
-    items = await _ai_official_links(session)
+    cached = _official_links_cache.get(community)
+    if cached and cached["data"] is not None and now < cached["expires"]:
+        return {"items": cached["data"]}
+    items = await _ai_official_links(session, community)
     seen = {item["url"] for item in items}
-    for item in await _collect_official_links(session):
+    for item in await _collect_official_links(session, community):
         if item["url"] not in seen:
             seen.add(item["url"])
             items.append(item)
         if len(items) >= 30:
             break
-    _official_links_cache["data"] = items
-    _official_links_cache["expires"] = now + _OFFICIAL_LINKS_TTL_SECONDS
+    _official_links_cache[community] = {
+        "data": items,
+        "expires": now + _OFFICIAL_LINKS_TTL_SECONDS,
+    }
     return {"items": items}
 
 
 @router.get("/site-config")
 async def site_config(session: AsyncSession = Depends(get_session)):
-    """公开站点配置：全服公告与文案区域（不含任何 SMTP 信息）。"""
+    """公开站点配置：全服公告、文案区域与分区清单（不含任何 SMTP 信息）。"""
+    from app.models import COMMUNITY_LABELS
     from app.services import settings as settings_service
 
     return {
         "announcement": await settings_service.get_announcement(session),
         "texts": await settings_service.get_texts(session),
+        "communities": [
+            {"key": str(key), "label": label}
+            for key, label in COMMUNITY_LABELS.items()
+        ],
         "media_visibility": await settings_service.get_media_visibility(session),
     }
 

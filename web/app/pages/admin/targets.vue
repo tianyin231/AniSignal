@@ -29,9 +29,17 @@ const form = reactive({
   co_terms: '',
   min_views: 10000,
   tier: 'general',
+  community: 'wuwa',
 })
 const creating = ref(false)
 const formError = ref<string | null>(null)
+
+const communityLabels: Record<string, string> = { wuwa: '鸣潮', blhx: '碧蓝航线' }
+// 分区筛选：全部 | 鸣潮 | 碧蓝航线
+const communityFilter = ref<'' | 'wuwa' | 'blhx'>('')
+const filteredTargets = computed(() =>
+  communityFilter.value ? targets.value.filter(t => t.community === communityFilter.value) : targets.value,
+)
 
 const availableTypes = computed(() => combos[form.platform] ?? [])
 watch(() => form.platform, () => { form.target_type = availableTypes.value[0] ?? 'keyword_search' })
@@ -61,6 +69,7 @@ async function create() {
         co_terms: form.co_terms.split(/[,，]/).map((x: string) => x.trim()).filter(Boolean),
         min_views: Number(form.min_views) || 0,
         tier: form.tier,
+        community: form.community,
       },
     })
     form.target_value = ''
@@ -182,6 +191,10 @@ onMounted(refreshRuns)
         <option value="core">准入分级：核心关键词（全量入库，强及时）</option>
         <option value="general">准入分级：泛关键词（走共现词与热度门槛）</option>
       </select>
+      <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="所属游戏分区：决定内容与事件的归属">
+        <option value="wuwa">分区：鸣潮</option>
+        <option value="blhx">分区：碧蓝航线</option>
+      </select>
       <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5">
       <input v-model.number="form.min_views" type="number" min="0" :placeholder="form.tier === 'core' ? '最低播放量（核心分级可选，0 不过滤）' : '最低播放量（默认 10000；0 不过滤）'" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
@@ -192,12 +205,28 @@ onMounted(refreshRuns)
 
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <h2 class="text-sm font-semibold">目标列表</h2>
+      <div class="flex items-center gap-1">
+        <button
+          v-for="option in [['', '全部分区'], ['wuwa', '鸣潮'], ['blhx', '碧蓝航线']] as const"
+          :key="option[0]"
+          class="rounded-full px-2.5 py-1 text-xs transition-colors"
+          :class="communityFilter === option[0] ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
+          @click="communityFilter = option[0]"
+        >
+          {{ option[1] }}
+        </button>
+      </div>
+    </div>
+
     <div class="panel overflow-hidden">
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
             <th class="px-3 py-2.5 font-medium">目标</th>
             <th class="px-2.5 py-2.5 font-medium">平台 · 类型</th>
+            <th class="px-2.5 py-2.5 font-medium">分区</th>
             <th class="px-2.5 py-2.5 font-medium">分级</th>
             <th class="px-2.5 py-2.5 font-medium">播放门槛</th>
             <th class="px-2.5 py-2.5 font-medium">频率</th>
@@ -206,7 +235,7 @@ onMounted(refreshRuns)
           </tr>
         </thead>
         <tbody>
-          <tr v-for="target in targets" :key="target.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5">
+          <tr v-for="target in filteredTargets" :key="target.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5">
             <td class="px-3 py-2.5">
               <span class="font-medium">{{ target.display_name && target.display_name !== target.target_value ? target.display_name : target.target_value }}</span>
               <span v-if="target.display_name && target.display_name !== target.target_value" class="mono ml-1.5 text-xs text-slate-400">{{ target.target_value }}</span>
@@ -215,6 +244,14 @@ onMounted(refreshRuns)
               {{ platformLabels[target.platform] ?? target.platform }}
               <span class="text-slate-400">·</span>
               {{ targetTypeLabels[target.target_type] ?? target.target_type }}
+            </td>
+            <td class="whitespace-nowrap px-2.5 py-2.5">
+              <span
+                class="chip whitespace-nowrap"
+                :class="target.community === 'blhx' ? 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+              >
+                {{ communityLabels[target.community] ?? target.community }}
+              </span>
             </td>
             <td class="whitespace-nowrap px-2.5 py-2.5">
               <button
@@ -241,7 +278,7 @@ onMounted(refreshRuns)
             </td>
           </tr>
           <tr v-if="targets.length === 0">
-            <td colspan="7" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
+            <td colspan="8" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
           </tr>
         </tbody>
       </table>

@@ -24,15 +24,16 @@ const tab = computed({
 const q = computed(() => String(route.query.q || ''))
 
 const { api } = usePublicApi()
+const { community } = useGameSection()
 const { data: eventsData, status: eventsStatus } = await useAsyncData(
-  () => `search-events-${q.value}`,
-  () => (q.value ? api<ApiEventList>('/api/events', { query: { q: q.value, limit: 30 } }) : Promise.resolve({ items: [], total: 0 })),
-  { watch: [q] },
+  () => `search-events-${community.value}-${q.value}`,
+  () => (q.value ? api<ApiEventList>('/api/events', { query: { community: community.value, q: q.value, limit: 30 } }) : Promise.resolve({ items: [], total: 0 })),
+  { watch: [community, q] },
 )
 const { data: contentsData, status: contentsStatus } = await useAsyncData(
-  () => `search-contents-${q.value}`,
-  () => (q.value ? api<PublicContentList>('/api/contents', { query: { q: q.value, limit: 30 } }) : Promise.resolve({ items: [], total: 0 })),
-  { watch: [q] },
+  () => `search-contents-${community.value}-${q.value}`,
+  () => (q.value ? api<PublicContentList>('/api/contents', { query: { community: community.value, q: q.value, limit: 30 } }) : Promise.resolve({ items: [], total: 0 })),
+  { watch: [community, q] },
 )
 const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const contents = computed(() => (contentsData.value?.items ?? []).map(toRawItem))

@@ -20,7 +20,7 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
         <NuxtLink to="/" class="flex items-center gap-2">
           <img src="/icon.png" alt="" class="size-7 shrink-0">
           <span class="text-[15px] font-semibold tracking-tight">AniSignal</span>
-          <span class="chip ml-1 bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300">鸣潮事件雷达</span>
+          <span class="chip ml-1 bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300">游戏事件雷达</span>
         </NuxtLink>
         <NuxtLink to="/" class="text-sm text-slate-500 transition-colors hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-100">
           直接浏览 →

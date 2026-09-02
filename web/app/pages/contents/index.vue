@@ -17,22 +17,38 @@ watch(q, (v) => (searchInput.value = v))
 const pageSize = 30
 
 const { api } = usePublicApi()
+const { community } = useGameSection()
 const { data, status } = await useAsyncData(
-  () => `contents-${platform.value}-${q.value}-${page.value}`,
+  () => `contents-${community.value}-${platform.value}-${q.value}-${page.value}`,
   () =>
     api<PublicContentList>('/api/contents', {
       query: {
+        community: community.value,
         limit: pageSize,
         offset: (page.value - 1) * pageSize,
         ...(platform.value ? { platform: platform.value } : {}),
         ...(q.value ? { q: q.value } : {}),
       },
     }),
-  { watch: [platform, q, page] },
+  { watch: [community, platform, q, page] },
 )
 
 const list = computed(() => (data.value?.items ?? []).map(toRawItem))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
+
+// 平台筛选随分区变化：碧蓝航线当前只有 B 站来源，库街区/YouTube 是鸣潮专属
+const platformsByCommunity: Record<string, string[]> = {
+  wuwa: ['bilibili', 'youtube', 'kuro'],
+  blhx: ['bilibili'],
+}
+const visiblePlatformTabs = computed(() =>
+  (platformsByCommunity[community.value] ?? ['bilibili']).filter(key => key in platformMeta),
+)
+watch(community, () => {
+  if (platform.value && !visiblePlatformTabs.value.includes(platform.value)) {
+    applyQuery({ platform: undefined })
+  }
+})
 
 function applyQuery(patch: Record<string, string | undefined>) {
   router.replace({ query: { ...route.query, page: undefined, ...patch } })
@@ -60,13 +76,13 @@ function applyQuery(patch: Record<string, string | undefined>) {
         全部平台
       </button>
       <button
-        v-for="(meta, key) in platformMeta"
+        v-for="key in visiblePlatformTabs"
         :key="key"
         class="rounded-full px-3 py-1 text-xs transition-colors"
         :class="platform === key ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
         @click="applyQuery({ platform: key })"
       >
-        {{ meta.label }}
+        {{ platformMeta[key as Platform]?.label }}
       </button>
     </div>
 

@@ -9,6 +9,7 @@ export interface CollectTarget {
   interval_minutes: number
   enabled: boolean
   tier: 'core' | 'general'
+  community: 'wuwa' | 'blhx'
   co_terms: string[]
   min_views: number
   next_run_at: string | null
@@ -29,6 +30,7 @@ export interface ContentItem {
   platform: string
   content_type: string
   external_id: string
+  community: 'wuwa' | 'blhx'
   url: string | null
   published_at: string | null
   collected_at: string

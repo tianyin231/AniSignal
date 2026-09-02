@@ -31,6 +31,7 @@ class MatchContent:
     title: str
     text: str
     category: str | None
+    community: str = "wuwa"
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,7 @@ async def _load_recent_official(session: AsyncSession) -> list[MatchContent]:
             title=(version.title or raw.external_id).strip(),
             text=_plain(version.text or "")[:800],
             category=version.category,
+            community=getattr(raw, "community", None) or "wuwa",
         )
         for raw, version in result
     ]
@@ -178,6 +180,9 @@ def _candidate_pairs(
     for index, left in enumerate(rows):
         for right in rows[index + 1 :]:
             if left.platform == right.platform:
+                continue
+            # 跨分区（鸣潮/碧蓝航线）的官方内容永不配对
+            if left.community != right.community:
                 continue
             if base_ids and left.id not in base_ids and right.id not in base_ids:
                 continue

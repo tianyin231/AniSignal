@@ -21,6 +21,7 @@ class CollectTargetCreate(BaseModel):
     co_terms: list[str] = Field(default_factory=list)
     min_views: int = Field(default=0, ge=0, le=10_000_000)
     tier: str = Field(default="general", pattern="^(core|general)$")
+    community: str = Field(default="wuwa", pattern="^(wuwa|blhx)$")
 
 
 class CollectTargetUpdate(BaseModel):
@@ -31,6 +32,7 @@ class CollectTargetUpdate(BaseModel):
     co_terms: list[str] | None = None
     min_views: int | None = Field(default=None, ge=0, le=10_000_000)
     tier: str | None = Field(default=None, pattern="^(core|general)$")
+    community: str | None = Field(default=None, pattern="^(wuwa|blhx)$")
 
 
 class CollectTargetOut(BaseModel):
@@ -44,6 +46,7 @@ class CollectTargetOut(BaseModel):
     co_terms: list[str] = []
     min_views: int = 0
     tier: str = "general"
+    community: str = "wuwa"
     next_run_at: datetime | None
 
     @field_validator("co_terms", mode="before")
@@ -78,6 +81,7 @@ class ContentItemOut(BaseModel):
     platform: Platform
     content_type: str
     external_id: str
+    community: str = "wuwa"
     url: str | None
     published_at: datetime | None
     collected_at: datetime
@@ -159,6 +163,7 @@ class PublicSource(BaseModel):
     enabled: bool
     last_success_at: datetime | None
     consecutive_failures: int
+    community: str = "wuwa"
 
 
 class PublicSourceList(BaseModel):
@@ -287,6 +292,7 @@ class EventOut(BaseModel):
     summary_status: str | None = None
     summary_updated_at: datetime | None = None
     category: str
+    community: str = "wuwa"
     product_id: int | None
     product_slug: str | None
     identity: str
@@ -398,6 +404,7 @@ class ProductOut(BaseModel):
     slug: str
     name: str
     publisher: str | None
+    community: str = "wuwa"
     skus: list[str]
     price_note: str | None
     presale_at: str | None
@@ -431,6 +438,7 @@ class ProductCreate(BaseModel):
     slug: str | None = Field(default=None, min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     publisher: str | None = Field(default=None, max_length=255)
+    community: str = Field(default="wuwa", pattern="^(wuwa|blhx)$")
     skus: list[str] = Field(default_factory=list)
     price_note: str | None = Field(default=None, max_length=64)
     presale_at: str | None = Field(default=None, max_length=64)
@@ -445,6 +453,7 @@ class ProductCreate(BaseModel):
 class ProductUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     publisher: str | None = Field(default=None, max_length=255)
+    community: str | None = Field(default=None, pattern="^(wuwa|blhx)$")
     skus: list[str] | None = None
     price_note: str | None = Field(default=None, max_length=64)
     presale_at: str | None = Field(default=None, max_length=64)
@@ -463,6 +472,7 @@ class RuleCreate(BaseModel):
     platform: str | None = Field(default=None, max_length=32)
     priority: int = Field(default=100, ge=0, le=1000)
     enabled: bool = True
+    community: str | None = Field(default=None, pattern="^(wuwa|blhx)$")
 
 
 class RuleOut(RuleCreate):

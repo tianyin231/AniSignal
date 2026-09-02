@@ -6,7 +6,12 @@ import type { PublicSource } from '~/composables/usePublicApi'
 useSeoMeta({ title: '来源健康' })
 
 const { api } = usePublicApi()
-const { data } = await useAsyncData('public-sources', () => api<{ items: PublicSource[] }>('/api/sources'))
+const { community } = useGameSection()
+const { data } = await useAsyncData(
+  () => `public-sources-${community.value}`,
+  () => api<{ items: PublicSource[] }>('/api/sources', { query: { community: community.value } }),
+  { watch: [community] },
+)
 
 const regionOf: Record<string, Region> = {
   bilibili: 'cn',
