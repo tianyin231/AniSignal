@@ -33,7 +33,83 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
   → 公开 API → Nuxt SSR
 ```
 
-三条不可违反的数据原则：**原始数据不可覆盖**（改解析产生新 version）；**AI 结果可以重算**（`POST /api/admin/reparse` 全量重算解析+分类+聚合；`POST /api/admin/ai/summarize-all` 补摘要）；**事件结论可以修正**（人工编辑自动锁定，引擎跳过 locked）。
+三条不可违反的数据原则：**原始数据不可覆盖**（改解析产生新 version；管理端人工修订也产生新版本）；**AI 结果可以重算**（`POST /api/admin/reparse` 全量重算解析+分类+聚合；`POST /api/admin/ai/summarize-all` 补摘要）；**事件结论可以修正**（人工编辑自动锁定，引擎跳过 locked）。
+
+## 游戏分区（2026-09-02 上线，鸣潮/碧蓝航线）
+
+- **community 字段贯穿全链路**（迁移 0024）：collect_targets / raw_contents / events / products 带
+  `community`（`wuwa`=鸣潮默认存量回填 / `blhx`=碧蓝航线），classification_rules.community 可空
+  （NULL=全分区通用，履约词典等共享规则不需要每游戏复制一份）。
+- 归属规则：内容 community **首次入库时由采集目标写入，之后不随其他目标翻转**（避免双游戏联动内容
+  来回跳分区）；事件 community 由聚合引擎按证据分区写入（跨分区证据永不合并——`_rule_clusters`
+  输入按分区切分、`_candidate_pairs` 跨分区不配对）；商品履约只在同分区内容池里匹配 watch_terms。
+- 0024 迁移回填：存量行全回 wuwa 后，按 matched_keywords 含「碧蓝航线/碧蓝航线官方账号动态」把
+  已采内容划入 blhx（MySQL 走 JSON_CONTAINS、SQLite 走 json_each，注意方言分支）；同时播种
+  碧蓝官方动态目标（UID 233114659，bili CLI 核验认证"碧蓝航线官方账号"，tier=core）。
+- 公开 API（/contents /events /products /highlights /sources /official-links）都带 `community` 查询
+  参数，**默认 wuwa**，非法值 422；official-links 缓存按分区各存一份。审核提示词
+  （`_review_system_prompt`）、AI 摘要提示词按分区模板化游戏名；`_load_known_terms` 词表只加载
+  本分区目标关键词 + 通用规则。
+- B 站官方身份判定改多账号映射（parsers/bilibili.py `_official_mids`：鸣潮 1955897084 +
+  碧蓝 233114659，config `azur_lane_bili_mid` 可覆盖）；YouTube 官方白名单配置化
+  （`official_youtube_channels`，"频道ID:名称"逗号分隔）。
+- 前端：`useGameSection.ts` 是分区唯一状态源（URL query 优先 → localStorage 回退 → 默认 wuwa；
+  默认分区不写进 URL 保持干净）。顶栏品牌右侧是分区 tablist；导航 links 会带上分区 query；
+  切分区重置页码。各数据页 key/参数/watch 都要带 community（漏一个就会出现切了标签内容不换）。
+  平台筛选随分区收敛（blhx 只有 B站）；useOfficialLinks.fetchOnce(community) 带 pending 补拉
+  （挂载后 localStorage 使分区翻转时避免 loading 守卫吞掉第二次请求）。
+- 管理端：目标表单分区下拉 + 列表分区列/筛选；内容管理分区筛选+徽章；事件审核分区筛选；
+  商品表单分区下拉（自动建的 B 站监控继承商品分区）；分类词典可限定分区。
+- 坑：`_review_candidates` 里对 SQLAlchemy Result 只能迭代一次，分区词表分组前先 `.all()` 物化
+  （曾因此 candidates=0 全部漏审）。
+
+## 内容准入分级（2026-08-30）
+
+- 采集目标带 `tier` 分级（迁移 0023，存量回填 general）：**core = 特定关键词**（商品/联名/周边，
+  豁免共现词；min_views > 0 时仍作为兜底门槛）；**general = 泛关键词**（走共现词 + min_views 热度门槛，
+  在 `filter_relevant` 采集侧硬过滤）。官方 notices 目标永不过滤。
+  管理端目标表单分级选择前置、泛关键词默认门槛 10000、列表带播放门槛列（分级徽章 nowrap 防竖排）。
+- 现行策略：鸣潮泛关键词 target min_views=10000；爱弥斯联名键盘 target=core。
+  多社区扩展时按社区建目标组，每个社区的"商品/特定词"目标设 core、泛话题目标设 general+门槛。
+- 管理端适配：内容管理页每行带来源分级徽章（核心来源/泛关键词/无匹配，按 matched_keywords ∩ core 目标词表判定）与分级筛选；
+  采集目标页底部有「最近采集运行」区块（抓取→过滤→入库计数，`/api/admin/runs` 已含 items_fetched/items_filtered）。
+- 分级筛选走**全量扫描（2000 上限）+ Python 过滤分页**（SQL offset 会漏配行、total 不准）；目标行的分级徽章**可点击切换** core/general（PUT tier）。
+- 坑：目标**更新端点曾忽略 min_views/co_terms**（schema 有字段但端点不应用），已修——
+  改采集过滤策略时先确认端点真的持久化这些字段。
+- 坑：内容管理列表的审核筛选条件引用 ContentReview 但查询缺 JOIN → SQLAlchemy 隐式笛卡尔积，
+  筛选返回全部内容且 total 膨胀（曾 62866）。**where 里引用的表必须在查询里显式 JOIN**。
+- 管理端列表筛选交互为显式「查询」按钮应用（不随下拉变更即时搜索），翻页即时生效。
+
+## 履约信号 AI 预判与候选可见（2026-08-30）
+
+- 审核管线对命中商品 watch_terms 的内容追加**履约预判**（`content_reviews.fulfillment`，迁移 0021/0022）：
+  kind ∈ self_purchase/pr_sample/forward/none + confidence + reason。
+- 小模型（agnes-2.5-flash）长指令下**常丢尾部的 fulfillment 字段**：解析侧在 product_context 存在且字段缺失时，
+  从 category_hint（unboxing/arrived）与理由正向词（自购/订单优先于送测/样品，注意"非官方送测"否定语境）确定性推导，置信 60。
+  kind 别名映射（unboxing/arrived→self_purchase 等）也在解析层。
+- 信号列表（`list_product_signals`）带 `ai_hint`：管理端候选按 AI 建议排序（自购开箱置顶）+ 预判徽章；
+  公开侧候选信号标注"AI 预判（仍需人工核验）"。核验工作流本身仍是人工（products 管理页逐条确认）。
+- 质量轴新增候选关注态：**≥2 个独立来源的未核验质量候选 → `candidate_attention`「多账号反馈质量问题」**（单来源不触发）。
+- 三轴快照带 `ai_preview`：无核验数据时聚合候选的 AI 预判（如"5 条自购开箱候选（依据…）"），
+  履约信号卡在对应轴下以蓝色"AI 预判"行展示。侧栏履约信号卡支持多商品 chips 切换（当前单商品不显示）。
+- 商品列表卡带 `latest_candidate`（最新候选摘要+未核验标注）；右栏履约信号卡展示最新 2 条候选。
+- 教训：改迁移前先 `git log` 检查并行会话是否也加了迁移（曾撞号 0021 双 head 导致站点重启循环）。
+
+## 官方外链聚合（2026-08-30）
+
+- `GET /api/official-links`：扫描近 30 天官方身份内容正文里的 http(s) 链接，剔除图片/静态资源主机（hdslb 等），按 host 分类（kuro/bilibili/youtube/miyoushe/web），去重取最新 30 条；进程内缓存 5 分钟。
+- 管理端内容治理动作（下架/删除/修订）会调用 `invalidate_official_links_cache()` 立即失效缓存。
+- 模板链接过滤：同 URL 在扫描窗口出现 ≥3 次（每条官方内容都带的下载页/官网/社媒签名块）剔除；社媒黑名单（Facebook/Twitter/Discord/Reddit/TikTok/Instagram/频道页）直接排除——否则 YouTube 简介的固定链接块会刷屏。
+- 链接名称两级来源：**AI 审核时顺带提取**（`content_reviews.links`，简体中文名称如"B站主题收藏集"，面板优先用）；未审核内容回退规则提取（锚文本/前文短语）。审核完成会自动失效外链缓存。规则回退会跳过 AI 已提取过的内容。
+- 侧栏「工具」与「官方链接」是两个独立面板。
+- 前端 `OfficialLinks.vue` 双形态：桌面在侧栏下方列表（variant=list），移动端（lg 以下）在首页 tab 行下方横滑条（variant=strip）；`useOfficialLinks` 共享状态，首处触发拉取。
+
+## 内容审核门禁（2026-08-30）
+
+- 每次采集后对所有新入库内容**逐条多模态 AI 审核**（`review_contents`，标题+正文+封面图，Semaphore(4) 并发，AI 配置走 site_settings('ai')）；判定 relevant/promotional/violation/quality_score 存 `content_reviews`。
+- **违规（violation）→ 自动 `raw_contents.hidden=true`；不相关（relevant=false）→ 仅非官方内容自动下架**（官方账号豁免相关性下架——新角色/新活动常超出模型知识库）。相关性判据不靠模型记忆：提示词注入管理员词表（采集目标关键词+分类词典，`_load_known_terms`）与内容的 matched_keywords，命中词表即相关，明确禁止以"不认识"判无关；管理员在词典补录新角色名即可让审核跟上版本更新。AI 失败保持可见（fail-open）。公开侧全量过滤 hidden：内容流/详情(404)/精选/事件证据(views.events_to_out)/账号关注流/邮件候选；事件聚合本身保留，仅证据列表过滤。
+- 管理端内容页（/admin/contents「内容管理」）：审核徽章（违规/不相关/AI 分数+理由）、筛选（平台/审核结果/仅看已下架/标题搜索）、操作=下架|恢复（PATCH visibility）+ 修订（PATCH，产生新版本）+ 删除（DELETE，FK 级联，事件保留）+ 重审（POST review，清旧判定入队，队列抽象 `enqueue_review`）。
+- 判定要克制是 prompt 明文要求；恢复后重新审核仍会按新判定再次下架。
 
 ## 降噪与信息分层（2026-08-23 上线）
 
@@ -41,7 +117,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 - 首页信息分层：**近期聚合结论 + 社区观察 > 官方原始内容**；内容按 `published_at` 排序（缺失时才回退 `collected_at`），禁止新回填的旧内容抢占顶部。事件按最新有效证据时间排序。
 - 采集目标支持 `co_terms`（共现词：标题/简介须至少命中一个）与 `min_views`（热度门槛）——入口在管理看板采集目标表单。
 - YouTube RSS 同时支持官方与精选社区频道；只有官方 channel ID 白名单标记为 official，社区频道必须配置 `co_terms` 避免混入其他游戏。
-- 内容与事件均带 `matched_keywords`（采集关键词溯源，多词共现合并展示），前端显示为蓝色 chips。
+- 内容与事件均带 `matched_keywords`（采集关键词溯源）；蓝色 chips 只在内容行展示，事件行 2026-08-30 起精简为 身份+来源账号+平台徽章+功能状态（类目/地区/证据数/可信度/关键词 chips 已移除，详情页仍可见）。
 
 ## 事件引擎（规则版）
 
@@ -49,7 +125,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 - 聚合规则：官方同类目+72h 内+标题公共子串 ≥4 字符才合并（宁缺勿滥，不同主题绝不合并——曾因"同类目唯一活跃事件可延续"兜底导致误合并，已删）；商品事件按 watch_terms 匹配标题。
 - 履约阶梯（products.computed_stage）：送测样品→首位用户到货→多名独立用户到货（≥3 独立账号）→…；stage_hint 可手动覆盖（-1=自动）。
 - 事件 facts 结构化关键事实（引擎模板生成，AI 摘要可覆盖）；置顶=importance（管理端事件列表 ☆ 按钮）。
-- 已知边界：**跨语言公告不会自动合并**（中英标题无共享词，留给 AI 语义匹配）；B 站 DRAW 图文动态正文/图片 CLI 拿不到（列表与详情接口均空，bili 0.3.0 的动态接口被 -352 风控门挡住，匿名无解，页面有诚实的"查看原文"降级）。
+- 已知边界：**跨语言公告不会自动合并**（中英标题无共享词，留给 AI 语义匹配）。B 站 DRAW 图文动态的正文/图片走匿名公开详情补全（`_enrich_draw_dynamics`），B 站风控瞬时拒绝时会有空动态入库——**自愈回填** `_backfill_empty_draw_dynamics` 会在后续动态采集时重试近 7 天的空动态（每轮最多 5 条），大部分能补回；个别被彻底拒绝的保持"查看原文"降级。
 
 ## AI 层（2026-08-23 上线，管理端 `/admin/ai` 页）
 
@@ -59,10 +135,12 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 - **每次调用记 ai_usage 表**（task/tokens 明细/费用/耗时/状态）；`/admin/ai` 页有用量总览（窗口+累计，按任务分布）与最近调用明细。
 - 未配置时任务安全跳过（skipped: ai_not_configured）。
 
-## 账号系统（2026-08-23 上线）
+## 账号系统（2026-08-23 上线，账号中心 2026-08-29 整理）
 
-- 邮箱+密码（scrypt 标准库），服务端会话（httpOnly cookie，改密/重置吊销全部会话）；验证码 6 位/15 分钟/5 次，发码与登录限频，防枚举文案。
+- 邮箱+密码（scrypt 标准库），服务端会话（httpOnly cookie，改密/重置吊销全部会话）；验证码 6 位/15 分钟/5 次，发码与登录限频，防枚举文案。**登录用户必然已验证**（register/login/重置均不建未验证会话），`/account` 不需要未验证引导 UI。
 - 用户关键词监控（user_keywords，10 个上限，启停切换）→「我的关注流」（标题命中，分页 20/页）；资料：昵称+12 个预设头像（渐变色卡，白名单校验，无紫色）。
+- 账号中心（2026-08-29 整理）：不展示订阅（未上线）；关键词 chip 带命中数（`GET /api/account/keywords` 返回 `matches`，union_all 单查询）且**点击 chip 可筛选关注流**（`GET /api/account/feed?keyword_id=`，条目 `matched_keywords` 标注命中的用户关键词，响应含 `new_today` 近 24h 采集数）；改密默认折叠。登录页/账号页按钮在 IAB 自动化里 click 可能因 actionability 超时，可用 `form.requestSubmit()` 兜底。
+- 站点背景可选随机壁纸（2026-08-29）：`GET /api/wallpaper` 返回 JSON `{url}`（解析 api.yppp.net 最终原图地址，每次刷新新图、2s 去重防抖），前端**图床 CDN 直连**显示。**不要把壁纸字节引到本站出口**：实测用户到图床 CDN ~4MB/s、到本站仅 ~180KB/s，服务端压缩转发（试过 Pillow→WebP+LQIP）反而慢数倍，已回退只留解析+下载代理；`/wallpaper/download?url=` 只转发 15min 内签发过的地址（内存签发集，防开放代理），保证下载的就是当前展示那张。前端 `useWallpaper`（localStorage `anisignal-wallpaper`，与主题同级）；顶栏 `WallpaperToggle` 按钮**以 status 为 key 重挂载**（否则 PROPS-only patchFlag 按钮的子节点不更新、图标不渲染）；失败自动回退默认极光背景。覆盖 default/account/auth 布局，管理看板不接壁纸。
 - 路由：`/login /register /forgot /account`（auth 布局：极简品牌头+表单+真实数据预览栏）；登录/注册后进账号中心。
 - 邮件：通用 SMTP 热配置（管理端站点设置页，含测试发信）；未配置时验证码落库，`GET /api/admin/email-codes` 可查。
 
@@ -90,7 +168,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 
 - **时间**：存储 UTC（naive），展示北京时间；全站格式 `YYYY/MM/DD HH:mm`（`utils/admin-types.ts fmtTime`）。
 - **MySQL**：utf8mb4；新表迁移必须给存量行回填默认值（0007 漏回填曾致 /api/admin/overview 500）。
-- **前端**（web/README.md）：三栏论坛布局、macOS 玻璃材质、论坛蓝、无紫色系、mono 时间戳；身份标签色系见 data.ts identityMeta。页面文案走 site-config（`useSiteConfig().t(key)` 带默认值）。
+- **前端**（web/README.md）：三栏论坛布局、macOS 玻璃材质、论坛蓝、无紫色系、mono 时间戳；身份标签色系见 data.ts identityMeta。页面文案走 site-config（`useSiteConfig().t(key)` 带默认值）。品牌图标是 Q 版看板娘（`web/public/icon.png`，favicon 32px / apple-touch-icon 180px 同源图），顶栏与 account/auth 布局品牌位用 `<img src="/icon.png">`，favicon 配置在 nuxt.config `app.head.link`。
 - **管理端交互**：所有异步按钮必须有 busy 文案+toast（useAdminToast，右下角带时间戳）；禁止 alert()。
 - **模板改动必须浏览器实测**（本会话两次因批处理脚本引入模板结构 bug——嵌套 `<a>`、灯箱插入错位——构建通过但渲染碎裂；验收用 DOM snapshot/截图，不能只看构建和状态码）。
 

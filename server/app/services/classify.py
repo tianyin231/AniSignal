@@ -97,7 +97,7 @@ async def load_rules(session: AsyncSession) -> list[ClassificationRule]:
 
 
 def classify_content(
-    normalized: NormalizedContent, rules: list[ClassificationRule]
+    normalized: NormalizedContent, rules: list[ClassificationRule], community: str = "wuwa"
 ) -> str | None:
     haystack = " ".join(
         part for part in (normalized.title or "", normalized.text or "") if part
@@ -105,6 +105,9 @@ def classify_content(
     if haystack:
         for rule in rules:
             if rule.platform and rule.platform != normalized.platform:
+                continue
+            # community 为空的规则全分区通用，否则只作用于对应分区
+            if rule.community and rule.community != community:
                 continue
             if rule.pattern in haystack:
                 return rule.category

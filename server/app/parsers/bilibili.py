@@ -9,7 +9,17 @@ from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 PARSER_VERSION = "4"
 
 # 已知官方账号（身份判定用；账号 UID 由配置注入，此处仅做兜底）
-_OFFICIAL_MID = "1955897084"  # 鸣潮官方账号，见 data-sources.md
+_OFFICIAL_MIDS = {"1955897084", "233114659"}  # 鸣潮官方 / 碧蓝航线官方，见 data-sources.md
+
+
+def _official_mids() -> set[str]:
+    """官方账号 UID 集合：配置优先（鸣潮/碧蓝航线），空值跳过。"""
+    from app.config import get_settings
+
+    settings = get_settings()
+    configured = {settings.wuthering_waves_bili_mid, settings.azur_lane_bili_mid}
+    known = {mid for mid in configured if mid} or _OFFICIAL_MIDS
+    return {str(mid) for mid in known}
 
 
 def parse_video(raw: dict) -> NormalizedContent:
@@ -40,6 +50,8 @@ def parse_video(raw: dict) -> NormalizedContent:
 
 # CLI 对部分动态类型（如 DRAW）不展开正文与图片字段；采集器会用匿名公开详情补全，
 # 若平台临时拒绝详情请求，仍用类型标签作为可追溯的展示标题。
+# 自愈：动态采集入库后 _backfill_empty_draw_dynamics 会重试近 7 天的空 DRAW 动态
+# （collect.py，每轮最多 5 条；B 站风控瞬时拒绝的场景可在后续轮次补回）。
 _DYNAMIC_TYPE_LABELS = {
     "DYNAMIC_TYPE_DRAW": "图文动态",
     "DYNAMIC_TYPE_ARTICLE": "专栏动态",
@@ -51,7 +63,7 @@ _DYNAMIC_TYPE_LABELS = {
 def parse_dynamic(raw: dict) -> NormalizedContent:
     dynamic_id = str(raw.get("id") or "")
     author = _author(raw.get("author_mid"), raw.get("author_name"))
-    if author.external_id == _OFFICIAL_MID:
+    if author.external_id in _official_mids():
         author.identity = Identity.OFFICIAL
     metrics = {
         "like": _int(raw.get("stat_like")),
@@ -98,7 +110,7 @@ def _display_title(text: str | None) -> str | None:
 
 
 def _author(mid, name) -> NormalizedAuthor:
-    identity = Identity.OFFICIAL if str(mid) == _OFFICIAL_MID else Identity.UNKNOWN
+    identity = Identity.OFFICIAL if str(mid) in _official_mids() else Identity.UNKNOWN
     return NormalizedAuthor(
         external_id=str(mid) if mid is not None else None,
         name=name or None,

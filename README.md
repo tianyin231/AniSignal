@@ -37,3 +37,17 @@ docker compose up -d --build    # 建表随启动自动执行
 ```
 
 服务器代码更新走 `git bundle`（私有仓库无服务器凭据）+ `docker compose up -d --build`，完整流程见 skill「部署速查」。后端测试：`cd server && uv run pytest`。
+
+## 恢复服务器监控
+
+监控配置和历史数据保留在服务器 `/www/monitoring`。需要恢复时执行：
+
+```bash
+ssh us3q
+sudo systemctl enable --now cloudphone-collect.service
+cd /www/monitoring
+docker compose up -d
+docker compose ps
+```
+
+Grafana 地址：`http://154.40.58.230:3000`。再次停用时执行 `docker compose down`，并运行 `sudo systemctl disable --now cloudphone-collect.service`。

@@ -29,10 +29,13 @@ class Event(Base):
     __tablename__ = "events"
     __table_args__ = (
         Index("ix_events_active_updated", "is_active", "last_updated_at"),
+        Index("ix_events_community_active", "community", "is_active"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
+    # 所属游戏分区：由聚合引擎按证据的分区写入（与证据保持一致）
+    community: Mapped[str] = mapped_column(String(16), default="wuwa")
     summary: Mapped[str | None] = mapped_column(Text)
     summary_status: Mapped[str | None] = mapped_column(String(16))  # ai/fallback/manual
     summary_updated_at: Mapped[datetime | None] = mapped_column(DateTime)

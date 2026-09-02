@@ -38,21 +38,28 @@ const officialPlatform = computed({
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 20
 
+const { community } = useGameSection()
 const { api } = usePublicApi()
 
 const eventsRequest = useAsyncData(
-  () => `home-briefing-${page.value}`,
+  () => `home-briefing-${community.value}-${page.value}`,
   () => api<ApiEventList>('/api/events', {
-    query: { published_within_hours: 168, limit: pageSize, offset: (page.value - 1) * pageSize },
+    query: {
+      community: community.value,
+      published_within_hours: 168,
+      limit: pageSize,
+      offset: (page.value - 1) * pageSize,
+    },
   }),
-  { watch: [page] },
+  { watch: [page, community] },
 )
 const feedRequest = useAsyncData(
-  () => `home-feed-${tab.value}-${officialPlatform.value}-${page.value}`,
+  () => `home-feed-${community.value}-${tab.value}-${officialPlatform.value}-${page.value}`,
   () =>
     tab.value === 'latest' || tab.value === 'official'
       ? api<PublicContentList>('/api/contents', {
           query: {
+            community: community.value,
             limit: pageSize,
             offset: (page.value - 1) * pageSize,
             ...(tab.value === 'official'
@@ -65,15 +72,25 @@ const feedRequest = useAsyncData(
           },
         })
       : Promise.resolve({ items: [], total: 0 }),
-  { watch: [tab, officialPlatform, page] },
+  { watch: [tab, officialPlatform, page, community] },
 )
-const highlightsRequest = useAsyncData('home-highlights', () =>
-  api<PublicContentList>('/api/highlights', { query: { limit: 5 } }),
+const highlightsRequest = useAsyncData(
+  () => `home-highlights-${community.value}`,
+  () => api<PublicContentList>('/api/highlights', { query: { community: community.value, limit: 5 } }),
+  { watch: [community] },
 )
-const communityHighlightsRequest = useAsyncData('home-community-highlights', () =>
-  api<PublicContentList>('/api/contents', {
-    query: { exclude_identity: 'official', published_within_hours: 168, sort: 'hot', limit: 8 },
+const communityHighlightsRequest = useAsyncData(
+  () => `home-community-highlights-${community.value}`,
+  () => api<PublicContentList>('/api/contents', {
+    query: {
+      community: community.value,
+      exclude_identity: 'official',
+      published_within_hours: 168,
+      sort: 'hot',
+      limit: 8,
+    },
   }),
+  { watch: [community] },
 )
 const [
   { data: eventsData, status: eventsStatus },
@@ -147,12 +164,13 @@ async function checkForUpdates() {
     let head: string | null = null
     if (isBriefing.value) {
       const res = await $fetch<ApiEventList>('/api/events', {
-        query: { published_within_hours: 168, limit: 1 },
+        query: { community: community.value, published_within_hours: 168, limit: 1 },
       })
       head = res.items[0]?.id != null ? String(res.items[0].id) : null
     } else if (tab.value === 'official' || tab.value === 'latest') {
       const res = await $fetch<PublicContentList>('/api/contents', {
         query: {
+          community: community.value,
           limit: 1,
           ...(tab.value === 'official'
             ? {
@@ -181,7 +199,7 @@ async function applyUpdates() {
   await refreshHome()
 }
 
-watch([tab, officialPlatform, page], () => {
+watch([tab, officialPlatform, page, community], () => {
   pendingNewContent.value = false
 })
 

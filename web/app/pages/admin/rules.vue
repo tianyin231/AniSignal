@@ -27,7 +27,7 @@ const categoryLabels: Record<string, string> = {
   official_announce: '官方公告', promotion: '推广', other: '其他',
 }
 
-const form = reactive({ category: 'unboxing', pattern: '', priority: 100 })
+const form = reactive({ category: 'unboxing', pattern: '', priority: 100, community: '' })
 
 async function refresh() {
   try {
@@ -42,7 +42,7 @@ async function create() {
   if (!form.pattern.trim()) return
   busy.value = true
   try {
-    await api('/api/admin/classification-rules', { method: 'POST', body: { ...form, pattern: form.pattern.trim() } })
+    await api('/api/admin/classification-rules', { method: 'POST', body: { ...form, community: form.community || null, pattern: form.pattern.trim() } })
     toast.ok('规则已新增；点击「全量重算」生效')
     form.pattern = ''
     await refresh()
@@ -113,6 +113,11 @@ async function reparseAll() {
         <option v-for="c in categories" :key="c" :value="c">{{ categoryLabels[c] ?? c }}</option>
       </select>
       <input v-model="form.pattern" placeholder="关键词，如 翻车" class="flex-1 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="通用规则对全部分区生效；限定后只作用于该分区">
+        <option value="">全部游戏</option>
+        <option value="wuwa">仅鸣潮</option>
+        <option value="blhx">仅碧蓝航线</option>
+      </select>
       <input v-model.number="form.priority" type="number" min="0" max="1000" class="mono w-24 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
       <button type="submit" class="btn-primary px-4 py-2" :disabled="busy || !form.pattern.trim()">新增</button>
     </form>

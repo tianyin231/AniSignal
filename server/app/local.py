@@ -44,6 +44,15 @@ SEED_TARGETS = [
         interval_minutes=60,
         enabled=False,
     ),
+    dict(
+        platform="bilibili",
+        target_type="keyword_search",
+        target_value="碧蓝航线",
+        display_name="B站搜索·碧蓝航线（需 Docker 内运行）",
+        interval_minutes=60,
+        enabled=False,
+        community="blhx",
+    ),
 ]
 
 
@@ -60,7 +69,7 @@ async def init_db() -> None:
                 [CollectTarget(**spec, next_run_at=utcnow()) for spec in SEED_TARGETS]
             )
             await session.commit()
-            print("已播种演示目标：鸣潮官网公告（启用）+ B站搜索·鸣潮（停用）")
+            print("已播种演示目标：鸣潮官网公告（启用）+ B站搜索·鸣潮 / 碧蓝航线（停用，带分区标记）")
 
 
 def main() -> None:

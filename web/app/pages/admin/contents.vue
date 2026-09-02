@@ -11,6 +11,7 @@ const toast = useAdminToast()
 const items = ref<ContentItem[]>([])
 const total = ref(0)
 const platform = ref<string>('')
+const communityFilter = ref<string>('')
 const reviewFilter = ref<string>('')
 const tierFilter = ref<string>('')
 const hiddenOnly = ref(false)
@@ -27,6 +28,7 @@ async function refresh() {
   try {
     const query: Record<string, string | number | boolean> = { limit: pageSize, offset: (page.value - 1) * pageSize }
     if (platform.value) query.platform = platform.value
+    if (communityFilter.value) query.community = communityFilter.value
     if (reviewFilter.value) query.review = reviewFilter.value
     if (hiddenOnly.value) query.hidden = true
     if (tierFilter.value) query.tier = tierFilter.value
@@ -48,7 +50,7 @@ function applyFilters() {
 
 onMounted(refresh)
 // 翻页立即生效；筛选条件变更后需点击「查询」应用，避免无效查询压力
-watch([platform, reviewFilter, hiddenOnly, tierFilter], () => {
+watch([platform, communityFilter, reviewFilter, hiddenOnly, tierFilter], () => {
   page.value = 1
 })
 watch(page, refresh)
@@ -183,6 +185,14 @@ async function rereview(item: ContentItem) {
           <option value="none">无匹配词</option>
         </select>
         <select
+          v-model="communityFilter"
+          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+        >
+          <option value="">全部分区</option>
+          <option value="wuwa">鸣潮</option>
+          <option value="blhx">碧蓝航线</option>
+        </select>
+        <select
           v-model="reviewFilter"
           class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
         >
@@ -232,7 +242,13 @@ async function rereview(item: ContentItem) {
               <span class="mono text-xs text-slate-400">v{{ item.version ?? '?' }} · {{ item.external_id }}</span>
               <p v-if="item.review?.reason" class="mt-0.5 truncate text-xs text-slate-400 dark:text-zinc-500" :title="item.review.reason">AI：{{ item.review.reason }}</p>
             </td>
-            <td class="whitespace-nowrap px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabels[item.platform] ?? item.platform }}</td>
+            <td class="whitespace-nowrap px-4 py-2.5 text-slate-600 dark:text-zinc-300">
+              {{ platformLabels[item.platform] ?? item.platform }}
+              <span
+                class="chip ml-1 whitespace-nowrap"
+                :class="item.community === 'blhx' ? 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+              >{{ item.community === 'blhx' ? '碧蓝' : '鸣潮' }}</span>
+            </td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <span
                 class="chip"

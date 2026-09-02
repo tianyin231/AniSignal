@@ -76,10 +76,14 @@ async def get_queue(request: Request) -> BaseQueue:
 
 
 @router.get("/collect-targets", response_model=list[CollectTargetOut])
-async def list_targets(session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(CollectTarget).order_by(CollectTarget.platform, CollectTarget.id)
-    )
+async def list_targets(
+    community: str | None = Query(default=None, pattern="^(wuwa|blhx)$", description="游戏分区"),
+    session: AsyncSession = Depends(get_session),
+):
+    query = select(CollectTarget).order_by(CollectTarget.platform, CollectTarget.id)
+    if community:
+        query = query.where(CollectTarget.community == community)
+    result = await session.execute(query)
     return list(result.scalars())
 
 
@@ -110,6 +114,7 @@ async def create_target(
         co_terms=body.co_terms,
         min_views=body.min_views,
         tier=body.tier,
+        community=body.community,
         next_run_at=utcnow() if body.enabled else None,
     )
     session.add(target)
@@ -147,6 +152,8 @@ async def update_target(
         target.target_value = body.target_value
     if body.tier is not None:
         target.tier = body.tier
+    if body.community is not None:
+        target.community = body.community
     if body.min_views is not None:
         target.min_views = body.min_views
     if body.co_terms is not None:
@@ -206,6 +213,7 @@ async def overview(
 @router.get("/contents", response_model=ContentListOut)
 async def list_contents(
     platform: str | None = Query(default=None),
+    community: str | None = Query(default=None, pattern="^(wuwa|blhx)$", description="游戏分区"),
     hidden: bool | None = Query(default=None),
     review: str | None = Query(default=None, description="violation / irrelevant / ok"),
     q: str | None = Query(default=None, description="标题关键词"),
@@ -217,6 +225,8 @@ async def list_contents(
     conditions = []
     if platform:
         conditions.append(RawContent.platform == platform)
+    if community:
+        conditions.append(RawContent.community == community)
     if hidden is not None:
         conditions.append(RawContent.hidden.is_(hidden))
     if q:
@@ -308,6 +318,7 @@ async def list_contents(
             platform=raw.platform,
             content_type=raw.content_type,
             external_id=raw.external_id,
+            community=getattr(raw, "community", None) or "wuwa",
             url=raw.url,
             published_at=raw.published_at,
             collected_at=raw.collected_at,
@@ -493,6 +504,7 @@ async def list_runs(
 @router.get("/events", response_model=EventListOut)
 async def list_events(
     category: str | None = Query(default=None),
+    community: str | None = Query(default=None, pattern="^(wuwa|blhx)$", description="游戏分区"),
     include_inactive: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -503,6 +515,8 @@ async def list_events(
         conditions.append(Event.is_active.is_(True))
     if category:
         conditions.append(Event.category == category)
+    if community:
+        conditions.append(Event.community == community)
     total = await session.scalar(select(func.count(Event.id)).where(*conditions)) or 0
     events = list(
         (
@@ -737,6 +751,7 @@ async def create_product(body: ProductCreate, session: AsyncSession = Depends(ge
                 enabled=True,
                 co_terms=[],
                 min_views=0,
+                community=body.community,
                 next_run_at=utcnow(),
             )
             session.add(target)

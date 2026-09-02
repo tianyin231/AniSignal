@@ -1,0 +1,112 @@
+"""游戏分区（community）单测：入库归属、词典作用域、事件隔离、公开 API 过滤。"""
+
+from sqlalchemy import func, select
+
+from app.models import ClassificationRule, Event, Evidence, RawContent
+from app.services.classify import classify_content, seed_defaults
+from app.services.events import run_aggregation
+from app.services.ingest import ingest_items
+
+from tests.test_parsers_bilibili import VIDEO_RAW
+
+
+def _video(bvid: str, title: str, owner_mid: int = 100, owner: str = "用户") -> dict:
+    return dict(VIDEO_RAW, bvid=bvid, title=title, owner_mid=owner_mid, owner_name=owner, description="")
+
+
+async def test_ingest_assigns_community(session):
+    await ingest_items(session, "bilibili_search", [_video("BVw1", "鸣潮视频")], community="wuwa")
+    await ingest_items(session, "bilibili_search", [_video("BVb1", "碧蓝航线视频")], community="blhx")
+    rows = {r.external_id: r.community for r in (await session.execute(select(RawContent))).scalars()}
+    assert rows["BVw1"] == "wuwa"
+    assert rows["BVb1"] == "blhx"
+
+
+async def test_classification_rule_community_scope(session):
+    await seed_defaults(session)
+    # 分区专属规则：碧蓝航线专属词只作用于 blhx，鸣潮专属词只作用于 wuwa
+    session.add_all(
+        [
+            ClassificationRule(category="review", pattern="舰船强化", priority=1, community="blhx"),
+            ClassificationRule(category="review", pattern="声骸强化", priority=1, community="wuwa"),
+        ]
+    )
+    await session.commit()
+    rules = list((await session.execute(select(ClassificationRule))).scalars())
+    # 通用规则（community=NULL）对两个分区都生效
+    assert classify_content(_norm("键盘开箱"), rules, "blhx") == "unboxing"
+    assert classify_content(_norm("键盘开箱"), rules, "wuwa") == "unboxing"
+    # 分区专属规则只对对应分区生效
+    assert classify_content(_norm("舰船强化指南"), rules, "blhx") == "review"
+    assert classify_content(_norm("舰船强化指南"), rules, "wuwa") is None
+    assert classify_content(_norm("声骸强化指南"), rules, "wuwa") == "review"
+    assert classify_content(_norm("声骸强化指南"), rules, "blhx") is None
+
+
+def _norm(title: str):
+    from app.models.enums import Identity, Platform
+    from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
+
+    return NormalizedContent(
+        platform=Platform.BILIBILI,
+        content_type=ContentType.VIDEO,
+        external_id="BVtest",
+        author=NormalizedAuthor(external_id="1", name="x", identity=Identity.USER),
+        title=title,
+    )
+
+
+async def test_official_events_isolated_by_community(session):
+    """同标题、同类目的官方公告，因分区不同不合并；事件归属各自分区。"""
+    await seed_defaults(session)
+    # 官方身份走解析器的官方 mid 集合（鸣潮 1955897084 / 碧蓝航线 233114659）
+    wuwa_a = _video("BVoff1", "周年庆版本延期发货公告", owner_mid=1955897084, owner="鸣潮")
+    wuwa_b = _video("BVoff2", "周年庆版本延期发货公告（更新）", owner_mid=1955897084, owner="鸣潮")
+    blhx_a = _video("BVblhx1", "周年庆版本延期发货公告", owner_mid=233114659, owner="碧蓝航线")
+    await ingest_items(session, "bilibili_search", [wuwa_a, wuwa_b], community="wuwa")
+    await ingest_items(session, "bilibili_search", [blhx_a], community="blhx")
+
+    stats = await run_aggregation(session)
+    assert stats.events_created == 2
+
+    events = list((await session.execute(select(Event))).scalars())
+    by_community = {}
+    for event in events:
+        by_community.setdefault(event.community, []).append(event)
+    assert {len(v) for v in by_community.values()} == {1}
+    assert set(by_community) == {"wuwa", "blhx"}
+    # 鸣潮事件两条证据，碧蓝航线事件一条
+    evidence_counts = dict(
+        (await session.execute(
+            select(Evidence.event_id, func.count(Evidence.id)).group_by(Evidence.event_id)
+        )).all()
+    )
+    wuwa_event = by_community["wuwa"][0]
+    blhx_event = by_community["blhx"][0]
+    assert evidence_counts[wuwa_event.id] == 2
+    assert evidence_counts[blhx_event.id] == 1
+
+
+async def test_community_content_isolation_on_reingest(session):
+    """同一内容被另一分区的目标再次采集时，community 保持首次入库值不翻转。"""
+    await ingest_items(session, "bilibili_search", [_video("BVmix", "联动视频")], community="wuwa")
+    await ingest_items(session, "bilibili_search", [_video("BVmix", "联动视频")], community="blhx")
+    raw = await session.scalar(select(RawContent).where(RawContent.external_id == "BVmix"))
+    assert raw.community == "wuwa"
+
+
+async def test_public_contents_community_filter(client, session):
+    await ingest_items(session, "bilibili_search", [_video("BVw1", "鸣潮视频")], community="wuwa")
+    await ingest_items(session, "bilibili_search", [_video("BVb1", "碧蓝航线视频")], community="blhx")
+    await session.commit()
+
+    default = await client.get("/api/contents")
+    assert default.json()["total"] == 1  # 默认只返回鸣潮分区
+    assert default.json()["items"][0]["external_id"] == "BVw1"
+
+    blhx = await client.get("/api/contents", params={"community": "blhx"})
+    assert blhx.json()["total"] == 1
+    assert blhx.json()["items"][0]["external_id"] == "BVb1"
+
+    invalid = await client.get("/api/contents", params={"community": "other"})
+    assert invalid.status_code == 422

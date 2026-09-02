@@ -25,6 +25,8 @@ class Product(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     slug: Mapped[str] = mapped_column(String(64), unique=True)
     name: Mapped[str] = mapped_column(String(255))
+    # 所属游戏分区：决定履约证据从哪个分区的内容池匹配
+    community: Mapped[str] = mapped_column(String(16), default="wuwa")
     publisher: Mapped[str | None] = mapped_column(String(255))
     skus: Mapped[list] = mapped_column(JSON, default=list)
     price_note: Mapped[str | None] = mapped_column(String(64))

@@ -114,7 +114,7 @@ async def _backfill_empty_draw_dynamics(
 
     cutoff = utcnow() - timedelta(days=7)
     rows = (await session.execute(text(
-        "SELECT rc.id, rc.external_id, rc.raw_json "
+        "SELECT rc.id, rc.external_id, rc.raw_json, rc.community "
         "FROM raw_contents rc JOIN content_versions cv ON cv.raw_content_id=rc.id "
         "AND cv.version=(SELECT MAX(version) FROM content_versions WHERE raw_content_id=rc.id) "
         "WHERE rc.content_type='dynamic' AND rc.platform='bilibili' "
@@ -125,9 +125,9 @@ async def _backfill_empty_draw_dynamics(
     if not rows:
         return 0
 
-    enriched_items: list[dict] = []
+    enriched_by_community: dict[str, list[dict]] = {}
     touched: list[int] = []
-    for rid, external_id, raw_json in rows:
+    for rid, external_id, raw_json, community in rows:
         if not external_id:
             continue
         try:
@@ -148,15 +148,18 @@ async def _backfill_empty_draw_dynamics(
             raw = {}
         item = dict(raw)
         item.update({"id": external_id, "text": rich.get("text") or "", "pics": rich.get("pics") or []})
-        enriched_items.append(item)
+        enriched_by_community.setdefault(community or "wuwa", []).append(item)
         touched.append(rid)
-    if enriched_items:
-        await ingest_items(session, "bilibili_dynamics", enriched_items)
+    total = 0
+    for community, items in enriched_by_community.items():
+        await ingest_items(session, "bilibili_dynamics", items, community=community)
+        total += len(items)
+    if total:
         logger.info(
             "backfilled %s empty DRAW dynamics with anonymous detail: %s",
-            len(enriched_items), touched,
+            total, touched,
         )
-    return len(enriched_items)
+    return total
 
 
 async def run_collection(redis, target_id: int) -> dict:
@@ -201,7 +204,9 @@ async def run_collection(redis, target_id: int) -> dict:
                     "target %s: %s items filtered by relevance rules",
                     target.id, filtered_out,
                 )
-            stats = await ingest_items(session, fetch_result.fetch_kind, fetch_result.items)
+            stats = await ingest_items(
+                session, fetch_result.fetch_kind, fetch_result.items, community=target.community
+            )
             if fetch_result.fetch_kind == "bilibili_dynamics":
                 try:
                     await _backfill_empty_draw_dynamics(session, collector_factory())
