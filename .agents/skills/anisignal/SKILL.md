@@ -191,6 +191,9 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 - **MySQL**：utf8mb4；新表迁移必须给存量行回填默认值（0007 漏回填曾致 /api/admin/overview 500）。
 - **前端**（web/README.md）：三栏论坛布局、macOS 玻璃材质、论坛蓝、无紫色系、mono 时间戳；身份标签色系见 data.ts identityMeta。页面文案走 site-config（`useSiteConfig().t(key)` 带默认值）。品牌图标是 Q 版看板娘（`web/public/icon.png`，favicon 32px / apple-touch-icon 180px 同源图），顶栏与 account/auth 布局品牌位用 `<img src="/icon.png">`，favicon 配置在 nuxt.config `app.head.link`。
 - **管理端交互**：所有异步按钮必须有 busy 文案+toast（useAdminToast，右下角带时间戳）；禁止 alert()。
+- **禁止解释性填充小字**（2026-09-05 用户明确要求）：吸顶导航/列表区不放"××按分区独立组织""当前分区：××"
+  这类灰色说明 caption——无价值小字加大信息密度、显得低级没有活人感；状态信息用视觉载体表达
+  （分区=频道下划线+强调条颜色，功能=可点击的控件），文字只出现在有操作或数据语义的地方。
 - **模板改动必须浏览器实测**（本会话两次因批处理脚本引入模板结构 bug——嵌套 `<a>`、灯箱插入错位——构建通过但渲染碎裂；验收用 DOM snapshot/截图，不能只看构建和状态码）。
 
 ## 部署速查（服务器 us3q / 154.40.58.230）
