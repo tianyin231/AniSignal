@@ -253,12 +253,12 @@ async function saveSignal() {
       <div class="mt-4 max-w-xl">
         <label class="text-xs text-slate-500 dark:text-zinc-400">
           商品名称 <span class="text-red-500">*</span>
-          <input v-model="form.name" required class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" placeholder="如：爱弥斯联名机械键盘">
+          <input v-model="form.name" required class="input mt-1 w-full px-3 py-2 text-sm" placeholder="如：爱弥斯联名机械键盘">
         </label>
       </div>
 
       <label v-if="!editing" class="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-sm">
-        <input v-model="form.create_bilibili_target" type="checkbox" class="mt-0.5 accent-blue-600">
+        <input v-model="form.create_bilibili_target" type="checkbox" class="checkbox mt-0.5">
         <span>
           <span class="font-medium text-slate-700 dark:text-zinc-200">同时创建 B 站关键词监控</span>
           <span class="mt-0.5 block text-xs text-slate-500 dark:text-zinc-400">默认按完整商品名、每 30 分钟采集；已有同名监控会直接复用。</span>
@@ -270,21 +270,21 @@ async function saveSignal() {
         <div class="mt-3 grid gap-3 sm:grid-cols-3">
           <label class="text-xs text-slate-500 sm:col-span-2 dark:text-zinc-400">
             内容匹配词
-            <input v-model="form.watch_terms" required class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" placeholder="逗号分隔" @input="termsTouched = true">
+            <input v-model="form.watch_terms" required class="input mt-1 w-full px-3 py-2 text-sm" placeholder="逗号分隔" @input="termsTouched = true">
             <span class="mt-1 block text-[11px] text-slate-400">已按商品名自动生成；避免改成角色名等过宽词。</span>
           </label>
-          <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="所属游戏分区：履约证据从对应分区的内容池匹配">
+          <select v-model="form.community" class="select px-3 py-2 text-sm" title="所属游戏分区：履约证据从对应分区的内容池匹配">
             <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
           </select>
-          <input v-model="form.slug" :disabled="!!editing" placeholder="URL 标识，留空自动生成" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm disabled:opacity-50 dark:border-white/15 dark:bg-white/5">
-          <input v-model="form.publisher" placeholder="发行方" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-model="form.skus" placeholder="SKU（逗号分隔）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-model="form.price_note" placeholder="价格说明" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-model="form.presale_at" placeholder="预售日期" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-model="form.balance_window" placeholder="尾款窗口" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-model="form.original_ship_at" placeholder="原定发货" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-model="form.ship_note" placeholder="发货说明" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-          <input v-if="!editing && form.create_bilibili_target" v-model="form.monitor_keyword" placeholder="B站搜索词，留空用完整商品名" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model="form.slug" :disabled="!!editing" placeholder="URL 标识，留空自动生成" class="input px-3 py-2 text-sm disabled:opacity-50">
+          <input v-model="form.publisher" placeholder="发行方" class="input px-3 py-2 text-sm">
+          <input v-model="form.skus" placeholder="SKU（逗号分隔）" class="input px-3 py-2 text-sm">
+          <input v-model="form.price_note" placeholder="价格说明" class="input px-3 py-2 text-sm">
+          <input v-model="form.presale_at" placeholder="预售日期" class="input px-3 py-2 text-sm">
+          <input v-model="form.balance_window" placeholder="尾款窗口" class="input px-3 py-2 text-sm">
+          <input v-model="form.original_ship_at" placeholder="原定发货" class="input px-3 py-2 text-sm">
+          <input v-model="form.ship_note" placeholder="发货说明" class="input px-3 py-2 text-sm">
+          <input v-if="!editing && form.create_bilibili_target" v-model="form.monitor_keyword" placeholder="B站搜索词，留空用完整商品名" class="input px-3 py-2 text-sm">
         </div>
       </details>
 
@@ -333,30 +333,30 @@ async function saveSignal() {
           <p class="text-sm font-medium">审核 #{{ editingSignal.id }}</p>
           <div class="mt-3 grid gap-3">
             <label class="text-xs text-slate-500">审核状态
-              <select v-model="signalForm.review_status" class="mt-1 min-h-11 w-full rounded-md border border-slate-900/10 bg-white px-3 text-sm dark:border-white/15 dark:bg-zinc-900">
+              <select v-model="signalForm.review_status" class="select mt-1 min-h-11 w-full bg-white px-3 text-sm dark:bg-zinc-900">
                 <option value="candidate">待核验</option><option value="verified">已核验</option><option value="rejected">驳回</option><option value="conflict">证据冲突</option>
               </select>
             </label>
             <div class="grid grid-cols-2 gap-3">
               <label class="text-xs text-slate-500">主体
-                <select v-model="signalForm.actor_type" class="mt-1 min-h-11 w-full rounded-md border border-slate-900/10 bg-white px-2 text-sm dark:border-white/15 dark:bg-zinc-900">
+                <select v-model="signalForm.actor_type" class="select mt-1 min-h-11 w-full bg-white px-2 text-sm dark:bg-zinc-900">
                   <option value="unknown">待确认</option><option value="official">官方</option><option value="user">普通用户</option><option value="seeded">送测账号</option><option value="media">媒体</option><option value="merchant">商家</option>
                 </select>
               </label>
               <label class="text-xs text-slate-500">获取方式
-                <select v-model="signalForm.acquisition_type" class="mt-1 min-h-11 w-full rounded-md border border-slate-900/10 bg-white px-2 text-sm dark:border-white/15 dark:bg-zinc-900">
+                <select v-model="signalForm.acquisition_type" class="select mt-1 min-h-11 w-full bg-white px-2 text-sm dark:bg-zinc-900">
                   <option value="unknown">待确认</option><option value="self_purchase">自购</option><option value="seeded">送测</option>
                 </select>
               </label>
             </div>
             <label class="text-xs text-slate-500">事实摘要
-              <textarea v-model="signalForm.summary" rows="2" required class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"></textarea>
+              <textarea v-model="signalForm.summary" rows="2" required class="textarea mt-1 w-full px-3 py-2 text-sm"></textarea>
             </label>
             <label class="text-xs text-slate-500">原文摘录
-              <textarea v-model="signalForm.claim_quote" rows="3" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"></textarea>
+              <textarea v-model="signalForm.claim_quote" rows="3" class="textarea mt-1 w-full px-3 py-2 text-sm"></textarea>
             </label>
             <label class="text-xs text-slate-500">审核备注
-              <textarea v-model="signalForm.note" rows="2" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"></textarea>
+              <textarea v-model="signalForm.note" rows="2" class="textarea mt-1 w-full px-3 py-2 text-sm"></textarea>
             </label>
           </div>
           <div class="mt-4 flex items-center gap-3">
@@ -371,7 +371,7 @@ async function saveSignal() {
     <div class="mb-3 flex items-center gap-2">
       <select
         v-model="communityFilter"
-        class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+        class="select px-3 py-2 text-sm"
       >
         <option value="">全部分区</option>
         <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>

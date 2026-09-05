@@ -154,23 +154,23 @@ async function translateMissing() {
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div class="sm:col-span-2">
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">Base URL</label>
-          <input v-model="config.base_url" placeholder="https://api.deepseek.com/v1" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model="config.base_url" placeholder="https://api.deepseek.com/v1" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">模型名</label>
-          <input v-model="config.model" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model="config.model" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">API Key（留空保留）</label>
-          <input v-model="config.api_key" type="password" placeholder="sk-…" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model="config.api_key" type="password" placeholder="sk-…" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">输入单价（/百万 tokens）</label>
-          <input v-model.number="config.price_in" type="number" step="0.1" min="0" class="mono mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model.number="config.price_in" type="number" step="0.1" min="0" class="input mono mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">输出单价（/百万 tokens）</label>
-          <input v-model.number="config.price_out" type="number" step="0.1" min="0" class="mono mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model.number="config.price_out" type="number" step="0.1" min="0" class="input mono mt-1 w-full px-3 py-2 text-sm">
         </div>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
@@ -196,7 +196,7 @@ async function translateMissing() {
     <section class="panel p-5">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-semibold">用量统计</h2>
-        <select v-model.number="days" class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/5" @change="loadUsage">
+        <select v-model.number="days" class="select px-2 py-1 text-xs" @change="loadUsage">
           <option :value="1">近 1 天</option>
           <option :value="7">近 7 天</option>
           <option :value="30">近 30 天</option>

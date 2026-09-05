@@ -377,7 +377,7 @@ async function changePassword() {
         <h3 class="text-sm font-semibold">编辑资料</h3>
         <label class="mt-3 block text-xs font-medium text-slate-500 dark:text-zinc-400">昵称（留空则使用邮箱前缀）</label>
         <input v-model="nameDraft" maxlength="24" placeholder="最多 24 个字符"
-          class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          class="input mt-1 w-full px-3 py-2 text-sm">
         <p class="mt-3 block text-xs font-medium text-slate-500 dark:text-zinc-400">头像</p>
         <div class="mt-2 grid grid-cols-6 gap-2">
           <button
@@ -412,7 +412,7 @@ async function changePassword() {
             <div class="relative flex-1">
               <Plus :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input id="keyword-input" v-model="newKeyword" placeholder="添加关键词，如 爱弥斯 / 菲比 / 3.6 版本" maxlength="64"
-                class="w-full rounded-md border border-slate-900/10 bg-white/70 py-2 pl-8 pr-3 text-sm dark:border-white/15 dark:bg-white/5">
+                class="input w-full py-2 pl-8 pr-3 text-sm">
             </div>
             <button type="submit" class="btn-primary shrink-0 px-4 py-2" :disabled="busy || !newKeyword.trim()">添加</button>
           </form>
@@ -464,7 +464,7 @@ async function changePassword() {
           <form class="mt-3 grid gap-2 sm:grid-cols-[7rem_1fr]" @submit.prevent="createCustomFeed">
             <select
               v-model="customForm.kind"
-              class="rounded-md border border-slate-900/10 bg-white/70 px-2.5 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+              class="select px-2.5 py-2 text-sm"
             >
               <option value="keyword">关键词监控</option>
               <option value="uid">UID 监控</option>
@@ -472,12 +472,12 @@ async function changePassword() {
             <input
               v-model="customForm.target_value"
               :placeholder="customForm.kind === 'uid' ? 'B 站 UID（纯数字）' : '监控关键词'"
-              class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+              class="input px-3 py-2 text-sm"
             />
             <input
               v-model="customForm.name"
               placeholder="监控名称（如：某UP主动态 / 某话题）"
-              class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5"
+              class="input px-3 py-2 text-sm sm:col-span-2"
             />
             <input
               v-if="customForm.kind === 'keyword'"
@@ -485,14 +485,14 @@ async function changePassword() {
               type="number"
               min="0"
               placeholder="播放量门槛（可选）"
-              class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+              class="input px-3 py-2 text-sm"
             />
             <div class="flex flex-wrap items-center gap-4 sm:col-span-2">
               <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
-                <input v-model="customForm.push_enabled" type="checkbox" class="size-4 accent-blue-600" /> 新消息邮件推送
+                <input v-model="customForm.push_enabled" type="checkbox" class="checkbox" /> 新消息邮件推送
               </label>
               <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
-                <input v-model="customForm.is_public" type="checkbox" class="size-4 accent-blue-600" /> 公开到全站
+                <input v-model="customForm.is_public" type="checkbox" class="checkbox" /> 公开到全站
               </label>
               <button type="submit" class="btn-primary ml-auto px-4 py-2 text-sm" :disabled="customBusy">创建监控</button>
             </div>
@@ -673,9 +673,9 @@ async function changePassword() {
           <p v-if="!showSecurity" class="mt-1 text-xs text-slate-400 dark:text-zinc-500">修改密码后其他登录会话将全部退出。</p>
           <template v-else>
             <input v-model="oldPassword" type="password" autocomplete="current-password" placeholder="原密码"
-              class="mt-3 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+              class="input mt-3 w-full px-3 py-2 text-sm">
             <input v-model="newPassword" type="password" autocomplete="new-password" placeholder="新密码（至少 8 位）"
-              class="mt-2.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+              class="input mt-2.5 w-full px-3 py-2 text-sm">
             <p v-if="securityErr" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ securityErr }}</p>
             <p v-if="securityMsg" class="mt-2 text-xs text-emerald-600 dark:text-emerald-400">{{ securityMsg }}</p>
             <button class="btn-primary mt-3 w-full px-4 py-2" :disabled="busy || !oldPassword || !newPassword" @click="changePassword">

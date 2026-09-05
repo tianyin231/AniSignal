@@ -59,7 +59,7 @@ function applyQuery(patch: Record<string, string | undefined>) {
       <form class="flex items-center gap-2" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
         <div class="flex items-center gap-1.5 rounded-md border border-slate-900/10 bg-white/70 px-2.5 py-1.5 dark:border-white/15 dark:bg-white/5">
           <Search :size="13" class="text-slate-400" />
-          <input v-model="searchInput" placeholder="标题关键词" class="w-36 bg-transparent text-xs outline-none sm:w-48" >
+          <input v-model="searchInput" placeholder="标题关键词" class="w-36 bg-transparent text-xs outline-none placeholder:text-slate-400 sm:w-48" >
         </div>
         <button type="submit" class="btn-primary px-3 py-1.5 text-xs">搜索</button>
       </form>

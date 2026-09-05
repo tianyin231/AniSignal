@@ -18,7 +18,7 @@ function go() {
       type="search"
       aria-label="站内搜索"
       placeholder="搜索事件 / 主题"
-      class="w-40 rounded-md border border-slate-200/80 bg-white/60 py-1.5 pl-8 pr-2 text-xs outline-none backdrop-blur transition-all placeholder:text-slate-400 focus:w-56 focus:border-blue-400 dark:border-zinc-700/60 dark:bg-white/5 dark:text-zinc-200"
+      class="input w-40 py-1.5 pl-8 pr-2 text-xs transition-all focus:w-56 dark:text-zinc-200"
       @keydown.enter.prevent="go"
     />
   </form>

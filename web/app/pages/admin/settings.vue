@@ -284,19 +284,19 @@ async function saveTexts() {
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div>
           <label for="smtp-host" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">SMTP 服务器</label>
-          <input id="smtp-host" v-model="smtp.host" placeholder="如 smtp.qq.com" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
+          <input id="smtp-host" v-model="smtp.host" placeholder="如 smtp.qq.com" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label for="smtp-port" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">端口</label>
-          <input id="smtp-port" v-model.number="smtp.port" type="number" class="mono mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
+          <input id="smtp-port" v-model.number="smtp.port" type="number" class="input mono mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label for="smtp-user" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">账号</label>
-          <input id="smtp-user" v-model="smtp.user" autocomplete="username" placeholder="xxx@qq.com" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
+          <input id="smtp-user" v-model="smtp.user" autocomplete="username" placeholder="xxx@qq.com" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label for="smtp-password" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">密码 / 授权码</label>
-          <input id="smtp-password" v-model="smtp.password" type="password" autocomplete="new-password" placeholder="留空 = 保留已存密码" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
+          <input id="smtp-password" v-model="smtp.password" type="password" autocomplete="new-password" placeholder="留空 = 保留已存密码" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div class="sm:col-span-2">
           <label for="smtp-from" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">发件人（From）</label>
@@ -304,7 +304,7 @@ async function saveTexts() {
         </div>
         <div class="sm:col-span-2">
           <label for="smtp-tls-mode" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">连接加密</label>
-          <select id="smtp-tls-mode" v-model="smtp.tls_mode" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5 sm:w-72">
+          <select id="smtp-tls-mode" v-model="smtp.tls_mode" class="select mt-1 w-full px-3 py-2 text-sm sm:w-72">
             <option value="starttls">STARTTLS（通常使用 587）</option>
             <option value="tls">SSL/TLS（通常使用 465）</option>
             <option value="none">不加密</option>
@@ -316,7 +316,7 @@ async function saveTexts() {
           <Save :size="14" /> {{ busyWhat === 'saveSmtp' ? '保存中…' : '保存 SMTP' }}
         </button>
         <label for="smtp-test-to" class="sr-only">测试收件邮箱</label>
-        <input id="smtp-test-to" v-model="testTo" type="email" placeholder="测试收件邮箱" class="min-h-11 w-52 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
+        <input id="smtp-test-to" v-model="testTo" type="email" placeholder="测试收件邮箱" class="input min-h-11 w-52 px-3 py-2 text-sm">
         <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-slate-900/10 px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15" :disabled="busy || !testTo.trim()" @click="sendTest">
           <Send :size="14" /> {{ busyWhat === 'sendTest' ? '发送中…' : '发送测试邮件' }}
         </button>
@@ -347,14 +347,14 @@ async function saveTexts() {
           <tr class="border-b border-slate-900/5 dark:border-white/10">
             <td class="px-3 py-2 font-medium text-slate-700 dark:text-zinc-200">全站默认</td>
             <td class="px-3 py-2">
-              <select v-model="mediaVisibility.default.image" class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-xs dark:border-white/15 dark:bg-white/5">
+              <select v-model="mediaVisibility.default.image" class="select px-2 py-1.5 text-xs">
                 <option value="show">显示图片</option>
                 <option value="link">仅展示链接</option>
                 <option value="hide">不显示</option>
               </select>
             </td>
             <td class="px-3 py-2">
-              <select v-model="mediaVisibility.default.video" class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-xs dark:border-white/15 dark:bg-white/5">
+              <select v-model="mediaVisibility.default.video" class="select px-2 py-1.5 text-xs">
                 <option value="show">显示视频来源</option>
                 <option value="link">仅展示链接</option>
                 <option value="hide">不显示</option>
@@ -366,7 +366,7 @@ async function saveTexts() {
             <td class="px-3 py-2">
               <select
                 :value="platformMode(p.key, 'image')"
-                class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-xs dark:border-white/15 dark:bg-white/5"
+                class="select px-2 py-1.5 text-xs"
                 @change="setPlatformMode(p.key, 'image', $event)"
               >
                 <option value="inherit">跟随全站默认</option>
@@ -378,7 +378,7 @@ async function saveTexts() {
             <td class="px-3 py-2">
               <select
                 :value="platformMode(p.key, 'video')"
-                class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-xs dark:border-white/15 dark:bg-white/5"
+                class="select px-2 py-1.5 text-xs"
                 @change="setPlatformMode(p.key, 'video', $event)"
               >
                 <option value="inherit">跟随全站默认</option>
@@ -406,7 +406,7 @@ async function saveTexts() {
         <template v-if="onepushInfo.fields.length"> · 已保存字段：{{ onepushInfo.fields.join('、') }}</template>
       </div>
       <label class="mt-4 flex min-h-11 cursor-pointer items-center gap-2 text-sm">
-        <input v-model="onepush.enabled" type="checkbox" class="rounded focus-visible:ring-2 focus-visible:ring-blue-500">
+        <input v-model="onepush.enabled" type="checkbox" class="checkbox">
         启用 OnePush 自动发送
       </label>
       <div class="mt-3">
@@ -417,7 +417,7 @@ async function saveTexts() {
           rows="5"
           spellcheck="false"
           placeholder="provider: bark&#10;key: YOUR_BARK_KEY"
-          class="mono mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5"
+          class="textarea mono mt-1 w-full px-3 py-2 text-sm leading-relaxed"
         />
         <p class="mt-1.5 text-xs text-slate-500 dark:text-zinc-400">已配置时留空保存会保留原参数；关闭开关只停止自动发送，仍可执行测试。</p>
       </div>
@@ -442,15 +442,15 @@ async function saveTexts() {
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div class="sm:col-span-2">
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">Base URL（如 https://api.deepseek.com/v1）</label>
-          <input v-model="ai.base_url" placeholder="https://api.example.com/v1" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model="ai.base_url" placeholder="https://api.example.com/v1" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">模型名（如 deepseek-chat）</label>
-          <input v-model="ai.model" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model="ai.model" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">API Key（留空 = 保留已存）</label>
-          <input v-model="ai.api_key" type="password" placeholder="sk-…" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model="ai.api_key" type="password" placeholder="sk-…" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
@@ -470,19 +470,19 @@ async function saveTexts() {
       <div class="mt-4 space-y-3">
         <div class="flex flex-wrap items-center gap-4">
           <label class="flex items-center gap-2 text-sm">
-            <input v-model="announcement.enabled" type="checkbox" class="rounded"> 启用公告
+            <input v-model="announcement.enabled" type="checkbox" class="checkbox"> 启用公告
           </label>
           <div class="flex items-center gap-2 text-sm">
             <span class="text-xs text-slate-500 dark:text-zinc-400">级别</span>
-            <select v-model="announcement.level" class="rounded-md border border-slate-900/10 bg-white/70 px-2 py-1.5 text-sm dark:border-white/15 dark:bg-white/5">
+            <select v-model="announcement.level" class="select px-2 py-1.5 text-sm">
               <option value="info">通知（蓝）</option>
               <option value="warning">警示（琥珀）</option>
             </select>
           </div>
-          <input v-model="announcement.link" placeholder="跳转链接（可选，如 /about）" class="w-56 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+          <input v-model="announcement.link" placeholder="跳转链接（可选，如 /about）" class="input w-56 px-3 py-2 text-sm">
         </div>
         <textarea v-model="announcement.text" rows="2" maxlength="500" placeholder="公告内容，如：今晚 22:00-23:00 系统维护，期间采集可能暂停。"
-          class="w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" />
+          class="textarea w-full px-3 py-2 text-sm" />
       </div>
       <button class="btn-primary mt-3 px-4 py-2" :disabled="busy" @click="saveAnnouncement">{{ busyWhat === 'saveAnnouncement' ? '保存中…' : '保存公告' }}</button>
     </section>
@@ -493,7 +493,7 @@ async function saveTexts() {
       <div class="mt-4 space-y-3">
         <div v-for="(label, key) in TEXT_LABELS" :key="key">
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">{{ label }}（{{ key }}）</label>
-          <textarea v-model="texts[key]" rows="2" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" />
+          <textarea v-model="texts[key]" rows="2" class="textarea mt-1 w-full px-3 py-2 text-sm" />
         </div>
       </div>
       <button class="btn-primary mt-4 px-4 py-2" :disabled="busy" @click="saveTexts">{{ busyWhat === 'saveTexts' ? '保存中…' : '保存文案' }}</button>

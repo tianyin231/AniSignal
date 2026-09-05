@@ -36,10 +36,10 @@ async function submit() {
       <p class="mt-1 text-sm text-slate-500 dark:text-zinc-400">全站内容免费浏览；登录用于管理订阅与通知。</p>
 
       <label class="mt-5 block text-sm font-medium" for="email">邮箱</label>
-      <input id="email" v-model="email" type="email" autocomplete="email" class="mt-1.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input id="email" v-model="email" type="email" autocomplete="email" class="input mt-1.5 w-full px-3 py-2 text-sm">
 
       <label class="mt-4 block text-sm font-medium" for="password">密码</label>
-      <input id="password" v-model="password" type="password" autocomplete="current-password" class="mt-1.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input id="password" v-model="password" type="password" autocomplete="current-password" class="input mt-1.5 w-full px-3 py-2 text-sm">
 
       <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 

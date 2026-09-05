@@ -50,7 +50,7 @@ async function submitReset() {
       </p>
 
       <label class="mt-5 block text-sm font-medium" for="email">邮箱</label>
-      <input id="email" v-model="email" type="email" autocomplete="email" class="mt-1.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input id="email" v-model="email" type="email" autocomplete="email" class="input mt-1.5 w-full px-3 py-2 text-sm">
 
       <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
@@ -67,9 +67,9 @@ async function submitReset() {
       <p class="mt-1 text-sm text-slate-500 dark:text-zinc-400">重置码已发至 <span class="mono">{{ email }}</span></p>
 
       <input v-model="code" inputmode="numeric" maxlength="6" placeholder="6 位重置码"
-        class="mono mt-5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-center text-lg tracking-[0.4em] dark:border-white/15 dark:bg-white/5">
+        class="input mono mt-5 w-full px-3 py-2 text-center text-lg tracking-[0.4em]">
       <input v-model="newPassword" type="password" autocomplete="new-password" placeholder="新密码（至少 8 位）"
-        class="mt-3 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+        class="input mt-3 w-full px-3 py-2 text-sm">
 
       <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 

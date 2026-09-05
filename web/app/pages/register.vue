@@ -73,13 +73,13 @@ async function verify() {
       <p class="mt-1 text-sm text-slate-500 dark:text-zinc-400">注册免费，用于订阅与通知；全站内容不登录也可浏览。</p>
 
       <label class="mt-5 block text-sm font-medium" for="email">邮箱</label>
-      <input id="email" v-model="email" type="email" autocomplete="email" class="mt-1.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input id="email" v-model="email" type="email" autocomplete="email" class="input mt-1.5 w-full px-3 py-2 text-sm">
 
       <label class="mt-4 block text-sm font-medium" for="password">密码（至少 8 位）</label>
-      <input id="password" v-model="password" type="password" autocomplete="new-password" class="mt-1.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input id="password" v-model="password" type="password" autocomplete="new-password" class="input mt-1.5 w-full px-3 py-2 text-sm">
 
       <label class="mt-4 block text-sm font-medium" for="confirm">确认密码</label>
-      <input id="confirm" v-model="confirm" type="password" autocomplete="new-password" class="mt-1.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input id="confirm" v-model="confirm" type="password" autocomplete="new-password" class="input mt-1.5 w-full px-3 py-2 text-sm">
 
       <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
@@ -103,7 +103,7 @@ async function verify() {
         inputmode="numeric"
         maxlength="6"
         placeholder="6 位验证码"
-        class="mono mt-5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-center text-lg tracking-[0.4em] dark:border-white/15 dark:bg-white/5"
+        class="input mono mt-5 w-full px-3 py-2 text-center text-lg tracking-[0.4em]"
       >
 
       <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
