@@ -28,12 +28,12 @@ const showingLogin = computed(() => route.path === '/admin/login')
   <div class="aurora-bg min-h-screen">
     <header class="glass sticky top-0 z-20">
       <div class="mx-auto max-w-5xl px-4 sm:px-6">
-        <div class="flex h-14 items-center gap-6">
-          <NuxtLink to="/admin" class="flex items-center gap-2">
+        <div class="flex h-14 items-center gap-4">
+          <NuxtLink to="/admin" class="flex shrink-0 items-center gap-2">
             <span class="text-base font-semibold tracking-tight">AniSignal</span>
             <span class="chip bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300">管理看板</span>
           </NuxtLink>
-          <nav v-if="!showingLogin" class="hidden items-center gap-1 text-sm md:flex">
+          <nav v-if="!showingLogin" class="hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm [scrollbar-width:none] md:flex">
             <NuxtLink
               v-for="item in nav"
               :key="item.to"
@@ -46,7 +46,7 @@ const showingLogin = computed(() => route.path === '/admin/login')
               {{ item.label }}
             </NuxtLink>
           </nav>
-          <div class="ml-auto flex items-center gap-3 text-sm">
+          <div class="ml-auto flex shrink-0 items-center gap-3 text-sm">
             <NuxtLink to="/" class="hidden text-slate-500 hover:text-slate-900 sm:block dark:text-zinc-400 dark:hover:text-zinc-100">返回站点</NuxtLink>
             <button
               v-if="token"
