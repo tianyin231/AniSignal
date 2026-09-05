@@ -111,15 +111,15 @@ async function reparseAll() {
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
     <form class="panel flex flex-wrap gap-3 p-4" @submit.prevent="create">
-      <select v-model="form.category" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <select v-model="form.category" class="select px-3 py-2 text-sm">
         <option v-for="c in categories" :key="c" :value="c">{{ categoryLabels[c] ?? c }}</option>
       </select>
-      <input v-model="form.pattern" placeholder="关键词，如 翻车" class="flex-1 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-      <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="通用规则对全部分区生效；限定后只作用于该分区">
+      <input v-model="form.pattern" placeholder="关键词，如 翻车" class="input flex-1 px-3 py-2 text-sm">
+      <select v-model="form.community" class="select px-3 py-2 text-sm" title="通用规则对全部分区生效；限定后只作用于该分区">
         <option value="">全部游戏</option>
         <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">仅{{ c.label }}</option>
       </select>
-      <input v-model.number="form.priority" type="number" min="0" max="1000" class="mono w-24 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input v-model.number="form.priority" type="number" min="0" max="1000" class="input mono w-24 px-3 py-2 text-sm">
       <button type="submit" class="btn-primary px-4 py-2" :disabled="busy || !form.pattern.trim()">新增</button>
     </form>
 

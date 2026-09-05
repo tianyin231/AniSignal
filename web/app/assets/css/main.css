@@ -138,6 +138,54 @@
   .chip {
     @apply inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs;
   }
+  /* 表单基础件：输入框 / 下拉 / 文本域（统一玻璃质感 + 聚焦光环） */
+  .input,
+  .select,
+  .textarea {
+    @apply rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none transition
+      placeholder:text-slate-400
+      dark:border-white/15 dark:bg-white/5 dark:text-zinc-100 dark:placeholder:text-zinc-500;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  }
+  .input:focus,
+  .select:focus,
+  .text-area:focus,
+  .textarea:focus {
+    border-color: rgb(96 140 250 / 0.8);
+    box-shadow: 0 0 0 3px rgb(59 130 246 / 0.15);
+  }
+  .dark .input:focus,
+  .dark .select:focus,
+  .dark .textarea:focus {
+    border-color: rgb(118 158 252 / 0.6);
+    box-shadow: 0 0 0 3px rgb(59 130 246 / 0.2);
+  }
+  /* 下拉：appearance:none + 自绘箭头（灰箭头在亮暗玻璃底上都可读） */
+  .select {
+    @apply cursor-pointer appearance-none pr-8;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+  }
+  .textarea {
+    @apply leading-relaxed;
+  }
+  /* 复选框：appearance:none 自绘（蓝色勾选块 + 白色对勾） */
+  .checkbox {
+    @apply size-4 shrink-0 cursor-pointer appearance-none rounded border border-slate-900/25 bg-white/80 transition
+      checked:border-blue-600 checked:bg-blue-600
+      dark:border-white/30 dark:bg-white/10 dark:checked:border-blue-500 dark:checked:bg-blue-500;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 11px;
+  }
+  .checkbox:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 13 4 4L19 7'/%3E%3C/svg%3E");
+  }
+  .checkbox:focus-visible {
+    outline: 2px solid rgb(59 130 246 / 0.5);
+    outline-offset: 2px;
+  }
 }
 
 /* 履约阶梯当前节点的雷达脉冲 */

@@ -178,27 +178,27 @@ onMounted(refreshRuns)
     </div>
 
     <form class="panel grid gap-3 p-5 sm:grid-cols-[9rem_9rem_1fr_6rem_auto]" @submit.prevent="create">
-      <select v-model="form.platform" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <select v-model="form.platform" class="select px-3 py-2 text-sm">
         <option v-for="(label, value) in platformLabels" :key="value" :value="value">{{ label }}</option>
       </select>
-      <select v-model="form.target_type" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <select v-model="form.target_type" class="select px-3 py-2 text-sm">
         <option v-for="type in availableTypes" :key="type" :value="type">{{ targetTypeLabels[type] ?? type }}</option>
       </select>
       <input
         v-model="form.target_value"
         placeholder="关键词 / 账号 UID / 频道 ID（公告类可留占位）"
-        class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+        class="input px-3 py-2 text-sm"
       >
-      <input v-model.number="form.interval_minutes" type="number" min="5" max="1440" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
-      <select v-model="form.tier" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5" title="核心关键词：商品/联名等特定内容，全量入库强及时；泛关键词：社区泛话题，走共现词与热度门槛">
+      <input v-model.number="form.interval_minutes" type="number" min="5" max="1440" class="input mono px-3 py-2 text-sm">
+      <select v-model="form.tier" class="select px-3 py-2 text-sm sm:col-span-2" title="核心关键词：商品/联名等特定内容，全量入库强及时；泛关键词：社区泛话题，走共现词与热度门槛">
         <option value="core">准入分级：核心关键词（全量入库，强及时）</option>
         <option value="general">准入分级：泛关键词（走共现词与热度门槛）</option>
       </select>
-      <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="所属游戏分区：决定内容与事件的归属">
+      <select v-model="form.community" class="select px-3 py-2 text-sm" title="所属游戏分区：决定内容与事件的归属">
         <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
       </select>
-      <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5">
-      <input v-model.number="form.min_views" type="number" min="0" :placeholder="form.tier === 'core' ? '最低播放量（核心分级可选，0 不过滤）' : '最低播放量（默认 10000；0 不过滤）'" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+      <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="input px-3 py-2 text-sm sm:col-span-2">
+      <input v-model.number="form.min_views" type="number" min="0" :placeholder="form.tier === 'core' ? '最低播放量（核心分级可选，0 不过滤）' : '最低播放量（默认 10000；0 不过滤）'" class="input mono px-3 py-2 text-sm">
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
         {{ creating ? '创建中…' : '新增目标' }}
       </button>

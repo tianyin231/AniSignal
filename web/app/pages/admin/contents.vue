@@ -193,12 +193,12 @@ async function rereview(item: ContentItem) {
         <input
           v-model="q"
           placeholder="标题关键词"
-          class="w-44 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="input w-44 px-3 py-2 text-sm"
           @keyup.enter="page = 1; refresh()"
         >
         <select
           v-model="tierFilter"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部分级</option>
           <option value="core">核心来源</option>
@@ -207,14 +207,14 @@ async function rereview(item: ContentItem) {
         </select>
         <select
           v-model="communityFilter"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部分区</option>
           <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
         </select>
         <select
           v-model="reviewFilter"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部审核结果</option>
           <option value="violation">违规</option>
@@ -223,13 +223,13 @@ async function rereview(item: ContentItem) {
         </select>
         <select
           v-model="platform"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部平台</option>
           <option v-for="(label, value) in platformLabels" :key="value" :value="value">{{ label }}</option>
         </select>
         <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
-          <input v-model="hiddenOnly" type="checkbox" class="size-4 accent-blue-600">
+          <input v-model="hiddenOnly" type="checkbox" class="checkbox">
           仅看已下架
         </label>
         <button class="btn-primary px-4 py-2 text-sm" :disabled="loading" @click="applyFilters">
@@ -367,13 +367,13 @@ async function rereview(item: ContentItem) {
         <label class="mt-3 block text-xs font-medium text-slate-500 dark:text-zinc-400">标题</label>
         <input
           v-model="editTitle"
-          class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="input mt-1 w-full px-3 py-2 text-sm"
         >
         <label class="mt-3 block text-xs font-medium text-slate-500 dark:text-zinc-400">正文</label>
         <textarea
           v-model="editText"
           rows="8"
-          class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="textarea mt-1 w-full px-3 py-2 text-sm"
         />
         <div class="mt-4 flex justify-end gap-2">
           <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" @click="editing = null">取消</button>

@@ -32,7 +32,7 @@ async function submit() {
         type="password"
         autocomplete="current-password"
         placeholder="admin token"
-        class="mono mt-1.5 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-white/15 dark:bg-white/5"
+        class="input mono mt-1.5 w-full px-3 py-2 text-sm focus:border-blue-500"
       />
       <p v-if="failed" class="mt-2 text-sm text-red-600 dark:text-red-400">Token 无效，请重试。</p>
       <button type="submit" class="btn-primary mt-6 w-full px-4 py-2" :disabled="checking">

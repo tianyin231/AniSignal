@@ -214,7 +214,7 @@ async function splitSelectedEvidence() {
       <div class="flex items-center gap-2">
         <select
           v-model="communityFilter"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部分区</option>
           <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
@@ -277,13 +277,13 @@ async function splitSelectedEvidence() {
           <NuxtLink :to="`/events/${selected.id}`" target="_blank" class="link text-xs">公开页 ↗</NuxtLink>
         </div>
         <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">标题</label>
-        <input v-model="edit.title" class="w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+        <input v-model="edit.title" class="input w-full px-3 py-2 text-sm">
         <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">结论</label>
-        <textarea v-model="edit.conclusion" rows="3" class="w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" />
+        <textarea v-model="edit.conclusion" rows="3" class="textarea w-full px-3 py-2 text-sm" />
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">可信度</label>
-            <select v-model="edit.confidence" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+            <select v-model="edit.confidence" class="select mt-1 w-full px-3 py-2 text-sm">
               <option value="high">high</option>
               <option value="medium">medium</option>
               <option value="low">low</option>
@@ -291,11 +291,11 @@ async function splitSelectedEvidence() {
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">状态标签</label>
-            <input v-model="edit.status_label" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+            <input v-model="edit.status_label" class="input mt-1 w-full px-3 py-2 text-sm">
           </div>
         </div>
         <label class="flex items-center gap-2 text-sm">
-          <input v-model="edit.importance" type="checkbox" class="rounded"> 标记为重要事件
+          <input v-model="edit.importance" type="checkbox" class="checkbox"> 标记为重要事件
         </label>
         <button class="btn-primary w-full px-4 py-2" :disabled="busy" @click="save">保存（自动锁定）</button>
 
@@ -327,7 +327,7 @@ async function splitSelectedEvidence() {
           <div class="max-h-72 space-y-2 overflow-y-auto pr-1">
             <div v-for="source in evidences" :key="`${source.role}-${source.content_id}`" class="rounded-md border border-slate-900/10 p-2.5 dark:border-white/10">
               <div class="flex items-start gap-2">
-                <input v-if="source.content_id" v-model="splitEvidenceIds" type="checkbox" :value="source.content_id" class="mt-1 rounded" :disabled="busy" :aria-label="`选择证据内容 #${source.content_id}`">
+                <input v-if="source.content_id" v-model="splitEvidenceIds" type="checkbox" :value="source.content_id" class="checkbox mt-1" :disabled="busy" :aria-label="`选择证据内容 #${source.content_id}`">
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-sm font-medium">{{ source.title || `内容 #${source.content_id}` }}</p>
                   <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">
@@ -360,7 +360,7 @@ async function splitSelectedEvidence() {
         <div class="border-t border-slate-900/10 pt-3 dark:border-white/10">
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">合并其他事件进来</label>
           <div class="mt-1 flex gap-2">
-            <input v-model="mergeSource" type="number" placeholder="源事件 ID" class="mono w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
+            <input v-model="mergeSource" type="number" placeholder="源事件 ID" class="input mono w-full px-3 py-2 text-sm">
             <button class="shrink-0 rounded-md border border-slate-900/10 px-3 py-2 text-sm dark:border-white/15" :disabled="busy || !mergeSource" @click="merge">合并</button>
           </div>
         </div>

@@ -129,7 +129,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <input
             v-model="qInput"
             placeholder="监控名 / 目标 / 用户邮箱"
-            class="w-56 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+            class="input w-56 px-3 py-2 text-sm"
           />
           <button type="submit" class="btn-primary px-4 py-2 text-sm" :disabled="loading">
             <Search :size="14" class="mr-1 inline" /> 搜索
@@ -137,7 +137,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
         </form>
         <select
           v-model="kindFilter"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部类型</option>
           <option value="uid">UID 监控</option>
@@ -145,7 +145,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
         </select>
         <select
           v-model="statusFilter"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部处置状态</option>
           <option value="active">正常</option>

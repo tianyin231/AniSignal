@@ -229,17 +229,17 @@ const deliveryStatusLabel: Record<string, string> = {
         <input
           v-model="broadcast.subject"
           placeholder="邮件主题（不超过 200 字）"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="input px-3 py-2 text-sm"
         />
         <textarea
           v-model="broadcast.body"
           rows="4"
           placeholder="邮件正文（纯文本，将自动套用邮件模板）"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="textarea px-3 py-2 text-sm"
         ></textarea>
         <div class="flex flex-wrap items-center gap-4">
           <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
-            <input v-model="broadcast.verified_only" type="checkbox" class="size-4 accent-blue-600" />
+            <input v-model="broadcast.verified_only" type="checkbox" class="checkbox" />
             仅发给已验证用户
           </label>
           <span class="text-xs text-slate-400 dark:text-zinc-500">封禁用户始终排除；按 50 人/批后台分批投递</span>
@@ -261,7 +261,7 @@ const deliveryStatusLabel: Record<string, string> = {
           <input
             v-model="qInput"
             placeholder="邮箱 / 昵称"
-            class="w-56 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+            class="input w-56 px-3 py-2 text-sm"
           />
           <button type="submit" class="btn-primary px-4 py-2 text-sm" :disabled="loading">
             <Search :size="14" class="mr-1 inline" /> 搜索
@@ -269,7 +269,7 @@ const deliveryStatusLabel: Record<string, string> = {
         </form>
         <select
           v-model="statusFilter"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部状态</option>
           <option value="active">正常</option>
@@ -277,7 +277,7 @@ const deliveryStatusLabel: Record<string, string> = {
         </select>
         <select
           v-model="verifiedFilter"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="select px-3 py-2 text-sm"
         >
           <option value="">全部验证状态</option>
           <option value="yes">已验证</option>
@@ -420,13 +420,13 @@ const deliveryStatusLabel: Record<string, string> = {
         <input
           v-model="mailSubject"
           placeholder="邮件主题（如：违规提醒 / 专属优惠）"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="input px-3 py-2 text-sm"
         />
         <textarea
           v-model="mailBody"
           rows="4"
           placeholder="邮件正文（纯文本，将自动套用邮件模板）"
-          class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+          class="textarea px-3 py-2 text-sm"
         ></textarea>
         <div class="flex items-center justify-end gap-2">
           <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm text-slate-600 dark:border-white/15 dark:text-zinc-300" @click="mailOpen = false">取消</button>
