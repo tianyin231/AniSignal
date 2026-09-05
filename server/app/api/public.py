@@ -530,11 +530,15 @@ _URL_PATTERN = re.compile(r"https?://[^\s<>\"'）)\]}】」]+")
 # 纯静态资源与站内图片不入链接清单
 _LINK_HOST_BLOCKLIST = ("hdslb.com", "bilivideo", "ytimg.com", "ggpht.com", "static.", "akamaized.net")
 _LINK_PATH_BLOCKLIST = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".css", ".js", ".json")
-# 官方简介里的固定社媒/频道链接是"关注我们"模板，不是活动链接
+# 官方简介里的固定社媒/频道链接是"关注我们"模板，不是活动链接；
+# 网盘与 UGC 作品页（二创作者主页、资源盘）同样不是官方公告的去处
 _LINK_SOCIAL_HOSTS = (
     "facebook.com", "twitter.com", "x.com", "discord", "reddit.com", "tiktok",
     "instagram.com", "t.me", "whatsapp", "weibo.com", "youtube.com/c/",
     "youtube.com/channel/", "hoYoLAB".lower(),
+    "pan.baidu.com", "pan.quark.cn", "pan.xunlei.com", "lanzou", "123pan",
+    "aliyundrive", "alipan.com", "share.weiyun.com", "caiyun.139.com",
+    "deviantart.com", "pixiv.net", "artstation.com",
 )
 # 模板链接判定：同一条 URL 在扫描窗口内出现 ≥3 次（下载页/官网首页每条视频都带）
 _LINK_BOILERPLATE_MIN_HITS = 3
@@ -543,6 +547,22 @@ _LINK_VIDEO_PATTERNS = (
     "bilibili.com/video/", "m.bilibili.com/video/", "bilibili.com/opus/",
     "b23.tv/", "youtube.com/watch", "youtu.be/", "youtube.com/shorts/",
 )
+# 这些"标签"看不出链接是什么内容（常见于官网英文页锚文本/正文词），回退用来源内容标题
+_LINK_GENERIC_LABELS = {
+    "information", "info", "link", "url", "here", "详情", "查看详情", "点击查看",
+    "阅读原文", "原文", "官网", "主页", "下载", "download", "news", "notice",
+    "了解更多", "learn more", "read more", "view more", "点击进入", "点击前往",
+}
+
+
+def _usable_link_label(label: str | None, url: str) -> bool:
+    text = (label or "").strip()
+    if len(text) < 2:
+        return False
+    if text.lower() in _LINK_GENERIC_LABELS:
+        return False
+    host = url.split("/")[2].lower() if url.count("/") >= 2 else ""
+    return not (host and text.lower() in host)
 
 
 def _clean_url(value: str) -> str | None:
@@ -658,7 +678,7 @@ async def _collect_official_links(session: AsyncSession, community: str) -> list
             {
                 "url": url,
                 "category": _link_category(url),
-                "label": label or title[:40],
+                "label": (label if _usable_link_label(label, url) else "") or title[:40],
                 "title": title,
                 "platform": raw.platform,
                 "published_at": raw.published_at or raw.collected_at,
@@ -675,7 +695,11 @@ def invalidate_official_links_cache() -> None:
 
 
 async def _ai_official_links(session: AsyncSession, community: str) -> list[dict]:
-    """AI 审核时提取的外链（已带简体中文名称）。"""
+    """AI 审核提取的外链（已带简体中文名称）——**仅限官方身份内容**。
+
+    用户/媒体内容的 AI 提取链接（网盘、二创作者主页等）不属于"官方动态的链接"，
+    一律不进面板；标签不可读（如官网英文页的 "information"）时回退来源内容标题。
+    """
     latest_sq = (
         select(
             ContentVersion.raw_content_id.label("rid"),
@@ -686,10 +710,17 @@ async def _ai_official_links(session: AsyncSession, community: str) -> list[dict
     )
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
     rows = await session.execute(
-        select(RawContent, ContentReview)
+        select(RawContent, ContentReview, ContentVersion)
         .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest_sq.c.rid)
+            & (ContentVersion.version == latest_sq.c.v),
+        )
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
+        .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(
+            Source.identity == "official",
             ContentReview.links.is_not(None),
             RawContent.hidden.is_(False),
             RawContent.community == community,
@@ -702,19 +733,23 @@ async def _ai_official_links(session: AsyncSession, community: str) -> list[dict
     seen: set[str] = set()
     from html import unescape
 
-    for raw, review in rows:
+    for raw, review, version in rows:
+        title = (version.title or raw.external_id)[:80]
         for link in review.links or []:
             # 历史数据可能存有 HTML 实体（&amp;），setAttribute 不解码，必须还原
             url = _clean_url(unescape(str(link.get("url") or "")))
             if not url or url in seen:
                 continue
             seen.add(url)
+            label = str(link.get("label") or "").strip()
+            if not _usable_link_label(label, url):
+                label = title[:40] or url
             items.append(
                 {
                     "url": url,
                     "category": _link_category(url),
-                    "label": (str(link.get("label") or "").strip() or url)[:80],
-                    "title": "",
+                    "label": label[:80],
+                    "title": title,
                     "platform": raw.platform,
                     "published_at": raw.published_at or raw.collected_at,
                 }

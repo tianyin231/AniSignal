@@ -31,6 +31,14 @@ function hostOf(url: string): string {
     return ''
   }
 }
+
+// tooltip：来源内容标题 + 链接名；两者相同（回退标签即标题）时只显示一份
+function tooltip(link: { title?: string, label?: string, url: string }): string {
+  const title = (link.title ?? '').trim()
+  const label = (link.label || hostOf(link.url)).trim()
+  if (!title || title === label) return label
+  return `${title} · ${label}`
+}
 </script>
 
 <template>
@@ -44,7 +52,7 @@ function hostOf(url: string): string {
           :href="link.url"
           target="_blank"
           rel="noopener"
-          :title="`${link.title} · ${link.label || hostOf(link.url)}`"
+          :title="tooltip(link)"
           class="group block rounded-md px-2 py-1.5 transition-colors hover:bg-slate-200/70 dark:hover:bg-zinc-800/70"
         >
           <span class="flex items-center gap-1.5">
