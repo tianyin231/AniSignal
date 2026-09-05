@@ -197,8 +197,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <!-- 栏目导航与刷新同处一行，顶部只有一层吸顶栏 -->
-    <div class="mb-4 flex items-center justify-between gap-2">
+    <!-- 栏目导航与刷新同处一行（磨砂玻璃质感，沿用原 Tab 条容器），顶部只有一层吸顶栏 -->
+    <div class="panel-glass mb-4 flex max-w-full items-center justify-between gap-2 rounded-[14px] p-1">
       <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-sm [scrollbar-width:none]" aria-label="站点栏目">
         <NuxtLink
           v-for="l in sectionLinks"
