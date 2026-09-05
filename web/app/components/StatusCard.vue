@@ -4,8 +4,12 @@ import type { ApiProductList } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 
 const { api } = usePublicApi()
-const { data } = await useAsyncData('status-product', () =>
-  api<ApiProductList>('/api/products'),
+const { community } = useGameSection()
+// 履约信号按分区隔离：商品列表跟随顶栏分区刷新
+const { data } = await useAsyncData(
+  () => `status-product-${community.value}`,
+  () => api<ApiProductList>('/api/products', { query: { community: community.value } }),
+  { watch: [community] },
 )
 const products = computed(() => data.value?.items ?? [])
 // 多商品：默认展示第一个，可通过 chips 切换

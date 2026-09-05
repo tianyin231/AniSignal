@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ApiProduct, ApiProductList, ApiProductSignal, ApiProductSignalList } from '~/composables/usePublicApi'
+import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_BADGE, ADMIN_COMMUNITY_LABELS } from '~/utils/admin-communities'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '商品管理 · AniSignal 管理看板' })
@@ -13,6 +14,10 @@ const fulfillmentKindLabels: Record<string, string> = {
   none: '普通资讯',
 }
 const products = ref<ApiProduct[]>([])
+const communityFilter = ref<string>('')
+const filteredProducts = computed(() =>
+  communityFilter.value ? products.value.filter(p => p.community === communityFilter.value) : products.value,
+)
 const error = ref<string | null>(null)
 const busy = ref(false)
 const toast = useAdminToast()
@@ -269,8 +274,7 @@ async function saveSignal() {
             <span class="mt-1 block text-[11px] text-slate-400">已按商品名自动生成；避免改成角色名等过宽词。</span>
           </label>
           <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="所属游戏分区：履约证据从对应分区的内容池匹配">
-            <option value="wuwa">分区：鸣潮</option>
-            <option value="blhx">分区：碧蓝航线</option>
+            <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
           </select>
           <input v-model="form.slug" :disabled="!!editing" placeholder="URL 标识，留空自动生成" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm disabled:opacity-50 dark:border-white/15 dark:bg-white/5">
           <input v-model="form.publisher" placeholder="发行方" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
@@ -364,6 +368,15 @@ async function saveSignal() {
       <p v-else class="mt-4 rounded-lg border border-dashed border-slate-900/15 p-6 text-center text-sm text-slate-400 dark:border-white/15">暂无履约信号。先采集并聚合该商品的官方、到货或质量内容。</p>
     </section>
 
+    <div class="mb-3 flex items-center gap-2">
+      <select
+        v-model="communityFilter"
+        class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+      >
+        <option value="">全部分区</option>
+        <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
+      </select>
+    </div>
     <div class="panel overflow-x-auto">
       <table class="w-full min-w-[900px] text-sm">
         <thead>
@@ -377,10 +390,11 @@ async function saveSignal() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="p in products" :key="p.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5">
+          <tr v-for="p in filteredProducts" :key="p.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5">
             <td class="px-4 py-3">
               <span class="font-medium">{{ p.name }}</span>
               <span class="mono ml-2 text-xs text-slate-400">{{ p.slug }}</span>
+              <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[p.community ?? ''] ?? 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'">{{ ADMIN_COMMUNITY_LABELS[p.community ?? ''] ?? '鸣潮' }}</span>
             </td>
             <td class="max-w-48 truncate px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.watch_terms.join(' / ') || '—' }}</td>
             <td class="max-w-48 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.fulfillment.official.state_label }}</td>
@@ -392,7 +406,7 @@ async function saveSignal() {
               <button class="min-h-11 rounded px-2 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busy" @click="remove(p)">删除</button>
             </td>
           </tr>
-          <tr v-if="!products.length">
+          <tr v-if="!filteredProducts.length">
             <td colspan="6" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无商品</td>
           </tr>
         </tbody>

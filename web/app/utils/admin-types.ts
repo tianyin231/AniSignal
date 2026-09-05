@@ -9,7 +9,8 @@ export interface CollectTarget {
   interval_minutes: number
   enabled: boolean
   tier: 'core' | 'general'
-  community: 'wuwa' | 'blhx'
+  /** 游戏分区 key（合法值集合随分区注册表扩展，见 utils/admin-communities.ts） */
+  community: string
   co_terms: string[]
   min_views: number
   next_run_at: string | null
@@ -30,7 +31,7 @@ export interface ContentItem {
   platform: string
   content_type: string
   external_id: string
-  community: 'wuwa' | 'blhx'
+  community: string
   url: string | null
   published_at: string | null
   collected_at: string

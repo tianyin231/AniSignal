@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { type Platform, type RawItem, type Region } from '~/utils/data'
 import { toRawItem } from '~/utils/public-utils'
+import { platformsForCommunity } from '~/composables/useGameSection'
 import type { PublicContentList, PublicContentItem } from '~/composables/usePublicApi'
 
 const tabs = [
@@ -15,10 +16,10 @@ const tabs = [
 const route = useRoute()
 const router = useRouter()
 const { community } = useGameSection()
-// 平台筛选随分区变化：碧蓝航线当前只有 B 站官方动态
+// 平台筛选随分区变化（映射统一在 useGameSection）：碧蓝航线当前只有 B 站官方动态
 const visibleTabs = computed(() => {
-  if (community.value === 'blhx') return tabs.filter(t => ['all', 'bilibili'].includes(t.key))
-  return tabs
+  const allowed = platformsForCommunity(community.value)
+  return tabs.filter(t => t.key === 'all' || allowed.includes(t.key))
 })
 const tab = computed({
   get: () => String(route.query.tab || 'all'),
