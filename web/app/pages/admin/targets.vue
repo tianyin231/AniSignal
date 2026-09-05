@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CollectTarget } from '~/utils/admin-types'
 import { fmtTime, platformLabels, targetTypeLabels } from '~/utils/admin-types'
+import { ADMIN_COMMUNITIES } from '~/utils/admin-communities'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '采集目标 · AniSignal 管理看板' })
@@ -34,7 +35,9 @@ const form = reactive({
 const creating = ref(false)
 const formError = ref<string | null>(null)
 
-const communityLabels: Record<string, string> = { wuwa: '鸣潮', blhx: '碧蓝航线' }
+const communityLabels: Record<string, string> = Object.fromEntries(
+  ADMIN_COMMUNITIES.map(c => [c.key, c.label]),
+)
 // 分区筛选：全部 | 鸣潮 | 碧蓝航线
 const communityFilter = ref<'' | 'wuwa' | 'blhx'>('')
 const filteredTargets = computed(() =>
@@ -192,8 +195,7 @@ onMounted(refreshRuns)
         <option value="general">准入分级：泛关键词（走共现词与热度门槛）</option>
       </select>
       <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="所属游戏分区：决定内容与事件的归属">
-        <option value="wuwa">分区：鸣潮</option>
-        <option value="blhx">分区：碧蓝航线</option>
+        <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
       </select>
       <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5">
       <input v-model.number="form.min_views" type="number" min="0" :placeholder="form.tier === 'core' ? '最低播放量（核心分级可选，0 不过滤）' : '最低播放量（默认 10000；0 不过滤）'" class="mono rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
@@ -209,7 +211,7 @@ onMounted(refreshRuns)
       <h2 class="text-sm font-semibold">目标列表</h2>
       <div class="flex items-center gap-1">
         <button
-          v-for="option in [['', '全部分区'], ['wuwa', '鸣潮'], ['blhx', '碧蓝航线']] as const"
+          v-for="option in [['', '全部分区'], ...ADMIN_COMMUNITIES.map(c => [c.key, c.label] as const)] as const"
           :key="option[0]"
           class="rounded-full px-2.5 py-1 text-xs transition-colors"
           :class="communityFilter === option[0] ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"

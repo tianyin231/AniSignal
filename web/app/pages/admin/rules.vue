@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ADMIN_COMMUNITIES } from '~/utils/admin-communities'
+
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '分类词典 · AniSignal 管理看板' })
 
@@ -115,8 +117,7 @@ async function reparseAll() {
       <input v-model="form.pattern" placeholder="关键词，如 翻车" class="flex-1 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
       <select v-model="form.community" class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5" title="通用规则对全部分区生效；限定后只作用于该分区">
         <option value="">全部游戏</option>
-        <option value="wuwa">仅鸣潮</option>
-        <option value="blhx">仅碧蓝航线</option>
+        <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">仅{{ c.label }}</option>
       </select>
       <input v-model.number="form.priority" type="number" min="0" max="1000" class="mono w-24 rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5">
       <button type="submit" class="btn-primary px-4 py-2" :disabled="busy || !form.pattern.trim()">新增</button>

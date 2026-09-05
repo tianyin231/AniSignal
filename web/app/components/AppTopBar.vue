@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { avatarGradient, displayName } from '~/utils/avatars'
+import { communityClasses } from '~/composables/useGameSection'
 
 const route = useRoute()
 const links = [
@@ -11,7 +12,8 @@ const links = [
 ]
 const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
 
-const { community, communityQuery, setCommunity, communities } = useGameSection()
+const { community, currentCommunity, communityQuery, setCommunity, communities } = useGameSection()
+const accent = computed(() => communityClasses(currentCommunity.value.color))
 
 const { user, logout } = useAuth()
 const menuOpen = ref(false)
@@ -36,6 +38,11 @@ async function handleLogout() {
       <NuxtLink to="/" class="flex shrink-0 items-center gap-2">
         <img src="/icon.png" alt="" class="size-7 shrink-0">
         <span class="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-zinc-50">AniSignal</span>
+        <!-- 常驻分区徽章：无论是否默认分区都显示当前所在分区 -->
+        <span
+          class="hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline-flex"
+          :class="accent.chip"
+        >{{ currentCommunity.label }}</span>
       </NuxtLink>
       <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-sm [scrollbar-width:none]">
         <div class="mr-1.5 flex shrink-0 items-center rounded-[10px] bg-slate-200/60 p-0.5 dark:bg-zinc-800/70" role="tablist" aria-label="游戏分区">
@@ -45,14 +52,15 @@ async function handleLogout() {
             type="button"
             role="tab"
             :aria-selected="community === c.key"
-            class="cursor-pointer whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-all"
+            class="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all"
             :class="
               community === c.key
-                ? 'bg-white text-blue-700 shadow-sm dark:bg-zinc-900 dark:text-blue-300'
+                ? communityClasses(c.color).tabActive
                 : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-100'
             "
             @click="setCommunity(c.key)"
           >
+            <span class="size-1.5 rounded-full" :class="communityClasses(c.color).dot" aria-hidden="true" />
             {{ c.label }}
           </button>
         </div>
@@ -105,5 +113,7 @@ async function handleLogout() {
         </div>
       </div>
     </div>
+    <!-- 分区强调条：整站顶栏底部 3px 渐变，颜色跟随当前分区，切换分区时整条变色 -->
+    <div class="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-gradient-to-r" :class="accent.bar" aria-hidden="true" />
   </header>
 </template>

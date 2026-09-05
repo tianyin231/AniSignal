@@ -5,9 +5,12 @@ import { categoryMeta, toAppEvent } from '~/utils/public-utils'
 
 // 认证专属布局：极简品牌头 + 居中表单 + 站点内容预览（真实数据）
 const { api } = usePublicApi()
+const { community } = useGameSection()
 const { data: stats } = await useAsyncData('auth-stats', () => api<PublicStats>('/api/stats'))
-const { data: eventsData } = await useAsyncData('auth-events', () =>
-  api<ApiEventList>('/api/events', { query: { limit: 3 } }),
+const { data: eventsData } = await useAsyncData(
+  () => `auth-events-${community.value}`,
+  () => api<ApiEventList>('/api/events', { query: { limit: 3, community: community.value } }),
+  { watch: [community] },
 )
 const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 </script>

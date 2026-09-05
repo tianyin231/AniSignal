@@ -79,6 +79,7 @@ export function toRawItem(item: PublicContentItem): RawItem {
     cover: item.cover ?? undefined,
     originalUrl: item.url ?? undefined,
     metrics: item.metrics ?? undefined,
+    community: item.community,
     previewMode: item.preview_mode,
   }
 }

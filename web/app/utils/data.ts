@@ -128,5 +128,6 @@ export interface RawItem {
   cover?: string
   originalUrl?: string
   metrics?: Record<string, number>
+  community?: string
   previewMode: 'full' | 'partial' | 'external_only'
 }

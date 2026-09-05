@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ArrowUpRight } from 'lucide-vue-next'
 import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
+import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 
-const props = defineProps<{ item: RawItem; to?: string }>()
+const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean }>()
 const { mediaMode } = useSiteConfig()
 const detailTo = computed(() => props.to ?? `/contents/${props.item.id}`)
 const coverFailed = ref(false)
@@ -10,6 +11,13 @@ watch(() => props.item.cover, () => (coverFailed.value = false))
 
 // 图片展示策略：show=封面图 / link=仅图片链接 / hide=不显示
 const imageMode = computed(() => mediaMode(props.item.platform, 'image'))
+
+// 分区徽章（仅跨分区列表启用，如账号中心关注流）：显示该内容所属游戏分区
+const communityBadge = computed(() => {
+  if (!props.showCommunity || !props.item.community) return null
+  const meta = GAME_COMMUNITIES.find(c => c.key === props.item.community)
+  return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
+})
 
 </script>
 
@@ -49,6 +57,11 @@ const imageMode = computed(() => mediaMode(props.item.platform, 'image'))
         </p>
         <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400 dark:text-zinc-500">
         <span>{{ platformMeta[item.platform].label }} · {{ item.account }}</span>
+        <span
+          v-if="communityBadge"
+          class="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+          :class="communityBadge.chip"
+        >{{ communityBadge.label }}</span>
         <template v-if="item.identity !== 'unknown'">
           <span aria-hidden="true">·</span>
           <span :class="identityMeta[item.identity].text">{{ identityMeta[item.identity].label }}</span>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ContentList, ContentItem } from '~/utils/admin-types'
 import { contentTypeLabels, fmtTime, platformLabels } from '~/utils/admin-types'
+import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_BADGE } from '~/utils/admin-communities'
 import { Pencil, RotateCw, Trash2 } from 'lucide-vue-next'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
@@ -66,6 +67,26 @@ const metricText = (metrics: Record<string, number> | null) => {
   return parts.join(' · ') || '—'
 }
 
+const rereviewBusy = ref(false)
+async function rereviewCommunity() {
+  if (!communityFilter.value || rereviewBusy.value) return
+  const label = ADMIN_COMMUNITIES.find(c => c.key === communityFilter.value)?.label ?? communityFilter.value
+  if (!confirm(`重审「${label}」分区的全部内容？将清除既有 AI 判定并重新审核（下架状态会按新判定更新）。`)) return
+  rereviewBusy.value = true
+  try {
+    const res = await api<{ cleared: number, queued: number }>('/api/admin/ai/review-community', {
+      method: 'POST',
+      query: { community: communityFilter.value },
+    })
+    toast.ok(`已入队重审 ${res.queued} 条（清除 ${res.cleared} 条旧判定），稍后刷新查看结果`)
+    await refresh()
+  } catch (exc: any) {
+    toast.err(`重审失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
+  } finally {
+    rereviewBusy.value = false
+  }
+}
+
 function reviewBadge(item: ContentItem): { label: string; class: string } | null {
   const review = item.review
   if (!review) return null
@@ -83,9 +104,9 @@ async function toggleHidden(item: ContentItem) {
       body: { hidden: !item.hidden },
     })
     item.hidden = data.hidden
-    toast.push(data.hidden ? `已下架 #${item.id}` : `已恢复展示 #${item.id}`)
+    toast.ok(data.hidden ? `已下架 #${item.id}` : `已恢复展示 #${item.id}`)
   } catch (exc: any) {
-    toast.push(`操作失败：${exc?.message ?? exc}`)
+    toast.err(`操作失败：${exc?.message ?? exc}`)
   } finally {
     busyId.value = null
   }
@@ -97,10 +118,10 @@ async function deleteContent(item: ContentItem) {
   busyId.value = item.id
   try {
     await api(`/api/admin/contents/${item.id}`, { method: 'DELETE' })
-    toast.push(`已删除 #${item.id}`)
+    toast.ok(`已删除 #${item.id}`)
     await refresh()
   } catch (exc: any) {
-    toast.push(`删除失败：${exc?.message ?? exc}`)
+    toast.err(`删除失败：${exc?.message ?? exc}`)
   } finally {
     busyId.value = null
   }
@@ -189,8 +210,7 @@ async function rereview(item: ContentItem) {
           class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
         >
           <option value="">全部分区</option>
-          <option value="wuwa">鸣潮</option>
-          <option value="blhx">碧蓝航线</option>
+          <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
         </select>
         <select
           v-model="reviewFilter"
@@ -214,6 +234,15 @@ async function rereview(item: ContentItem) {
         </label>
         <button class="btn-primary px-4 py-2 text-sm" :disabled="loading" @click="applyFilters">
           {{ loading ? '查询中…' : '查询' }}
+        </button>
+        <button
+          v-if="communityFilter"
+          class="cursor-pointer rounded-md border border-blue-500/40 px-4 py-2 text-sm text-blue-600 transition-colors hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300"
+          :disabled="rereviewBusy || loading"
+          title="清除该分区全部 AI 判定并重新审核"
+          @click="rereviewCommunity"
+        >
+          {{ rereviewBusy ? '重审入队中…' : '重审本分区' }}
         </button>
       </div>
     </div>
@@ -244,10 +273,7 @@ async function rereview(item: ContentItem) {
             </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-slate-600 dark:text-zinc-300">
               {{ platformLabels[item.platform] ?? item.platform }}
-              <span
-                class="chip ml-1 whitespace-nowrap"
-                :class="item.community === 'blhx' ? 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
-              >{{ item.community === 'blhx' ? '碧蓝' : '鸣潮' }}</span>
+              <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[item.community] ?? 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'">{{ item.community === 'blhx' ? '碧蓝' : '鸣潮' }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <span

@@ -2,6 +2,7 @@
 import { Search } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { toRawItem } from '~/utils/public-utils'
+import { platformsForCommunity } from '~/composables/useGameSection'
 import { platformMeta, type Platform } from '~/utils/data'
 
 useSeoMeta({ title: '内容库 · AniSignal' })
@@ -36,13 +37,9 @@ const { data, status } = await useAsyncData(
 const list = computed(() => (data.value?.items ?? []).map(toRawItem))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 
-// 平台筛选随分区变化：碧蓝航线当前只有 B 站来源，库街区/YouTube 是鸣潮专属
-const platformsByCommunity: Record<string, string[]> = {
-  wuwa: ['bilibili', 'youtube', 'kuro'],
-  blhx: ['bilibili'],
-}
+// 平台筛选随分区变化（映射统一在 useGameSection）：碧蓝航线当前只有 B 站来源
 const visiblePlatformTabs = computed(() =>
-  (platformsByCommunity[community.value] ?? ['bilibili']).filter(key => key in platformMeta),
+  platformsForCommunity(community.value).filter(key => key in platformMeta),
 )
 watch(community, () => {
   if (platform.value && !visiblePlatformTabs.value.includes(platform.value)) {

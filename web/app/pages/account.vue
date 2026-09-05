@@ -408,7 +408,8 @@ async function changePassword() {
             </div>
           </div>
           <div v-if="feed?.items?.length" class="border-t border-slate-900/5 dark:border-white/5">
-            <RawFeedRow v-for="item in feed.items" :key="item.id" :item="toRawItem(item)" />
+            <!-- 关注流跨分区：每条标注所属游戏分区 -->
+            <RawFeedRow v-for="item in feed.items" :key="item.id" :item="toRawItem(item)" show-community />
           </div>
           <p v-else class="border-t border-slate-900/5 px-5 py-8 text-center text-sm text-slate-400 dark:border-white/5 dark:text-zinc-500">
             <template v-if="selectedKeyword">关键词「{{ selectedKeyword.keyword }}」暂无命中内容，系统持续采集中。</template>

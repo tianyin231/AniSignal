@@ -2,6 +2,7 @@
 import { RefreshCw } from 'lucide-vue-next'
 import type { ApiEventList, PublicContentList } from '~/composables/usePublicApi'
 import { toAppEvent, toRawItem } from '~/utils/public-utils'
+import { platformsForCommunity } from '~/composables/useGameSection'
 
 // 三个分区互不混用：聚合结论、官方内容、非官方社区线索。
 const tabs = [
@@ -16,7 +17,7 @@ const officialPlatformTabs = [
   { key: 'youtube', label: 'YouTube' },
   { key: 'kuro', label: '库街区' },
 ]
-const validOfficialPlatforms = new Set(officialPlatformTabs.map((item) => item.key))
+const validOfficialPlatforms = new Set(officialPlatformTabs.map(item => item.key))
 const route = useRoute()
 const router = useRouter()
 const tab = computed({
@@ -105,6 +106,16 @@ const [
 ])
 
 const isBriefing = computed(() => tab.value === 'briefing')
+// 平台筛选随分区收敛：碧蓝航线只有 B站，切分区时清掉不可用的平台
+const visibleOfficialTabs = computed(() => {
+  const allowed = platformsForCommunity(community.value)
+  return officialPlatformTabs.filter(t => t.key === 'all' || allowed.includes(t.key))
+})
+watch(community, () => {
+  if (!visibleOfficialTabs.value.some(t => t.key === officialPlatform.value)) {
+    officialPlatform.value = 'all'
+  }
+})
 const totalPages = computed(() =>
   Math.max(1, Math.ceil(((isBriefing.value ? eventsData.value?.total : feed.value?.total) ?? 0) / pageSize)),
 )
@@ -296,7 +307,7 @@ useSeoMeta({ title: '近期情报' })
     <template v-else>
       <nav v-if="tab === 'official'" aria-label="官方内容平台筛选" class="mb-3 flex flex-wrap gap-1.5">
         <button
-          v-for="item in officialPlatformTabs"
+          v-for="item in visibleOfficialTabs"
           :key="item.key"
           type="button"
           class="min-h-9 cursor-pointer rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"

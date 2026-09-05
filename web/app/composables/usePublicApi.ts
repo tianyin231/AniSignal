@@ -19,6 +19,7 @@ export interface PublicContentItem {
   cover: string | null
   preview_mode: 'full' | 'partial' | 'external_only'
   matched_keywords: string[]
+  community?: string
 }
 
 export interface PublicContentList {
@@ -214,6 +215,7 @@ export interface ApiProduct {
   id: number
   slug: string
   name: string
+  community?: string
   publisher: string | null
   skus: string[]
   price_note: string | null
