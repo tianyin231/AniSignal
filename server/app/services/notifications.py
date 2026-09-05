@@ -709,3 +709,36 @@ async def run_scheduled_morning(session: AsyncSession) -> dict:
             await get_onepush(session),
         )
     return {"users": len(users), **stats}
+
+
+async def send_admin_email(session: AsyncSession, delivery_id: int) -> dict:
+    """发送管理端撰写的单发/广播邮件（kind=admin/broadcast，正文已在投递行里）。
+
+    封禁用户跳过（广播批量入队后用户可能恰好被封）；失败不重试，错误落库可见。
+    """
+    delivery = await session.get(NotificationDelivery, delivery_id)
+    if delivery is None or delivery.status != "pending":
+        return {"status": "skipped", "reason": "delivery_not_pending"}
+    user = await session.get(User, delivery.user_id)
+    if user is None or user.status != "active" or not user.is_verified:
+        delivery.status = "skipped"
+        delivery.error = "用户未验证或已封禁"
+        await session.commit()
+        return {"status": "skipped", "reason": "user_not_eligible"}
+
+    subject = (delivery.subject or "AniSignal 通知").strip()
+    body = delivery.body or ""
+    html_body = delivery.html_body or notice_email(subject, body)
+    sent = await send_email(
+        user.email,
+        subject,
+        body,
+        smtp=await _smtp(session),
+        html_body=html_body,
+    )
+    delivery.html_body = html_body
+    delivery.status = "sent" if sent else "failed"
+    delivery.error = None if sent else "SMTP 发送失败，请查看服务端日志"
+    delivery.sent_at = utcnow() if sent else None
+    await session.commit()
+    return {"status": delivery.status}

@@ -11,6 +11,7 @@ class _FakeQueue:
         self.enqueued: list[int] = []
         self.notifications: list[int] = []
         self.reviewed: list[int] = []
+        self.admin_emails: list[int] = []
 
     async def enqueue_collect(self, target_id: int) -> str | None:
         self.enqueued.append(target_id)
@@ -29,6 +30,10 @@ class _FakeQueue:
     async def enqueue_review(self, content_ids: list[int]) -> str | None:
         self.reviewed.extend(content_ids)
         return "fake-review-job"
+
+    async def enqueue_admin_email(self, delivery_ids: list[int]) -> str | None:
+        self.admin_emails.extend(delivery_ids)
+        return "fake-admin-email-job"
 
 
 async def test_healthz_open(client):

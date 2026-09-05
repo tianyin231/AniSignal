@@ -22,6 +22,8 @@ class User(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     notification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active/banned
+    banned_reason: Mapped[str | None] = mapped_column(Text)
+    banned_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
 

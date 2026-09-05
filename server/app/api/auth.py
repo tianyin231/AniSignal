@@ -224,6 +224,8 @@ async def reset(body: dict, session: AsyncSession = Depends(get_session)):
     user = await session.scalar(select(User).where(User.email == email))
     if user is None:
         raise HTTPException(status_code=400, detail="验证码不正确或已过期")
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="账号不可用")
     try:
         await verify_code(session, user, "reset", code)
         _, new = validate_credentials(email, new)

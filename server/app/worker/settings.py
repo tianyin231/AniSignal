@@ -57,6 +57,20 @@ async def send_user_notification(ctx, delivery_id: int) -> dict:
         return await process_delivery(session, delivery_id)
 
 
+async def send_admin_emails(ctx, delivery_ids: list[int]) -> dict:
+    """管理端单发/广播邮件批次：逐条 SMTP，失败不阻断批次。"""
+    from app.db import SessionLocal
+    from app.services.notifications import send_admin_email
+
+    stats = {"sent": 0, "failed": 0, "skipped": 0}
+    async with SessionLocal() as session:
+        for delivery_id in delivery_ids:
+            result = await send_admin_email(session, delivery_id)
+            status = result.get("status", "failed")
+            stats[status if status in stats else "failed"] += 1
+    return stats
+
+
 async def send_morning_notifications(ctx) -> dict:
     """北京时间 08:00 的用户关键词早报批次。"""
     from app.db import SessionLocal
@@ -83,6 +97,7 @@ class WorkerSettings:
         review_contents,
         send_user_notification,
         send_morning_notifications,
+        send_admin_emails,
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4

@@ -1,8 +1,14 @@
 """kuro / miyoushe / youtube 解析器单测（样例结构按 data-sources.md 与接口文档整理）。"""
 
+from datetime import timedelta
+
+from app.clock import utcnow
 from app.parsers.kuro import parse_notice
 from app.parsers.miyoushe import parse_post
 from app.parsers.youtube import parse_rss_item
+
+# 发布时间取"昨天"：官方链接等 30 天窗口测试对固定时间戳存在边界漂移（曾因此滑出窗口）
+_KURO_START_MS = int((utcnow() - timedelta(days=1)).timestamp() * 1000)
 
 KURO_ITEM = {
     "platform": "kuro_global",
@@ -13,7 +19,7 @@ KURO_ITEM = {
             "zh-Hans": "版本更新维护公告",
         },
         "tabBanner": {"en": "https://example.com/banner.png"},
-        "startTimeMs": 1786000000000,
+        "startTimeMs": _KURO_START_MS,
     },
     "detail": {"noticeId": 50553, "textContent": "<p>html body</p>"},
     "list_url": "https://aki-gm-resources-back.aki-game.net/gamenotice/G153/x/notice.json",
