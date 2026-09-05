@@ -210,6 +210,23 @@ docker compose up -d --build
 # 验证：curl http://127.0.0.1:8090/api/healthz；容器产物内容校验用中文界面字符串 grep（函数名会被压缩改名，不要用标识符搜）
 ```
 
+## 管理端用户管理（2026-09-05 上线）
+
+- **模型**：users.status（active/banned，0003 已有）+ banned_reason/banned_at（迁移 0026，附
+  ix_users_status 索引）。封禁在三层强制执行：登录/重置 403（api/auth.py）、会话解析直接失效
+  （get_user_by_token 查 status）、自动通知跳过（process_delivery）。
+- **API（api/admin_users.py，/api/admin/users）**：GET 列表（邮箱/昵称 like + 状态/验证筛选 +
+  id 倒序分页 + 关键词数分组子查询，按 1 万用户规模设计）；GET {id} 详情（关键词订阅 + 最近投递）；
+  PATCH {banned/ban_reason/notification_enabled}（封禁即时 revoke_all_sessions）；POST {id}/email
+  单发；POST /broadcast 广播（默认仅已验证+活跃，confirm 位必填，SMTP 未配置 400 快速失败，
+  50 人/块入队 send_admin_emails worker 任务，上限 2 万，dedupe_key=broadcast:{batch}:{uid}）；
+  GET deliveries/recent 触达审计。**注意 FastAPI 对 Query 默认空串也校验 pattern**——可空筛选
+  正则要写成 `^(|a|b)$`（曾因 `^(a|b)$` + default "" 全列表 422）。
+- **前端 /admin/users**：搜索/筛选/分页表单、状态徽章、通知订阅行内开关、详情面板（关键词 chips
+  + 投递记录）、单发邮件表单、广播编辑器。投递行 kind=admin/broadcast/morning/ai。
+- **KURO_ITEM 等固定时间戳测试样例对时间窗口测试有边界漂移风险**（startTimeMs 曾滑出官方链接
+  30 天窗口导致 3 个用例假失败）——时间相关样例一律用 `utcnow() - timedelta(days=1)` 相对时间。
+
 ## 未完成 / 下一步选项
 
 - **邮件通知与早报**（设计文档 §10）：账号+SMTP+监控关键词都就绪，差发送管线与 08:00 调度。
