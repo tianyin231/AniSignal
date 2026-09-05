@@ -20,6 +20,51 @@ export interface CollectTarget {
   last_error: string | null
 }
 
+export interface AdminUser {
+  id: number
+  email: string
+  display_name: string | null
+  avatar: string | null
+  is_verified: boolean
+  notification_enabled: boolean
+  status: 'active' | 'banned' | string
+  banned_reason: string | null
+  banned_at: string | null
+  created_at: string
+  last_login_at: string | null
+  keyword_count?: number | null
+}
+
+export interface AdminUserList {
+  items: AdminUser[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface AdminUserKeyword {
+  id: number
+  keyword: string
+  enabled: boolean
+  created_at: string
+}
+
+export interface AdminDelivery {
+  id: number
+  kind: string
+  status: string
+  subject: string | null
+  error: string | null
+  created_at: string
+  sent_at: string | null
+}
+
+export interface AdminUserDetail extends AdminUser {
+  keywords: AdminUserKeyword[]
+  sent_total: number
+  recent_deliveries: AdminDelivery[]
+}
+
 export interface Overview {
   targets: CollectTarget[]
   queue: { pending_jobs: number | null }

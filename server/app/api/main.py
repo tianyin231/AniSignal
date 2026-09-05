@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from app.api.account import router as account_router
 from app.api.admin import router as admin_router
 from app.api.admin_ai import router as admin_ai_router
+from app.api.admin_users import router as admin_users_router
 from app.api.admin_settings import router as admin_settings_router
 from app.api.auth import router as auth_router
 from app.api.public import router as public_router
@@ -62,6 +63,7 @@ app.include_router(auth_router)
 app.include_router(account_router)
 app.include_router(admin_settings_router)
 app.include_router(admin_ai_router)
+app.include_router(admin_users_router)
 
 
 @app.get("/api/healthz")

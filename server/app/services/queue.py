@@ -27,6 +27,9 @@ class BaseQueue:
     async def enqueue_review(self, content_ids: list[int]) -> str | None:
         raise NotImplementedError
 
+    async def enqueue_admin_email(self, delivery_ids: list[int]) -> str | None:
+        raise NotImplementedError
+
     async def aclose(self) -> None:
         pass
 
@@ -115,6 +118,20 @@ class LocalQueue(BaseQueue):
         task.add_done_callback(self._tasks.discard)
         return f"local:review:{content_ids[0] if content_ids else 0}:{time.time():.0f}"
 
+    async def enqueue_admin_email(self, delivery_ids: list[int]) -> str | None:
+        from app.db import SessionLocal
+        from app.services.notifications import send_admin_email
+
+        async def run() -> None:
+            async with SessionLocal() as session:
+                for delivery_id in delivery_ids:
+                    await send_admin_email(session, delivery_id)
+
+        task = asyncio.create_task(run())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return f"local:admin-email:{delivery_ids[0] if delivery_ids else 0}:{time.time():.0f}"
+
     async def _run(self, run_collection, target_id: int) -> None:
         try:
             await run_collection(self._redis, target_id)
@@ -156,6 +173,10 @@ class ArqQueue(BaseQueue):
 
     async def enqueue_review(self, content_ids: list[int]) -> str | None:
         job = await self._pool.enqueue_job("review_contents", content_ids)
+        return getattr(job, "job_id", None) if job is not None else None
+
+    async def enqueue_admin_email(self, delivery_ids: list[int]) -> str | None:
+        job = await self._pool.enqueue_job("send_admin_emails", delivery_ids)
         return getattr(job, "job_id", None) if job is not None else None
 
     async def aclose(self) -> None:
