@@ -2,13 +2,16 @@
 /**
  * 顶栏下方的站点栏目细条：官方动态 / 商品 / 事件 / 内容库（glass 吸顶），
  * 链接自动携带当前分区；底部 3px 分区色强调条随分区变色，是全站的分区标识。
- * 顶栏品牌旁是"首页 + 各分区"频道组，栏目维度集中在本条。
+ * 顶栏品牌旁是"首页 + 各分区"频道组。不放解释性文案——吸顶区只留可操作的导航。
  */
-import { communityClasses } from '~/composables/useGameSection'
+import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 
 const route = useRoute()
-const { community, currentCommunity, communityQuery } = useGameSection()
-const accent = computed(() => communityClasses(currentCommunity.value.color))
+const { community, communityQuery } = useGameSection()
+const accent = computed(() => {
+  const meta = GAME_COMMUNITIES.find(c => c.key === community.value)
+  return communityClasses(meta?.color ?? 'blue')
+})
 
 const links = [
   { to: '/official', label: '官方动态' },
@@ -37,9 +40,6 @@ const isActive = (to: string) => route.path.startsWith(to)
           {{ l.label }}
         </NuxtLink>
       </nav>
-      <span class="hidden shrink-0 text-xs text-slate-400 md:block dark:text-zinc-500">
-        当前分区：{{ currentCommunity.label }}
-      </span>
     </div>
     <!-- 分区强调条：本条底部 3px 渐变，颜色跟随当前分区 -->
     <div class="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-gradient-to-r" :class="accent.bar" aria-hidden="true" />
