@@ -12,7 +12,15 @@ from app.clock import utcnow
 from app.communities import DEFAULT_COMMUNITY
 from app.db import get_session
 from app.api.admin import get_queue
-from app.models import ContentVersion, NotificationDelivery, RawContent, Source, User, UserKeyword
+from app.models import (
+    ContentVersion,
+    CustomFeed,
+    NotificationDelivery,
+    RawContent,
+    Source,
+    User,
+    UserKeyword,
+)
 from app.schemas.api import PublicContentItem, PublicContentList
 from app.services.notifications import beijing_today, create_delivery, enabled_keywords
 from app.services.queue import BaseQueue
@@ -368,3 +376,153 @@ def _excerpt(text: str) -> str | None:
 
         text = bleach.clean(text, tags=[], strip=True).strip()
     return text[:140] + ("…" if len(text) > 140 else "")
+
+
+# ---------- 定制监控（用户自建 UID/关键词抓取源） ----------
+
+MAX_CUSTOM_FEEDS = 10
+
+
+def _validate_custom_payload(body: dict, *, partial: bool = False) -> dict:
+    kind = str(body.get("kind") or "").strip()
+    if kind and kind not in {"uid", "keyword"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控类型只支持 uid / keyword")
+    platform = str(body.get("platform") or "bilibili").strip()
+    if platform and platform not in {"bilibili"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "定制平台当前仅支持 B 站")
+    name = str(body.get("name") or "").strip()
+    if name and len(name) > 64:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控名称不超过 64 字")
+    target = str(body.get("target_value") or "").strip()
+    if target and len(target) > 128:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控目标过长")
+    if kind == "uid" and target and not target.isdigit():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
+    min_views = body.get("min_views")
+    if min_views is not None:
+        try:
+            min_views = max(0, min(10_000_000, int(min_views)))
+        except (TypeError, ValueError):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "播放量门槛不合法")
+    return {
+        "name": name,
+        "kind": kind,
+        "platform": platform,
+        "target_value": target,
+        "min_views": min_views,
+        "push_enabled": body.get("push_enabled"),
+        "is_public": body.get("is_public"),
+        "enabled": body.get("enabled"),
+    }
+
+
+@router.get("/custom-feeds")
+async def my_custom_feeds(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """我的定制监控（公开与私有全部返回，仅本人可见）。"""
+    from app.services.custom_feeds import count_feed_items
+
+    feeds = list(
+        (
+            await session.execute(
+                select(CustomFeed)
+                .where(CustomFeed.user_id == user.id)
+                .order_by(CustomFeed.id.desc())
+            )
+        ).scalars()
+    )
+    counts = await count_feed_items(session, [f.id for f in feeds])
+    return [
+        {
+            "id": f.id,
+            "name": f.name,
+            "kind": f.kind,
+            "platform": f.platform,
+            "target_value": f.target_value,
+            "min_views": f.min_views,
+            "push_enabled": f.push_enabled,
+            "is_public": f.is_public,
+            "enabled": f.enabled,
+            "status": f.status,
+            "item_count": counts.get(f.id, 0),
+            "last_collected_at": f.last_collected_at,
+            "created_at": f.created_at,
+        }
+        for f in feeds
+    ]
+
+
+@router.post("/custom-feeds", status_code=status.HTTP_201_CREATED)
+async def create_custom_feed(
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """新建定制监控；免费额度 10 个。"""
+    payload = _validate_custom_payload(body)
+    if not payload["name"] or not payload["kind"] or not payload["target_value"]:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "名称、监控类型与目标均不能为空")
+    count = await session.scalar(
+        select(func.count(CustomFeed.id)).where(CustomFeed.user_id == user.id)
+    )
+    if (count or 0) >= MAX_CUSTOM_FEEDS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"最多 {MAX_CUSTOM_FEEDS} 个定制监控")
+    feed = CustomFeed(
+        user_id=user.id,
+        name=payload["name"],
+        kind=payload["kind"],
+        platform=payload["platform"] or "bilibili",
+        target_value=payload["target_value"],
+        min_views=payload["min_views"] or 0,
+        push_enabled=bool(payload["push_enabled"]),
+        is_public=bool(payload["is_public"]),
+    )
+    session.add(feed)
+    await session.commit()
+    return {"id": feed.id, "name": feed.name}
+
+
+@router.patch("/custom-feeds/{feed_id}")
+async def update_custom_feed(
+    feed_id: int,
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    feed = await session.get(CustomFeed, feed_id)
+    if feed is None or feed.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
+    payload = _validate_custom_payload(body, partial=True)
+    if payload["name"]:
+        feed.name = payload["name"]
+    if payload["target_value"]:
+        if payload["kind"] == "uid" and not payload["target_value"].isdigit():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
+        feed.target_value = payload["target_value"]
+        feed.last_collected_at = None
+    if payload["min_views"] is not None:
+        feed.min_views = payload["min_views"]
+    if payload["push_enabled"] is not None:
+        feed.push_enabled = bool(payload["push_enabled"])
+    if payload["is_public"] is not None:
+        feed.is_public = bool(payload["is_public"])
+    if payload["enabled"] is not None:
+        feed.enabled = bool(payload["enabled"])
+        feed.next_run_at = None  # 重新启用立即调度
+    await session.commit()
+    return {"id": feed.id, "updated": True}
+
+
+@router.delete("/custom-feeds/{feed_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_custom_feed(
+    feed_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    feed = await session.get(CustomFeed, feed_id)
+    if feed is None or feed.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
+    await session.delete(feed)
+    await session.commit()

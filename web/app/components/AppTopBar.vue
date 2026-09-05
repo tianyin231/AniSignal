@@ -8,12 +8,15 @@ const route = useRoute()
 const channels = [
   { key: 'home', label: '首页', color: 'blue' as const },
   ...GAME_COMMUNITIES.map(c => ({ key: c.key, label: c.label, color: c.color })),
+  // 定制化频道固定最后：用户自建监控（UID/关键词）的公开目录
+  { key: 'custom', label: '定制化', color: 'blue' as const, to: '/custom' },
 ]
 
 const { community } = useGameSection()
 
 // 选中频道：聚合首页 → 首页；分区首页 → 该分区；栏目页 → 当前分区
 const activeChannel = computed<string | null>(() => {
+  if (route.path.startsWith('/custom')) return 'custom'
   if (route.path === '/') {
     const q = String(route.query.community || '')
     if (GAME_COMMUNITIES.some(c => c.key === q)) return q
@@ -52,7 +55,7 @@ async function handleLogout() {
         <NuxtLink
           v-for="ch in channels"
           :key="ch.key"
-          :to="ch.key === 'home' ? '/' : { path: '/', query: { community: ch.key } }"
+          :to="ch.to ?? (ch.key === 'home' ? '/' : { path: '/', query: { community: ch.key } })"
           class="flex items-center whitespace-nowrap border-b-2 px-3 transition-colors"
           :class="
             activeChannel === ch.key

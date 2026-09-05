@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 _SHANGHAI = timezone(timedelta(hours=8))
 _local_morning_date = None
+_local_custom_sweep_at = None
+_CUSTOM_SWEEP_INTERVAL = timedelta(minutes=5)
 
 
 def _morning_due(now: datetime) -> tuple[bool, str]:
@@ -51,6 +53,10 @@ async def local_loop(queue) -> None:
                     await queue.enqueue_morning()
                     _local_morning_date = day
                     logger.info("local enqueued morning notifications for %s", day)
+                global _local_custom_sweep_at
+                if _local_custom_sweep_at is None or now >= _local_custom_sweep_at:
+                    await queue.enqueue_custom_sweep()
+                    _local_custom_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
         except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
             logger.exception("local scheduler tick failed")
         await asyncio.sleep(settings.scheduler_poll_seconds)
@@ -130,6 +136,15 @@ async def main() -> None:
                             target.next_run_at,
                         )
                     await _enqueue_morning_if_due(redis, now)
+                    # 定制监控轮询：5 分钟桶去重，worker 内部再按 next_run_at 限速
+                    bucket = int(now.timestamp() // 300)
+                    if not await redis.get(f"anisignal:custom-sweep-enqueued:{bucket}"):
+                        job = await redis.enqueue_job(
+                            "collect_custom_feeds", _job_id=f"custom-sweep:{bucket}")
+                        await redis.set(
+                            f"anisignal:custom-sweep-enqueued:{bucket}", "1",
+                            nx=True, px=6 * 60 * 60 * 1000)
+                        logger.info("enqueued custom sweep job=%s", getattr(job, "job_id", None))
             except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
                 logger.exception("scheduler tick failed")
             await asyncio.sleep(settings.scheduler_poll_seconds)

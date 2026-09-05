@@ -22,6 +22,7 @@ from app.models.enums import (
     RunStatus,
     TargetType,
 )
+from app.models.custom_feed import CustomFeed, CustomFeedItem
 from app.models.event import Event, EventRevision, Evidence
 from app.models.fulfillment import ProductSignal, ProductSignalEvidence, ProductSignalRevision
 from app.models.product import FULFILLMENT_STAGES, Product
