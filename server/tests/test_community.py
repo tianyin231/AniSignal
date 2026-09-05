@@ -143,6 +143,19 @@ async def test_admin_review_community_endpoint(client, session, admin_headers):
     )
     assert left == 0
 
+    # only_missing 增量模式：已有判定记录的不再入队（模拟 worker 已重审完成）
+    fake.reviewed.clear()
+    session.add(ContentReview(raw_content_id=rows["BVb2"].id, relevant=True, model="test"))
+    await session.commit()
+    resp = await client.post(
+        "/api/admin/ai/review-community",
+        params={"community": "blhx", "only_missing": True},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"community": "blhx", "cleared": 0, "queued": 0}
+    assert fake.reviewed == []
+
     invalid = await client.post(
         "/api/admin/ai/review-community", params={"community": "xyz"}, headers=admin_headers
     )
