@@ -2,7 +2,9 @@
 import { ArrowLeft, ArrowRight, Flame, ImageIcon, ShieldCheck } from 'lucide-vue-next'
 import { platformMeta, type RawItem } from '~/utils/data'
 
-const props = defineProps<{ items: RawItem[] }>()
+import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
+
+const props = defineProps<{ items: RawItem[]; showCommunity?: boolean }>()
 const activeIndex = ref(0)
 const slideIndex = ref(props.items.length > 1 ? 1 : 0)
 const transitionEnabled = ref(true)
@@ -182,6 +184,13 @@ onBeforeUnmount(() => {
             </span>
             <span v-if="platformMeta[item.platform]" class="absolute bottom-3 left-3 rounded-full bg-black/70 px-2.5 py-1 text-xs text-white backdrop-blur-sm">
               {{ platformMeta[item.platform].label }}
+            </span>
+            <span
+              v-if="showCommunity && item.community"
+              class="absolute right-3 top-3 rounded-full px-2.5 py-1 text-xs font-medium backdrop-blur-sm"
+              :class="communityClasses(GAME_COMMUNITIES.find(c => c.key === item.community)?.color ?? 'blue').chip"
+            >
+              {{ GAME_COMMUNITIES.find(c => c.key === item.community)?.label ?? item.community }}
             </span>
           </NuxtLink>
           </div>

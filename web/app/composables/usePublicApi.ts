@@ -139,6 +139,7 @@ export interface ApiEvent {
   matched_keywords: string[]
   regions: string[]
   evidence_count: number
+  community?: string
   sources: ApiEventSource[]
   conflicts: ApiEventSource[]
   corrections: ApiEventCorrection[]

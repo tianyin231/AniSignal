@@ -16,44 +16,47 @@ const HOT_BOOST_HOURS = 12
 
 const { community } = useGameSection()
 const { api } = usePublicApi()
+// 首页频道语义：/ 无 community 参数 = 跨分区聚合（community=all）；带参数 = 该分区首页
+const aggregate = computed(() => !route.query.community)
+const homeCommunity = computed(() => (aggregate.value ? 'all' : community.value))
 
 const eventsRequest = useAsyncData(
-  () => `home-events-${community.value}`,
+  () => `home-events-${homeCommunity.value}`,
   () => api<ApiEventList>('/api/events', {
-    query: { community: community.value, published_within_hours: 168, limit: 5 },
+    query: { community: homeCommunity.value, published_within_hours: 168, limit: 5 },
   }),
-  { watch: [community] },
+  { watch: [homeCommunity] },
 )
 const officialRequest = useAsyncData(
-  () => `home-official-${community.value}-${page.value}`,
+  () => `home-official-${homeCommunity.value}-${page.value}`,
   () => api<PublicContentList>('/api/contents', {
     query: {
-      community: community.value,
+      community: homeCommunity.value,
       identity: 'official',
       published_within_hours: 168,
       limit: OFFICIAL_PER_PAGE,
       offset: (page.value - 1) * OFFICIAL_PER_PAGE,
     },
   }),
-  { watch: [community, page] },
+  { watch: [homeCommunity, page] },
 )
 const communityRequest = useAsyncData(
-  () => `home-community-${community.value}-${page.value}`,
+  () => `home-community-${homeCommunity.value}-${page.value}`,
   () => api<PublicContentList>('/api/contents', {
     query: {
-      community: community.value,
+      community: homeCommunity.value,
       exclude_identity: 'official',
       published_within_hours: 168,
       limit: COMMUNITY_PER_PAGE,
       offset: (page.value - 1) * COMMUNITY_PER_PAGE,
     },
   }),
-  { watch: [community, page] },
+  { watch: [homeCommunity, page] },
 )
 const highlightsRequest = useAsyncData(
-  () => `home-highlights-${community.value}`,
-  () => api<PublicContentList>('/api/highlights', { query: { community: community.value, limit: 5 } }),
-  { watch: [community] },
+  () => `home-highlights-${homeCommunity.value}`,
+  () => api<PublicContentList>('/api/highlights', { query: { community: homeCommunity.value, limit: 5 } }),
+  { watch: [homeCommunity] },
 )
 
 const [
@@ -135,7 +138,7 @@ function currentHeads(): [string | null, string | null] {
 async function probeHead(identity: 'official' | 'community'): Promise<string | null> {
   const res = await api<PublicContentList>('/api/contents', {
     query: {
-      community: community.value,
+      community: homeCommunity.value,
       limit: 1,
       published_within_hours: 168,
       ...(identity === 'official' ? { identity } : { exclude_identity: identity }),
@@ -169,7 +172,7 @@ async function applyUpdates() {
   await refreshHome()
 }
 
-watch([page, community], () => {
+watch([page, homeCommunity], () => {
   pendingNewContent.value = false
 })
 
@@ -218,7 +221,7 @@ onBeforeUnmount(() => {
             全部官方动态
           </NuxtLink>
         </header>
-        <FeaturedCarousel v-if="featuredHighlights.length" :items="featuredHighlights" />
+        <FeaturedCarousel v-if="featuredHighlights.length" :items="featuredHighlights" :show-community="aggregate" />
         <div v-else class="panel px-4 py-10 text-center text-sm text-slate-400">
           近 7 天暂无精选内容。
         </div>
@@ -231,7 +234,7 @@ onBeforeUnmount(() => {
           <NuxtLink to="/events" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">查看事件库</NuxtLink>
         </header>
         <div class="panel overflow-hidden">
-          <EventRow v-for="e in eventList" :key="e.id" :event="e" />
+          <EventRow v-for="e in eventList" :key="e.id" :event="e" :show-community="aggregate" />
           <p v-if="!eventList.length" class="px-4 py-8 text-center text-sm text-slate-400">
             近 7 天暂无新事件。
           </p>
@@ -247,7 +250,7 @@ onBeforeUnmount(() => {
           </NuxtLink>
         </header>
         <div class="panel overflow-hidden">
-          <RawFeedRow v-for="row in feedItems" :key="row.id" :item="row" />
+          <RawFeedRow v-for="row in feedItems" :key="row.id" :item="row" :show-community="aggregate" />
           <p v-if="!feedItems.length" class="px-4 py-10 text-center text-sm text-slate-400">
             近 7 天暂无内容。
           </p>
