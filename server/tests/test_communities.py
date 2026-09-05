@@ -27,8 +27,8 @@ def test_registry_matches_enum():
         assert meta.label and meta.bare_name and meta.color
         assert meta.game_name
         assert meta.game_note
-        # 《X》写法与裸名一致
-        assert meta.game_names == (f"《{meta.bare_name}》", meta.bare_name)
+        # 前 two 项必须是《X》与裸名；变体（extra_names）跟在后面
+        assert meta.game_names[:2] == (f"《{meta.bare_name}》", meta.bare_name)
 
 
 def test_community_pattern_derived_from_registry():
@@ -43,10 +43,10 @@ def test_review_prompt_templated_per_community():
     for key, meta in COMMUNITIES.items():
         prompt = _review_system_prompt(key)
         assert f"《{meta.bare_name}》" in prompt
-        # 其他分区的游戏名应出现在"其他游戏"示例中
+        # 其他分区的游戏名（任意变体）应出现在"其他游戏"示例中
         for other_key, other in COMMUNITIES.items():
             if other_key != key:
-                assert other.bare_name in prompt
+                assert any(name in prompt for name in other.game_names)
 
 
 def test_crosstalk_wordlist_excludes_own_game():

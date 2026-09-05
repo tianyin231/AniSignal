@@ -22,6 +22,7 @@ class Community(StrEnum):
 
     WUWA = "wuwa"  # 鸣潮（默认分区，存量数据回填值）
     BLHX = "blhx"  # 碧蓝航线
+    HSR = "hsr"  # 崩坏星穹铁道
 
 
 # 分区展示名（唯一权威是 communities 注册表，此处派生保持兼容）
