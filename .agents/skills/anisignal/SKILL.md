@@ -224,6 +224,9 @@ docker compose up -d --build
   正则要写成 `^(|a|b)$`（曾因 `^(a|b)$` + default "" 全列表 422）。
 - **前端 /admin/users**：搜索/筛选/分页表单、状态徽章、通知订阅行内开关、详情面板（关键词 chips
   + 投递记录）、单发邮件表单、广播编辑器。投递行 kind=admin/broadcast/morning/ai。
+- **轮播卡排版（2026-09-05）**：标题 text-lg + line-clamp-3（中文标题 20-30 字，窄栏 2 行 clamp
+  会截掉一半关键信息）；卡片 md:h-80；摘要素 line-clamp-2。注意 Tailwind v4 的 line-clamp 在新版
+  Chromium 计算为 flow-root 但省略号仍正常渲染（实测验证过）。
 - **KURO_ITEM 等固定时间戳测试样例对时间窗口测试有边界漂移风险**（startTimeMs 曾滑出官方链接
   30 天窗口导致 3 个用例假失败）——时间相关样例一律用 `utcnow() - timedelta(days=1)` 相对时间。
 
