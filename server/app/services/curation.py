@@ -32,6 +32,9 @@ from app.services.ai import ai_available, chat, get_ai_config, record_usage
 from app.services.classify import HIDDEN_CATEGORIES
 
 REVIEW_CONCURRENCY = 4
+# AI 限流（429）退避：免费模型批量重审时常见，等待比换并发更稳
+REVIEW_429_BACKOFF_SECONDS = 20
+REVIEW_429_RETRIES = 4
 HIGHLIGHT_WINDOW = timedelta(days=7)
 COMMUNITY_MIN_VIEWS = 10_000
 _PROMOTION_TERMS = (
@@ -174,7 +177,8 @@ async def _review_one(
 ) -> tuple[dict | None, dict | None, bool, int]:
     """单条审核：文本 JSON + 封面数据图（多模态）。返回 (判定, usage, 是否失败, 耗时)。
 
-    带图调用失败时降级为纯文本重试一次，保证审核不因图片中断。
+    带图调用失败时降级为纯文本重试一次，保证审核不因图片中断；
+    命中 AI 限流（429）时按退避重试整轮（免费模型批量重审时常见），不立即放弃。
     """
     started = time.monotonic()
     usage = None
@@ -201,25 +205,24 @@ async def _review_one(
             content = text_payload()
         return await chat(config, system_prompt, content, json_mode=True)
 
-    try:
-        raw_response, usage = await attempt(with_image=True)
-        decision = _parse_review(
-            raw_response, candidate["id"], bool(candidate.get("product_context"))
-        )
-        if decision is None:
-            raise ValueError("model returned no valid review")
-        return decision, usage, False, int((time.monotonic() - started) * 1000)
-    except Exception as first_exc:  # noqa: BLE001 - 带图失败降级纯文本重试
-        logger.info(
-            "content review with cover failed for %s (%r), retrying text-only",
-            candidate.get("id"), first_exc,
-        )
-    try:
-        candidate_text_only = {k: v for k, v in candidate.items() if k != "cover"}
+    async def attempt_with_text_fallback() -> tuple[dict, dict | None]:
+        try:
+            raw_response, usage = await attempt(with_image=True)
+            decision = _parse_review(
+                raw_response, candidate["id"], bool(candidate.get("product_context"))
+            )
+            if decision is None:
+                raise ValueError("model returned no valid review")
+            return decision, usage
+        except Exception as cover_exc:  # noqa: BLE001 - 带图失败降级纯文本重试
+            logger.info(
+                "content review with cover failed for %s (%r), retrying text-only",
+                candidate.get("id"), cover_exc,
+            )
         raw_response, usage = await chat(
             config,
             _review_system_prompt(candidate.get("community") or DEFAULT_COMMUNITY),
-            json.dumps(candidate_text_only, ensure_ascii=False),
+            json.dumps({k: v for k, v in candidate.items() if k != "cover"}, ensure_ascii=False),
             json_mode=True,
         )
         decision = _parse_review(
@@ -227,10 +230,23 @@ async def _review_one(
         )
         if decision is None:
             raise ValueError("model returned no valid review")
-        return decision, usage, False, int((time.monotonic() - started) * 1000)
-    except Exception as exc:  # noqa: BLE001 - 单条失败不阻断其余内容
-        logger.warning("content review failed for %s: %r", candidate.get("id"), exc)
-        return None, usage, True, int((time.monotonic() - started) * 1000)
+        return decision, usage
+
+    for remaining_attempts in range(REVIEW_429_RETRIES, -1, -1):
+        try:
+            decision, usage = await attempt_with_text_fallback()
+            return decision, usage, False, int((time.monotonic() - started) * 1000)
+        except Exception as exc:  # noqa: BLE001 - 单条失败不阻断其余内容
+            if remaining_attempts > 0 and "429" in repr(exc):
+                logger.info(
+                    "content review rate-limited for %s, backing off %ss (%d retries left)",
+                    candidate.get("id"), REVIEW_429_BACKOFF_SECONDS, remaining_attempts,
+                )
+                await asyncio.sleep(REVIEW_429_BACKOFF_SECONDS)
+                continue
+            logger.warning("content review failed for %s: %r", candidate.get("id"), exc)
+            return None, usage, True, int((time.monotonic() - started) * 1000)
+    return None, usage, True, int((time.monotonic() - started) * 1000)  # pragma: no cover
 
 
 async def review_recent_contents(
