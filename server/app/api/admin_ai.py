@@ -197,6 +197,7 @@ async def review_recent(
 async def review_community(
     community: str = Query(..., pattern=community_pattern(), description="游戏分区"),
     limit: int = Query(default=500, ge=1, le=1000, description="单次最多重审条数"),
+    only_missing: bool = Query(default=False, description="只处理当前没有判定记录的内容（增量补审）"),
     session: AsyncSession = Depends(get_session),
     queue=Depends(get_queue),
 ):
@@ -204,17 +205,17 @@ async def review_community(
 
     用途：分区归属或审核提示词调整后的存量修正（如 blhx 内容曾按 wuwa 语境
     误判"与鸣潮无关"而下架）。重审会按新判定重新计算下架状态。
+    免费模型限流下建议 only_missing=true 小批量多次调用做增量补审。
     """
     from app.models import ContentReview, RawContent
 
-    ids = list(
-        await session.scalars(
-            select(RawContent.id)
-            .where(RawContent.community == community)
-            .order_by(RawContent.id)
-            .limit(limit)
-        )
-    )
+    query = select(RawContent.id).where(RawContent.community == community)
+    if only_missing:
+        has_review = select(ContentReview.raw_content_id).where(
+            ContentReview.raw_content_id == RawContent.id
+        ).exists()
+        query = query.where(~has_review)
+    ids = list(await session.scalars(query.order_by(RawContent.id).limit(limit)))
     if not ids:
         return {"community": community, "cleared": 0, "queued": 0}
     await session.execute(
