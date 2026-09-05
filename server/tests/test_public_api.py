@@ -434,3 +434,64 @@ async def test_product_list_includes_latest_candidate(client, session):
     item = next(i for i in resp.json()["items"] if i["slug"] == "latest-cand")
     assert item["latest_candidate"]["summary"] == "最新候选测试键盘到货"
     assert item["latest_candidate"]["content_id"] == raw.id
+
+
+async def test_official_links_ai_path_requires_official_identity(client, session):
+    """AI 提取链接只收官方身份内容：用户内容里的网盘/二创链接不得混入官方链接面板。"""
+    from copy import deepcopy
+
+    from sqlalchemy import select
+
+    from app.models import ContentReview, RawContent
+    from app.services.ingest import ingest_items
+
+    # 官方公告（库洛，official）
+    notice = deepcopy(KURO_ITEM)
+    notice["entry"] = dict(notice["entry"], id="ai-link-official")
+    notice["detail"] = {"noticeId": 50557, "textContent": "<p>活动详情</p>"}
+    await ingest_items(session, "kuro_notices", [notice])
+    # 用户视频（B 站普通用户）
+    await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, bvid="BVlinkuser", title="资源分享帖")])
+
+    official_raw = await session.scalar(
+        select(RawContent).where(RawContent.external_id == "ai-link-official")
+    )
+    user_raw = await session.scalar(select(RawContent).where(RawContent.external_id == "BVlinkuser"))
+    session.add_all(
+        [
+            ContentReview(
+                raw_content_id=official_raw.id,
+                relevant=True,
+                model="test",
+                links=[
+                    # AI 提取了一个不可读的英文标签 → 应回退为来源内容标题
+                    {"url": "https://wutheringwaves.kurogames.com/en/main/news/detail/999", "label": "information"},
+                ],
+            ),
+            ContentReview(
+                raw_content_id=user_raw.id,
+                relevant=True,
+                model="test",
+                links=[
+                    {"url": "https://pan.quark.cn/s/noise", "label": "夸克网盘资源链接"},
+                    {"url": "https://www.deviantart.com/someartist", "label": "作者DeviantArt主页"},
+                ],
+            ),
+        ]
+    )
+    await session.commit()
+    from app.api.public import invalidate_official_links_cache
+
+    invalidate_official_links_cache()
+
+    resp = await client.get("/api/official-links")
+    items = resp.json()["items"]
+    urls = [item["url"] for item in items]
+    # 官方内容的链接保留，用户内容的网盘/二创链接不出现
+    assert "https://wutheringwaves.kurogames.com/en/main/news/detail/999" in urls
+    assert "https://pan.quark.cn/s/noise" not in urls
+    assert "https://www.deviantart.com/someartist" not in urls
+    # 不可读标签回退为来源内容标题（而不是 "information"）
+    by_url = {item["url"]: item for item in items}
+    assert by_url["https://wutheringwaves.kurogames.com/en/main/news/detail/999"]["label"] != "information"
+    assert by_url["https://wutheringwaves.kurogames.com/en/main/news/detail/999"]["title"]
