@@ -18,20 +18,7 @@ const product = computed(
   () => products.value.find((p) => p.slug === selectedSlug.value) ?? products.value[0],
 )
 
-const candidates = ref<{ id: number; summary: string; occurred_at: string | null }[]>([])
-watch(product, async (p) => {
-  if (!p?.slug) return
-  try {
-    const data = await api<{ items: { id: number; summary: string; review_status: string; occurred_at: string | null }[] }>(
-      `/api/products/${p.slug}/signals`,
-    )
-    candidates.value = data.items
-      .filter((s) => s.review_status === 'candidate')
-      .slice(0, 2)
-      .map((s) => ({ id: s.id, summary: s.summary, occurred_at: s.occurred_at }))
-  } catch { /* 候选预览失败不影响主卡 */ }
-}, { immediate: true })
-
+// 右栏只做粗略速览：三轴状态行 + 待核验数，细节进详情页
 const axisMeta = [
   { key: 'official', icon: Building2 },
   { key: 'consumer', icon: Users },
@@ -61,36 +48,21 @@ const axisMeta = [
       </button>
     </div>
     <p class="mt-1 truncate text-xs text-slate-400 dark:text-zinc-500">{{ product.name }}</p>
-    <div class="mt-3 space-y-2">
+    <div class="mt-3 space-y-1.5">
       <div
         v-for="axis in axisMeta"
         :key="axis.key"
-        class="rounded-lg border border-slate-900/5 bg-white/45 p-2.5 dark:border-white/10 dark:bg-white/5"
+        class="flex items-center justify-between gap-2 rounded-lg border border-slate-900/5 bg-white/45 px-2.5 py-2 dark:border-white/10 dark:bg-white/5"
       >
-        <div class="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-zinc-300">
+        <span class="flex shrink-0 items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-zinc-300">
           <axis.icon :size="13" /> {{ product.fulfillment[axis.key].label }}
-        </div>
-        <p class="mt-1 text-xs font-medium text-slate-700 dark:text-zinc-200">{{ product.fulfillment[axis.key].state_label }}</p>
-        <p
-          v-if="product.fulfillment[axis.key].ai_preview"
-          class="mt-1 text-[11px] leading-relaxed text-sky-600 dark:text-sky-400"
-        >
-          AI 预判：{{ product.fulfillment[axis.key].ai_preview }}
-        </p>
-        <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">{{ product.fulfillment[axis.key].summary }}</p>
+        </span>
+        <span class="truncate text-xs font-medium text-slate-700 dark:text-zinc-200">{{ product.fulfillment[axis.key].state_label }}</span>
       </div>
     </div>
-    <div class="mt-2 border-t border-slate-100 pt-2.5 dark:border-zinc-800">
-      <div class="flex flex-wrap items-center gap-1.5">
-        <span class="chip bg-amber-500/10 text-amber-700 dark:text-amber-300">{{ product.fulfillment.candidate_total }} 条待核验</span>
-        <span class="mono text-[11px] text-slate-400">{{ fmtTime(product.updated_at) }}</span>
-      </div>
-      <ul v-if="candidates.length" class="mt-1.5 space-y-1">
-        <li v-for="c in candidates" :key="c.id" class="truncate text-xs text-slate-500 dark:text-zinc-400">
-          <span class="chip bg-amber-500/10 text-amber-700 dark:text-amber-300">未核验</span>
-          {{ c.summary }}
-        </li>
-      </ul>
+    <div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2.5 dark:border-zinc-800">
+      <span class="chip bg-amber-500/10 text-amber-700 dark:text-amber-300">{{ product.fulfillment.candidate_total }} 条待核验</span>
+      <span class="mono text-[11px] text-slate-400">{{ fmtTime(product.updated_at) }}</span>
     </div>
   </section>
 </template>
