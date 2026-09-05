@@ -36,6 +36,19 @@ _NEW_TARGETS = [
 
 
 def upgrade() -> None:
+    # 同一频道/关键词可被多个分区各自监控，唯一键必须含 community
+    op.drop_constraint("uq_target", "collect_targets", type_="unique")
+    op.create_unique_constraint(
+        "uq_target_community",
+        "collect_targets",
+        ["platform", "target_type", "target_value", "community"],
+    )
+    # 历史遗留：碧蓝航线搜索目标曾挂在 wuwa 分区（0024 已把其内容划入 blhx），归位
+    op.execute(
+        "UPDATE collect_targets SET community='blhx', tier='general' "
+        "WHERE community='wuwa' AND platform='bilibili' AND target_type='keyword_search' "
+        "AND target_value='碧蓝航线'"
+    )
     # 同键目标已存在时跳过（INSERT..SELECT..WHERE NOT EXISTS 兼容 MySQL/SQLite）
     for platform, target_type, target_value, name, co_terms, min_views, tier, community in _NEW_TARGETS:
         op.execute(
@@ -58,3 +71,7 @@ def downgrade() -> None:
             + "' AND target_value='" + target_value
             + "' AND community='" + community + "'"
         )
+    op.drop_constraint("uq_target_community", "collect_targets", type_="unique")
+    op.create_unique_constraint(
+        "uq_target", "collect_targets", ["platform", "target_type", "target_value"]
+    )

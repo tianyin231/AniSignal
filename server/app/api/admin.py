@@ -101,6 +101,7 @@ async def create_target(
             CollectTarget.platform == body.platform,
             CollectTarget.target_type == body.target_type,
             CollectTarget.target_value == body.target_value,
+            CollectTarget.community == body.community,
         )
     )
     if duplicate is not None:
@@ -145,6 +146,7 @@ async def update_target(
                 CollectTarget.platform == target.platform,
                 CollectTarget.target_type == target.target_type,
                 CollectTarget.target_value == body.target_value,
+                CollectTarget.community == target.community,
                 CollectTarget.id != target.id,
             )
         )
