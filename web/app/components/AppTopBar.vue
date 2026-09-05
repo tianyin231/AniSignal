@@ -3,14 +3,15 @@ import { avatarGradient, displayName } from '~/utils/avatars'
 import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 
 const route = useRoute()
-// 顶栏 = 品牌旁的"频道"组：首页（跨分区聚合）+ 各游戏分区，下划线选中态；
-// 站点栏目导航（官方动态/商品/事件/内容库）在下方 SectionBar 细条里。
+// 顶栏只有一层：品牌旁的"频道"组（首页/鸣潮/碧蓝航线…）+ 右侧工具；
+// 栏目导航（官方动态/商品/事件/内容库）放在首页内容区的操作行里，不单独占一层。
 const channels = [
   { key: 'home', label: '首页', color: 'blue' as const },
   ...GAME_COMMUNITIES.map(c => ({ key: c.key, label: c.label, color: c.color })),
 ]
 
-const { community } = useGameSection()
+const { community, currentCommunity } = useGameSection()
+const accent = computed(() => communityClasses(currentCommunity.value.color))
 
 // 选中频道：聚合首页 → 首页；分区首页 → 该分区；栏目页 → 当前分区
 const activeChannel = computed(() => {
@@ -97,5 +98,7 @@ async function handleLogout() {
         </div>
       </div>
     </div>
+    <!-- 分区强调条：顶栏底部 3px 渐变，颜色跟随当前分区 -->
+    <div class="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-gradient-to-r" :class="accent.bar" aria-hidden="true" />
   </header>
 </template>

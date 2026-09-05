@@ -8,7 +8,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>()
 </script>
 
 <template>
-  <div class="sticky top-[6.5rem] z-30 mb-4">
+  <div class="sticky top-16 z-30 mb-4">
     <div class="panel-glass flex max-w-full items-center justify-between gap-2 rounded-[14px] p-1">
       <div class="inline-flex gap-0.5 overflow-x-auto [scrollbar-width:none]">
         <button

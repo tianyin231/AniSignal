@@ -3,7 +3,6 @@
     <div class="aurora-bg pointer-events-none fixed inset-0 -z-10" aria-hidden="true" />
     <WallpaperBackdrop />
     <AppTopBar />
-    <SectionBar />
     <AnnouncementBanner />
     <div class="mx-auto max-w-[1280px] px-4 lg:px-6">
       <div
@@ -11,7 +10,7 @@
         :class="{ 'xl:grid-cols-[220px_minmax(0,1fr)_300px]': !contentFocus }"
       >
         <aside class="hidden lg:block">
-          <div class="sticky top-[6.5rem]">
+          <div class="sticky top-[72px]">
             <AppSidebar />
           </div>
         </aside>
@@ -19,7 +18,7 @@
           <slot />
         </main>
         <aside v-if="!contentFocus" class="hidden xl:block">
-          <div class="sticky top-[6.5rem] space-y-4">
+          <div class="sticky top-[72px] space-y-4">
             <RightRail />
           </div>
         </aside>
