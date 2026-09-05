@@ -58,14 +58,21 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 - **批量重审**：`POST /api/admin/ai/review-community?community=X&limit≤500`（清该分区 content_reviews
   后按 50/块入队）；管理端内容页选分区筛选后出现「重审本分区」按钮。2026-09-05 用它修正了 blhx
   存量 84+ 条按 wuwa 语境误判"与鸣潮无关"而下架的内容——分区归属/提示词调整后必须重审存量。
-- **前端视觉（2026-09-05 定稿）**：顶栏底部 3px 分区色强调条（切分区整条变色：wuwa=论坛蓝、
-  blhx=青色）+ 品牌旁常驻分区徽章 chip + 分段控件带分区色点、选中态用分区色。类组全部字面量写在
+- **前端视觉（2026-09-05 定稿，同日二改）**：顶栏只做站点大分类导航（首页居首）；分区切换在顶栏
+  正下方的常驻细条 `CommunityBar.vue`（sticky top-14），底部 3px 分区色强调条随分区变色
+  （wuwa=论坛蓝、blhx=青色）。分段控件带分区色点、选中态用分区色，类组全部字面量写在
   `useGameSection.ts` 的 COMMUNITY_CLASSES（动态拼接类名会被 Tailwind purge）。
+  **sticky 偏移约定**：CommunityBar 占 top-14~top-[6.5rem]，TabNav/侧栏/右栏 sticky 都用
+  top-[6.5rem]（新增吸顶元素注意别被分区条盖住）。
   `useGameSection.ts` 是分区唯一状态源（URL query 优先 → localStorage 回退 → 默认 wuwa；默认分区
   不写 URL），并集中 `PLATFORMS_BY_COMMUNITY`（平台筛选随分区收敛：blhx 只有 B站）——contents/
-  official/首页 official pills 三处共用，首页那处曾是漏网。**各数据页 key/参数/watch 都要带
-  community**（右栏履约信号卡 StatusCard、auth 布局事件预览曾是漏网）。跨分区场景（账号中心关注流）
-  保持跨分区统一但 RawFeedRow 传 `show-community` 逐条显示分区徽章。
+  official/首页三处共用。
+  **首页信息架构（2026-09-05 定稿）**：官方精选轮播 → 近期聚合结论（5 条速览）→ 「最新·最热」
+  混合流：官方+社区内容每页 15:30 双请求拉取，页内按"有效时间"排序（官方 +36h、播放≥1 万 +12h），
+  RawFeedRow 播放量≥1 万自动带 🔥热门徽章与播放数。右栏履约信号卡只做粗略速览（三轴状态行+待核验
+  数），细节在商品详情页。
+  **各数据页 key/参数/watch 都要带 community**（auth 布局事件预览曾是漏网）。跨分区场景（账号中心
+  关注流）保持跨分区统一但 RawFeedRow 传 `show-community` 逐条显示分区徽章。
 - 管理端：分区选项/徽章单一来源 `web/app/utils/admin-communities.ts`（targets/contents/events/
   products/rules 五页共用）；内容管理分区筛选+徽章+批量重审按钮；商品管理分区筛选+徽章；
   目标表单分区下拉；商品表单分区下拉（自动建的 B 站监控继承商品分区）；分类词典可限定分区。
