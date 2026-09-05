@@ -119,7 +119,8 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 
 - `GET /api/official-links`：扫描近 30 天官方身份内容正文里的 http(s) 链接，剔除图片/静态资源主机（hdslb 等），按 host 分类（kuro/bilibili/youtube/miyoushe/web），去重取最新 30 条；进程内缓存 5 分钟。
 - 管理端内容治理动作（下架/删除/修订）会调用 `invalidate_official_links_cache()` 立即失效缓存。
-- 模板链接过滤：同 URL 在扫描窗口出现 ≥3 次（每条官方内容都带的下载页/官网/社媒签名块）剔除；社媒黑名单（Facebook/Twitter/Discord/Reddit/TikTok/Instagram/频道页）直接排除——否则 YouTube 简介的固定链接块会刷屏。
+- 模板链接过滤：同 URL 在扫描窗口出现 ≥3 次（每条官方内容都带的下载页/官网/社媒签名块）剔除；黑名单直接排除——社媒（Facebook/Twitter/Discord/Reddit/TikTok/Instagram/频道页）+ **网盘与 UGC 作品页**（百度/夸克/迅雷网盘、lanzou、DeviantArt、Pixiv、ArtStation，2026-09-05 增补：曾因此混入用户资源帖/二创作者主页链接刷屏官方面板）。**AI 提取路径同样必须过滤官方身份**（`_ai_official_links` 曾漏掉 identity 过滤，用户内容被 AI 提取的链接全量混入面板——两路径共享 Source.identity=official 过滤）。
+- 不可读标签（官网英文页锚文本 "information"、裸域名等 `_LINK_GENERIC_LABELS`）回退为**来源内容标题**；AI 路径的 title 字段填来源内容标题，前端 tooltip 显示"标题 · 链接名"（相同则去重）。
 - 链接名称两级来源：**AI 审核时顺带提取**（`content_reviews.links`，简体中文名称如"B站主题收藏集"，面板优先用）；未审核内容回退规则提取（锚文本/前文短语）。审核完成会自动失效外链缓存。规则回退会跳过 AI 已提取过的内容。
 - 侧栏「工具」与「官方链接」是两个独立面板。
 - 前端 `OfficialLinks.vue` 双形态：桌面在侧栏下方列表（variant=list），移动端（lg 以下）在首页 tab 行下方横滑条（variant=strip）；`useOfficialLinks` 共享状态，首处触发拉取。
