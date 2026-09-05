@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.clock import utcnow
 from app.models.base import Base
+from app.communities import DEFAULT_COMMUNITY
 
 # 履约阶梯固定标签（设计文档 §9.2）；索引即阶段号
 FULFILLMENT_STAGES = [
@@ -26,7 +27,7 @@ class Product(Base):
     slug: Mapped[str] = mapped_column(String(64), unique=True)
     name: Mapped[str] = mapped_column(String(255))
     # 所属游戏分区：决定履约证据从哪个分区的内容池匹配
-    community: Mapped[str] = mapped_column(String(16), default="wuwa")
+    community: Mapped[str] = mapped_column(String(16), default=DEFAULT_COMMUNITY)
     publisher: Mapped[str | None] = mapped_column(String(255))
     skus: Mapped[list] = mapped_column(JSON, default=list)
     price_note: Mapped[str | None] = mapped_column(String(64))

@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.communities import DEFAULT_COMMUNITY
 from app.models import (
     ContentVersion,
     Event,
@@ -122,7 +123,7 @@ async def events_to_out(
                 summary_status=event.summary_status,
                 summary_updated_at=event.summary_updated_at,
                 category=event.category,
-                community=(event.community or "wuwa"),
+                community=(event.community or DEFAULT_COMMUNITY),
                 product_id=event.product_id,
                 product_slug=(product.slug if product else None),
                 identity=event.identity,
@@ -244,7 +245,7 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         slug=product.slug,
         name=product.name,
         publisher=product.publisher,
-        community=(product.community or "wuwa"),
+        community=(product.community or DEFAULT_COMMUNITY),
         skus=(product.skus or []),
         price_note=product.price_note,
         presale_at=product.presale_at,

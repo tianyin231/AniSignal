@@ -15,6 +15,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.communities import DEFAULT_COMMUNITY
 from app.collectors.base import CollectorError, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.kuro import KuroCollector
@@ -148,7 +149,7 @@ async def _backfill_empty_draw_dynamics(
             raw = {}
         item = dict(raw)
         item.update({"id": external_id, "text": rich.get("text") or "", "pics": rich.get("pics") or []})
-        enriched_by_community.setdefault(community or "wuwa", []).append(item)
+        enriched_by_community.setdefault(community or DEFAULT_COMMUNITY, []).append(item)
         touched.append(rid)
     total = 0
     for community, items in enriched_by_community.items():

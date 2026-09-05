@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
+from app.communities import DEFAULT_COMMUNITY
 from app.models import ContentVersion, MetricSnapshot, RawContent, Source
 from app.models.enums import Identity
 from app.parsers.bilibili import PARSER_VERSION as BILIBILI_PARSER_VERSION
@@ -54,7 +55,7 @@ class IngestStats:
 
 
 async def ingest_items(
-    session: AsyncSession, fetch_kind: str, items: list[dict], community: str = "wuwa"
+    session: AsyncSession, fetch_kind: str, items: list[dict], community: str = DEFAULT_COMMUNITY
 ) -> IngestStats:
     if fetch_kind not in PARSERS:
         raise ValueError(f"no parser registered for fetch_kind={fetch_kind}")
@@ -103,7 +104,7 @@ async def _ingest_one(
     raw: dict,
     parser_version: str,
     rules: list,
-    community: str = "wuwa",
+    community: str = DEFAULT_COMMUNITY,
 ) -> tuple[bool, bool, int, str]:
     """返回 (is_new, fingerprint_changed, content_id, source_identity)。"""
     from app.services.statistics import record_content_stat
@@ -243,7 +244,7 @@ def _add_version(
             parser_version=parser_version,
             # 分区缺省时按内容自身归属（重算路径）
             category=classify_content(
-                normalized, rules, community or getattr(content, "community", None) or "wuwa"
+                normalized, rules, community or getattr(content, "community", None) or DEFAULT_COMMUNITY
             ),
         )
     )

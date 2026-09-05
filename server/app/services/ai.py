@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.communities import DEFAULT_COMMUNITY, crosstalk_names, get_community
 from app.config import get_settings
 from app.models import (
     AiUsage,
@@ -131,17 +132,12 @@ def _plain_evidence(text: str) -> str:
     return re.sub(r"\s+", " ", plain).strip()
 
 
-def _summary_supported(summary: str, evidence_text: str) -> bool:
-    """拒绝证据外的其它游戏名和数字事实；允许活动名标点归一化。"""
-    other_games = (
-        "战双帕弥什",
-        "战双",
-        "原神",
-        "崩坏：星穹铁道",
-        "崩坏星穹铁道",
-        "绝区零",
-    )
-    for game_name in other_games:
+def _summary_supported(summary: str, evidence_text: str, community: str = DEFAULT_COMMUNITY) -> bool:
+    """拒绝证据外的其它游戏名和数字事实；允许活动名标点归一化。
+
+    防串扰词表来自 communities 注册表：其他分区的游戏名 + 固定扩展名单。
+    """
+    for game_name in crosstalk_names(community):
         if game_name in summary and game_name not in evidence_text:
             return False
     for number in re.findall(r"\d+(?:\.\d+)?", summary):
@@ -208,11 +204,9 @@ async def summarize_event(
     if used_fallback:
         summary = _fallback_summary(event, len(evidences))
     else:
-        community = getattr(event, "community", None) or "wuwa"
-        if community == "blhx":
-            game, game_note = "《碧蓝航线》", "不要把《碧蓝航线》写成其它游戏；"
-        else:
-            game, game_note = "库洛游戏《鸣潮》", "不要把《鸣潮》写成其它游戏；"
+        community = getattr(event, "community", None) or DEFAULT_COMMUNITY
+        meta = get_community(community)
+        game, game_note = meta.game_name, meta.game_note
         system = (
             f"你是{game}的情报编辑，只能根据给定证据输出 JSON："
             '{"summary": "100字以内中文结论摘要"}。'
@@ -239,7 +233,7 @@ async def summarize_event(
 
         summary = str(parsed.get("summary") or "").strip()[:1000]
         used_fallback = not summary or not _summary_supported(
-            summary, "\n".join(evidence_context)
+            summary, "\n".join(evidence_context), getattr(event, "community", None) or DEFAULT_COMMUNITY
         )
         if used_fallback:
             summary = _fallback_summary(event, len(evidences))

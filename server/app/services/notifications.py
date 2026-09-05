@@ -34,7 +34,7 @@ MAX_ITEMS = 5
 
 _LOW_SIGNAL_NOTIFICATION_PATTERNS = (
     re.compile(r"(?:reaction|反应|锐评|破防|泪崩)", re.IGNORECASE),
-    re.compile(r"看.{0,16}(?:鸣潮|pv|动画|短片|剧情)", re.IGNORECASE),
+    re.compile(r"看.{0,16}(?:pv|动画|短片|剧情)", re.IGNORECASE),
     re.compile(r"(?:配队|伤害|矩阵|轮椅轴|手法|深塔|满星|速通)"),
     re.compile(r"(?:绘画过程|同人|手书|cosplay|cos|only|电台)", re.IGNORECASE),
 )
@@ -292,7 +292,7 @@ async def ai_curate(
         for item in eligible[:30]
     ]
     system = (
-        "你是《鸣潮》资讯早报编辑，只能根据输入候选生成 JSON："
+        "你是游戏资讯早报编辑，只能根据输入候选生成 JSON："
         '{"items":[{"id":1,"summary":"80字以内事实摘要"}]}。'
         "只保留真正以用户关键词为主题、且提供可核实新事实的内容，最多5条；没有合格内容就返回空数组，宁缺毋滥；"
         "抽奖、签到、泛闲聊、标题党、传闻预测、纯观看反应、攻略配队、伤害展示、开箱晒单、二创、情绪表达、无证据指控和仅顺带提及关键词的内容一律不要选；"
@@ -364,7 +364,7 @@ def _item_summary(item: dict) -> str:
     if summary:
         return summary
     title = _plain(str(item.get("title") or "这条更新"))[:100]
-    source = _plain(str(item.get("source") or "鸣潮官方"))[:40]
+    source = _plain(str(item.get("source") or "官方渠道"))[:40]
     if item.get("identity") == "official":
         return f"{source}发布了「{title}」相关更新，详情以官方原文为准。"
     return f"发现一条与关注关键词相关的新内容：{title}。"

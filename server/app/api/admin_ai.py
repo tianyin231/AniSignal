@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.admin import get_queue
 from app.api.deps import require_admin
 from app.clock import utcnow
+from app.communities import community_pattern
 from app.db import get_session
 from app.models import AiUsage
 from app.services import settings as settings_service
@@ -189,6 +191,44 @@ async def review_recent(
 
     stats = await review_recent_contents(session, limit=limit, only_missing=only_missing)
     return stats.__dict__
+
+
+@router.post("/review-community")
+async def review_community(
+    community: str = Query(..., pattern=community_pattern(), description="游戏分区"),
+    limit: int = Query(default=500, ge=1, le=1000, description="单次最多重审条数"),
+    session: AsyncSession = Depends(get_session),
+    queue=Depends(get_queue),
+):
+    """按分区批量重审：清除该分区内容的既有 AI 判定并入队重新审核。
+
+    用途：分区归属或审核提示词调整后的存量修正（如 blhx 内容曾按 wuwa 语境
+    误判"与鸣潮无关"而下架）。重审会按新判定重新计算下架状态。
+    """
+    from app.models import ContentReview, RawContent
+
+    ids = list(
+        await session.scalars(
+            select(RawContent.id)
+            .where(RawContent.community == community)
+            .order_by(RawContent.id)
+            .limit(limit)
+        )
+    )
+    if not ids:
+        return {"community": community, "cleared": 0, "queued": 0}
+    await session.execute(
+        ContentReview.__table__.delete().where(ContentReview.raw_content_id.in_(ids))
+    )
+    await session.commit()
+    queued = 0
+    for start in range(0, len(ids), 50):
+        chunk = ids[start : start + 50]
+        if await queue.enqueue_review(chunk) is not None:
+            queued += len(chunk)
+    if queued < len(ids):
+        logger.warning("review-community: %s items failed to enqueue", len(ids) - queued)
+    return {"community": community, "cleared": len(ids), "queued": queued}
 
 
 @router.post("/translate-missing")

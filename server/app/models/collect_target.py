@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.clock import utcnow
 from app.models.base import Base
+from app.communities import DEFAULT_COMMUNITY
 
 
 class CollectTarget(Base):
@@ -28,7 +29,7 @@ class CollectTarget(Base):
     # 采集分级：core = 特定关键词（商品/联名等，全量入库强及时）；general = 泛关键词（走热度门槛）
     tier: Mapped[str] = mapped_column(String(16), default="general")
     # 所属游戏分区（鸣潮/碧蓝航线），决定入库内容与事件的归属
-    community: Mapped[str] = mapped_column(String(16), default="wuwa")
+    community: Mapped[str] = mapped_column(String(16), default=DEFAULT_COMMUNITY)
 
     # 调度字段（naive UTC）
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime)

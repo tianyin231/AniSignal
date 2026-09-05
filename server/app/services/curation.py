@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.communities import DEFAULT_COMMUNITY, get_community
 from app.models import (
     ClassificationRule,
     CollectTarget,
@@ -185,7 +186,7 @@ async def _review_one(
         )
 
     async def attempt(with_image: bool) -> tuple[str, dict | None]:
-        system_prompt = _review_system_prompt(candidate.get("community") or "wuwa")
+        system_prompt = _review_system_prompt(candidate.get("community") or DEFAULT_COMMUNITY)
         cover_url = candidate.get("cover")
         if with_image and cover_url:
             data_url = await _cover_data_url(cover_url)
@@ -217,7 +218,7 @@ async def _review_one(
         candidate_text_only = {k: v for k, v in candidate.items() if k != "cover"}
         raw_response, usage = await chat(
             config,
-            _review_system_prompt(candidate.get("community") or "wuwa"),
+            _review_system_prompt(candidate.get("community") or DEFAULT_COMMUNITY),
             json.dumps(candidate_text_only, ensure_ascii=False),
             json_mode=True,
         )
@@ -260,7 +261,7 @@ async def review_recent_contents(
 
 
 async def select_highlights(
-    session: AsyncSession, limit: int = 5, community: str = "wuwa"
+    session: AsyncSession, limit: int = 5, community: str = DEFAULT_COMMUNITY
 ) -> list[dict]:
     """返回官方与社区混排精选；AI 结果缺失时使用可解释的规则分数。"""
     latest = _latest_version_subquery()
@@ -352,6 +353,7 @@ async def select_highlights(
                 "cover": cover,
                 "preview_mode": "full" if (version.text or "").strip() else "partial",
                 "matched_keywords": raw.matched_keywords or [],
+                "community": getattr(raw, "community", None) or DEFAULT_COMMUNITY,
             },
             score=score,
             group=group,
@@ -424,7 +426,7 @@ async def _review_candidates(
     )
     metrics = await _latest_metrics(session, ids)
     # 词表按分区加载：审核提示词与已知词都限定在内容所属分区内
-    communities = {getattr(raw, "community", None) or "wuwa" for raw, _, _ in rows}
+    communities = {getattr(raw, "community", None) or DEFAULT_COMMUNITY for raw, _, _ in rows}
     terms_by_community = {
         community: await _load_known_terms(session, community) for community in communities
     }
@@ -434,7 +436,7 @@ async def _review_candidates(
         media = normalized.get("media") or []
         cover = next((item for item in media if isinstance(item, str) and item), None)
         text_plain = _plain(version.text or "")
-        community = getattr(raw, "community", None) or "wuwa"
+        community = getattr(raw, "community", None) or DEFAULT_COMMUNITY
         candidates.append(
             {
                 "id": raw.id,
@@ -466,7 +468,7 @@ def _match_product_context(
     """内容命中所属分区在售商品的匹配词时，附带商品上下文供 AI 做履约预判。"""
     haystack = f"{title} {text} {' '.join(str(k) for k in matched_keywords)}"
     for product in tracked_products:
-        if (product.get("community") or "wuwa") != community:
+        if (product.get("community") or DEFAULT_COMMUNITY) != community:
             continue
         hits = [term for term in product["terms"] if term and term in haystack]
         if hits:
@@ -481,12 +483,12 @@ async def _load_tracked_products(session: AsyncSession) -> list[dict]:
         term_list = [t for t in (terms or []) if isinstance(t, str) and len(t.strip()) >= 2]
         if term_list:
             products.append(
-                {"id": pid, "name": name, "terms": term_list, "community": community or "wuwa"}
+                {"id": pid, "name": name, "terms": term_list, "community": community or DEFAULT_COMMUNITY}
             )
     return products
 
 
-async def _load_known_terms(session: AsyncSession, community: str = "wuwa") -> list[str]:
+async def _load_known_terms(session: AsyncSession, community: str = DEFAULT_COMMUNITY) -> list[str]:
     """权威相关词表：所属分区的采集目标关键词 + 适用的分类词典。
 
     模型知识库不认识最新的角色/活动，词表是相关性的判据来源，
@@ -648,12 +650,10 @@ def _excerpt(value: str) -> str | None:
     return text[:140] + ("…" if len(text) > 140 else "")
 
 
-def _review_system_prompt(community: str = "wuwa") -> str:
-    """审核提示词按分区模板化：游戏名与"其他游戏"示例随分区变化。"""
-    if community == "blhx":
-        game, other_games = "《碧蓝航线》", "（如鸣潮、崩坏系列、原神等）"
-    else:
-        game, other_games = "《鸣潮》", "（如崩坏系列、原神、碧蓝航线等）"
+def _review_system_prompt(community: str = DEFAULT_COMMUNITY) -> str:
+    """审核提示词按分区模板化：游戏名与"其他游戏"示例取自 communities 注册表。"""
+    meta = get_community(community)
+    game, other_games = f"《{meta.bare_name}》", meta.other_games_examples
     return f"""你是{game}主题情报站的编辑兼内容安全审核员。本站对{game}及其周边生态做定向采集，你的知识库可能不包含最新的角色、版本与活动——判断相关性必须以下面两条为准，不得依赖你自己认识与否：
 
 1. 内容自带的 matched_keywords 是它被采集入库的原因（来自站点配置的采集关键词）。

@@ -20,6 +20,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
+from app.communities import DEFAULT_COMMUNITY, game_name_boilerplate
 from app.models import (
     ANNOUNCE_CATEGORIES,
     Category,
@@ -64,7 +65,7 @@ class ContentRow:
     identity: str
     source_name: str | None
     source_external_id: str | None
-    community: str = "wuwa"
+    community: str = DEFAULT_COMMUNITY
 
 
 @dataclass
@@ -146,17 +147,14 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
                 identity=(source.identity if source else "unknown"),
                 source_name=(source.name if source else None),
                 source_external_id=(source.external_id if source else None),
-                community=(raw.community or "wuwa"),
+                community=(raw.community or DEFAULT_COMMUNITY),
             )
         )
     return result
 
 
 _TITLE_BOILERPLATE = (
-    "《鸣潮》",
-    "鸣潮",
-    "《碧蓝航线》",
-    "碧蓝航线",
+    *game_name_boilerplate(),  # 各分区游戏名的《X》/X 写法，由注册表派生
     "先约电台",
     "官方",
     "公告",
@@ -380,7 +378,7 @@ async def _aggregate_official(
             tuple(sorted((left_id, right_id))) for left_id, right_id in pair_rows
         }
 
-    communities = sorted({row.community for row in official_all} | {"wuwa"})
+    communities = sorted({row.community for row in official_all} | {DEFAULT_COMMUNITY})
     for community in communities:
         official = [row for row in official_all if row.community == community]
         await _aggregate_official_community(
@@ -575,7 +573,7 @@ async def _aggregate_product(
     matched = [
         row
         for row in contents
-        if row.community == (product.community or "wuwa")
+        if row.community == (product.community or DEFAULT_COMMUNITY)
         and row.category in FULFILLMENT_CATEGORIES
         and _matches_product(row, product)
     ]
@@ -590,7 +588,7 @@ async def _aggregate_product(
             session,
             category=category,
             product_id=product.id,
-            community=product.community or "wuwa",
+            community=product.community or DEFAULT_COMMUNITY,
             cluster=items,
             stats=stats,
             product=product,
@@ -803,7 +801,7 @@ async def split_event(
         title=first.title[:255],
         category=event.category,
         product_id=event.product_id,
-        community=event.community or "wuwa",
+        community=event.community or DEFAULT_COMMUNITY,
         identity=event.identity,
         importance=event.importance,
         confidence=event.confidence,

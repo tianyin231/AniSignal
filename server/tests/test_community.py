@@ -110,3 +110,103 @@ async def test_public_contents_community_filter(client, session):
 
     invalid = await client.get("/api/contents", params={"community": "other"})
     assert invalid.status_code == 422
+
+
+async def test_admin_review_community_endpoint(client, session, admin_headers):
+    """按分区批量重审：只清本分区判定并入队，非法分区 422。"""
+    await ingest_items(session, "bilibili_search", [_video("BVw2", "鸣潮内容")], community="wuwa")
+    await ingest_items(session, "bilibili_search", [_video("BVb2", "碧蓝航线内容")], community="blhx")
+    from app.models import ContentReview, RawContent
+
+    rows = {
+        r.external_id: r
+        for r in (await session.execute(select(RawContent))).scalars()
+    }
+    # 预置旧判定（模拟 wuwa 语境下的误判）
+    session.add(ContentReview(raw_content_id=rows["BVb2"].id, relevant=False, model="test"))
+    await session.commit()
+
+    from app.api import main as api_main
+
+    fake = api_main.app.state.queue
+    resp = await client.post(
+        "/api/admin/ai/review-community", params={"community": "blhx"}, headers=admin_headers
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"community": "blhx", "cleared": 1, "queued": 1}
+    assert rows["BVb2"].id in fake.reviewed
+    assert rows["BVw2"].id not in fake.reviewed
+    left = await session.scalar(
+        select(func.count())
+        .select_from(ContentReview)
+        .where(ContentReview.raw_content_id == rows["BVb2"].id)
+    )
+    assert left == 0
+
+    invalid = await client.post(
+        "/api/admin/ai/review-community", params={"community": "xyz"}, headers=admin_headers
+    )
+    assert invalid.status_code == 422
+
+
+async def test_admin_products_community_filter(client, session, admin_headers):
+    from app.models import Product
+
+    session.add_all(
+        [
+            Product(slug="p-wuwa", name="鸣潮商品", community="wuwa"),
+            Product(slug="p-blhx", name="碧蓝商品", community="blhx"),
+        ]
+    )
+    await session.commit()
+    total = len((await client.get("/api/admin/products", headers=admin_headers)).json()["items"])
+    resp = await client.get(
+        "/api/admin/products", params={"community": "blhx"}, headers=admin_headers
+    )
+    items = resp.json()["items"]
+    assert items and all(p["community"] == "blhx" for p in items)
+    assert 0 < len(items) < total
+
+
+async def test_product_signal_community_follows_product(session):
+    """履约信号显式携带商品分区（同步时强制覆盖，不依赖 join 推断）。"""
+    from app.models import ContentVersion, Event, Evidence, Product, ProductSignal, RawContent, Source
+    from app.services.fulfillment import sync_product_signals
+
+    product = Product(slug="p-sig", name="信号分区商品", community="blhx", watch_terms=["信号分区"])
+    source = Source(platform="bilibili", external_id="u-sig", name="用户", identity="user", raw_json={})
+    session.add_all([product, source])
+    await session.flush()
+    raw = RawContent(
+        platform="bilibili",
+        content_type="video",
+        external_id="BVsig1",
+        source_id=source.id,
+        url="https://example.com/BVsig1",
+        raw_json={},
+        community="blhx",
+    )
+    session.add(raw)
+    await session.flush()
+    session.add(
+        ContentVersion(raw_content_id=raw.id, version=1, title="信号分区商品开箱", text="已到货")
+    )
+    event = Event(
+        title="信号分区商品开箱",
+        category="unboxing",
+        identity="user",
+        is_active=True,
+        product_id=product.id,
+        community="blhx",
+    )
+    session.add(event)
+    await session.flush()
+    session.add(Evidence(event_id=event.id, raw_content_id=raw.id, role="support"))
+    await session.commit()
+
+    created = await sync_product_signals(session, product.id)
+    assert created >= 1
+    signal = (
+        await session.execute(select(ProductSignal).where(ProductSignal.product_id == product.id))
+    ).scalars().first()
+    assert signal.community == "blhx"
