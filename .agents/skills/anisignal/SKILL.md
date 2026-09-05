@@ -63,8 +63,8 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
   类组在 COMMUNITY_CLASSES.nav）。**首页频道 = 跨分区聚合**（`/` 无 community 参数 → 后端以
   community=all 查询），分区频道 = `/?community=key`（显式写参数，与聚合首页区分；点击调
   useGameSection.selectCommunity 会写 localStorage）。**吸顶只有顶栏一层**；站点栏目导航（官方动态/商品/事件/内容库，带 communityQuery）放在
-  首页内容区首行（panel-glass 磨砂条，与刷新同处一行，随内容滚动、不吸顶）。3px 分区色强调条
-  在顶栏底边。类组全部字面量写在 COMMUNITY_CLASSES（动态拼接会被 Tailwind purge）。
+  首页内容区首行（panel-glass 磨砂条，与刷新同处一行，随内容滚动、不吸顶）。分区指示不带通栏强调条（2026-09-05 评估后删除：频道下划线已足够表达），
+  悬停一律纯文字变色（容器内不放灰底 hover 块）。类组全部字面量写在 COMMUNITY_CLASSES（动态拼接会被 Tailwind purge）。
 - **聚合查询**：/api/contents、/api/events、/api/highlights 接受 `community=all`（跳过分区过滤，
   `COMMUNITY_AGGREGATE_QUERY`）；sources/products/official-links 仍严格单分区。聚合页所有内容行
   （RawFeedRow `show-community`）、事件行、轮播卡都带分区徽章。
