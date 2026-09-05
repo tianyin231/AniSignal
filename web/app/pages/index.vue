@@ -14,8 +14,17 @@ const COMMUNITY_PER_PAGE = 30
 const OFFICIAL_BOOST_HOURS = 36
 const HOT_BOOST_HOURS = 12
 
-const { community } = useGameSection()
+const { community, communityQuery } = useGameSection()
 const { api } = usePublicApi()
+
+// 站点栏目导航：与刷新同处一行（顶栏只有频道一层）
+const sectionLinks = [
+  { to: '/official', label: '官方动态' },
+  { to: '/products', label: '商品' },
+  { to: '/events', label: '事件' },
+  { to: '/contents', label: '内容库' },
+]
+const isActive = (to: string) => route.path.startsWith(to)
 // 首页频道语义：/ 无 community 参数 = 跨分区聚合（community=all）；带参数 = 该分区首页
 const aggregate = computed(() => !route.query.community)
 const homeCommunity = computed(() => (aggregate.value ? 'all' : community.value))
@@ -188,25 +197,43 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <div class="mb-4 flex items-center justify-end gap-2">
-      <button
-        v-if="pendingNewContent"
-        type="button"
-        class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-blue-600/10 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-600/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-400/15 dark:text-blue-300"
-        @click="applyUpdates"
-      >
-        <span class="size-1.5 animate-pulse rounded-full bg-blue-500" aria-hidden="true" />
-        有新内容
-      </button>
-      <button
-        type="button"
-        :disabled="refreshing"
-        class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 py-1.5 text-xs text-slate-500 transition-colors hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60 dark:text-zinc-400 dark:hover:text-blue-300"
-        @click="pendingNewContent ? applyUpdates() : refreshHome()"
-      >
-        <RefreshCw :size="13" :class="{ 'animate-spin': refreshing }" aria-hidden="true" />
-        {{ refreshing ? '刷新中…' : '刷新' }}
-      </button>
+    <!-- 栏目导航与刷新同处一行，顶部只有一层吸顶栏 -->
+    <div class="mb-4 flex items-center justify-between gap-2">
+      <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-sm [scrollbar-width:none]" aria-label="站点栏目">
+        <NuxtLink
+          v-for="l in sectionLinks"
+          :key="l.to"
+          :to="{ path: l.to, query: communityQuery }"
+          class="whitespace-nowrap rounded-md px-2.5 py-1.5 transition-colors"
+          :class="
+            isActive(l.to)
+              ? 'bg-blue-500/10 font-medium text-blue-600 dark:bg-blue-400/15 dark:text-blue-300'
+              : 'text-slate-600 hover:bg-slate-200/70 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
+          "
+        >
+          {{ l.label }}
+        </NuxtLink>
+      </nav>
+      <div class="flex shrink-0 items-center gap-2">
+        <button
+          v-if="pendingNewContent"
+          type="button"
+          class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-blue-600/10 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-600/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-400/15 dark:text-blue-300"
+          @click="applyUpdates"
+        >
+          <span class="size-1.5 animate-pulse rounded-full bg-blue-500" aria-hidden="true" />
+          有新内容
+        </button>
+        <button
+          type="button"
+          :disabled="refreshing"
+          class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 py-1.5 text-xs text-slate-500 transition-colors hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60 dark:text-zinc-400 dark:hover:text-blue-300"
+          @click="pendingNewContent ? applyUpdates() : refreshHome()"
+        >
+          <RefreshCw :size="13" :class="{ 'animate-spin': refreshing }" aria-hidden="true" />
+          {{ refreshing ? '刷新中…' : '刷新' }}
+        </button>
+      </div>
     </div>
 
     <OfficialLinks variant="strip" />
