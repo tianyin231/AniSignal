@@ -243,3 +243,19 @@ async def test_public_aggregate_community_all(client, session):
 
     # sources / products 保持严格分区校验，不接受 all
     assert (await client.get("/api/sources", params={"community": "all"})).status_code == 422
+
+
+async def test_products_community_all(client, session):
+    """商品列表支持 community=all：跨分区聚合返回全部分区商品。"""
+    from app.models import Product
+
+    session.add_all(
+        [
+            Product(slug="pa-wuwa", name="鸣潮商品B", community="wuwa"),
+            Product(slug="pa-blhx", name="碧蓝商品B", community="blhx"),
+        ]
+    )
+    await session.commit()
+    resp = await client.get("/api/products", params={"community": "all"})
+    names = {p["name"] for p in resp.json()["items"]}
+    assert "鸣潮商品B" in names and "碧蓝商品B" in names

@@ -22,19 +22,20 @@ const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
 
 const { api } = usePublicApi()
-const { community } = useGameSection()
+// community=all（首页聚合进入）时跨分区展示并逐行标注分区
+const { scope, isAll } = useCommunityScope()
 const { data, status } = await useAsyncData(
-  () => `events-${community.value}-${tab.value}-${page.value}`,
+  () => `events-${scope.value}-${tab.value}-${page.value}`,
   () =>
     api<ApiEventList>('/api/events', {
       query: {
-        community: community.value,
+        community: scope.value,
         limit: pageSize,
         offset: (page.value - 1) * pageSize,
         ...(tab.value !== 'all' ? { category: tab.value } : {}),
       },
     }),
-  { watch: [community, tab, page] },
+  { watch: [scope, tab, page] },
 )
 
 const list = computed<AppEvent[]>(() => (data.value?.items ?? []).map(toAppEvent))
@@ -55,7 +56,7 @@ useSeoMeta({ title: '事件库' })
       加载中…
     </section>
     <section v-else class="panel overflow-hidden">
-      <EventRow v-for="e in list" :key="e.id" :event="e" />
+      <EventRow v-for="e in list" :key="e.id" :event="e" :show-community="isAll" />
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
         在已接入来源中暂无此类事件。
       </p>

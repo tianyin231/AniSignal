@@ -4,12 +4,16 @@ import type { ApiProductList } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 
 const { api } = usePublicApi()
+const route = useRoute()
 const { community } = useGameSection()
-// 履约信号按分区隔离：商品列表跟随顶栏分区刷新
+// 履约信号跟随页面视角：community=all（首页聚合）时展示全部分区商品
+const scope = computed(() =>
+  String(route.query.community || '') === 'all' ? 'all' : community.value,
+)
 const { data } = await useAsyncData(
-  () => `status-product-${community.value}`,
-  () => api<ApiProductList>('/api/products', { query: { community: community.value } }),
-  { watch: [community] },
+  () => `status-product-${scope.value}`,
+  () => api<ApiProductList>('/api/products', { query: { community: scope.value } }),
+  { watch: [scope] },
 )
 const products = computed(() => data.value?.items ?? [])
 // 多商品：默认展示第一个，可通过 chips 切换

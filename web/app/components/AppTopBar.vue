@@ -13,12 +13,14 @@ const channels = [
 const { community } = useGameSection()
 
 // 选中频道：聚合首页 → 首页；分区首页 → 该分区；栏目页 → 当前分区
-const activeChannel = computed(() => {
+const activeChannel = computed<string | null>(() => {
   if (route.path === '/') {
     const q = String(route.query.community || '')
     if (GAME_COMMUNITIES.some(c => c.key === q)) return q
     return 'home'
   }
+  // 栏目页处于聚合视角（community=all）时不高亮任何分区频道
+  if (String(route.query.community || '') === 'all') return null
   return community.value
 })
 
