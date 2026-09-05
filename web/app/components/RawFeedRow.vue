@@ -19,6 +19,11 @@ const communityBadge = computed(() => {
   return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
 })
 
+// 热门标记：播放量达到泛关键词准入门槛（1 万）即视为热门内容
+const HOT_VIEWS = 10_000
+const viewCount = computed(() => props.item.metrics?.view)
+const isHot = computed(() => (viewCount.value ?? 0) >= HOT_VIEWS)
+
 </script>
 
 <template>
@@ -56,6 +61,11 @@ const communityBadge = computed(() => {
           平台公开接口未返回正文或图片，可直接打开原文核对。
         </p>
         <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400 dark:text-zinc-500">
+        <span
+          v-if="isHot"
+          class="rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600 dark:text-orange-300"
+        >🔥 热门</span>
+        <span v-if="viewCount" class="mono">{{ viewCount.toLocaleString('zh-CN') }} 播放 · </span>
         <span>{{ platformMeta[item.platform].label }} · {{ item.account }}</span>
         <span
           v-if="communityBadge"
