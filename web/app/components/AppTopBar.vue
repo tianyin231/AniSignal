@@ -10,8 +10,7 @@ const channels = [
   ...GAME_COMMUNITIES.map(c => ({ key: c.key, label: c.label, color: c.color })),
 ]
 
-const { community, currentCommunity } = useGameSection()
-const accent = computed(() => communityClasses(currentCommunity.value.color))
+const { community } = useGameSection()
 
 // 选中频道：聚合首页 → 首页；分区首页 → 该分区；栏目页 → 当前分区
 const activeChannel = computed(() => {
@@ -98,7 +97,5 @@ async function handleLogout() {
         </div>
       </div>
     </div>
-    <!-- 分区强调条：顶栏底部 3px 渐变，颜色跟随当前分区 -->
-    <div class="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-gradient-to-r" :class="accent.bar" aria-hidden="true" />
   </header>
 </template>

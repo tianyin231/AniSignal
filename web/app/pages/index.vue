@@ -204,11 +204,11 @@ onBeforeUnmount(() => {
           v-for="l in sectionLinks"
           :key="l.to"
           :to="{ path: l.to, query: communityQuery }"
-          class="whitespace-nowrap rounded-md px-2.5 py-1.5 transition-colors"
+          class="whitespace-nowrap rounded-[10px] px-3 py-1.5 text-sm transition-all"
           :class="
             isActive(l.to)
-              ? 'bg-blue-500/10 font-medium text-blue-600 dark:bg-blue-400/15 dark:text-blue-300'
-              : 'text-slate-600 hover:bg-slate-200/70 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
+              ? 'bg-white/85 font-medium text-blue-700 shadow-sm dark:bg-white/10 dark:text-blue-300'
+              : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200'
           "
         >
           {{ l.label }}

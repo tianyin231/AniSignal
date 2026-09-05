@@ -29,29 +29,20 @@ const STORAGE_KEY = 'anisignal-community'
 const VALID_KEYS = new Set(GAME_COMMUNITIES.map(item => item.key))
 
 /**
- * 分区色 → Tailwind 类组（全部字面量写出）。
- * bar 是分区条底部强调条的发光渐变；chip 用于分区徽章；nav 是顶栏频道 tab 的
- * 选中态（分区色文字 + 2px 下划线）；tabActive 是细条分段控件选中态。
+ * 分区色 → Tailwind 类组（全部字面量写出，只保留实际消费的键）。
+ * chip：内容行/事件行/轮播卡的分区徽章；nav：顶栏频道 tab 选中态（分区色文字+下划线）。
  */
 const COMMUNITY_CLASSES: Record<
   GameCommunity['color'],
-  { dot: string, text: string, chip: string, bar: string, nav: string, tabActive: string }
+  { chip: string, nav: string }
 > = {
   blue: {
-    dot: 'bg-blue-500',
-    text: 'text-blue-600 dark:text-blue-300',
     chip: 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300',
-    bar: 'from-blue-500/80 via-blue-400/60 to-cyan-400/40',
     nav: 'border-blue-500 text-blue-700 dark:text-blue-300',
-    tabActive: 'bg-white text-blue-700 shadow-sm dark:bg-zinc-900 dark:text-blue-300',
   },
   cyan: {
-    dot: 'bg-cyan-500',
-    text: 'text-cyan-700 dark:text-cyan-300',
     chip: 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300',
-    bar: 'from-cyan-500/80 via-cyan-400/60 to-sky-400/40',
     nav: 'border-cyan-500 text-cyan-700 dark:text-cyan-300',
-    tabActive: 'bg-white text-cyan-700 shadow-sm dark:bg-zinc-900 dark:text-cyan-300',
   },
 }
 
