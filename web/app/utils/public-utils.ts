@@ -48,6 +48,7 @@ export function toAppEvent(e: ApiEvent): AppEvent {
       }),
     ),
     evidenceCount: e.evidence_count,
+    community: e.community,
     firstSeenAt: fmtTime(e.first_seen_at),
     latestEvidenceAt: fmtTime(e.latest_evidence_at ?? e.first_seen_at),
     updatedAt: fmtTime(e.updated_at),

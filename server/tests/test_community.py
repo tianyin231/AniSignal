@@ -223,3 +223,23 @@ async def test_product_signal_community_follows_product(session):
         await session.execute(select(ProductSignal).where(ProductSignal.product_id == product.id))
     ).scalars().first()
     assert signal.community == "blhx"
+
+
+async def test_public_aggregate_community_all(client, session):
+    """community=all：跨分区聚合返回两个分区内容，非法写路径不受影响。"""
+    await ingest_items(session, "bilibili_search", [_video("BVw3", "鸣潮内容")], community="wuwa")
+    await ingest_items(session, "bilibili_search", [_video("BVb3", "碧蓝航线内容")], community="blhx")
+    await session.commit()
+
+    resp = await client.get("/api/contents", params={"community": "all"})
+    titles = [i["title"] for i in resp.json()["items"]]
+    assert "鸣潮内容" in titles and "碧蓝航线内容" in titles
+    assert resp.json()["total"] == 2
+
+    events = await client.get("/api/events", params={"community": "all", "limit": 10})
+    assert events.status_code == 200
+    highlights = await client.get("/api/highlights", params={"community": "all"})
+    assert highlights.status_code == 200
+
+    # sources / products 保持严格分区校验，不接受 all
+    assert (await client.get("/api/sources", params={"community": "all"})).status_code == 422

@@ -79,6 +79,19 @@ def community_pattern() -> str:
     return "^(%s)$" % "|".join(COMMUNITIES)
 
 
+# 聚合查询专用：community=all 表示跨分区（仅限公开读端点，写路径不接受）
+COMMUNITY_ALL = "all"
+
+
+def community_query_pattern() -> str:
+    """公开列表端点的分区查询正则：各分区 + all（跨分区聚合）。"""
+    return "^(%s|%s)$" % ("|".join(COMMUNITIES), COMMUNITY_ALL)
+
+
+def is_all_community(value: str | None) -> bool:
+    return (value or "") == COMMUNITY_ALL
+
+
 def get_community(key: str | None) -> CommunityMeta:
     """按 key 取分区元数据；未知/缺省回落默认分区。"""
     return COMMUNITIES.get(key or "", COMMUNITIES[DEFAULT_COMMUNITY])

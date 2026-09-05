@@ -14,7 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, community_pattern
+from app.communities import (
+    COMMUNITIES,
+    DEFAULT_COMMUNITY,
+    community_pattern,
+    community_query_pattern,
+    is_all_community,
+)
 from app.db import get_session
 from app.clock import utcnow
 from app.models import CollectTarget, ContentReview, ContentVersion, Evidence, RawContent, Source
@@ -43,12 +49,18 @@ COMMUNITY_QUERY = Query(
     pattern=community_pattern(),
     description="游戏分区（%s）" % ", ".join(f"{k}={v.label}" for k, v in COMMUNITIES.items()),
 )
+# 聚合版：额外接受 all（跨分区），仅首页三个列表端点使用
+COMMUNITY_AGGREGATE_QUERY = Query(
+    default=DEFAULT_COMMUNITY,
+    pattern=community_query_pattern(),
+    description="游戏分区（all=跨分区聚合）",
+)
 
 
 @router.get("/highlights", response_model=PublicContentList)
 async def list_highlights(
     limit: int = Query(default=5, ge=1, le=8),
-    community: str = COMMUNITY_QUERY,
+    community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     """首页精选：官方实质动态与高热度社区内容混排。"""
@@ -72,7 +84,7 @@ def _preview_mode(text: str | None, media: list, url: str | None) -> str:
 @router.get("/contents", response_model=PublicContentList)
 async def list_contents(
     platform: str | None = Query(default=None),
-    community: str = COMMUNITY_QUERY,
+    community: str = COMMUNITY_AGGREGATE_QUERY,
     content_type: str | None = Query(default=None),
     identity: str | None = Query(default=None, description="official/user/... 来源身份过滤"),
     exclude_identity: str | None = Query(default=None, max_length=32, description="排除指定来源身份"),
@@ -97,7 +109,7 @@ async def list_contents(
         .group_by(ContentVersion.raw_content_id)
         .subquery()
     )
-    conditions = [RawContent.community == community]
+    conditions: list = [] if is_all_community(community) else [RawContent.community == community]
     if platform:
         conditions.append(
             RawContent.platform.in_(("kuro_cn", "kuro_global"))
@@ -369,7 +381,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
 @router.get("/events", response_model=EventListOut)
 async def list_events(
     category: str | None = Query(default=None),
-    community: str = COMMUNITY_QUERY,
+    community: str = COMMUNITY_AGGREGATE_QUERY,
     product_slug: str | None = Query(default=None),
     importance: bool | None = Query(default=None),
     published_within_hours: int | None = Query(
@@ -384,7 +396,9 @@ async def list_events(
     from app.models import Product as ProductModel
     from app.services.views import events_to_out
 
-    conditions = [EventModel.is_active.is_(True), EventModel.community == community]
+    conditions = [EventModel.is_active.is_(True)]
+    if not is_all_community(community):
+        conditions.append(EventModel.community == community)
     latest_evidence_sq = (
         select(
             Evidence.event_id.label("event_id"),

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { identityMeta, platformMeta, type AppEvent } from '~/utils/data'
+import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 
-const props = defineProps<{ event: AppEvent }>()
+const props = defineProps<{ event: AppEvent; showCommunity?: boolean }>()
 
 const identity = computed(() => identityMeta[props.event.identity])
 const eventPlatforms = computed(() =>
@@ -13,6 +14,12 @@ const eventPlatforms = computed(() =>
 const multiPlatform = computed(
   () => new Set(props.event.sources.map((s) => s.platform)).size > 1,
 )
+// 聚合首页：事件行标注所属分区
+const communityBadge = computed(() => {
+  if (!props.showCommunity || !props.event.community) return null
+  const meta = GAME_COMMUNITIES.find(c => c.key === props.event.community)
+  return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
+})
 // 来源账号去重；过多时折叠计数，详情页可见全部
 const sourceNames = computed(() => {
   const names = [...new Set(props.event.sources.map((s) => s.account).filter(Boolean))]
@@ -35,6 +42,11 @@ const sourceNames = computed(() => {
           {{ event.title }}
         </h3>
         <div class="mt-1.5 flex flex-wrap items-center gap-1.5" aria-label="事件来源平台">
+          <span
+            v-if="communityBadge"
+            class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+            :class="communityBadge.chip"
+          >{{ communityBadge.label }}</span>
           <span
             v-for="platform in eventPlatforms"
             :key="platform.key"

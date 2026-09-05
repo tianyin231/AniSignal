@@ -1,18 +1,26 @@
 <script setup lang="ts">
 import { avatarGradient, displayName } from '~/utils/avatars'
+import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 
 const route = useRoute()
-// 顶栏只做站点大分类导航，首页居首；游戏分区切换在下方 CommunityBar
-const links = [
-  { to: '/', label: '首页' },
-  { to: '/official', label: '官方动态' },
-  { to: '/products', label: '商品' },
-  { to: '/events', label: '事件' },
-  { to: '/contents', label: '内容库' },
+// 顶栏 = 品牌旁的"频道"组：首页（跨分区聚合）+ 各游戏分区，下划线选中态；
+// 站点栏目导航（官方动态/商品/事件/内容库）在下方 SectionBar 细条里。
+const channels = [
+  { key: 'home', label: '首页', color: 'blue' as const },
+  ...GAME_COMMUNITIES.map(c => ({ key: c.key, label: c.label, color: c.color })),
 ]
-const isActive = (to: string) => (to === '/' ? route.path === '/' : route.path.startsWith(to))
 
-const { communityQuery } = useGameSection()
+const { community } = useGameSection()
+
+// 选中频道：聚合首页 → 首页；分区首页 → 该分区；栏目页 → 当前分区
+const activeChannel = computed(() => {
+  if (route.path === '/') {
+    const q = String(route.query.community || '')
+    if (GAME_COMMUNITIES.some(c => c.key === q)) return q
+    return 'home'
+  }
+  return community.value
+})
 
 const { user, logout } = useAuth()
 const menuOpen = ref(false)
@@ -34,26 +42,27 @@ async function handleLogout() {
 <template>
   <header class="glass sticky top-0 z-40">
     <div class="mx-auto flex h-14 max-w-[1280px] items-center gap-4 px-4 lg:px-6">
-      <NuxtLink to="/" class="flex shrink-0 items-center gap-2">
+      <NuxtLink to="/" class="flex shrink-0 items-center gap-2 self-center">
         <img src="/icon.png" alt="" class="size-7 shrink-0">
         <span class="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-zinc-50">AniSignal</span>
       </NuxtLink>
-      <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-sm [scrollbar-width:none]">
+      <nav class="flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto text-sm [scrollbar-width:none]">
         <NuxtLink
-          v-for="l in links"
-          :key="l.to"
-          :to="{ path: l.to, query: communityQuery }"
-          class="whitespace-nowrap rounded-md px-2.5 py-1.5 transition-colors"
+          v-for="ch in channels"
+          :key="ch.key"
+          :to="ch.key === 'home' ? '/' : { path: '/', query: { community: ch.key } }"
+          class="flex items-center whitespace-nowrap border-b-2 px-3 transition-colors"
           :class="
-            isActive(l.to)
-              ? 'bg-blue-500/10 font-medium text-blue-600 dark:bg-blue-400/15 dark:text-blue-300'
-              : 'text-slate-600 hover:bg-slate-200/70 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'
+            activeChannel === ch.key
+              ? communityClasses(ch.color).nav
+              : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-100'
           "
+          :aria-current="activeChannel === ch.key ? 'page' : undefined"
         >
-          {{ l.label }}
+          {{ ch.label }}
         </NuxtLink>
       </nav>
-      <div class="flex shrink-0 items-center gap-1">
+      <div class="flex shrink-0 items-center gap-1 self-center">
         <SearchBox />
         <WallpaperToggle />
         <ThemeToggle />

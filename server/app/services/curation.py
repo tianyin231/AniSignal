@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import DEFAULT_COMMUNITY, get_community
+from app.communities import DEFAULT_COMMUNITY, get_community, is_all_community
 from app.models import (
     ClassificationRule,
     CollectTarget,
@@ -296,7 +296,7 @@ async def select_highlights(
         .where(
             publication_time >= utcnow() - HIGHLIGHT_WINDOW,
             RawContent.hidden.is_(False),
-            RawContent.community == community,
+            *([] if is_all_community(community) else [RawContent.community == community]),
         )
         .order_by(publication_time.desc(), RawContent.id.desc())
         .limit(200)
