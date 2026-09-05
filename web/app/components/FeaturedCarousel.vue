@@ -145,7 +145,7 @@ onBeforeUnmount(() => {
     @touchstart.passive="onTouchStart"
     @touchend.passive="onTouchEnd"
   >
-    <div class="relative h-[31rem] overflow-hidden md:h-72">
+    <div class="relative h-[31rem] overflow-hidden md:h-80">
       <div
         class="flex h-full will-change-transform"
         :class="transitionEnabled ? 'transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none' : 'transition-none'"
@@ -201,7 +201,7 @@ onBeforeUnmount(() => {
           </p>
           <NuxtLink
             :to="`/contents/${item.id}`"
-            class="mt-2 line-clamp-2 rounded-sm text-xl font-semibold leading-snug text-slate-900 transition-colors hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-50 dark:hover:text-blue-300"
+            class="mt-2 line-clamp-3 rounded-sm text-lg font-semibold leading-snug text-slate-900 transition-colors hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-50 dark:hover:text-blue-300"
             :tabindex="index === slideIndex ? undefined : -1"
           >
             {{ item.title }}
