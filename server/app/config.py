@@ -36,9 +36,15 @@ class Settings(BaseSettings):
     wuthering_waves_bili_mid: str = "1955897084"
     # 碧蓝航线官方 B 站账号（UID 2026-09-02 经 bili CLI 核验，认证"碧蓝航线官方账号"）
     azur_lane_bili_mid: str = "233114659"
+    # 崩坏星穹铁道官方 B 站账号（UID 2026-09-05 经 bili CLI 核验，认证"崩坏：星穹铁道官方账号"）
+    star_rail_bili_mid: str = "1340190821"
 
     # YouTube 官方频道白名单："频道ID:名称" 逗号分隔（分区归属由采集目标的 community 决定）
-    official_youtube_channels: str = "UC0Bi5KMcECRVYis5Gb_ZYZQ:Wuthering Waves 官方频道"
+    official_youtube_channels: str = (
+        "UC0Bi5KMcECRVYis5Gb_ZYZQ:Wuthering Waves 官方频道,"
+        "UCPeJaqP6WgxUVDcpYkXZKMQ:Azur Lane Official,"
+        "UC2PeMPA8PAOp-bynLoCeMLA:Honkai Star Rail 官方频道"
+    )
 
     # 米游社默认游戏 ID（2 = 原神），管理员看板可按目标覆盖
     miyoushe_default_gids: int = 2

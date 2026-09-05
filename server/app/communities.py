@@ -22,14 +22,15 @@ class CommunityMeta:
     bare_name: str  # 裸游戏名：标题去噪、防串扰
     game_note: str  # 摘要提示词里防写成其他游戏的备注句
     other_games_examples: str  # 审核提示词"其他游戏"示例（含括号）
-    color: str  # 分区语义色键：前端据此映射 Tailwind 类（blue/cyan/...）
+    color: str  # 分区语义色键：前端据此映射 Tailwind 类（blue/cyan/amber/...）
     bili_mid_setting: str | None  # config 中官方 B 站 UID 属性名
     official_bili_mid_default: str | None  # 配置缺失时的兜底 UID
+    extra_names: tuple[str, ...] = ()  # 游戏名的常见变体（如"崩坏：星穹铁道"带冒号/繁体）
 
     @property
-    def game_names(self) -> tuple[str, str]:
-        """《X》与 X 两种书写形式（标题去噪 / 防串扰都要匹配）。"""
-        return f"《{self.bare_name}》", self.bare_name
+    def game_names(self) -> tuple[str, ...]:
+        """《X》与 X 两种书写形式 + 额外变体（标题去噪 / 防串扰都要匹配）。"""
+        return (f"《{self.bare_name}》", self.bare_name, *self.extra_names)
 
 
 COMMUNITIES: dict[str, CommunityMeta] = {
@@ -54,6 +55,18 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         color="cyan",
         bili_mid_setting="azur_lane_bili_mid",
         official_bili_mid_default="233114659",
+    ),
+    "hsr": CommunityMeta(
+        key="hsr",
+        label="崩坏星穹铁道",
+        game_name="《崩坏：星穹铁道》",
+        bare_name="崩坏星穹铁道",
+        game_note="不要把《崩坏：星穹铁道》写成其它游戏；",
+        other_games_examples="（如鸣潮、碧蓝航线、原神等）",
+        color="amber",
+        bili_mid_setting="star_rail_bili_mid",
+        official_bili_mid_default="1340190821",
+        extra_names=("崩坏：星穹铁道", "崩壞星穹鐵道", "崩壞：星穹鐵道", "星穹铁道", "星穹鐵道"),
     ),
 }
 
@@ -110,7 +123,7 @@ def crosstalk_names(community_key: str) -> tuple[str, ...]:
 
 
 def game_name_boilerplate() -> tuple[str, ...]:
-    """全部分区游戏名的两种写法，供标题去噪等"清洗游戏名"场景使用。"""
+    """全部分区游戏名的书写形式（含变体），供标题去噪等"清洗游戏名"场景使用。"""
     names: list[str] = []
     for meta in COMMUNITIES.values():
         names.extend(meta.game_names)

@@ -12,15 +12,16 @@
  */
 
 export interface GameCommunity {
-  key: 'wuwa' | 'blhx'
+  key: 'wuwa' | 'blhx' | 'hsr'
   label: string
   /** 分区语义色键，映射 COMMUNITY_CLASSES 的 Tailwind 类组（不用动态拼接，避免被 purge） */
-  color: 'blue' | 'cyan'
+  color: 'blue' | 'cyan' | 'amber'
 }
 
 export const GAME_COMMUNITIES: GameCommunity[] = [
   { key: 'wuwa', label: '鸣潮', color: 'blue' },
   { key: 'blhx', label: '碧蓝航线', color: 'cyan' },
+  { key: 'hsr', label: '崩坏星穹铁道', color: 'amber' },
 ]
 
 export type GameCommunityKey = GameCommunity['key']
@@ -44,6 +45,10 @@ const COMMUNITY_CLASSES: Record<
     chip: 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300',
     nav: 'border-cyan-500 text-cyan-700 dark:text-cyan-300',
   },
+  amber: {
+    chip: 'bg-amber-500/10 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
+    nav: 'border-amber-500 text-amber-700 dark:text-amber-300',
+  },
 }
 
 export function communityClasses(color: string) {
@@ -54,6 +59,7 @@ export function communityClasses(color: string) {
 export const PLATFORMS_BY_COMMUNITY: Record<GameCommunityKey, string[]> = {
   wuwa: ['bilibili', 'youtube', 'kuro'],
   blhx: ['bilibili'],
+  hsr: ['bilibili', 'youtube'],
 }
 
 export function platformsForCommunity(community: string): string[] {
