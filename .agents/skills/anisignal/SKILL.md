@@ -16,7 +16,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 | 部分 | 位置 | 状态 |
 |---|---|---|
 | 产品设计文档 | `docs/superpowers/specs/` | 已定稿，评审通过 |
-| 后端 | `server/`（FastAPI + arq + SQLAlchemy 2 + Alembic，迁移至 0009） | 采集闭环 + 事件引擎 + AI 层在线运行中，75 个单测全绿 |
+| 后端 | `server/`（FastAPI + arq + SQLAlchemy 2 + Alembic，迁移至 0025） | 采集闭环 + 事件引擎 + AI 层 + 邮件通知在线运行中，169 个单测全绿 |
 | Web 前端 | `web/`（Nuxt 4 + Tailwind 4） | 全站真实数据（首页要闻/内容库/事件/商品/来源/账号中心/认证页），管理看板 7 页 |
 | 部署 | 根目录 `Dockerfile` + `compose.yaml` | 4 容器：mysql / redis / app（FastAPI+Nitro 同容器，对外仅 8090，`/api/**` 同源代理）/ collector（调度+worker 同容器，Redis 领导锁支持 `--scale collector=N`）。数据 bind mount 在 `./data/`；单镜像含 bili+python+node。服务器更新流程：`git bundle` 传输 → `git merge --ff-only` → `docker compose up -d --build`（注意：必须先 `git checkout -- .` 清工作区，否则 merge 静默失败） |
 
@@ -35,31 +35,40 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 
 三条不可违反的数据原则：**原始数据不可覆盖**（改解析产生新 version；管理端人工修订也产生新版本）；**AI 结果可以重算**（`POST /api/admin/reparse` 全量重算解析+分类+聚合；`POST /api/admin/ai/summarize-all` 补摘要）；**事件结论可以修正**（人工编辑自动锁定，引擎跳过 locked）。
 
-## 游戏分区（2026-09-02 上线，鸣潮/碧蓝航线）
+## 游戏分区（2026-09-02 上线；2026-09-05 完成分区化改造，鸣潮/碧蓝航线）
 
-- **community 字段贯穿全链路**（迁移 0024）：collect_targets / raw_contents / events / products 带
-  `community`（`wuwa`=鸣潮默认存量回填 / `blhx`=碧蓝航线），classification_rules.community 可空
-  （NULL=全分区通用，履约词典等共享规则不需要每游戏复制一份）。
-- 归属规则：内容 community **首次入库时由采集目标写入，之后不随其他目标翻转**（避免双游戏联动内容
-  来回跳分区）；事件 community 由聚合引擎按证据分区写入（跨分区证据永不合并——`_rule_clusters`
-  输入按分区切分、`_candidate_pairs` 跨分区不配对）；商品履约只在同分区内容池里匹配 watch_terms。
-- 0024 迁移回填：存量行全回 wuwa 后，按 matched_keywords 含「碧蓝航线/碧蓝航线官方账号动态」把
-  已采内容划入 blhx（MySQL 走 JSON_CONTAINS、SQLite 走 json_each，注意方言分支）；同时播种
-  碧蓝官方动态目标（UID 233114659，bili CLI 核验认证"碧蓝航线官方账号"，tier=core）。
+- **分区注册表 `server/app/communities.py` 是唯一权威**（2026-09-05）：`COMMUNITIES` 每分区一条
+  CommunityMeta（label/game_name/bare_name/game_note/other_games_examples/color/bili_mid_setting/
+  official_bili_mid_default）。**新增分区 = 注册表加一条 + enums.py Community 加成员（测试断言一致） +
+  config 加 `<game>_bili_mid`（可选）+ 需要历史内容时写迁移回填**，业务代码不用动。
+- 由注册表派生的东西（不要在业务代码里写 `if community == "xxx"`）：全部 422 校验正则
+  （`community_pattern()`，此前 11 处硬编码）、审核提示词（curation._review_system_prompt）、
+  摘要提示词 game/game_note（ai.summarize_event）、摘要防串扰词表（`crosstalk_names()` =
+  其他分区游戏名 + 固定 extras；本分区名不在名单，联动内容证据提及即放行）、
+  标题去噪 `_TITLE_BOILERPLATE`（`game_name_boilerplate()`）、B 站官方 mid 集合
+  （parsers/bilibili.py 遍历注册表读 config）。早报 AI 提示词是跨分区通用文案（关注流跨分区）。
+- **community 字段**：collect_targets / raw_contents / events / products / product_signals（迁移 0025，
+  信号显式携带商品分区，sync 时强制覆盖）/ classification_rules（可空=NULL 全分区通用）。
+  内容 community **首次入库时由采集目标写入，之后不翻转**；事件跨分区永不合并
+  （`_aggregate_official` 按分区切分输入、`_candidate_pairs` 跨分区不配对）；商品履约只在同分区
+  内容池匹配 watch_terms。公开内容条目（PublicContentItem）也带 community 字段。
 - 公开 API（/contents /events /products /highlights /sources /official-links）都带 `community` 查询
-  参数，**默认 wuwa**，非法值 422；official-links 缓存按分区各存一份。审核提示词
-  （`_review_system_prompt`）、AI 摘要提示词按分区模板化游戏名；`_load_known_terms` 词表只加载
+  参数，**默认 wuwa**，非法值 422；official-links 缓存按分区各存一份。`_load_known_terms` 词表只加载
   本分区目标关键词 + 通用规则。
-- B 站官方身份判定改多账号映射（parsers/bilibili.py `_official_mids`：鸣潮 1955897084 +
-  碧蓝 233114659，config `azur_lane_bili_mid` 可覆盖）；YouTube 官方白名单配置化
-  （`official_youtube_channels`，"频道ID:名称"逗号分隔）。
-- 前端：`useGameSection.ts` 是分区唯一状态源（URL query 优先 → localStorage 回退 → 默认 wuwa；
-  默认分区不写进 URL 保持干净）。顶栏品牌右侧是分区 tablist；导航 links 会带上分区 query；
-  切分区重置页码。各数据页 key/参数/watch 都要带 community（漏一个就会出现切了标签内容不换）。
-  平台筛选随分区收敛（blhx 只有 B站）；useOfficialLinks.fetchOnce(community) 带 pending 补拉
-  （挂载后 localStorage 使分区翻转时避免 loading 守卫吞掉第二次请求）。
-- 管理端：目标表单分区下拉 + 列表分区列/筛选；内容管理分区筛选+徽章；事件审核分区筛选；
-  商品表单分区下拉（自动建的 B 站监控继承商品分区）；分类词典可限定分区。
+- **批量重审**：`POST /api/admin/ai/review-community?community=X&limit≤500`（清该分区 content_reviews
+  后按 50/块入队）；管理端内容页选分区筛选后出现「重审本分区」按钮。2026-09-05 用它修正了 blhx
+  存量 84+ 条按 wuwa 语境误判"与鸣潮无关"而下架的内容——分区归属/提示词调整后必须重审存量。
+- **前端视觉（2026-09-05 定稿）**：顶栏底部 3px 分区色强调条（切分区整条变色：wuwa=论坛蓝、
+  blhx=青色）+ 品牌旁常驻分区徽章 chip + 分段控件带分区色点、选中态用分区色。类组全部字面量写在
+  `useGameSection.ts` 的 COMMUNITY_CLASSES（动态拼接类名会被 Tailwind purge）。
+  `useGameSection.ts` 是分区唯一状态源（URL query 优先 → localStorage 回退 → 默认 wuwa；默认分区
+  不写 URL），并集中 `PLATFORMS_BY_COMMUNITY`（平台筛选随分区收敛：blhx 只有 B站）——contents/
+  official/首页 official pills 三处共用，首页那处曾是漏网。**各数据页 key/参数/watch 都要带
+  community**（右栏履约信号卡 StatusCard、auth 布局事件预览曾是漏网）。跨分区场景（账号中心关注流）
+  保持跨分区统一但 RawFeedRow 传 `show-community` 逐条显示分区徽章。
+- 管理端：分区选项/徽章单一来源 `web/app/utils/admin-communities.ts`（targets/contents/events/
+  products/rules 五页共用）；内容管理分区筛选+徽章+批量重审按钮；商品管理分区筛选+徽章；
+  目标表单分区下拉；商品表单分区下拉（自动建的 B 站监控继承商品分区）；分类词典可限定分区。
 - 坑：`_review_candidates` 里对 SQLAlchemy Result 只能迭代一次，分区词表分组前先 `.all()` 物化
   （曾因此 candidates=0 全部漏审）。
 
