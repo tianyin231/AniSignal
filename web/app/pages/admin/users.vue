@@ -55,24 +55,79 @@ watch([statusFilter, verifiedFilter], () => {
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 
-/* ---------- 详情（关键词订阅 / 邮件记录） ---------- */
+/* ---------- 详情模态框（关键词订阅 / 邮件记录） ---------- */
 const detail = ref<AdminUserDetail | null>(null)
 const detailLoading = ref(false)
+const showDetail = ref(false)
 
 async function openDetail(user: AdminUser) {
-  if (detail.value?.id === user.id) {
-    detail.value = null
-    return
-  }
   detailLoading.value = true
+  showDetail.value = true
   try {
     detail.value = await api<AdminUserDetail>(`/api/admin/users/${user.id}`)
   } catch (exc: any) {
     toast.err(`详情加载失败：${exc?.message ?? exc}`)
+    showDetail.value = false
   } finally {
     detailLoading.value = false
   }
 }
+
+function closeDetail() {
+  showDetail.value = false
+}
+
+/* ---------- 单发邮件模态框 ---------- */
+const showMail = ref(false)
+const mailTarget = ref<AdminUser | null>(null)
+const mailSubject = ref('')
+const mailBody = ref('')
+const mailBusy = ref(false)
+
+function openMail(user: AdminUser) {
+  mailTarget.value = user
+  mailSubject.value = ''
+  mailBody.value = ''
+  showMail.value = true
+}
+
+function closeMail() {
+  showMail.value = false
+}
+
+async function sendMail() {
+  if (!mailTarget.value || mailBusy.value) return
+  if (!mailSubject.value.trim() || !mailBody.value.trim()) {
+    toast.err('主题与正文不能为空')
+    return
+  }
+  if (!confirm(`向 ${mailTarget.value.email} 发送「${mailSubject.value}」？`)) return
+  mailBusy.value = true
+  try {
+    await api(`/api/admin/users/${mailTarget.value.id}/email`, {
+      method: 'POST',
+      body: { subject: mailSubject.value, body: mailBody.value },
+    })
+    toast.ok(`已进入发送队列：${mailTarget.value.email}`)
+    showMail.value = false
+    await refreshDeliveries()
+    if (showDetail.value && detail.value?.id === mailTarget.value.id) await openDetail(mailTarget.value)
+  } catch (exc: any) {
+    toast.err(`发送失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
+  } finally {
+    mailBusy.value = false
+  }
+}
+
+function onModalKeydown(ev: KeyboardEvent) {
+  if (ev.key === 'Escape') {
+    if (showMail.value) closeMail()
+    else if (showDetail.value) closeDetail()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onModalKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onModalKeydown))
 
 /* ---------- 封禁 / 解封 / 订阅开关 ---------- */
 async function setBanned(user: AdminUser, banned: boolean) {
@@ -113,44 +168,6 @@ async function toggleNotification(user: AdminUser) {
     toast.err(`操作失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
   } finally {
     busyId.value = null
-  }
-}
-
-/* ---------- 单发邮件 ---------- */
-const mailOpen = ref(false)
-const mailTarget = ref<AdminUser | null>(null)
-const mailSubject = ref('')
-const mailBody = ref('')
-const mailBusy = ref(false)
-
-function openMail(user: AdminUser) {
-  mailTarget.value = user
-  mailOpen.value = true
-  mailSubject.value = ''
-  mailBody.value = ''
-}
-
-async function sendMail() {
-  if (!mailTarget.value || mailBusy.value) return
-  if (!mailSubject.value.trim() || !mailBody.value.trim()) {
-    toast.err('主题与正文不能为空')
-    return
-  }
-  if (!confirm(`向 ${mailTarget.value.email} 发送「${mailSubject.value}」？`)) return
-  mailBusy.value = true
-  try {
-    await api(`/api/admin/users/${mailTarget.value.id}/email`, {
-      method: 'POST',
-      body: { subject: mailSubject.value, body: mailBody.value },
-    })
-    toast.ok(`已进入发送队列：${mailTarget.value.email}`)
-    mailOpen.value = false
-    await refreshDeliveries()
-    if (detail.value?.id === mailTarget.value.id) await openDetail(mailTarget.value)
-  } catch (exc: any) {
-    toast.err(`发送失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
-  } finally {
-    mailBusy.value = false
   }
 }
 
@@ -367,76 +384,6 @@ const deliveryStatusLabel: Record<string, string> = {
       </div>
     </section>
 
-    <!-- 用户详情 -->
-    <section v-if="detail" class="panel p-4">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">
-          {{ detail.email }}
-          <span v-if="detail.display_name" class="ml-1 text-xs font-normal text-slate-400">{{ detail.display_name }}</span>
-        </h2>
-        <button class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300" @click="detail = null">收起</button>
-      </div>
-      <p v-if="detail.status === 'banned'" class="mt-2 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
-        已封禁{{ detail.banned_at ? `（${fmtTime(detail.banned_at)}）` : '' }}{{ detail.banned_reason ? `：${detail.banned_reason}` : '' }}
-      </p>
-
-      <div class="mt-3 grid gap-4 md:grid-cols-2">
-        <div>
-          <h3 class="text-xs font-medium text-slate-400 dark:text-zinc-500">关键词订阅（{{ detail.keywords.length }}）</h3>
-          <div class="mt-2 flex flex-wrap gap-1.5">
-            <span
-              v-for="k in detail.keywords"
-              :key="k.id"
-              class="rounded px-2 py-0.5 text-[11px]"
-              :class="k.enabled
-                ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300'
-                : 'bg-slate-500/10 text-slate-400 line-through dark:text-zinc-500'"
-            >{{ k.keyword }}</span>
-            <span v-if="!detail.keywords.length" class="text-xs text-slate-400">未设置关键词</span>
-          </div>
-          <p class="mt-3 text-xs text-slate-400 dark:text-zinc-500">累计送达邮件 {{ detail.sent_total }} 封</p>
-        </div>
-        <div>
-          <h3 class="text-xs font-medium text-slate-400 dark:text-zinc-500">最近投递记录</h3>
-          <ul class="mt-2 space-y-1 text-xs">
-            <li v-for="d in detail.recent_deliveries" :key="d.id" class="flex items-center gap-2">
-              <span class="mono text-slate-400">{{ fmtTime(d.created_at) }}</span>
-              <span class="rounded bg-slate-500/10 px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-zinc-400">{{ kindLabels[d.kind] ?? d.kind }}</span>
-              <span class="min-w-0 flex-1 truncate">{{ d.subject || '—' }}</span>
-              <span :class="d.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : d.status === 'failed' ? 'text-red-500' : 'text-slate-400'">{{ deliveryStatusLabel[d.status] ?? d.status }}</span>
-            </li>
-            <li v-if="!detail.recent_deliveries.length" class="text-slate-400">暂无投递记录</li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <!-- 单发邮件 -->
-    <section v-if="mailOpen && mailTarget" class="panel p-4">
-      <h2 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-zinc-100">
-        <Mail :size="14" /> 发送邮件 → {{ mailTarget.email }}
-      </h2>
-      <div class="mt-3 grid gap-3">
-        <input
-          v-model="mailSubject"
-          placeholder="邮件主题（如：违规提醒 / 专属优惠）"
-          class="input px-3 py-2 text-sm"
-        />
-        <textarea
-          v-model="mailBody"
-          rows="4"
-          placeholder="邮件正文（纯文本，将自动套用邮件模板）"
-          class="textarea px-3 py-2 text-sm"
-        ></textarea>
-        <div class="flex items-center justify-end gap-2">
-          <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm text-slate-600 dark:border-white/15 dark:text-zinc-300" @click="mailOpen = false">取消</button>
-          <button class="btn-primary px-4 py-2 text-sm" :disabled="mailBusy" @click="sendMail">
-            <Send :size="13" class="mr-1 inline" />{{ mailBusy ? '入队中…' : '发送' }}
-          </button>
-        </div>
-      </div>
-    </section>
-
     <!-- 触达记录 -->
     <section class="panel p-4">
       <h2 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-zinc-100">
@@ -453,5 +400,80 @@ const deliveryStatusLabel: Record<string, string> = {
         <li v-if="!deliveries.length && !deliveriesLoading" class="text-slate-400 dark:text-zinc-500">暂无管理端邮件记录</li>
       </ul>
     </section>
+
+    <!-- 用户详情模态框 -->
+    <Teleport to="body">
+      <div v-if="showDetail" class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[10vh]">
+        <div class="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" @click="closeDetail" />
+        <div class="popover relative w-full max-w-xl p-5">
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0">
+              <h2 class="truncate text-sm font-semibold text-slate-900 dark:text-zinc-100">{{ detail?.email }}</h2>
+              <p v-if="detail?.display_name" class="mt-0.5 text-xs text-slate-400 dark:text-zinc-500">{{ detail?.display_name }}</p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                v-if="detail && detail.status === 'active'"
+                class="rounded-md border border-slate-900/10 px-2.5 py-1.5 text-xs text-slate-600 transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+                @click="openMail(detail)"
+              >发邮件</button>
+              <button class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300" @click="closeDetail">关闭</button>
+            </div>
+          </div>
+          <p v-if="detail?.status === 'banned'" class="mt-3 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+            已封禁{{ detail?.banned_at ? `（${fmtTime(detail.banned_at)}）` : '' }}{{ detail?.banned_reason ? `：${detail.banned_reason}` : '' }}
+          </p>
+          <div class="mt-4 grid gap-4 sm:grid-cols-2">
+            <div>
+              <h3 class="text-xs font-medium text-slate-400 dark:text-zinc-500">关键词订阅（{{ detail?.keywords.length ?? 0 }}）</h3>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <span
+                  v-for="k in detail?.keywords ?? []"
+                  :key="k.id"
+                  class="rounded px-2 py-0.5 text-[11px]"
+                  :class="k.enabled
+                    ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300'
+                    : 'bg-slate-500/10 text-slate-400 line-through dark:text-zinc-500'"
+                >{{ k.keyword }}</span>
+                <span v-if="!detail?.keywords.length" class="text-xs text-slate-400">未设置关键词</span>
+              </div>
+              <p class="mt-3 text-xs text-slate-400 dark:text-zinc-500">累计送达邮件 {{ detail?.sent_total ?? 0 }} 封</p>
+            </div>
+            <div>
+              <h3 class="text-xs font-medium text-slate-400 dark:text-zinc-500">最近投递记录</h3>
+              <ul class="mt-2 space-y-1 text-xs">
+                <li v-for="d in detail?.recent_deliveries ?? []" :key="d.id" class="flex items-center gap-2">
+                  <span class="mono shrink-0 text-slate-400">{{ fmtTime(d.created_at) }}</span>
+                  <span class="rounded bg-slate-500/10 px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-zinc-400">{{ kindLabels[d.kind] ?? d.kind }}</span>
+                  <span class="min-w-0 flex-1 truncate">{{ d.subject || '—' }}</span>
+                  <span :class="d.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : d.status === 'failed' ? 'text-red-500' : 'text-slate-400'">{{ deliveryStatusLabel[d.status] ?? d.status }}</span>
+                </li>
+                <li v-if="!detail?.recent_deliveries.length" class="text-slate-400">暂无投递记录</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 单发邮件模态框 -->
+    <Teleport to="body">
+      <div v-if="showMail && mailTarget" class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[14vh]">
+        <div class="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" @click="closeMail" />
+        <div class="popover relative w-full max-w-lg p-5">
+          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">发送邮件 → {{ mailTarget.email }}</h2>
+          <div class="mt-3 grid gap-3">
+            <input v-model="mailSubject" placeholder="邮件主题（如：违规提醒 / 专属优惠）" class="input" />
+            <textarea v-model="mailBody" rows="5" placeholder="邮件正文（纯文本，将自动套用邮件模板）" class="textarea"></textarea>
+            <div class="flex items-center justify-end gap-2">
+              <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10" @click="closeMail">取消</button>
+              <button class="btn-primary px-4 py-2 text-sm" :disabled="mailBusy" @click="sendMail">
+                <Send :size="13" class="mr-1 inline" />{{ mailBusy ? '入队中…' : '发送' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
