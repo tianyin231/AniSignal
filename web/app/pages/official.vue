@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { type Platform, type RawItem, type Region } from '~/utils/data'
 import { toRawItem } from '~/utils/public-utils'
-import { platformsForCommunity } from '~/composables/useGameSection'
+import { platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
 import type { PublicContentList, PublicContentItem } from '~/composables/usePublicApi'
 
 const tabs = [
@@ -15,28 +15,28 @@ const tabs = [
 ]
 const route = useRoute()
 const router = useRouter()
-const { community } = useGameSection()
-// 平台筛选随分区变化（映射统一在 useGameSection）：碧蓝航线当前只有 B 站官方动态
+const { scope, isAll } = useCommunityScope()
+// 平台筛选随视角变化（映射统一在 useGameSection）：聚合=all 并集，分区各自收敛
 const visibleTabs = computed(() => {
-  const allowed = platformsForCommunity(community.value)
+  const allowed = platformsForCommunity(scope.value)
   return tabs.filter(t => t.key === 'all' || allowed.includes(t.key))
 })
 const tab = computed({
   get: () => String(route.query.tab || 'all'),
   set: (v: string) => router.replace({ query: { ...route.query, tab: v } }),
 })
-watch(community, () => {
+watch(scope, () => {
   if (!visibleTabs.value.some(t => t.key === tab.value)) tab.value = 'all'
 })
 
 const { api } = usePublicApi()
 const { data, status } = await useAsyncData(
-  () => `official-feed-${community.value}`,
+  () => `official-feed-${scope.value}`,
   () =>
     api<PublicContentList>('/api/contents', {
-      query: { community: community.value, identity: 'official', limit: 100 },
+      query: { community: scope.value, identity: 'official', limit: 100 },
     }),
-  { watch: [community] },
+  { watch: [scope] },
 )
 
 function toRow(item: PublicContentItem): RawItem {

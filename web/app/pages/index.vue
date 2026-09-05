@@ -24,6 +24,8 @@ const sectionLinks = [
   { to: '/events', label: '事件' },
   { to: '/contents', label: '内容库' },
 ]
+// 聚合首页进栏目保持"全部分区"视角；分区首页则锁定该分区
+const sectionQuery = computed(() => (aggregate.value ? { community: 'all' } : communityQuery.value))
 const isActive = (to: string) => route.path.startsWith(to)
 // 首页频道语义：/ 无 community 参数 = 跨分区聚合（community=all）；带参数 = 该分区首页
 const aggregate = computed(() => !route.query.community)
@@ -203,7 +205,7 @@ onBeforeUnmount(() => {
         <NuxtLink
           v-for="l in sectionLinks"
           :key="l.to"
-          :to="{ path: l.to, query: communityQuery }"
+          :to="{ path: l.to, query: sectionQuery }"
           class="whitespace-nowrap rounded-[10px] px-3 py-1.5 text-sm transition-all"
           :class="
             isActive(l.to)

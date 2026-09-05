@@ -473,18 +473,19 @@ async def get_event(event_id: int, session: AsyncSession = Depends(get_session))
 
 @router.get("/products", response_model=ProductListOut)
 async def list_products(
-    community: str = COMMUNITY_QUERY,
+    community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     from app.models import Product as ProductModel
     from app.services.views import product_to_out
 
+    query = select(ProductModel)
+    if not is_all_community(community):
+        query = query.where(ProductModel.community == community)
     products = list(
         (
             await session.execute(
-                select(ProductModel)
-                .where(ProductModel.community == community)
-                .order_by(ProductModel.id)
+                query.order_by(ProductModel.id)
             )
         ).scalars()
     )

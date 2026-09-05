@@ -2,7 +2,7 @@
 import { Search } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { toRawItem } from '~/utils/public-utils'
-import { platformsForCommunity } from '~/composables/useGameSection'
+import { platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
 import { platformMeta, type Platform } from '~/utils/data'
 
 useSeoMeta({ title: '内容库 · AniSignal' })
@@ -18,20 +18,21 @@ watch(q, (v) => (searchInput.value = v))
 const pageSize = 30
 
 const { api } = usePublicApi()
-const { community } = useGameSection()
+// community=all（首页聚合进入）时跨分区展示并逐行标注分区
+const { scope, isAll } = useCommunityScope()
 const { data, status } = await useAsyncData(
-  () => `contents-${community.value}-${platform.value}-${q.value}-${page.value}`,
+  () => `contents-${scope.value}-${platform.value}-${q.value}-${page.value}`,
   () =>
     api<PublicContentList>('/api/contents', {
       query: {
-        community: community.value,
+        community: scope.value,
         limit: pageSize,
         offset: (page.value - 1) * pageSize,
         ...(platform.value ? { platform: platform.value } : {}),
         ...(q.value ? { q: q.value } : {}),
       },
     }),
-  { watch: [community, platform, q, page] },
+  { watch: [scope, platform, q, page] },
 )
 
 const list = computed(() => (data.value?.items ?? []).map(toRawItem))
@@ -39,9 +40,9 @@ const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0)
 
 // 平台筛选随分区变化（映射统一在 useGameSection）：碧蓝航线当前只有 B 站来源
 const visiblePlatformTabs = computed(() =>
-  platformsForCommunity(community.value).filter(key => key in platformMeta),
+  platformsForCommunity(scope.value).filter(key => key in platformMeta),
 )
-watch(community, () => {
+watch(scope, () => {
   if (platform.value && !visiblePlatformTabs.value.includes(platform.value)) {
     applyQuery({ platform: undefined })
   }
@@ -85,7 +86,7 @@ function applyQuery(patch: Record<string, string | undefined>) {
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
     <section v-else class="panel overflow-hidden">
-      <RawFeedRow v-for="item in list" :key="item.id" :item="item" />
+      <RawFeedRow v-for="item in list" :key="item.id" :item="item" :show-community="isAll" />
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">没有匹配的内容。</p>
       <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
         <span>共 {{ data?.total ?? 0 }} 条</span>

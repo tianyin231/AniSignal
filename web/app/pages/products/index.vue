@@ -1,14 +1,21 @@
 <script setup lang="ts">
 import type { ApiProductList } from '~/composables/usePublicApi'
+import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
+
+function communityChip(community?: string) {
+  const meta = GAME_COMMUNITIES.find(c => c.key === community)
+  return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
+}
 
 useSeoMeta({ title: '商品' })
 
 const { api } = usePublicApi()
-const { community } = useGameSection()
+// community=all（首页聚合进入）时跨分区展示并逐卡标注分区
+const { scope, isAll } = useCommunityScope()
 const { data, status } = await useAsyncData(
-  () => `products-${community.value}`,
-  () => api<ApiProductList>('/api/products', { query: { community: community.value } }),
-  { watch: [community] },
+  () => `products-${scope.value}`,
+  () => api<ApiProductList>('/api/products', { query: { community: scope.value } }),
+  { watch: [scope] },
 )
 const products = computed(() => data.value?.items ?? [])
 </script>
@@ -29,7 +36,14 @@ const products = computed(() => data.value?.items ?? [])
       >
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <h2 class="truncate font-semibold text-slate-900 dark:text-zinc-50">{{ p.name }}</h2>
+            <h2 class="flex items-center gap-1.5 truncate font-semibold text-slate-900 dark:text-zinc-50">
+              <span class="truncate">{{ p.name }}</span>
+              <span
+                v-if="isAll && communityChip(p.community)"
+                class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                :class="communityChip(p.community)!.chip"
+              >{{ communityChip(p.community)!.label }}</span>
+            </h2>
             <p class="mt-0.5 truncate text-xs text-slate-400 dark:text-zinc-500">
               {{ p.publisher || '—' }}{{ p.skus.length ? ` · ${p.skus.join(' / ')}` : '' }}
             </p>

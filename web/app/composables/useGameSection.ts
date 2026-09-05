@@ -57,7 +57,25 @@ export const PLATFORMS_BY_COMMUNITY: Record<GameCommunityKey, string[]> = {
 }
 
 export function platformsForCommunity(community: string): string[] {
+  if (community === 'all') {
+    // 聚合视角：全部分区平台的并集
+    return [...new Set(Object.values(PLATFORMS_BY_COMMUNITY).flat())]
+  }
   return PLATFORMS_BY_COMMUNITY[community as GameCommunityKey] ?? ['bilibili']
+}
+
+/**
+ * 栏目页的分区视角：URL 显式带 community=all 时为跨分区聚合（首页"首页"频道进入），
+ * 否则跟随分区状态源（URL 分区 → localStorage → 默认）。
+ */
+export function useCommunityScope() {
+  const route = useRoute()
+  const { community } = useGameSection()
+  const scope = computed<string>(() => {
+    const query = String(route.query.community || '')
+    return query === 'all' ? 'all' : community.value
+  })
+  return { scope, isAll: computed(() => scope.value === 'all') }
 }
 
 export function useGameSection() {
