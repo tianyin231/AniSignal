@@ -23,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.clock import utcnow
 from app.models.base import Base
+from app.communities import DEFAULT_COMMUNITY
 
 
 class Event(Base):
@@ -35,7 +36,7 @@ class Event(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
     # 所属游戏分区：由聚合引擎按证据的分区写入（与证据保持一致）
-    community: Mapped[str] = mapped_column(String(16), default="wuwa")
+    community: Mapped[str] = mapped_column(String(16), default=DEFAULT_COMMUNITY)
     summary: Mapped[str | None] = mapped_column(Text)
     summary_status: Mapped[str | None] = mapped_column(String(16))  # ai/fallback/manual
     summary_updated_at: Mapped[datetime | None] = mapped_column(DateTime)

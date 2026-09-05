@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, community_pattern
 from app.db import get_session
 from app.clock import utcnow
 from app.models import CollectTarget, ContentReview, ContentVersion, Evidence, RawContent, Source
@@ -36,9 +37,11 @@ router = APIRouter(prefix="/api")
 
 _EXCERPT_LEN = 140
 
-# 公开分区参数：默认鸣潮（存量主分区）
+# 公开分区参数：默认值与合法值集合来自 communities 注册表
 COMMUNITY_QUERY = Query(
-    default="wuwa", pattern="^(wuwa|blhx)$", description="游戏分区（wuwa=鸣潮, blhx=碧蓝航线）"
+    default=DEFAULT_COMMUNITY,
+    pattern=community_pattern(),
+    description="游戏分区（%s）" % ", ".join(f"{k}={v.label}" for k, v in COMMUNITIES.items()),
 )
 
 
@@ -164,6 +167,7 @@ async def list_contents(
                 cover=media[0] if isinstance(media, list) and media else None,
                 preview_mode=_preview_mode(text, media if isinstance(media, list) else [], raw.url),
                 matched_keywords=(raw.matched_keywords or []),
+                community=(raw.community or DEFAULT_COMMUNITY),
             )
         )
 
@@ -248,7 +252,7 @@ async def list_sources(
             enabled=target.enabled,
             last_success_at=target.last_success_at,
             consecutive_failures=target.consecutive_failures,
-            community=getattr(target, "community", None) or "wuwa",
+            community=getattr(target, "community", None) or DEFAULT_COMMUNITY,
         )
         for target in rows.scalars()
     ]
@@ -735,15 +739,14 @@ async def official_links(
 @router.get("/site-config")
 async def site_config(session: AsyncSession = Depends(get_session)):
     """公开站点配置：全服公告、文案区域与分区清单（不含任何 SMTP 信息）。"""
-    from app.models import COMMUNITY_LABELS
     from app.services import settings as settings_service
 
     return {
         "announcement": await settings_service.get_announcement(session),
         "texts": await settings_service.get_texts(session),
         "communities": [
-            {"key": str(key), "label": label}
-            for key, label in COMMUNITY_LABELS.items()
+            {"key": meta.key, "label": meta.label, "color": meta.color}
+            for meta in COMMUNITIES.values()
         ],
         "media_visibility": await settings_service.get_media_visibility(session),
     }

@@ -2,6 +2,8 @@
 
 from enum import StrEnum
 
+from app.communities import COMMUNITIES
+
 
 class Platform(StrEnum):
     BILIBILI = "bilibili"
@@ -12,17 +14,18 @@ class Platform(StrEnum):
 
 
 class Community(StrEnum):
-    """游戏分区：目标/内容/事件/商品按分区隔离，公开站大标签页切换（2026-09-02）。"""
+    """游戏分区：目标/内容/事件/商品按分区隔离，公开站大标签页切换（2026-09-02）。
+
+    成员与 app/communities.py 的 COMMUNITIES 注册表一一对应（测试断言防漂移）；
+    展示名/提示词语料等一律去注册表取，不在此处维护。
+    """
 
     WUWA = "wuwa"  # 鸣潮（默认分区，存量数据回填值）
     BLHX = "blhx"  # 碧蓝航线
 
 
-# 分区展示名（AI 提示词与前端 tabs 共用的唯一权威；前端 data.ts 与之保持一致）
-COMMUNITY_LABELS = {
-    Community.WUWA: "鸣潮",
-    Community.BLHX: "碧蓝航线",
-}
+# 分区展示名（唯一权威是 communities 注册表，此处派生保持兼容）
+COMMUNITY_LABELS = {key: COMMUNITIES[key].label for key in Community}
 
 
 class TargetType(StrEnum):

@@ -6,11 +6,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.communities import DEFAULT_COMMUNITY
 from app.models import (
     ContentReview,
     ContentVersion,
     Event,
     Evidence,
+    Product,
     ProductSignal,
     ProductSignalEvidence,
     ProductSignalRevision,
@@ -63,7 +65,13 @@ def _source_key(raw: RawContent, source: Source | None) -> str:
 
 
 async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
-    """把当前有效商品事件同步为候选信号；已人工审核的字段不覆盖。"""
+    """把当前有效商品事件同步为候选信号；已人工审核的字段不覆盖。
+
+    信号分区跟随商品分区，创建与刷新时都强制覆盖（商品改分区后旧信号自动对齐）。
+    """
+    product_community = (
+        await session.scalar(select(Product.community).where(Product.id == product_id))
+    ) or DEFAULT_COMMUNITY
     latest = (
         select(
             ContentVersion.raw_content_id.label("rid"),
@@ -121,6 +129,7 @@ async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
         if current:
             signal, evidence = current
             signal.active = True
+            signal.community = product_community
             if not signal.locked:
                 signal.actor_type = actor
                 signal.occurred_at = raw.published_at or raw.collected_at
@@ -134,6 +143,7 @@ async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
 
         signal = ProductSignal(
             product_id=product_id,
+            community=product_community,
             signal_type=signal_type,
             actor_type=actor,
             review_status="verified" if is_official else "candidate",
@@ -416,6 +426,7 @@ async def list_product_signals(
             {
                 "id": signal.id,
                 "product_id": signal.product_id,
+                "community": signal.community,
                 "signal_type": signal.signal_type,
                 "signal_label": SIGNAL_LABELS.get(signal.signal_type, signal.signal_type),
                 "actor_type": signal.actor_type,

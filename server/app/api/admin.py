@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.communities import DEFAULT_COMMUNITY, community_pattern
 from app.api.deps import require_admin
 from app.api.public import invalidate_official_links_cache
 from app.config import get_settings
@@ -77,7 +78,7 @@ async def get_queue(request: Request) -> BaseQueue:
 
 @router.get("/collect-targets", response_model=list[CollectTargetOut])
 async def list_targets(
-    community: str | None = Query(default=None, pattern="^(wuwa|blhx)$", description="游戏分区"),
+    community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
     session: AsyncSession = Depends(get_session),
 ):
     query = select(CollectTarget).order_by(CollectTarget.platform, CollectTarget.id)
@@ -213,7 +214,7 @@ async def overview(
 @router.get("/contents", response_model=ContentListOut)
 async def list_contents(
     platform: str | None = Query(default=None),
-    community: str | None = Query(default=None, pattern="^(wuwa|blhx)$", description="游戏分区"),
+    community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
     hidden: bool | None = Query(default=None),
     review: str | None = Query(default=None, description="violation / irrelevant / ok"),
     q: str | None = Query(default=None, description="标题关键词"),
@@ -318,7 +319,7 @@ async def list_contents(
             platform=raw.platform,
             content_type=raw.content_type,
             external_id=raw.external_id,
-            community=getattr(raw, "community", None) or "wuwa",
+            community=getattr(raw, "community", None) or DEFAULT_COMMUNITY,
             url=raw.url,
             published_at=raw.published_at,
             collected_at=raw.collected_at,
@@ -504,7 +505,7 @@ async def list_runs(
 @router.get("/events", response_model=EventListOut)
 async def list_events(
     category: str | None = Query(default=None),
-    community: str | None = Query(default=None, pattern="^(wuwa|blhx)$", description="游戏分区"),
+    community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
     include_inactive: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -704,10 +705,14 @@ async def recompute_events(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/products", response_model=ProductListOut)
-async def list_products_admin(session: AsyncSession = Depends(get_session)):
-    products = list(
-        (await session.execute(select(Product).order_by(Product.id))).scalars()
-    )
+async def list_products_admin(
+    community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
+    session: AsyncSession = Depends(get_session),
+):
+    query = select(Product).order_by(Product.id)
+    if community:
+        query = query.where(Product.community == community)
+    products = list((await session.execute(query)).scalars())
     return ProductListOut(items=[await product_to_out(session, p) for p in products])
 
 

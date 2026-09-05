@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.clock import utcnow
+from app.communities import DEFAULT_COMMUNITY
 from app.models.base import Base
 
 
@@ -25,6 +26,7 @@ class ProductSignal(Base):
     __table_args__ = (
         Index("ix_product_signals_product_status", "product_id", "review_status"),
         Index("ix_product_signals_product_type", "product_id", "signal_type"),
+        Index("ix_product_signals_community", "community"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -32,6 +34,8 @@ class ProductSignal(Base):
         ForeignKey("products.id", name="fk_product_signals_product_id_products", ondelete="CASCADE"),
         index=True,
     )
+    # 分区冗余列：信号跟随商品分区，同步时强制覆盖（避免 join 才能按分区过滤）
+    community: Mapped[str] = mapped_column(String(16), default=DEFAULT_COMMUNITY)
     signal_type: Mapped[str] = mapped_column(String(32))
     actor_type: Mapped[str] = mapped_column(String(16), default="unknown")
     review_status: Mapped[str] = mapped_column(String(16), default="candidate")

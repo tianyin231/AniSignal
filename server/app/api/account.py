@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.clock import utcnow
+from app.communities import DEFAULT_COMMUNITY
 from app.db import get_session
 from app.api.admin import get_queue
 from app.models import ContentVersion, NotificationDelivery, RawContent, Source, User, UserKeyword
@@ -352,6 +353,7 @@ async def my_feed(
                     else ("partial" if media else "external_only")
                 ),
                 matched_keywords=matched_user_keywords,
+                community=(getattr(raw, "community", None) or DEFAULT_COMMUNITY),
             )
         )
     return PublicContentList(items=items, total=total, new_today=new_today)

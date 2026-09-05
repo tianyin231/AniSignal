@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ClassificationRule, Identity
+from app.communities import DEFAULT_COMMUNITY
 from app.models.enums import Category
 from app.schemas.content import NormalizedContent
 
@@ -97,7 +98,7 @@ async def load_rules(session: AsyncSession) -> list[ClassificationRule]:
 
 
 def classify_content(
-    normalized: NormalizedContent, rules: list[ClassificationRule], community: str = "wuwa"
+    normalized: NormalizedContent, rules: list[ClassificationRule], community: str = DEFAULT_COMMUNITY
 ) -> str | None:
     haystack = " ".join(
         part for part in (normalized.title or "", normalized.text or "") if part

@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.communities import DEFAULT_COMMUNITY
 from app.models import ContentMatch, ContentVersion, RawContent, Source
 from app.services.ai import ai_available, chat, get_ai_config, record_usage
 
@@ -31,7 +32,7 @@ class MatchContent:
     title: str
     text: str
     category: str | None
-    community: str = "wuwa"
+    community: str = DEFAULT_COMMUNITY
 
 
 @dataclass(frozen=True)
@@ -167,7 +168,7 @@ async def _load_recent_official(session: AsyncSession) -> list[MatchContent]:
             title=(version.title or raw.external_id).strip(),
             text=_plain(version.text or "")[:800],
             category=version.category,
-            community=getattr(raw, "community", None) or "wuwa",
+            community=getattr(raw, "community", None) or DEFAULT_COMMUNITY,
         )
         for raw, version in result
     ]

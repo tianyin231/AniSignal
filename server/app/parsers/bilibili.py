@@ -3,22 +3,27 @@
 import re
 from datetime import datetime, timezone
 
+from app.communities import COMMUNITIES
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
 PARSER_VERSION = "4"
 
-# 已知官方账号（身份判定用；账号 UID 由配置注入，此处仅做兜底）
-_OFFICIAL_MIDS = {"1955897084", "233114659"}  # 鸣潮官方 / 碧蓝航线官方，见 data-sources.md
+# 已知官方账号兜底（身份判定用；正常路径由 communities 注册表驱动读配置）
+_OFFICIAL_MIDS = {meta.official_bili_mid_default for meta in COMMUNITIES.values() if meta.official_bili_mid_default}
 
 
 def _official_mids() -> set[str]:
-    """官方账号 UID 集合：配置优先（鸣潮/碧蓝航线），空值跳过。"""
+    """官方账号 UID 集合：遍历注册表读各分区 config 项，全部为空时回退兜底集合。"""
     from app.config import get_settings
 
     settings = get_settings()
-    configured = {settings.wuthering_waves_bili_mid, settings.azur_lane_bili_mid}
-    known = {mid for mid in configured if mid} or _OFFICIAL_MIDS
+    configured = set()
+    for meta in COMMUNITIES.values():
+        if meta.bili_mid_setting:
+            configured.add(getattr(settings, meta.bili_mid_setting, "") or "")
+    configured.discard("")
+    known = configured or _OFFICIAL_MIDS
     return {str(mid) for mid in known}
 
 
