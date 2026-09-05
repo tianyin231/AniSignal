@@ -227,6 +227,27 @@ docker compose up -d --build
 - **KURO_ITEM 等固定时间戳测试样例对时间窗口测试有边界漂移风险**（startTimeMs 曾滑出官方链接
   30 天窗口导致 3 个用例假失败）——时间相关样例一律用 `utcnow() - timedelta(days=1)` 相对时间。
 
+## 定制监控系统（2026-09-05 上线）
+
+- **模型（迁移 0027）**：custom_feeds（user_id/name/kind=uid|keyword/platform/target_value/
+  min_views/push_enabled/is_public/enabled/status=active|disabled(管理端)/interval_minutes/
+  next_run_at）+ custom_feed_items（feed_id/external_id 唯一/title/url/cover/view/published_at）。
+  **与主内容库完全隔离**（不进 raw_contents/事件引擎/分区）；status 是管理端停用，enabled 是
+  用户开关，两者独立。
+- **采集**：services/custom_feeds.sweep_custom_feeds(session, redis)——查到期源（next_run_at）、
+  每轮限量 20、复用 BilibiliCollector.user_dynamics/search_videos + parse_dynamic/parse_video，
+  平台礼貌间隔与主采集共享（platform_slot 注入 redis）；关键词监控按 min_views 过滤。
+  调度：scheduler 两循环（本地/生产）每 5 分钟桶入队 collect_custom_feeds（redis key 去重）；
+  新消息推送 = kind=custom 投递行 + send_admin_email 内联 SMTP，**每监控每天至多一封**（dedupe）。
+- **API**：公开 GET /api/custom/feeds（is_public+enabled+active 目录，带 owner/item_count）与
+  /feeds/{id}（私有仅所有者可见，可选登录 _optional_user）；账号 /api/account/custom-feeds CRUD
+  （每人上限 10，kind/platform/UID 数字校验；**返回裸数组**，与 keywords 端点一致）；管理端
+  /api/admin/custom-feeds（搜索/筛选/分页、PATCH status|is_public|enabled、DELETE、POST {id}/collect
+  手动触发）。
+- **前端**：顶栏频道组最后是「定制化」→ /custom 公开目录（卡片=名称/类型徽章/目标/条数/所有者）
+  + /custom/{id} 监控详情流；账号中心"定制监控"区块（创建表单 kind/target/name/min_views/推送/
+  公开 + 行内推送开关/删除/公开徽章）；管理端 /admin/customs（巡查表 + 停用/公开切换/手动抓取/删除）。
+
 ## 未完成 / 下一步选项
 
 - **邮件通知与早报**（设计文档 §10）：账号+SMTP+监控关键词都就绪，差发送管线与 08:00 调度。
