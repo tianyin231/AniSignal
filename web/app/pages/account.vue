@@ -75,6 +75,71 @@ const busy = ref(false)
 
 // ---------- 关注流（每页 20 条，可按关键词筛选）----------
 const FEED_PAGE_SIZE = 20
+// 定制监控（UID/关键词，可公开可推送）
+interface CustomFeedRow {
+  id: number
+  name: string
+  kind: 'uid' | 'keyword' | string
+  platform: string
+  target_value: string
+  min_views: number
+  push_enabled: boolean
+  is_public: boolean
+  enabled: boolean
+  status: string
+  item_count: number
+  last_collected_at: string | null
+}
+const customFeeds = ref<CustomFeedRow[]>([])
+const customError = ref('')
+const customForm = reactive({ name: '', kind: 'keyword', target_value: '', min_views: 0, push_enabled: false, is_public: false })
+const customBusy = ref(false)
+
+async function refreshCustomFeeds() {
+  try {
+    customFeeds.value = await $fetch<CustomFeedRow[]>('/api/account/custom-feeds')
+  } catch { /* 未登录等场景静默 */ }
+}
+
+async function createCustomFeed() {
+  if (customBusy.value) return
+  try {
+    await $fetch('/api/account/custom-feeds', {
+      method: 'POST',
+      body: { ...customForm, min_views: Number(customForm.min_views) || 0 },
+    })
+    customError.value = ''
+    customForm.name = ''
+    customForm.target_value = ''
+    customForm.min_views = 0
+    await refreshCustomFeeds()
+  } catch (exc: any) {
+    customError.value = exc?.data?.detail ?? '创建失败'
+  }
+}
+
+async function patchCustomFeed(feed: CustomFeedRow, body: Record<string, unknown>, okText: string) {
+  if (customBusy.value) return
+  try {
+    await $fetch(`/api/account/custom-feeds/${feed.id}`, { method: 'PATCH', body })
+    Object.assign(feed, body)
+    customError.value = ''
+  } catch (exc: any) {
+    customError.value = exc?.data?.detail ?? '操作失败'
+  }
+}
+
+async function removeCustomFeed(feed: CustomFeedRow) {
+  if (customBusy.value || !confirm(`删除监控「${feed.name}」及其全部抓取记录？`)) return
+  try {
+    await $fetch(`/api/account/custom-feeds/${feed.id}`, { method: 'DELETE' })
+    customFeeds.value = customFeeds.value.filter(f => f.id !== feed.id)
+    customError.value = ''
+  } catch (exc: any) {
+    customError.value = exc?.data?.detail ?? '删除失败'
+  }
+}
+
 const feed = ref<PublicContentList | null>(null)
 const feedPage = ref(1)
 const selectedKeywordId = ref<number | null>(null)
@@ -132,7 +197,10 @@ async function refresh() {
     /* 未登录由守卫处理 */
   }
 }
-onMounted(refresh)
+onMounted(() => {
+  refresh()
+  refreshCustomFeeds()
+})
 onBeforeUnmount(() => {
   if (notificationPoll) clearTimeout(notificationPoll)
 })
@@ -385,6 +453,86 @@ async function changePassword() {
               </button>
             </div>
           </div>
+        </section>
+
+        <!-- 定制监控（UID/关键词，可公开可推送） -->
+        <section class="panel p-5">
+          <h2 class="text-sm font-semibold">定制监控</h2>
+          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">
+            自建 UID / 关键词抓取源；公开后出现在"定制化"频道，不公开仅自己可见。
+          </p>
+          <form class="mt-3 grid gap-2 sm:grid-cols-[7rem_1fr]" @submit.prevent="createCustomFeed">
+            <select
+              v-model="customForm.kind"
+              class="rounded-md border border-slate-900/10 bg-white/70 px-2.5 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+            >
+              <option value="keyword">关键词监控</option>
+              <option value="uid">UID 监控</option>
+            </select>
+            <input
+              v-model="customForm.target_value"
+              :placeholder="customForm.kind === 'uid' ? 'B 站 UID（纯数字）' : '监控关键词'"
+              class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+            />
+            <input
+              v-model="customForm.name"
+              placeholder="监控名称（如：某UP主动态 / 某话题）"
+              class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm sm:col-span-2 dark:border-white/15 dark:bg-white/5"
+            />
+            <input
+              v-if="customForm.kind === 'keyword'"
+              v-model.number="customForm.min_views"
+              type="number"
+              min="0"
+              placeholder="播放量门槛（可选）"
+              class="rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm dark:border-white/15 dark:bg-white/5"
+            />
+            <div class="flex flex-wrap items-center gap-4 sm:col-span-2">
+              <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
+                <input v-model="customForm.push_enabled" type="checkbox" class="size-4 accent-blue-600" /> 新消息邮件推送
+              </label>
+              <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
+                <input v-model="customForm.is_public" type="checkbox" class="size-4 accent-blue-600" /> 公开到全站
+              </label>
+              <button type="submit" class="btn-primary ml-auto px-4 py-2 text-sm" :disabled="customBusy">创建监控</button>
+            </div>
+            <p v-if="customError" class="text-xs text-red-600 sm:col-span-2 dark:text-red-400">{{ customError }}</p>
+          </form>
+
+          <ul class="mt-3 space-y-1.5">
+            <li
+              v-for="f in customFeeds"
+              :key="f.id"
+              class="flex flex-wrap items-center gap-2 rounded-md border border-slate-900/5 px-3 py-2 text-sm dark:border-white/10"
+              :class="!f.enabled || f.status !== 'active' ? 'opacity-60' : ''"
+            >
+              <span class="chip whitespace-nowrap bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300">
+                {{ f.kind === 'uid' ? 'UID' : '关键词' }}
+              </span>
+              <span class="font-medium">{{ f.name }}</span>
+              <span class="mono truncate text-xs text-slate-400">{{ f.target_value }}</span>
+              <span class="mono text-xs text-slate-400">{{ f.item_count }} 条</span>
+              <span
+                class="chip whitespace-nowrap"
+                :class="f.is_public
+                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+              >{{ f.is_public ? '公开' : '私有' }}</span>
+              <button
+                class="text-xs text-slate-500 underline-offset-2 hover:underline dark:text-zinc-400"
+                @click="patchCustomFeed(f, { push_enabled: !f.push_enabled }, `推送已${!f.push_enabled ? '开启' : '关闭'}`)"
+              >推送{{ f.push_enabled ? '开' : '关' }}</button>
+              <NuxtLink v-if="f.is_public" :to="`/custom/${f.id}`" class="link text-xs">查看</NuxtLink>
+              <button
+                class="ml-auto text-xs text-red-500 hover:underline disabled:opacity-40"
+                :disabled="customBusy"
+                @click="removeCustomFeed(f)"
+              >删除</button>
+            </li>
+            <li v-if="!customFeeds.length" class="text-xs text-slate-400 dark:text-zinc-500">
+              还没有定制监控。创建一个 UID 或关键词监控，后台会每 30 分钟抓取一次。
+            </li>
+          </ul>
         </section>
 
         <!-- 我的关注流 -->

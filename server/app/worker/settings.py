@@ -57,6 +57,13 @@ async def send_user_notification(ctx, delivery_id: int) -> dict:
         return await process_delivery(session, delivery_id)
 
 
+async def collect_custom_feeds(ctx) -> dict:
+    """定制监控轮询：抓取到期用户监控源（每轮限量，内部自行限速）。"""
+    from app.services.custom_feeds import sweep_custom_feeds
+
+    return await sweep_custom_feeds(ctx["redis"])
+
+
 async def send_admin_emails(ctx, delivery_ids: list[int]) -> dict:
     """管理端单发/广播邮件批次：逐条 SMTP，失败不阻断批次。"""
     from app.db import SessionLocal
@@ -98,6 +105,7 @@ class WorkerSettings:
         send_user_notification,
         send_morning_notifications,
         send_admin_emails,
+        collect_custom_feeds,
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4
