@@ -1,17 +1,22 @@
 <script setup lang="ts">
 import { fmtTime } from '~/utils/admin-types'
 import { platformMeta, type Platform, type Region } from '~/utils/data'
+import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 import type { PublicSource } from '~/composables/usePublicApi'
 
 useSeoMeta({ title: '来源健康' })
 
 const { api } = usePublicApi()
-const { community } = useGameSection()
+// 系统级页面：展示全部分区的来源，不跟随顶栏分区
 const { data } = await useAsyncData(
-  () => `public-sources-${community.value}`,
-  () => api<{ items: PublicSource[] }>('/api/sources', { query: { community: community.value } }),
-  { watch: [community] },
+  'public-sources-all',
+  () => api<{ items: PublicSource[] }>('/api/sources', { query: { community: 'all' } }),
 )
+
+function communityBadge(community?: string) {
+  const meta = GAME_COMMUNITIES.find(c => c.key === community)
+  return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
+}
 
 const regionOf: Record<string, Region> = {
   bilibili: 'cn',
@@ -37,10 +42,11 @@ const targetTypeLabels: Record<string, string> = {
     </section>
 
     <section class="panel overflow-x-auto">
-      <table class="w-full min-w-[680px] text-left text-[13px]">
+      <table class="w-full min-w-[760px] text-left text-[13px]">
         <thead>
           <tr class="border-b border-slate-200 text-xs text-slate-400 dark:border-zinc-800">
             <th class="px-4 py-2.5 font-medium">来源</th>
+            <th class="px-3 py-2.5 font-medium">分区</th>
             <th class="px-3 py-2.5 font-medium">平台</th>
             <th class="px-3 py-2.5 font-medium">区域</th>
             <th class="px-3 py-2.5 font-medium">最近成功采集</th>
@@ -57,6 +63,13 @@ const targetTypeLabels: Record<string, string> = {
             <td class="px-4 py-2.5 text-slate-700 dark:text-zinc-200">
               {{ s.name }}
               <span class="ml-1.5 text-xs text-slate-400">{{ targetTypeLabels[s.target_type] ?? s.target_type }}</span>
+            </td>
+            <td class="px-3 py-2.5">
+              <span
+                v-if="communityBadge(s.community)"
+                class="chip whitespace-nowrap"
+                :class="communityBadge(s.community)!.chip"
+              >{{ communityBadge(s.community)!.label }}</span>
             </td>
             <td class="px-3 py-2.5">
               <span class="inline-flex items-center gap-1.5 text-slate-600 dark:text-zinc-400">
@@ -81,7 +94,7 @@ const targetTypeLabels: Record<string, string> = {
             </td>
           </tr>
           <tr v-if="!(data?.items ?? []).length">
-            <td colspan="6" class="px-4 py-10 text-center text-sm text-slate-400">暂无已接入来源。</td>
+            <td colspan="7" class="px-4 py-10 text-center text-sm text-slate-400">暂无已接入来源。</td>
           </tr>
         </tbody>
       </table>

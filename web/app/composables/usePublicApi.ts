@@ -36,6 +36,7 @@ export interface PublicSource {
   enabled: boolean
   last_success_at: string | null
   consecutive_failures: number
+  community?: string
 }
 
 export interface PublicStats {
