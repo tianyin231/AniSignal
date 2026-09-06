@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ContentList, ContentItem } from '~/utils/admin-types'
 import { contentTypeLabels, fmtTime, platformLabels } from '~/utils/admin-types'
-import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_BADGE } from '~/utils/admin-communities'
+import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_BADGE, ADMIN_COMMUNITY_SHORT } from '~/utils/admin-communities'
 import { Pencil, RotateCw, Trash2 } from 'lucide-vue-next'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
@@ -273,7 +273,7 @@ async function rereview(item: ContentItem) {
             </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-slate-600 dark:text-zinc-300">
               {{ platformLabels[item.platform] ?? item.platform }}
-              <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[item.community] ?? 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'">{{ item.community === 'blhx' ? '碧蓝' : '鸣潮' }}</span>
+              <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[item.community] ?? 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'">{{ ADMIN_COMMUNITY_SHORT[item.community] ?? '鸣潮' }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <span
