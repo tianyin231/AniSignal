@@ -12,16 +12,18 @@
  */
 
 export interface GameCommunity {
-  key: 'wuwa' | 'blhx' | 'hsr'
+  key: 'wuwa' | 'blhx' | 'hsr' | 'arknights'
   label: string
   /** 分区语义色键，映射 COMMUNITY_CLASSES 的 Tailwind 类组（不用动态拼接，避免被 purge） */
-  color: 'blue' | 'cyan' | 'amber'
+  color: 'yellow' | 'sky' | 'violet' | 'orange'
 }
 
+// 分区主题色对齐各游戏品牌色：鸣潮金 / 碧蓝天蓝 / 星穹铁道紫 / 明日方舟橙
 export const GAME_COMMUNITIES: GameCommunity[] = [
-  { key: 'wuwa', label: '鸣潮', color: 'blue' },
-  { key: 'blhx', label: '碧蓝航线', color: 'cyan' },
-  { key: 'hsr', label: '崩坏星穹铁道', color: 'amber' },
+  { key: 'wuwa', label: '鸣潮', color: 'yellow' },
+  { key: 'blhx', label: '碧蓝航线', color: 'sky' },
+  { key: 'hsr', label: '崩坏星穹铁道', color: 'violet' },
+  { key: 'arknights', label: '明日方舟', color: 'orange' },
 ]
 
 export type GameCommunityKey = GameCommunity['key']
@@ -34,25 +36,34 @@ const VALID_KEYS = new Set(GAME_COMMUNITIES.map(item => item.key))
  * chip：内容行/事件行/轮播卡的分区徽章；nav：顶栏频道 tab 选中态（分区色文字+下划线）。
  */
 const COMMUNITY_CLASSES: Record<
-  GameCommunity['color'],
+  GameCommunity['color'] | 'blue',
   { chip: string, nav: string }
 > = {
+  // blue = 站点主色：非分区频道（首页/定制化）与兜底用
   blue: {
     chip: 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300',
     nav: 'border-blue-500 text-blue-700 dark:text-blue-300',
   },
-  cyan: {
-    chip: 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300',
-    nav: 'border-cyan-500 text-cyan-700 dark:text-cyan-300',
+  yellow: {
+    chip: 'bg-yellow-500/15 text-yellow-700 dark:bg-yellow-400/15 dark:text-yellow-300',
+    nav: 'border-yellow-500 text-yellow-700 dark:text-yellow-300',
   },
-  amber: {
-    chip: 'bg-amber-500/10 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
-    nav: 'border-amber-500 text-amber-700 dark:text-amber-300',
+  sky: {
+    chip: 'bg-sky-500/10 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300',
+    nav: 'border-sky-500 text-sky-700 dark:text-sky-300',
+  },
+  violet: {
+    chip: 'bg-violet-500/10 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300',
+    nav: 'border-violet-500 text-violet-700 dark:text-violet-300',
+  },
+  orange: {
+    chip: 'bg-orange-500/10 text-orange-700 dark:bg-orange-400/15 dark:text-orange-300',
+    nav: 'border-orange-500 text-orange-700 dark:text-orange-300',
   },
 }
 
 export function communityClasses(color: string) {
-  return COMMUNITY_CLASSES[color as GameCommunity['color']] ?? COMMUNITY_CLASSES.blue
+  return COMMUNITY_CLASSES[color as GameCommunity['color'] | 'blue'] ?? COMMUNITY_CLASSES.blue
 }
 
 /** 各分区可用的平台筛选（/api/contents 的 platform 参数值）。 */
@@ -60,6 +71,7 @@ export const PLATFORMS_BY_COMMUNITY: Record<GameCommunityKey, string[]> = {
   wuwa: ['bilibili', 'youtube', 'kuro'],
   blhx: ['bilibili'],
   hsr: ['bilibili', 'youtube'],
+  arknights: ['bilibili', 'youtube'],
 }
 
 export function platformsForCommunity(community: string): string[] {
