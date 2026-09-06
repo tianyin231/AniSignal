@@ -212,6 +212,18 @@ docker compose up -d --build
 # 验证：curl http://127.0.0.1:8090/api/healthz；容器产物内容校验用中文界面字符串 grep（函数名会被压缩改名，不要用标识符搜）
 ```
 
+## 分区扩容与品牌色（2026-09-06）
+
+- **四分区主题色对齐游戏品牌**（useGameSection COMMUNITY_CLASSES + admin-communities BADGE）：
+  鸣潮=yellow（黑金）、碧蓝航线=sky（碧蓝）、崩坏星穹铁道=violet（紫）、明日方舟=orange（方舟橙）。
+  'blue' 保留给非分区频道（首页/定制化）与兜底。改色只动 COMMUNITY_CLASSES/ADMIN_COMMUNITY_BADGE。
+- **明日方舟分区（arknights，迁移 0029）**：B站官方 mid 161775300（bili CLI 核验认证"明日方舟官方
+  账号"，config arknights_bili_mid）；YouTube EN 官方 UCR0J2NYGuC8epsa1O4DMmXQ（handle 页 canonical +
+  externalId 双确认；**YouTube RSS 对服务器 IP 有间歇性 404/500 风控，与已知模式一致，会自愈**）；
+  0029 播种官方动态(core)/社区搜索(明日方舟, min_views 10000)/YouTube 官方/Rexlent·Xlice 社区
+  (co_terms 明日方舟)。
+- contents.vue 的分区短徽章用 ADMIN_COMMUNITY_SHORT 查表（三元硬编码在 4 分区下会错标）。
+
 ## 管理端用户管理（2026-09-05 上线）
 
 - **模型**：users.status（active/banned，0003 已有）+ banned_reason/banned_at（迁移 0026，附
