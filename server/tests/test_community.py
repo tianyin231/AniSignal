@@ -241,8 +241,10 @@ async def test_public_aggregate_community_all(client, session):
     highlights = await client.get("/api/highlights", params={"community": "all"})
     assert highlights.status_code == 200
 
-    # sources / products 保持严格分区校验，不接受 all
-    assert (await client.get("/api/sources", params={"community": "all"})).status_code == 422
+    # official-links 保持严格分区校验，不接受 all（其余列表端点均已支持聚合视角）
+    assert (
+        await client.get("/api/official-links", params={"community": "all"})
+    ).status_code == 422
 
 
 async def test_products_community_all(client, session):
@@ -259,3 +261,21 @@ async def test_products_community_all(client, session):
     resp = await client.get("/api/products", params={"community": "all"})
     names = {p["name"] for p in resp.json()["items"]}
     assert "鸣潮商品B" in names and "碧蓝商品B" in names
+
+
+async def test_sources_community_all(client, session):
+    """来源健康支持 community=all：跨分区返回全部来源。"""
+    from app.models import CollectTarget
+
+    session.add_all(
+        [
+            CollectTarget(platform="bilibili", target_type="keyword_search", target_value="甲", community="wuwa"),
+            CollectTarget(platform="bilibili", target_type="keyword_search", target_value="乙", community="blhx"),
+        ]
+    )
+    await session.commit()
+    resp = await client.get("/api/sources", params={"community": "all"})
+    names = {s["name"] for s in resp.json()["items"]}
+    assert {"甲", "乙"} <= names
+    single = await client.get("/api/sources", params={"community": "blhx"})
+    assert {s["name"] for s in single.json()["items"]} == {"乙"}

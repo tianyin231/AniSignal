@@ -244,17 +244,17 @@ def _excerpt(text: str) -> str | None:
 
 @router.get("/sources", response_model=PublicSourceList)
 async def list_sources(
-    community: str = COMMUNITY_QUERY,
+    community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     """公开的来源健康：已接入来源、最近成功采集时间与不可用状态（设计文档 §6/§16）。
 
-    不暴露 last_error 等内部细节。
+    community=all 时返回全部分区的来源（系统级视角）；不暴露 last_error 等内部细节。
     """
     rows = await session.execute(
         select(CollectTarget)
-        .where(CollectTarget.community == community)
-        .order_by(CollectTarget.platform, CollectTarget.id)
+        .where(*([] if is_all_community(community) else [CollectTarget.community == community]))
+        .order_by(CollectTarget.community, CollectTarget.platform, CollectTarget.id)
     )
     items = [
         PublicSource(
