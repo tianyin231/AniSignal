@@ -50,6 +50,7 @@ useSeoMeta({ title: '事件库' })
 
 <template>
   <div>
+    <BackToChannelHome />
     <TabNav v-model="tab" :tabs="tabs" />
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">

@@ -22,6 +22,7 @@ const products = computed(() => data.value?.items ?? [])
 
 <template>
   <div>
+    <BackToChannelHome />
     <h1 class="mb-4 text-lg font-semibold text-slate-900 dark:text-zinc-50">商品</h1>
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
