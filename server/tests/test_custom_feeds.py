@@ -177,3 +177,37 @@ async def test_admin_custom_feed_management(client, session, fake_bili):
     resp = await client.delete(f"/api/admin/custom-feeds/{feed_id}", headers=admin_headers)
     assert resp.status_code == 204
     assert (await client.get("/api/admin/custom-feeds", headers=admin_headers)).json()["total"] == 0
+
+
+@pytest.mark.parametrize("has_feed", [False, True])
+async def test_worker_collect_custom_feeds(session, session_factory, fake_bili, monkeypatch, has_feed):
+    import app.db as db
+    from app.worker.settings import collect_custom_feeds
+
+    monkeypatch.setattr(db, "SessionLocal", session_factory)
+    if has_feed:
+        user = User(email="worker-owner@anisignal.dev", password_hash="x", is_verified=True)
+        session.add(user)
+        await session.flush()
+        feed = CustomFeed(
+            user_id=user.id,
+            name="热门监控",
+            kind="keyword",
+            target_value="鸣潮",
+            min_views=10000,
+        )
+        session.add(feed)
+        await session.commit()
+
+    # 走生产 worker 入口和真实数据库，覆盖空轮询及到期源入库。
+    stats = await collect_custom_feeds({"redis": None})
+
+    expected = 1 if has_feed else 0
+    assert stats == {"feeds": expected, "new_items": expected, "pushed": 0, "failed": 0}
+    items = list((await session.execute(select(CustomFeedItem))).scalars())
+    assert len(items) == expected
+    if has_feed:
+        assert items[0].external_id == "BVcustomHot"
+        await session.refresh(feed)
+        assert feed.last_collected_at is not None
+        assert feed.next_run_at > feed.last_collected_at
