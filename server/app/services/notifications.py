@@ -1,4 +1,4 @@
-"""关键词邮件：候选筛选、AI 精炼、投递记录与每日批处理。"""
+"""全站早报与关键词通知：候选筛选、AI 精炼、投递记录与每日批处理。"""
 
 import json
 import logging
@@ -117,12 +117,12 @@ async def enabled_keywords(session: AsyncSession, user_id: int) -> list[str]:
 
 async def load_candidates(
     session: AsyncSession,
-    keywords: list[str],
+    keywords: list[str] | None,
     start_at: datetime,
     end_at: datetime,
 ) -> list[dict]:
-    """只从明确出现用户关键词的内容中取候选；正文命中标为 weak，交给 AI 决定。"""
-    if not keywords:
+    """None 表示全站早报；关键词通知只取明确命中内容，正文命中交给 AI 复核。"""
+    if keywords == []:
         return []
     latest_sq = (
         select(
@@ -166,13 +166,13 @@ async def load_candidates(
         provenance = [str(item).casefold() for item in (raw.matched_keywords or [])]
         strong: list[str] = []
         weak: list[str] = []
-        for keyword in keywords:
+        for keyword in keywords or []:
             folded = keyword.casefold()
             if folded in title_folded or folded in provenance:
                 strong.append(keyword)
             elif folded in body_folded:
                 weak.append(keyword)
-        if not strong and not weak:
+        if keywords is not None and not strong and not weak:
             continue
         normalized = version.normalized_json or {}
         media = normalized.get("media") if isinstance(normalized, dict) else []
@@ -196,7 +196,7 @@ async def load_candidates(
                 "identity": source.identity if source else "unknown",
                 "published_at": raw.published_at or raw.collected_at,
                 "keywords": strong or weak,
-                "strength": "strong" if strong else "weak",
+                "strength": "strong" if keywords is None or strong else "weak",
                 "category": version.category,
             }
         )
@@ -294,7 +294,8 @@ async def ai_curate(
     system = (
         "你是游戏资讯早报编辑，只能根据输入候选生成 JSON："
         '{"items":[{"id":1,"summary":"80字以内事实摘要"}]}。'
-        "只保留真正以用户关键词为主题、且提供可核实新事实的内容，最多5条；没有合格内容就返回空数组，宁缺毋滥；"
+        "根据指定范围筛选：全站早报覆盖所有游戏分区，不要求命中个人关键词；关键词通知须以用户关键词为主题。"
+        "只保留提供可核实新事实的内容，最多5条；没有合格内容就返回空数组，宁缺毋滥；"
         "抽奖、签到、泛闲聊、标题党、传闻预测、纯观看反应、攻略配队、伤害展示、开箱晒单、二创、情绪表达、无证据指控和仅顺带提及关键词的内容一律不要选；"
         "普通用户内容只有明确提供发售、预售、发货、延期或质量售后等新事实时才可入选；"
         "摘要要用一句自然中文说明发生了什么和新增了什么，不得照抄标题或视频简介，也不要写空泛评价；"
@@ -303,6 +304,7 @@ async def ai_curate(
         "严格区分官方信息、社区观察和普通用户反馈，不得补充输入中没有的事实、数字或结论。"
     )
     prompt = (
+        f"筛选范围：{'个人关键词' if keywords else '全站所有游戏分区'}\n"
         f"用户关键词：{json.dumps(keywords, ensure_ascii=False)}\n"
         f"候选内容：{json.dumps(payload, ensure_ascii=False)}"
     )
@@ -372,12 +374,14 @@ def _item_summary(item: dict) -> str:
 
 def _digest_intro(keywords: list[str], items: list[dict]) -> str:
     keyword_text = "、".join(keywords)
+    scope = f"与「{keyword_text}」明确相关的" if keywords else "全站可收录的"
     if not items:
-        return f"过去 24 小时，暂未发现与「{keyword_text}」明确相关的新信息。"
+        return f"过去 24 小时，暂未发现{scope}新信息。"
     official_count = sum(item.get("identity") == "official" for item in items)
     source_note = f"，其中官方信息 {official_count} 条" if official_count else ""
+    scope = f"围绕「{keyword_text}」" if keywords else "全站"
     return (
-        f"过去 24 小时，围绕「{keyword_text}」确认了 {len(items)} 条有效更新{source_note}。"
+        f"过去 24 小时，{scope}确认了 {len(items)} 条有效更新{source_note}。"
         f"最值得关注的是：{_item_summary(items[0])}"
     )
 
@@ -391,7 +395,7 @@ def _render_digest_html(
     intro = _digest_intro(keywords, items)
     keyword_chips = "".join(
         f'<span style="display:inline-block;margin:0 6px 6px 0;padding:4px 9px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:12px;font-weight:650;">{escape(keyword)}</span>'
-        for keyword in keywords
+        for keyword in (keywords or ["全站早报"])
     )
     parts = [
         f'<p class="email-muted" style="margin:0 0 8px;color:#64748b;font-size:13px;">{day:%Y/%m/%d} · 过去 24 小时</p>',
@@ -453,9 +457,11 @@ def _render_digest_html(
                 )
         card.extend(["</div>", "</div>"])
         parts.extend(card)
+    reason = ("你在 AniSignal 账号中心启用了邮件通知及以上关键词。" if keywords
+              else "你在 AniSignal 账号中心启用了全站每日早报。")
     parts.append(
         '<p class="email-muted" style="margin:22px 0 0;color:#64748b;font-size:12px;line-height:20px;">'
-        "收到原因：你在 AniSignal 账号中心启用了邮件通知及以上关键词。"
+        f"收到原因：{reason}"
         "</p>"
     )
     return document(title, "".join(parts), eyebrow="ANISIGNAL DAILY", preheader=intro[:120])
@@ -467,12 +473,12 @@ def render_email(
     keywords: list[str],
     items: list[dict],
 ) -> tuple[str, str, str]:
-    label = "AI 精炼通知" if kind == "ai" else "关键词早报"
+    label = "AI 精炼通知" if kind == "ai" else "全站早报"
     subject = f"[AniSignal] {day:%Y/%m/%d} {label}"
     intro = _digest_intro(keywords, items)
     lines = [
         f"{day:%Y/%m/%d} {label}",
-        f"关注关键词：{'、'.join(keywords)}",
+        f"关注关键词：{'、'.join(keywords)}" if keywords else "内容范围：全站所有游戏分区",
         "",
         f"今日结论：{intro}",
         "",
@@ -494,14 +500,15 @@ def render_email(
         lines.extend(
             [
                 f"{index}. [{identity_labels.get(item['identity'], '社区观察')}] {item['title']}",
-                f"匹配关键词：{'、'.join(item['keywords'])}",
+                *([f"匹配关键词：{'、'.join(item['keywords'])}"] if item['keywords'] else []),
                 f"摘要：{summary}",
                 f"来源：{item.get('source') or item['platform']} · {_format_time(item['published_at'])}",
                 f"原文：{item.get('url') or '暂无可访问链接'}",
                 "",
             ]
         )
-    lines.extend(["收到原因：你在 AniSignal 账号中心启用了邮件通知及以上关键词。"])
+    lines.append("收到原因：你在 AniSignal 账号中心启用了邮件通知及以上关键词。" if keywords
+                 else "收到原因：你在 AniSignal 账号中心启用了全站每日早报。")
     body = "\n".join(lines)
     return subject, body, _render_digest_html(label, day, keywords, items)
 
@@ -547,8 +554,8 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
         await session.commit()
         return {"status": "skipped", "reason": "user_not_eligible"}
 
-    keywords = await enabled_keywords(session, user.id)
-    if not keywords:
+    keywords = [] if delivery.kind == "morning" else await enabled_keywords(session, user.id)
+    if delivery.kind == "ai" and not keywords:
         delivery.status = "skipped"
         delivery.error = "没有启用中的关键词"
         await session.commit()
@@ -571,7 +578,7 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
             html_body = snapshot.html_body or notice_email(
                 snapshot.subject,
                 snapshot.body,
-                preheader="今日关键词早报重发",
+                preheader="今日全站早报重发",
             )
             sent = await send_email(
                 user.email,
@@ -596,7 +603,9 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
     else:
         end_at = utcnow()
         start_at = end_at - timedelta(hours=24)
-    candidates = await load_candidates(session, keywords, start_at, end_at)
+    candidates = await load_candidates(
+        session, None if delivery.kind == "morning" else keywords, start_at, end_at
+    )
 
     if delivery.kind == "ai":
         selected, ai_error = await ai_curate(session, user.id, keywords, candidates)
@@ -620,7 +629,7 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
         items = await group_candidates(session, trusted)
 
     items = items[:MAX_ITEMS]
-    if not items and delivery.source == "schedule":
+    if not items and delivery.source == "schedule" and delivery.kind != "morning":
         delivery.status = "skipped"
         delivery.error = "本期没有明确匹配的新信息"
         delivery.matched_keywords = keywords
@@ -668,12 +677,6 @@ async def run_scheduled_morning(session: AsyncSession) -> dict:
                     User.notification_enabled.is_(True),
                     User.is_verified.is_(True),
                     User.status == "active",
-                    select(UserKeyword.id)
-                    .where(
-                        UserKeyword.user_id == User.id,
-                        UserKeyword.enabled.is_(True),
-                    )
-                    .exists(),
                 )
                 .order_by(User.id)
             )
