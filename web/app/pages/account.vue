@@ -55,14 +55,15 @@ const notificationMessage = ref('')
 const notificationError = ref('')
 let notificationPoll: ReturnType<typeof setTimeout> | undefined
 
-const notificationReady = computed(() => Boolean(
-  notificationInfo.value?.enabled
+const notificationReady = computed(() => Boolean(notificationInfo.value?.enabled))
+const aiNotificationReady = computed(() => Boolean(
+  notificationReady.value
   && (overview.value?.keywords_enabled ?? 0) > 0,
 ))
 const notificationBlockReason = computed(() => {
   // 登录用户必然已验证（login/register 流程保证），此处只提示通知链路自身的前置条件
   if (!notificationInfo.value?.enabled) return '请先开启邮件通知，之后才能手动发送。'
-  if (!(overview.value?.keywords_enabled ?? 0)) return '还没有启用关键词。先添加关键词，系统才有明确的筛选范围。'
+  if (!(overview.value?.keywords_enabled ?? 0)) return '全站早报已开启。AI 精炼通知需先添加关键词。'
   return ''
 })
 
@@ -223,7 +224,7 @@ async function toggleNotifications() {
   try {
     const enabled = !notificationInfo.value?.enabled
     await $fetch('/api/account/notifications', { method: 'PUT', body: { enabled } })
-    notificationMessage.value = enabled ? '每日关键词早报已启用。' : '邮件通知已关闭。'
+    notificationMessage.value = enabled ? '每日全站早报已启用。' : '邮件通知已关闭。'
     await refresh()
   } catch (exc: any) {
     notificationError.value = exc?.data?.detail ?? '通知设置保存失败'
@@ -620,13 +621,13 @@ async function changePassword() {
               :disabled="!!notificationBusy || !notificationReady"
               @click="sendNotification('morning')"
             >
-              <Mail :size="15" /> {{ notificationBusy === 'morning' ? '提交中…' : '发送今日早报' }}
+              <Mail :size="15" /> {{ notificationBusy === 'morning' ? '提交中…' : '发送今日全站早报' }}
             </button>
             <button
               type="button"
               class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed"
-              :class="notificationReady ? 'border-slate-900/10 text-blue-700 hover:bg-blue-500/5 dark:border-white/15 dark:text-blue-300' : 'border-slate-900/10 bg-slate-50 text-slate-400 disabled:opacity-100 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-500'"
-              :disabled="!!notificationBusy || !notificationReady"
+              :class="aiNotificationReady ? 'border-slate-900/10 text-blue-700 hover:bg-blue-500/5 dark:border-white/15 dark:text-blue-300' : 'border-slate-900/10 bg-slate-50 text-slate-400 disabled:opacity-100 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-500'"
+              :disabled="!!notificationBusy || !aiNotificationReady"
               @click="sendNotification('ai')"
             >
               <Sparkles :size="15" /> {{ notificationBusy === 'ai' ? '提交中…' : '生成 AI 精炼通知' }}
@@ -647,7 +648,7 @@ async function changePassword() {
             <div class="mt-2 space-y-2">
               <div v-for="record in notificationInfo.records.slice(0, 3)" :key="record.id" class="rounded-lg bg-slate-500/5 px-3 py-2 dark:bg-white/5">
                 <div class="flex items-center justify-between gap-2 text-xs">
-                  <span class="font-medium">{{ record.kind === 'ai' ? 'AI 精炼通知' : '关键词早报' }}</span>
+                  <span class="font-medium">{{ record.kind === 'ai' ? 'AI 精炼通知' : '全站早报' }}</span>
                   <span
                     :class="record.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : record.status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-slate-400'"
                   >{{ notificationStatusLabel[record.status] }}</span>

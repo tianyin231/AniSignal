@@ -81,7 +81,7 @@ async def send_admin_emails(ctx, delivery_ids: list[int]) -> dict:
 
 
 async def send_morning_notifications(ctx) -> dict:
-    """北京时间 08:00 的用户关键词早报批次。"""
+    """北京时间 08:00 的全站早报批次。"""
     from app.db import SessionLocal
     from app.services.notifications import run_scheduled_morning
 

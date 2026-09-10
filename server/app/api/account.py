@@ -160,7 +160,7 @@ async def request_notification(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先验证邮箱")
     if not user.notification_enabled:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先启用邮件通知")
-    if not await enabled_keywords(session, user.id):
+    if kind == "ai" and not await enabled_keywords(session, user.id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先启用至少一个关键词")
     pending = await session.scalar(
         select(NotificationDelivery).where(
