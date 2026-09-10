@@ -59,9 +59,11 @@ async def send_user_notification(ctx, delivery_id: int) -> dict:
 
 async def collect_custom_feeds(ctx) -> dict:
     """定制监控轮询：抓取到期用户监控源（每轮限量，内部自行限速）。"""
+    from app.db import SessionLocal
     from app.services.custom_feeds import sweep_custom_feeds
 
-    return await sweep_custom_feeds(ctx["redis"])
+    async with SessionLocal() as session:
+        return await sweep_custom_feeds(session, ctx["redis"])
 
 
 async def send_admin_emails(ctx, delivery_ids: list[int]) -> dict:
