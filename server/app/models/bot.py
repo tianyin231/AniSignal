@@ -29,8 +29,23 @@ class BotDelivery(Base):
     dedupe_key: Mapped[str] = mapped_column(String(190), unique=True)
     kind: Mapped[str] = mapped_column(String(20))
     body: Mapped[str] = mapped_column(Text)
+    rendered_body: Mapped[str | None] = mapped_column(Text)
+    receipt: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(20), default="pending")
     error: Mapped[str | None] = mapped_column(String(255))
     attempts: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class BotReminder(Base):
+    __tablename__ = "bot_reminders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("bot_targets.id", ondelete="CASCADE"), index=True)
+    owner_id: Mapped[str] = mapped_column(String(255))
+    request_key: Mapped[str] = mapped_column(String(64), unique=True)
+    body: Mapped[str] = mapped_column(String(500))
+    due_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

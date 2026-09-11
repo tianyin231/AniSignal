@@ -1,4 +1,4 @@
-"""管理员通知面板，以及 AstrBot 专用的只读工具接口。"""
+"""管理员通知面板，以及 AstrBot 专用的情报查询接口。"""
 
 import secrets
 from typing import Literal
@@ -13,7 +13,7 @@ from app.api.deps import require_admin
 from app.clock import utcnow
 from app.communities import community_query_pattern
 from app.db import get_session
-from app.models import BotDelivery, BotTarget
+from app.models import BotDelivery, BotReminder, BotTarget
 from app.services import bot
 from app.services.settings import get_setting, set_setting
 
@@ -35,6 +35,18 @@ class TargetBody(BaseModel):
     tools: list[Literal["digest", "news", "products"]] = Field(default_factory=lambda: list(bot.TOOLS))
     ai_prompt: str = Field(default="简洁、自然地回答，保留来源与时间。", max_length=2000)
     ai_provider_id: str = Field(default="", max_length=200)
+    delivery_mode: Literal["direct", "astrbot"] = "direct"
+    chat_controls: bool = False
+    reminders_enabled: bool = False
+    activities_enabled: bool = False
+    manager_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("manager_ids")
+    @classmethod
+    def clean_managers(cls, values):
+        if any(len(v) > 255 for v in values):
+            raise ValueError("用户标识过长")
+        return list(dict.fromkeys(v.strip() for v in values if v.strip()))
 
     @field_validator("keywords")
     @classmethod
@@ -71,8 +83,8 @@ class MessageBody(BaseModel):
 
 
 def target_view(row):
-    return {"id": row.id, "name": row.name, "umo": row.umo, "enabled": row.enabled,
-            **row.config, "created_at": row.created_at}
+    return {**TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **row.config).model_dump(),
+            "id": row.id, "created_at": row.created_at}
 
 
 async def get_target(target_id, session):
@@ -121,10 +133,10 @@ async def edit_target(target_id: int, body: TargetBody, session: AsyncSession = 
     if body.enabled and (not row.enabled or config != row.config or body.umo != row.umo):
         row.last_scan_at = utcnow()
     if body.umo != row.umo or config != row.config or not body.enabled:
-        await session.execute(delete(BotDelivery).where(BotDelivery.target_id == target_id, BotDelivery.status == "pending"))
+        await session.execute(delete(BotDelivery).where(BotDelivery.target_id == target_id, BotDelivery.status == "pending", BotDelivery.kind != "reminder"))
         # 已失败的旧范围消息保留审计，但不再自动重试。
         from sqlalchemy import update
-        await session.execute(update(BotDelivery).where(BotDelivery.target_id == target_id, BotDelivery.status == "failed").values(attempts=3))
+        await session.execute(update(BotDelivery).where(BotDelivery.target_id == target_id, BotDelivery.status == "failed", BotDelivery.kind != "reminder").values(attempts=3))
     row.name, row.umo, row.enabled, row.config = body.name, body.umo, body.enabled, config
     await session.commit()
     return target_view(row)
@@ -134,6 +146,7 @@ async def edit_target(target_id: int, body: TargetBody, session: AsyncSession = 
 async def remove_target(target_id: int, session: AsyncSession = Depends(get_session)):
     await get_target(target_id, session)
     await session.execute(delete(BotDelivery).where(BotDelivery.target_id == target_id))
+    await session.execute(delete(BotReminder).where(BotReminder.target_id == target_id))
     await session.execute(delete(BotTarget).where(BotTarget.id == target_id))
     await session.commit()
     return {"ok": True}
@@ -159,7 +172,7 @@ async def deliveries(target_id: int | None = None, session: AsyncSession = Depen
     if target_id:
         stmt = stmt.where(BotDelivery.target_id == target_id)
     rows = (await session.execute(stmt.order_by(BotDelivery.id.desc()).limit(50))).all()
-    return [{"id": r.id, "target_id": r.target_id, "name": name, "kind": r.kind, "body": r.body,
+    return [{"id": r.id, "target_id": r.target_id, "name": name, "kind": r.kind, "body": r.body, "rendered_body": r.rendered_body,
              "status": r.status, "error": r.error, "attempts": r.attempts, "created_at": r.created_at} for r, name in rows]
 
 
@@ -168,7 +181,7 @@ async def retry(delivery_id: int, session: AsyncSession = Depends(get_session)):
     row = await session.get(BotDelivery, delivery_id)
     if not row or row.status not in ("failed", "unknown"):
         raise HTTPException(409, "仅失败或结果未知的记录可以重试")
-    row.status, row.attempts = "pending", 0
+    row.status, row.attempts, row.receipt = "pending", 0, None
     await session.commit()
     await bot.deliver(session, await get_target(row.target_id, session), row, force=True)
     return {"status": row.status, "error": row.error}
@@ -183,7 +196,9 @@ async def require_tools(x_bot_key: str = Header(default=""), session: AsyncSessi
 @tools_router.get("/targets", dependencies=[Depends(require_tools)])
 async def tool_targets(session: AsyncSession = Depends(get_session)):
     return [{"umo": t.umo, "tools": t.config.get("tools", []), "instructions": t.config.get("ai_prompt", ""),
-             "provider_id": t.config.get("ai_provider_id", "")}
+             "provider_id": t.config.get("ai_provider_id", ""),
+             "chat_controls": t.config.get("chat_controls", False), "reminders_enabled": t.config.get("reminders_enabled", False),
+             "activities_enabled": t.config.get("activities_enabled", False)}
             for t in await session.scalars(select(BotTarget).where(BotTarget.enabled.is_(True)))]
 
 
