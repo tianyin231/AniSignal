@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models.enums import COMMUNITY_LABELS
-from app.models import BotDelivery, BotTarget, Product
+from app.models import BotDelivery, BotTarget, Event, Product
 from app.services.notifications import group_candidates, load_candidates
 from app.services.settings import get_setting
 from app.services.views import product_to_out
@@ -144,10 +144,16 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
         quiet = (quiet_start <= local.hour < quiet_end) if quiet_start < quiet_end else (local.hour >= quiet_start or local.hour < quiet_end) if quiet_start != quiet_end else False
         if config.get("updates_enabled") and not quiet:
             payload = await query_target(session, target, now=now, collected_after=target.last_scan_at)
-            if payload["items"]:
-                ids_key = sorted({i for item in payload["items"] for i in item["content_ids"]})
-                digest = hashlib.sha256(str(ids_key).encode()).hexdigest()[:32]
-                await create_delivery(session, target, "updates", payload["text"], f"updates:{target.id}:{digest}")
+            for item in payload["items"]:
+                event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
+                # 同一公告跨平台补证据不重复推送；履约结论改变时才再次通知。
+                identity = f"event:{event.id}:{event.conclusion}" if event else f"content:{item['id']}"
+                digest = hashlib.sha256(identity.encode()).hexdigest()[:32]
+                text = (f"{COMMUNITY_LABELS.get(item.get('community'), '')} · 重要动态\n{item['title']}\n"
+                        f"{(item.get('summary') or item['text'])[:500]}\n"
+                        f"来源：{item.get('source') or item['platform']} · {(item['published_at'] + timedelta(hours=8)).strftime('%Y/%m/%d %H:%M')}\n"
+                        f"{item.get('url') or ''}")
+                await create_delivery(session, target, "updates", text, f"updates:{target.id}:{digest}")
             target.last_scan_at = now
             await session.commit()
         pending = list(await session.scalars(select(BotDelivery).where(
