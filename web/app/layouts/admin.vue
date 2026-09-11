@@ -34,19 +34,6 @@ const showingLogin = computed(() => route.path === '/admin/login')
             <span class="text-base font-semibold tracking-tight">AniSignal</span>
             <span class="chip bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300">管理看板</span>
           </NuxtLink>
-          <nav v-if="!showingLogin" class="hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm [scrollbar-width:none] md:flex">
-            <NuxtLink
-              v-for="item in nav"
-              :key="item.to"
-              :to="item.to"
-              class="whitespace-nowrap rounded-md px-3 py-1.5 transition-colors"
-              :class="route.path === item.to
-                ? 'bg-slate-900/5 font-medium text-blue-700 dark:bg-white/10 dark:text-blue-300'
-                : 'text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-100'"
-            >
-              {{ item.label }}
-            </NuxtLink>
-          </nav>
           <div class="ml-auto flex shrink-0 items-center gap-3 text-sm">
             <NuxtLink to="/" class="hidden text-slate-500 hover:text-slate-900 sm:block dark:text-zinc-400 dark:hover:text-zinc-100">返回站点</NuxtLink>
             <button
@@ -58,12 +45,13 @@ const showingLogin = computed(() => route.path === '/admin/login')
             </button>
           </div>
         </div>
-        <nav v-if="!showingLogin" class="-mx-4 flex gap-1 overflow-x-auto px-4 pb-2 text-sm md:hidden">
+        <nav v-if="!showingLogin" aria-label="管理功能" class="flex flex-wrap gap-1 border-t border-slate-900/5 py-2 text-sm dark:border-white/10">
           <NuxtLink
             v-for="item in nav"
             :key="item.to"
             :to="item.to"
-            class="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 transition-colors"
+            class="shrink-0 whitespace-nowrap rounded-md px-2.5 py-2 transition-colors"
+            :aria-current="route.path === item.to ? 'page' : undefined"
             :class="route.path === item.to
               ? 'bg-slate-900/5 font-medium text-blue-700 dark:bg-white/10 dark:text-blue-300'
               : 'text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-100'"
