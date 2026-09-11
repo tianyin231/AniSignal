@@ -20,6 +20,32 @@ const toolNames: Record<string, string> = { digest: '今日速报', news: '资�
 const statuses: Record<string, string> = { pending: '待发送', sending: '发送中', accepted: '网关已接收', failed: '发送失败', unknown: '结果待核对' }
 const form = ref<Target>(defaults())
 const editorOpen = ref(false)
+const editorDialog = ref<HTMLDialogElement | null>(null)
+const editorError = ref('')
+let previousBodyOverflow = ''
+watch(editorOpen, (open) => {
+  if (open) {
+    previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    editorDialog.value?.showModal()
+  } else {
+    editorDialog.value?.close()
+    document.body.style.overflow = previousBodyOverflow
+  }
+}, { flush: 'post' })
+onBeforeUnmount(() => {
+  if (editorOpen.value) document.body.style.overflow = previousBodyOverflow
+})
+
+function closeEditor() {
+  if (!busy.value) editorOpen.value = false
+}
+function onDialogClick(event: MouseEvent) {
+  const dialog = editorDialog.value
+  if (!dialog || event.target !== dialog) return
+  const rect = dialog.getBoundingClientRect()
+  if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeEditor()
+}
 const keywordInput = ref('')
 const busy = ref('')
 const loading = ref(true)
@@ -56,16 +82,20 @@ async function action(key: string, fn: () => Promise<void>) {
   try { await fn() }
   catch (e: any) {
     const detail = e?.data?.detail
-    toast.err(typeof detail === 'string' ? detail : '操作失败，请检查输入与网络')
+    const message = typeof detail === 'string' ? detail : '操作失败，请检查输入与网络'
+    if (key === 'target') editorError.value = message
+    else toast.err(message)
   } finally { busy.value = '' }
 }
 function edit(target?: Target) {
   form.value = target ? structuredClone(toRaw(target)) : defaults()
   keywordInput.value = form.value.keywords.join('，')
+  editorError.value = ''
   editorOpen.value = true
 }
 function saveTarget() {
   action('target', async () => {
+    editorError.value = ''
     form.value.keywords = keywordInput.value.split(/[,，\n]/).map(s => s.trim()).filter(Boolean)
     const id = form.value.id
     const saved = await api<Target>(`/api/admin/bot/targets${id ? `/${id}` : ''}`, { method: id ? 'PUT' : 'POST', body: form.value })
@@ -153,23 +183,31 @@ function retry(row: Delivery) {
       </article>
     </div>
 
-    <section v-if="editorOpen" class="panel rounded-xl p-5">
-      <h2 class="font-semibold">{{ form.id ? '编辑会话' : '添加会话' }}</h2>
-      <form class="mt-4 grid gap-4 sm:grid-cols-2" @submit.prevent="saveTarget">
-        <label class="text-sm">名称<input v-model.trim="form.name" required maxlength="100" :class="inputClass" placeholder="我的私聊 / 鸣潮交流群"></label>
+    <Teleport to="body">
+    <dialog ref="editorDialog" aria-labelledby="session-editor-title" class="session-editor m-auto w-[calc(100%-2rem)] max-w-2xl rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl dark:border-white/15 dark:bg-zinc-900 dark:text-zinc-100" @cancel.prevent="closeEditor" @click="onDialogClick">
+      <div class="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-white/10">
+        <h2 id="session-editor-title" class="text-lg font-semibold">{{ form.id ? '编辑会话' : '添加会话' }}</h2>
+        <button type="button" aria-label="关闭会话窗口" class="flex h-9 w-9 items-center justify-center rounded-lg text-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10" :disabled="!!busy" @click="closeEditor">×</button>
+      </div>
+      <form class="flex min-h-0 flex-col" @submit.prevent="saveTarget">
+      <div class="grid min-h-0 gap-4 overflow-y-auto overscroll-contain p-5 sm:grid-cols-2">
+        <p v-if="editorError" role="alert" class="rounded-lg bg-red-500/10 p-3 text-sm text-red-600 sm:col-span-2 dark:text-red-400">{{ editorError }}</p>
+        <label class="text-sm">名称<input v-model.trim="form.name" autofocus required maxlength="100" :class="inputClass" placeholder="我的私聊 / 鸣潮交流群"></label>
         <label class="text-sm">范围<select v-model="form.community" :class="inputClass"><option value="all">全站</option><option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option></select></label>
         <label class="text-sm sm:col-span-2">会话标识（UMO）<input v-model.trim="form.umo" required maxlength="255" :class="inputClass" placeholder="机器人名称:FriendMessage:用户标识 或 机器人名称:GroupMessage:群标识"><span class="mt-1 block text-xs text-slate-500">在机器人会话发送 /情报会话 获取，群标识不是普通 QQ 群号。</span></label>
         <label class="text-sm sm:col-span-2">关键词（留空不限，逗号分隔）<input v-model="keywordInput" :class="inputClass" placeholder="爱弥斯，联名键盘"></label>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.enabled" type="checkbox">启用此会话的推送与查询</label>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.updates_enabled" type="checkbox">推送新采集的官方或重要动态</label>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.daily_enabled" type="checkbox">每日早报<input v-model="form.daily_time" type="time" required class="rounded border bg-transparent px-2 py-1">北京时间</label>
-        <div class="flex items-center gap-2 text-sm"><span>即时推送免打扰</span><label><span class="sr-only">开始小时</span><input v-model.number="form.quiet_start" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>至</span><label><span class="sr-only">结束小时</span><input v-model.number="form.quiet_end" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>时（相同则关闭）</span></div>
+        <div class="flex flex-wrap items-center gap-2 text-sm"><span>即时推送免打扰</span><label><span class="sr-only">开始小时</span><input v-model.number="form.quiet_start" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>至</span><label><span class="sr-only">结束小时</span><input v-model.number="form.quiet_end" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>时（相同则关闭）</span></div>
         <fieldset class="sm:col-span-2"><legend class="text-sm font-medium">AI 可用的查询工具</legend><div class="mt-2 flex flex-wrap gap-4"><label v-for="(label, key) in toolNames" :key="key" class="flex items-center gap-2 text-sm"><input v-model="form.tools" type="checkbox" :value="key">{{ label }}</label></div></fieldset>
         <label class="text-sm sm:col-span-2">问答模型（AstrBot 中已配置的提供商 ID）<input v-model.trim="form.ai_provider_id" maxlength="200" :class="inputClass" placeholder="留空跟随机器人默认模型，例如 deepseek/deepseek-v4-flash"></label>
         <label class="text-sm sm:col-span-2">该会话的回答偏好<textarea v-model="form.ai_prompt" rows="3" maxlength="2000" :class="inputClass" placeholder="例如：用轻松语气回答；优先解释活动与玩家的关系。"></textarea></label>
-        <div class="flex gap-3 sm:col-span-2"><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy">{{ busy === 'target' ? '保存中…' : '保存会话' }}</button><button type="button" class="px-3 text-sm" :disabled="!!busy" @click="editorOpen = false">取消</button></div>
+      </div>
+        <div class="flex shrink-0 justify-end gap-3 border-t border-slate-200 px-5 py-4 dark:border-white/10"><button type="button" class="rounded-lg px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-white/10" :disabled="!!busy" @click="closeEditor">取消</button><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy">{{ busy === 'target' ? '保存中…' : '保存会话' }}</button></div>
       </form>
-    </section>
+    </dialog>
+    </Teleport>
 
     <section v-if="targets.length" class="panel rounded-xl p-5">
       <h2 class="font-semibold">查询与试发</h2>
@@ -186,3 +224,16 @@ function retry(row: Delivery) {
     </section>
   </div>
 </template>
+
+<style scoped>
+.session-editor[open] {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 2rem);
+  overflow: hidden;
+}
+.session-editor::backdrop {
+  background: rgb(15 23 42 / 45%);
+  backdrop-filter: blur(4px);
+}
+</style>
