@@ -214,7 +214,7 @@ async def companion(session: AsyncSession = Depends(get_session)):
     rows = (await session.execute(select(BotReminder, BotTarget.name).join(BotTarget, BotTarget.id == BotReminder.target_id)
         .order_by(BotReminder.id.desc()).limit(50))).all()
     return {"runtime": {**runtime, "online": bool(last_seen and last_seen > utcnow() - timedelta(minutes=2))},
-            "counts": counts, "reminders": [{**reminder_view(r), "name": name} for r, name in rows]}
+            "counts": counts, "reminders": [{**reminder_view(r), "due_at": r.due_at, "name": name} for r, name in rows]}
 
 
 @admin_router.post("/reminders/{reminder_id}/cancel")
