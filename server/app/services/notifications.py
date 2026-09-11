@@ -120,6 +120,9 @@ async def load_candidates(
     keywords: list[str] | None,
     start_at: datetime,
     end_at: datetime,
+    *,
+    community: str = "all",
+    collected_after: datetime | None = None,
 ) -> list[dict]:
     """None 表示全站早报；关键词通知只取明确命中内容，正文命中交给 AI 复核。"""
     if keywords == []:
@@ -147,6 +150,8 @@ async def load_candidates(
         .where(
             published >= start_at,
             published < end_at,
+            *([RawContent.community == community] if community != "all" else []),
+            *([RawContent.collected_at > collected_after] if collected_after else []),
             or_(
                 ContentVersion.category.notin_(HIDDEN_CATEGORIES),
                 ContentVersion.category.is_(None),
@@ -187,6 +192,7 @@ async def load_candidates(
         candidates.append(
             {
                 "id": raw.id,
+                "community": raw.community,
                 "title": title,
                 "text": (translated or text)[:800],
                 "url": _safe_url(raw.url),

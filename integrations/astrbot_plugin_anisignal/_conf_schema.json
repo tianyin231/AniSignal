@@ -1,0 +1,4 @@
+{
+  "base_url": {"description": "AniSignal 服务地址", "type": "string", "default": "http://anisignal-app-1:8000"},
+  "tools_key": {"description": "AniSignal 专用只读工具密钥", "type": "string", "default": "", "hint": "由部署脚本写入；不要填写管理员 Token 或 AstrBot 发送密钥。"}
+}
