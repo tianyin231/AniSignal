@@ -91,6 +91,10 @@ class AniSignalPlugin(Star):
             logger.warning("AniSignal persona rendering failed (%s)", type(exc).__name__)
             reason = {402: "模型余额不足", 429: "模型限流", 401: "模型鉴权失败", 403: "模型无访问权限"}.get(
                 getattr(exc, "status_code", None), "人格生成暂不可用")
+            # 部分供应商用 429 表示欠费；只识别原因，不保存含账号信息的原始错误。
+            details = str(getattr(exc, "body", "")).lower()
+            if any(term in details for term in ("insufficient balance", "insufficient_quota", "exceeded_current_quota")):
+                reason = "模型余额或额度不足"
             note = f"{reason}，已使用原始资料"
         try:
             platform, kind, session_id = row["umo"].split(":", 2)
