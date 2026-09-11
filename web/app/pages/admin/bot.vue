@@ -9,10 +9,10 @@ const toast = useAdminToast()
 interface Target {
   id?: number; name: string; umo: string; enabled: boolean; community: string; keywords: string[]
   daily_enabled: boolean; daily_time: string; updates_enabled: boolean; quiet_start: number; quiet_end: number
-  tools: string[]; ai_prompt: string
+  tools: string[]; ai_prompt: string; ai_provider_id: string
 }
 interface Delivery { id: number; target_id: number; name: string; kind: string; status: string; error: string | null; body: string; attempts: number; created_at: string }
-const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。' })
+const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。', ai_provider_id: '' })
 const targets = ref<Target[]>([])
 const deliveries = ref<Delivery[]>([])
 const bridge = reactive({ endpoint: '', api_key: '', api_key_set: false })
@@ -165,6 +165,7 @@ function retry(row: Delivery) {
         <label class="flex items-center gap-2 text-sm"><input v-model="form.daily_enabled" type="checkbox">每日早报<input v-model="form.daily_time" type="time" required class="rounded border bg-transparent px-2 py-1">北京时间</label>
         <div class="flex items-center gap-2 text-sm"><span>即时推送免打扰</span><label><span class="sr-only">开始小时</span><input v-model.number="form.quiet_start" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>至</span><label><span class="sr-only">结束小时</span><input v-model.number="form.quiet_end" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>时（相同则关闭）</span></div>
         <fieldset class="sm:col-span-2"><legend class="text-sm font-medium">AI 可用的查询工具</legend><div class="mt-2 flex flex-wrap gap-4"><label v-for="(label, key) in toolNames" :key="key" class="flex items-center gap-2 text-sm"><input v-model="form.tools" type="checkbox" :value="key">{{ label }}</label></div></fieldset>
+        <label class="text-sm sm:col-span-2">问答模型（AstrBot 中已配置的提供商 ID）<input v-model.trim="form.ai_provider_id" maxlength="200" :class="inputClass" placeholder="留空跟随机器人默认模型，例如 deepseek/deepseek-v4-flash"></label>
         <label class="text-sm sm:col-span-2">该会话的回答偏好<textarea v-model="form.ai_prompt" rows="3" maxlength="2000" :class="inputClass" placeholder="例如：用轻松语气回答；优先解释活动与玩家的关系。"></textarea></label>
         <div class="flex gap-3 sm:col-span-2"><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy">{{ busy === 'target' ? '保存中…' : '保存会话' }}</button><button type="button" class="px-3 text-sm" :disabled="!!busy" @click="editorOpen = false">取消</button></div>
       </form>
