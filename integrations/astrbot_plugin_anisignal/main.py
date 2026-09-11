@@ -87,8 +87,11 @@ class AniSignalPlugin(Star):
         text, note = row["body"], ""
         try:
             text = await asyncio.wait_for(self.render_delivery(row), timeout=45)
-        except Exception:
-            note = "人格生成暂不可用，已使用原始资料"
+        except Exception as exc:
+            logger.warning("AniSignal persona rendering failed (%s)", type(exc).__name__)
+            reason = {402: "模型余额不足", 429: "模型限流", 401: "模型鉴权失败", 403: "模型无访问权限"}.get(
+                getattr(exc, "status_code", None), "人格生成暂不可用")
+            note = f"{reason}，已使用原始资料"
         try:
             platform, kind, session_id = row["umo"].split(":", 2)
             adapter = self.context.get_platform_inst(platform)
