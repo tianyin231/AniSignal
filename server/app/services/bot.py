@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models.enums import COMMUNITY_LABELS
-from app.models import BotDelivery, BotTarget, Event, Product
+from app.models import BotDelivery, BotReminder, BotTarget, Event, Product
 from app.services.notifications import group_candidates, load_candidates
 from app.services.settings import get_setting
 from app.services.views import product_to_out
@@ -107,6 +107,9 @@ async def create_delivery(session, target, kind, text, key):
 async def deliver(session, target, row, *, force=False):
     if not target.enabled and not force:
         return row
+    # 人格播报由 AstrBot 插件领取，使用它实际配置的人格与模型。
+    if target.config.get("delivery_mode") == "astrbot":
+        return row
     result = await session.execute(update(BotDelivery).where(
         BotDelivery.id == row.id, BotDelivery.status.in_(["pending", "failed"]), BotDelivery.attempts < 3,
     ).values(status="sending", attempts=BotDelivery.attempts + 1, updated_at=utcnow()))
@@ -132,6 +135,19 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
     for target_id in ids:
         target = await session.get(BotTarget, target_id)
         config = target.config
+        if config.get("reminders_enabled"):
+            reminder_ids = list(await session.scalars(select(BotReminder.id).where(
+                BotReminder.target_id == target.id, BotReminder.status == "pending", BotReminder.due_at <= now,
+            ).order_by(BotReminder.due_at).limit(20)))
+            for reminder_id in reminder_ids:
+                reminder = await session.scalar(select(BotReminder).where(BotReminder.id == reminder_id,
+                    BotReminder.status == "pending").with_for_update())
+                if not reminder:
+                    continue
+                due = (reminder.due_at + timedelta(hours=8)).strftime("%Y/%m/%d %H:%M")
+                reminder.status = "queued"
+                await create_delivery(session, target, "reminder", f"约定提醒 #{reminder.id} · {due}（北京时间）\n{reminder.body}", f"reminder:{reminder.id}")
+            await session.commit()
         if config.get("daily_enabled"):
             hour, minute = map(int, config.get("daily_time", "08:00").split(":"))
             due = local.replace(hour=hour, minute=minute, second=0, microsecond=0) - timedelta(hours=8)
@@ -158,10 +174,12 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             await session.commit()
         pending = list(await session.scalars(select(BotDelivery).where(
             BotDelivery.target_id == target.id,
-            BotDelivery.kind.in_(["daily", "updates"]),
+            BotDelivery.kind.in_(["daily", "updates", "reminder"]),
             BotDelivery.status.in_(["pending", "failed"]), BotDelivery.attempts < 3,
         ).order_by(BotDelivery.id).limit(10)))
         for row in pending:
+            if row.kind == "reminder" and not config.get("reminders_enabled"):
+                continue
             if row.kind == "updates" and quiet:
                 continue
             if row.status == "failed" and row.updated_at > now - timedelta(minutes=5):

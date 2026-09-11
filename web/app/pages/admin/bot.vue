@@ -10,14 +10,17 @@ interface Target {
   id?: number; name: string; umo: string; enabled: boolean; community: string; keywords: string[]
   daily_enabled: boolean; daily_time: string; updates_enabled: boolean; quiet_start: number; quiet_end: number
   tools: string[]; ai_prompt: string; ai_provider_id: string
+  delivery_mode: string; chat_controls: boolean; reminders_enabled: boolean; activities_enabled: boolean; manager_ids: string[]
 }
-interface Delivery { id: number; target_id: number; name: string; kind: string; status: string; error: string | null; body: string; attempts: number; created_at: string }
-const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。', ai_provider_id: '' })
+interface Delivery { id: number; target_id: number; name: string; kind: string; status: string; error: string | null; body: string; rendered_body?: string; attempts: number; created_at: string }
+interface Reminder { id: number; name: string; body: string; due_at: string; status: string }
+const companion = ref<{ runtime: { online: boolean; version?: string }; counts: Record<string, number>; reminders: Reminder[] }>({ runtime: { online: false }, counts: {}, reminders: [] })
+const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。', ai_provider_id: '', delivery_mode: 'astrbot', chat_controls: false, reminders_enabled: false, activities_enabled: false, manager_ids: [] })
 const targets = ref<Target[]>([])
 const deliveries = ref<Delivery[]>([])
 const bridge = reactive({ endpoint: '', api_key: '', api_key_set: false })
 const toolNames: Record<string, string> = { digest: '今日速报', news: '资讯查询', products: '商品进展' }
-const statuses: Record<string, string> = { pending: '待发送', sending: '发送中', accepted: '网关已接收', failed: '发送失败', unknown: '结果待核对' }
+const statuses: Record<string, string> = { pending: '待发送', sending: '发送中', accepted: '网关已接收', failed: '发送失败', unknown: '结果待核对', cancelled: '已取消' }
 const form = ref<Target>(defaults())
 const editorOpen = ref(false)
 const editorDialog = ref<HTMLDialogElement | null>(null)
@@ -47,6 +50,7 @@ function onDialogClick(event: MouseEvent) {
   if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) closeEditor()
 }
 const keywordInput = ref('')
+const managerInput = ref('')
 const busy = ref('')
 const loading = ref(true)
 const loadError = ref('')
@@ -62,13 +66,15 @@ async function refresh() {
   loading.value = true
   loadError.value = ''
   try {
-    const [data, logs] = await Promise.all([
+    const [data, logs, companionData] = await Promise.all([
       api<{ bridge: { endpoint: string; api_key_set: boolean }; targets: Target[] }>('/api/admin/bot'),
       api<Delivery[]>('/api/admin/bot/deliveries'),
+      api<typeof companion.value>('/api/admin/bot/companion'),
     ])
     targets.value = data.targets
     Object.assign(bridge, data.bridge)
     deliveries.value = logs
+    companion.value = companionData
     if (!targets.value.some(t => t.id === selectedId.value)) selectedId.value = targets.value[0]?.id ?? null
   } catch (e: any) { loadError.value = e?.data?.detail || e.message }
   finally { loading.value = false }
@@ -90,6 +96,7 @@ async function action(key: string, fn: () => Promise<void>) {
 function edit(target?: Target) {
   form.value = target ? structuredClone(toRaw(target)) : defaults()
   keywordInput.value = form.value.keywords.join('，')
+  managerInput.value = form.value.manager_ids.join('，')
   editorError.value = ''
   editorOpen.value = true
 }
@@ -97,6 +104,7 @@ function saveTarget() {
   action('target', async () => {
     editorError.value = ''
     form.value.keywords = keywordInput.value.split(/[,，\n]/).map(s => s.trim()).filter(Boolean)
+    form.value.manager_ids = managerInput.value.split(/[,，\n]/).map(s => s.trim()).filter(Boolean)
     const id = form.value.id
     const saved = await api<Target>(`/api/admin/bot/targets${id ? `/${id}` : ''}`, { method: id ? 'PUT' : 'POST', body: form.value })
     editorOpen.value = false
@@ -140,6 +148,7 @@ function send() {
   action('send', async () => {
     const result = await api<{ status: string; error: string }>(`/api/admin/bot/targets/${selectedId.value}/send`, { method: 'POST', body: { content: previewText.value } })
     if (result.status === 'accepted') toast.ok('AstrBot 已接收，请在 QQ 核对消息')
+    else if (result.status === 'pending') toast.ok('已排队，AstrBot 将按当前人格播报')
     else toast.err(result.error || '发送失败')
     await refresh()
   })
@@ -149,7 +158,15 @@ function retry(row: Delivery) {
   action(`retry-${row.id}`, async () => {
     const result = await api<{ status: string; error: string }>(`/api/admin/bot/deliveries/${row.id}/retry`, { method: 'POST' })
     if (result.status === 'accepted') toast.ok('AstrBot 已接收')
+    else if (result.status === 'pending') toast.ok('已重新排队')
     else toast.err(result.error || '发送失败')
+    await refresh()
+  })
+}
+function cancelReminder(row: Reminder) {
+  action(`reminder-${row.id}`, async () => {
+    await api(`/api/admin/bot/reminders/${row.id}/cancel`, { method: 'POST' })
+    toast.ok('提醒已取消')
     await refresh()
   })
 }
@@ -162,6 +179,12 @@ function retry(row: Delivery) {
       <div class="flex gap-2"><button class="rounded-lg border px-3 py-2 text-sm" :disabled="loading || !!busy" @click="refresh">{{ loading ? '加载中…' : '刷新' }}</button><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy" @click="edit()">添加会话</button></div>
     </div>
     <p v-if="loadError" role="alert" class="rounded-lg bg-red-500/10 p-3 text-red-600">{{ loadError }}</p>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div class="panel rounded-xl p-4"><p class="text-sm text-slate-500">AstrBot 插件</p><p class="mt-2 font-semibold" :class="companion.runtime.online ? 'text-emerald-600' : 'text-amber-600'">{{ companion.runtime.online ? `在线 · ${companion.runtime.version}` : '未连接或心跳延迟' }}</p></div>
+      <div class="panel rounded-xl p-4"><p class="text-sm text-slate-500">近 24 小时已接收</p><p class="mt-2 text-xl font-semibold">{{ companion.counts.accepted || 0 }}</p></div>
+      <div class="panel rounded-xl p-4"><p class="text-sm text-slate-500">近 24 小时待处理</p><p class="mt-2 text-xl font-semibold">{{ (companion.counts.pending || 0) + (companion.counts.sending || 0) }}</p></div>
+      <div class="panel rounded-xl p-4"><p class="text-sm text-slate-500">近 24 小时需核对</p><p class="mt-2 text-xl font-semibold">{{ (companion.counts.failed || 0) + (companion.counts.unknown || 0) }}</p></div>
+    </div>
 
     <details class="panel rounded-xl p-5" :open="!bridge.api_key_set">
       <summary class="cursor-pointer font-medium">AstrBot 发送通道 <span class="ml-2 text-sm text-slate-500">{{ bridge.api_key_set ? '已配置密钥' : '待配置' }}</span></summary>
@@ -179,6 +202,7 @@ function retry(row: Delivery) {
         <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? '重要动态推送' : '即时推送关闭' }}</p>
         <p class="mt-2 text-sm text-slate-500">{{ target.keywords.length ? target.keywords.join(' / ') : '不限关键词' }}</p>
         <p class="mt-2 text-sm text-slate-500">查询工具：{{ target.tools.map(t => toolNames[t]).join('、') || '全部关闭' }}</p>
+        <div class="mt-3 flex flex-wrap gap-2 text-xs"><span class="rounded bg-blue-500/10 px-2 py-1">{{ target.delivery_mode === 'astrbot' ? 'AstrBot 人格播报' : '原文推送' }}</span><span v-if="target.chat_controls" class="rounded bg-blue-500/10 px-2 py-1">聊天管理订阅</span><span v-if="target.reminders_enabled" class="rounded bg-blue-500/10 px-2 py-1">定时提醒</span><span v-if="target.activities_enabled" class="rounded bg-blue-500/10 px-2 py-1">话题与挑战</span></div>
         <div class="mt-4 flex flex-wrap gap-4 text-sm"><button class="text-blue-600" :disabled="!!busy" @click="edit(target)">编辑</button><button :disabled="!!busy" @click="toggle(target)">{{ busy === `toggle-${target.id}` ? '处理中…' : target.enabled ? '暂停' : '启用' }}</button><button class="text-red-500" :disabled="!!busy" @click="remove(target)">删除</button></div>
       </article>
     </div>
@@ -201,6 +225,11 @@ function retry(row: Delivery) {
         <label class="flex items-center gap-2 text-sm"><input v-model="form.daily_enabled" type="checkbox">每日早报<input v-model="form.daily_time" type="time" required class="rounded border bg-transparent px-2 py-1">北京时间</label>
         <div class="flex flex-wrap items-center gap-2 text-sm"><span>即时推送免打扰</span><label><span class="sr-only">开始小时</span><input v-model.number="form.quiet_start" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>至</span><label><span class="sr-only">结束小时</span><input v-model.number="form.quiet_end" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>时（相同则关闭）</span></div>
         <fieldset class="sm:col-span-2"><legend class="text-sm font-medium">AI 可用的查询工具</legend><div class="mt-2 flex flex-wrap gap-4"><label v-for="(label, key) in toolNames" :key="key" class="flex items-center gap-2 text-sm"><input v-model="form.tools" type="checkbox" :value="key">{{ label }}</label></div></fieldset>
+        <label class="text-sm sm:col-span-2">推送方式<select v-model="form.delivery_mode" :class="inputClass"><option value="astrbot">AstrBot 当前人格播报，可连续追问</option><option value="direct">直接发送原文</option></select></label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="form.chat_controls" type="checkbox">允许在聊天中管理订阅</label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="form.reminders_enabled" type="checkbox">允许创建当前会话的定时提醒</label>
+        <label class="flex items-center gap-2 text-sm sm:col-span-2"><input v-model="form.activities_enabled" type="checkbox">开启「聊点什么」和「情报挑战」（需启用今日速报工具）</label>
+        <label v-if="form.chat_controls && form.umo.includes(':GroupMessage:')" class="text-sm sm:col-span-2">可修改全群订阅的用户标识<input v-model="managerInput" :class="inputClass" placeholder="通过 /情报会话 获取管理标识，逗号分隔"></label>
         <label class="text-sm sm:col-span-2">问答模型（AstrBot 中已配置的提供商 ID）<input v-model.trim="form.ai_provider_id" maxlength="200" :class="inputClass" placeholder="留空跟随机器人默认模型，例如 deepseek/deepseek-v4-flash"></label>
         <label class="text-sm sm:col-span-2">该会话的回答偏好<textarea v-model="form.ai_prompt" rows="3" maxlength="2000" :class="inputClass" placeholder="例如：用轻松语气回答；优先解释活动与玩家的关系。"></textarea></label>
       </div>
@@ -214,13 +243,19 @@ function retry(row: Delivery) {
       <div class="mt-3 grid gap-3 sm:grid-cols-3"><label class="text-sm">接收会话<select v-model="selectedId" :class="inputClass"><option v-for="target in targets" :key="target.id" :value="target.id">{{ target.name }}</option></select></label><label class="text-sm">查询工具<select v-model="tool" :class="inputClass"><option v-for="(label, key) in toolNames" :key="key" :value="key">{{ label }}</option></select></label><label class="text-sm">查询关键词<input v-model.trim="query" maxlength="100" :class="inputClass" placeholder="留空查询所选范围"></label></div>
       <button class="mt-3 rounded-lg border px-3 py-2 text-sm" :disabled="!!busy || !selectedId" @click="preview">{{ busy === 'preview' ? '查询中…' : '生成预览' }}</button>
       <label class="mt-4 block text-sm">待发送内容<textarea v-model="previewText" rows="9" maxlength="3500" :class="inputClass" placeholder="先生成预览，或直接输入测试消息"></textarea></label>
-      <div class="mt-3 flex flex-wrap items-center gap-3"><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy || !selectedId || !previewText.trim()" @click="send">{{ busy === 'send' ? '发送中…' : `发送给「${selected?.name || ''}」` }}</button><span class="text-xs text-slate-500">手动发送立即执行，也可向已暂停的会话试发。</span></div>
+      <div class="mt-3 flex flex-wrap items-center gap-3"><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy || !selectedId || !previewText.trim()" @click="send">{{ busy === 'send' ? '发送中…' : `发送给「${selected?.name || ''}」` }}</button><span class="text-xs text-slate-500">人格播报会进入发送队列，也可向已暂停的会话试发。</span></div>
+    </section>
+
+    <section class="panel rounded-xl p-5">
+      <h2 class="font-semibold">会话提醒</h2>
+      <p v-if="!companion.reminders.length" class="py-5 text-sm text-slate-500">在已开启提醒的会话中说「明天上午 8 点提醒我查看公告」即可创建。</p>
+      <div v-for="row in companion.reminders" :key="row.id" class="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4 text-sm dark:border-white/10"><div class="min-w-0 flex-1"><p class="font-medium">#{{ row.id }} · {{ row.name }} · {{ fmtTime(row.due_at) }}</p><p class="mt-1 break-words text-slate-500">{{ row.body }}</p></div><span>{{ { pending: '待提醒', queued: '已到期，见投递记录', cancelled: '已取消' }[row.status] || row.status }}</span><button v-if="['pending', 'queued'].includes(row.status)" class="text-blue-600" :disabled="!!busy" @click="cancelReminder(row)">{{ busy === `reminder-${row.id}` ? '取消中…' : '取消提醒' }}</button></div>
     </section>
 
     <section class="panel rounded-xl p-5">
       <h2 class="font-semibold">最近投递</h2>
       <p v-if="!deliveries.length" class="py-5 text-sm text-slate-500">暂无投递记录</p>
-      <div class="mt-3 divide-y divide-slate-200 dark:divide-white/10"><details v-for="row in deliveries" :key="row.id" class="py-3"><summary class="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-1 text-sm"><span class="font-medium">{{ row.name }}</span><span>{{ { daily: '每日早报', updates: '重要动态', manual: '手动发送' }[row.kind] || row.kind }}</span><span :class="row.status === 'accepted' ? 'text-emerald-600' : ['failed', 'unknown'].includes(row.status) ? 'text-amber-600' : 'text-slate-500'">{{ statuses[row.status] || row.status }}</span><span class="ml-auto text-xs text-slate-500">{{ fmtTime(row.created_at) }}</span></summary><p v-if="row.error" class="mt-2 text-sm text-amber-600">{{ row.error }}</p><pre class="mt-3 whitespace-pre-wrap break-words text-sm text-slate-600 dark:text-zinc-300">{{ row.body }}</pre><button v-if="['failed', 'unknown'].includes(row.status)" class="mt-3 text-sm text-blue-600" :disabled="!!busy" @click="retry(row)">{{ busy === `retry-${row.id}` ? '重试中…' : '核对后重试' }}</button></details></div>
+      <div class="mt-3 divide-y divide-slate-200 dark:divide-white/10"><details v-for="row in deliveries" :key="row.id" class="py-3"><summary class="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-1 text-sm"><span class="font-medium">{{ row.name }}</span><span>{{ { daily: '每日早报', updates: '重要动态', manual: '手动发送', reminder: '定时提醒' }[row.kind] || row.kind }}</span><span :class="row.status === 'accepted' ? 'text-emerald-600' : ['failed', 'unknown'].includes(row.status) ? 'text-amber-600' : 'text-slate-500'">{{ statuses[row.status] || row.status }}</span><span class="ml-auto text-xs text-slate-500">{{ fmtTime(row.created_at) }}</span></summary><p v-if="row.error" class="mt-2 text-sm text-amber-600">{{ row.error }}</p><pre class="mt-3 whitespace-pre-wrap break-words text-sm text-slate-600 dark:text-zinc-300">{{ row.rendered_body || row.body }}</pre><details v-if="row.rendered_body && row.rendered_body !== row.body" class="mt-3 text-sm"><summary class="cursor-pointer text-slate-500">原始资料</summary><pre class="mt-2 whitespace-pre-wrap break-words">{{ row.body }}</pre></details><button v-if="['failed', 'unknown'].includes(row.status)" class="mt-3 text-sm text-blue-600" :disabled="!!busy" @click="retry(row)">{{ busy === `retry-${row.id}` ? '重试中…' : '核对后重试' }}</button></details></div>
     </section>
   </div>
 </template>

@@ -1,5 +1,5 @@
 from app.models.base import Base
-from app.models.bot import BotDelivery, BotTarget
+from app.models.bot import BotDelivery, BotReminder, BotTarget
 from app.models.classification import ClassificationRule
 from app.models.collect_target import CollectTarget
 from app.models.content import (
