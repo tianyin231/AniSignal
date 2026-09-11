@@ -34,6 +34,7 @@ class TargetBody(BaseModel):
     quiet_end: int = Field(default=8, ge=0, le=23)
     tools: list[Literal["digest", "news", "products"]] = Field(default_factory=lambda: list(bot.TOOLS))
     ai_prompt: str = Field(default="简洁、自然地回答，保留来源与时间。", max_length=2000)
+    ai_provider_id: str = Field(default="", max_length=200)
 
     @field_validator("keywords")
     @classmethod
@@ -181,7 +182,8 @@ async def require_tools(x_bot_key: str = Header(default=""), session: AsyncSessi
 
 @tools_router.get("/targets", dependencies=[Depends(require_tools)])
 async def tool_targets(session: AsyncSession = Depends(get_session)):
-    return [{"umo": t.umo, "tools": t.config.get("tools", []), "instructions": t.config.get("ai_prompt", "")}
+    return [{"umo": t.umo, "tools": t.config.get("tools", []), "instructions": t.config.get("ai_prompt", ""),
+             "provider_id": t.config.get("ai_provider_id", "")}
             for t in await session.scalars(select(BotTarget).where(BotTarget.enabled.is_(True)))]
 
 

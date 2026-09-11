@@ -119,6 +119,13 @@ class AniSignalPlugin(Star):
                 f"\n该会话回答偏好：{target.get('instructions', '')}"
             )
 
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
+    async def select_conversation_provider(self, event: AstrMessageEvent):
+        """Apply an explicit provider only to configured AniSignal conversations."""
+        target = self.targets.get(event.unified_msg_origin)
+        if target and target.get("tools") and target.get("provider_id"):
+            event.set_extra("selected_provider", target["provider_id"])
+
     async def terminate(self):
         if self.task:
             self.task.cancel()
