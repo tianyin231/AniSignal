@@ -85,3 +85,15 @@ async def test_failed_send_does_not_invent_success(plugin):
     plugin.context.send_message.return_value = False
     await plugin.send_delivery(delivery())
     assert plugin.api.call_args.args[1]['status'] == 'failed'
+
+
+async def test_quota_429_is_distinguished_from_rate_limit_without_leaking_details(plugin):
+    error = RuntimeError('account-private')
+    error.status_code = 429
+    error.body = {'error': {'message': 'account-private: insufficient balance'}}
+    plugin.render_delivery.side_effect = error
+    await plugin.send_delivery(delivery())
+    receipt = plugin.api.call_args.args[1]
+    assert receipt['status'] == 'accepted'
+    assert receipt['error'] == '模型余额或额度不足，已使用原始资料'
+    assert 'account-private' not in str(receipt)
