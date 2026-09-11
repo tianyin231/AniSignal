@@ -98,8 +98,25 @@ async def on_startup(ctx) -> None:
     )
 
 
+async def send_bot_notifications(ctx):
+    from app.db import SessionLocal
+    from app.services.bot import run_bot_notifications
+
+    # 固定 job ID 不足以阻止不同分钟的任务重叠，批次另持 Redis 锁。
+    import secrets
+    token = secrets.token_hex(16)
+    if not await ctx["redis"].set("anisignal:bot-sweep-lock", token, nx=True, ex=1900):
+        return {"status": "busy"}
+    try:
+        async with SessionLocal() as session:
+            return await run_bot_notifications(session)
+    finally:
+        await ctx["redis"].eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0", 1, "anisignal:bot-sweep-lock", token)
+
+
 class WorkerSettings:
     functions = [
+        send_bot_notifications,
         collect_target,
         summarize_event,
         translate_content,

@@ -1,0 +1,187 @@
+<script setup lang="ts">
+import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_LABELS } from '~/utils/admin-communities'
+import { fmtTime } from '~/utils/admin-types'
+
+definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
+useSeoMeta({ title: '机器人通知 · AniSignal' })
+const { api } = useAdminApi()
+const toast = useAdminToast()
+interface Target {
+  id?: number; name: string; umo: string; enabled: boolean; community: string; keywords: string[]
+  daily_enabled: boolean; daily_time: string; updates_enabled: boolean; quiet_start: number; quiet_end: number
+  tools: string[]; ai_prompt: string
+}
+interface Delivery { id: number; target_id: number; name: string; kind: string; status: string; error: string | null; body: string; attempts: number; created_at: string }
+const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。' })
+const targets = ref<Target[]>([])
+const deliveries = ref<Delivery[]>([])
+const bridge = reactive({ endpoint: '', api_key: '', api_key_set: false })
+const toolNames: Record<string, string> = { digest: '今日速报', news: '资讯查询', products: '商品进展' }
+const statuses: Record<string, string> = { pending: '待发送', sending: '发送中', accepted: '网关已接收', failed: '发送失败', unknown: '结果待核对' }
+const form = ref<Target>(defaults())
+const editorOpen = ref(false)
+const keywordInput = ref('')
+const busy = ref('')
+const loading = ref(true)
+const loadError = ref('')
+const selectedId = ref<number | null>(null)
+const tool = ref('digest')
+const query = ref('')
+const previewText = ref('')
+const selected = computed(() => targets.value.find(t => t.id === selectedId.value))
+const activeCount = computed(() => targets.value.filter(t => t.enabled).length)
+const inputClass = 'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-white/15 dark:bg-zinc-900'
+
+async function refresh() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const [data, logs] = await Promise.all([
+      api<{ bridge: { endpoint: string; api_key_set: boolean }; targets: Target[] }>('/api/admin/bot'),
+      api<Delivery[]>('/api/admin/bot/deliveries'),
+    ])
+    targets.value = data.targets
+    Object.assign(bridge, data.bridge)
+    deliveries.value = logs
+    if (!targets.value.some(t => t.id === selectedId.value)) selectedId.value = targets.value[0]?.id ?? null
+  } catch (e: any) { loadError.value = e?.data?.detail || e.message }
+  finally { loading.value = false }
+}
+onMounted(refresh)
+watch([selectedId, tool, query], () => { previewText.value = '' })
+
+async function action(key: string, fn: () => Promise<void>) {
+  if (busy.value) return
+  busy.value = key
+  try { await fn() }
+  catch (e: any) {
+    const detail = e?.data?.detail
+    toast.err(typeof detail === 'string' ? detail : '操作失败，请检查输入与网络')
+  } finally { busy.value = '' }
+}
+function edit(target?: Target) {
+  form.value = target ? structuredClone(toRaw(target)) : defaults()
+  keywordInput.value = form.value.keywords.join('，')
+  editorOpen.value = true
+}
+function saveTarget() {
+  action('target', async () => {
+    form.value.keywords = keywordInput.value.split(/[,，\n]/).map(s => s.trim()).filter(Boolean)
+    const id = form.value.id
+    const saved = await api<Target>(`/api/admin/bot/targets${id ? `/${id}` : ''}`, { method: id ? 'PUT' : 'POST', body: form.value })
+    editorOpen.value = false
+    selectedId.value = saved.id!
+    previewText.value = ''
+    toast.ok('会话配置已保存')
+    await refresh()
+  })
+}
+function toggle(target: Target) {
+  action(`toggle-${target.id}`, async () => {
+    await api(`/api/admin/bot/targets/${target.id}`, { method: 'PUT', body: { ...target, enabled: !target.enabled } })
+    toast.ok(target.enabled ? '已暂停该会话' : '已启用该会话')
+    await refresh()
+  })
+}
+function remove(target: Target) {
+  if (!confirm(`删除「${target.name}」及其投递记录？`)) return
+  action('delete', async () => {
+    await api(`/api/admin/bot/targets/${target.id}`, { method: 'DELETE' })
+    toast.ok('已删除会话')
+    await refresh()
+  })
+}
+function saveBridge() {
+  action('bridge', async () => {
+    await api('/api/admin/bot/bridge', { method: 'PUT', body: { endpoint: bridge.endpoint, api_key: bridge.api_key } })
+    bridge.api_key = ''
+    toast.ok('AstrBot 通道已保存')
+    await refresh()
+  })
+}
+function preview() {
+  action('preview', async () => {
+    const result = await api<{ text: string }>(`/api/admin/bot/targets/${selectedId.value}/preview`, { method: 'POST', body: { tool: tool.value, query: query.value } })
+    previewText.value = result.text
+    toast.ok('查询完成，可编辑后发送')
+  })
+}
+function send() {
+  action('send', async () => {
+    const result = await api<{ status: string; error: string }>(`/api/admin/bot/targets/${selectedId.value}/send`, { method: 'POST', body: { content: previewText.value } })
+    if (result.status === 'accepted') toast.ok('AstrBot 已接收，请在 QQ 核对消息')
+    else toast.err(result.error || '发送失败')
+    await refresh()
+  })
+}
+function retry(row: Delivery) {
+  if (!confirm('请先核对收件端，重试可能产生重复消息。现在重新发送？')) return
+  action(`retry-${row.id}`, async () => {
+    const result = await api<{ status: string; error: string }>(`/api/admin/bot/deliveries/${row.id}/retry`, { method: 'POST' })
+    if (result.status === 'accepted') toast.ok('AstrBot 已接收')
+    else toast.err(result.error || '发送失败')
+    await refresh()
+  })
+}
+</script>
+
+<template>
+  <div class="space-y-6">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div><h1 class="text-2xl font-semibold">机器人通知</h1><p class="mt-1 text-sm text-slate-500">{{ targets.length }} 个会话 · {{ activeCount }} 个已启用</p></div>
+      <div class="flex gap-2"><button class="rounded-lg border px-3 py-2 text-sm" :disabled="loading || !!busy" @click="refresh">{{ loading ? '加载中…' : '刷新' }}</button><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy" @click="edit()">添加会话</button></div>
+    </div>
+    <p v-if="loadError" role="alert" class="rounded-lg bg-red-500/10 p-3 text-red-600">{{ loadError }}</p>
+
+    <details class="panel rounded-xl p-5" :open="!bridge.api_key_set">
+      <summary class="cursor-pointer font-medium">AstrBot 发送通道 <span class="ml-2 text-sm text-slate-500">{{ bridge.api_key_set ? '已配置密钥' : '待配置' }}</span></summary>
+      <form class="mt-4 grid gap-4 sm:grid-cols-2" @submit.prevent="saveBridge">
+        <label class="text-sm">发送接口<input v-model.trim="bridge.endpoint" type="url" required :class="inputClass" placeholder="http://astrbot:6185/api/v1/im/messages"></label>
+        <label class="text-sm">API 密钥<input v-model="bridge.api_key" type="password" autocomplete="new-password" :class="inputClass" :placeholder="bridge.api_key_set ? '已保存，留空保持原值' : '填写 AstrBot API Key'"></label>
+        <div><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy">{{ busy === 'bridge' ? '保存中…' : '保存通道' }}</button></div>
+      </form>
+    </details>
+
+    <div v-if="!targets.length && !loading" class="panel rounded-xl p-10 text-center text-slate-500">添加第一个群聊或私聊，设置它关心的资讯。</div>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <article v-for="target in targets" :key="target.id" class="panel rounded-xl p-5">
+        <div class="flex items-start justify-between gap-3"><div><h2 class="font-semibold">{{ target.name }}</h2><p class="mt-1 text-sm text-slate-500">{{ target.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ ADMIN_COMMUNITY_LABELS[target.community] || '全站' }}</p></div><span class="rounded-full px-2 py-1 text-xs" :class="target.enabled ? 'bg-emerald-500/10 text-emerald-600' : 'bg-slate-500/10 text-slate-500'">{{ target.enabled ? '已启用' : '已暂停' }}</span></div>
+        <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? '重要动态推送' : '即时推送关闭' }}</p>
+        <p class="mt-2 text-sm text-slate-500">{{ target.keywords.length ? target.keywords.join(' / ') : '不限关键词' }}</p>
+        <p class="mt-2 text-sm text-slate-500">查询工具：{{ target.tools.map(t => toolNames[t]).join('、') || '全部关闭' }}</p>
+        <div class="mt-4 flex flex-wrap gap-4 text-sm"><button class="text-blue-600" :disabled="!!busy" @click="edit(target)">编辑</button><button :disabled="!!busy" @click="toggle(target)">{{ busy === `toggle-${target.id}` ? '处理中…' : target.enabled ? '暂停' : '启用' }}</button><button class="text-red-500" :disabled="!!busy" @click="remove(target)">删除</button></div>
+      </article>
+    </div>
+
+    <section v-if="editorOpen" class="panel rounded-xl p-5">
+      <h2 class="font-semibold">{{ form.id ? '编辑会话' : '添加会话' }}</h2>
+      <form class="mt-4 grid gap-4 sm:grid-cols-2" @submit.prevent="saveTarget">
+        <label class="text-sm">名称<input v-model.trim="form.name" required maxlength="100" :class="inputClass" placeholder="我的私聊 / 鸣潮交流群"></label>
+        <label class="text-sm">范围<select v-model="form.community" :class="inputClass"><option value="all">全站</option><option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option></select></label>
+        <label class="text-sm sm:col-span-2">会话标识（UMO）<input v-model.trim="form.umo" required maxlength="255" :class="inputClass" placeholder="机器人名称:FriendMessage:用户标识 或 机器人名称:GroupMessage:群标识"><span class="mt-1 block text-xs text-slate-500">在机器人会话发送 /情报会话 获取，群标识不是普通 QQ 群号。</span></label>
+        <label class="text-sm sm:col-span-2">关键词（留空不限，逗号分隔）<input v-model="keywordInput" :class="inputClass" placeholder="爱弥斯，联名键盘"></label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="form.enabled" type="checkbox">启用此会话的推送与查询</label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="form.updates_enabled" type="checkbox">推送新采集的官方或重要动态</label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="form.daily_enabled" type="checkbox">每日早报<input v-model="form.daily_time" type="time" required class="rounded border bg-transparent px-2 py-1">北京时间</label>
+        <div class="flex items-center gap-2 text-sm"><span>即时推送免打扰</span><label><span class="sr-only">开始小时</span><input v-model.number="form.quiet_start" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>至</span><label><span class="sr-only">结束小时</span><input v-model.number="form.quiet_end" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>时（相同则关闭）</span></div>
+        <fieldset class="sm:col-span-2"><legend class="text-sm font-medium">AI 可用的查询工具</legend><div class="mt-2 flex flex-wrap gap-4"><label v-for="(label, key) in toolNames" :key="key" class="flex items-center gap-2 text-sm"><input v-model="form.tools" type="checkbox" :value="key">{{ label }}</label></div></fieldset>
+        <label class="text-sm sm:col-span-2">该会话的回答偏好<textarea v-model="form.ai_prompt" rows="3" maxlength="2000" :class="inputClass" placeholder="例如：用轻松语气回答；优先解释活动与玩家的关系。"></textarea></label>
+        <div class="flex gap-3 sm:col-span-2"><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy">{{ busy === 'target' ? '保存中…' : '保存会话' }}</button><button type="button" class="px-3 text-sm" :disabled="!!busy" @click="editorOpen = false">取消</button></div>
+      </form>
+    </section>
+
+    <section v-if="targets.length" class="panel rounded-xl p-5">
+      <h2 class="font-semibold">查询与试发</h2>
+      <div class="mt-3 grid gap-3 sm:grid-cols-3"><label class="text-sm">接收会话<select v-model="selectedId" :class="inputClass"><option v-for="target in targets" :key="target.id" :value="target.id">{{ target.name }}</option></select></label><label class="text-sm">查询工具<select v-model="tool" :class="inputClass"><option v-for="(label, key) in toolNames" :key="key" :value="key">{{ label }}</option></select></label><label class="text-sm">查询关键词<input v-model.trim="query" maxlength="100" :class="inputClass" placeholder="留空查询所选范围"></label></div>
+      <button class="mt-3 rounded-lg border px-3 py-2 text-sm" :disabled="!!busy || !selectedId" @click="preview">{{ busy === 'preview' ? '查询中…' : '生成预览' }}</button>
+      <label class="mt-4 block text-sm">待发送内容<textarea v-model="previewText" rows="9" maxlength="3500" :class="inputClass" placeholder="先生成预览，或直接输入测试消息"></textarea></label>
+      <div class="mt-3 flex flex-wrap items-center gap-3"><button class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white" :disabled="!!busy || !selectedId || !previewText.trim()" @click="send">{{ busy === 'send' ? '发送中…' : `发送给「${selected?.name || ''}」` }}</button><span class="text-xs text-slate-500">手动发送立即执行，也可向已暂停的会话试发。</span></div>
+    </section>
+
+    <section class="panel rounded-xl p-5">
+      <h2 class="font-semibold">最近投递</h2>
+      <p v-if="!deliveries.length" class="py-5 text-sm text-slate-500">暂无投递记录</p>
+      <div class="mt-3 divide-y divide-slate-200 dark:divide-white/10"><details v-for="row in deliveries" :key="row.id" class="py-3"><summary class="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-1 text-sm"><span class="font-medium">{{ row.name }}</span><span>{{ { daily: '每日早报', updates: '重要动态', manual: '手动发送' }[row.kind] || row.kind }}</span><span :class="row.status === 'accepted' ? 'text-emerald-600' : ['failed', 'unknown'].includes(row.status) ? 'text-amber-600' : 'text-slate-500'">{{ statuses[row.status] || row.status }}</span><span class="ml-auto text-xs text-slate-500">{{ fmtTime(row.created_at) }}</span></summary><p v-if="row.error" class="mt-2 text-sm text-amber-600">{{ row.error }}</p><pre class="mt-3 whitespace-pre-wrap break-words text-sm text-slate-600 dark:text-zinc-300">{{ row.body }}</pre><button v-if="['failed', 'unknown'].includes(row.status)" class="mt-3 text-sm text-blue-600" :disabled="!!busy" @click="retry(row)">{{ busy === `retry-${row.id}` ? '重试中…' : '核对后重试' }}</button></details></div>
+    </section>
+  </div>
+</template>

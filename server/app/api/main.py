@@ -68,6 +68,9 @@ app.include_router(admin_users_router)
 app.include_router(admin_custom_router)
 from app.api.custom import router as custom_router
 app.include_router(custom_router)
+from app.api.bot import router as bot_router, tools_router
+app.include_router(bot_router)
+app.include_router(tools_router)
 
 
 @app.get("/api/healthz")

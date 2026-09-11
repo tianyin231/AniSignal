@@ -1,4 +1,5 @@
 from app.models.base import Base
+from app.models.bot import BotDelivery, BotTarget
 from app.models.classification import ClassificationRule
 from app.models.collect_target import CollectTarget
 from app.models.content import (
@@ -33,6 +34,8 @@ from app.models.statistics import CollectionDailyStat, ContentDailyStat
 from app.models.user import EmailCode, NotificationDelivery, User, UserKeyword, UserSession
 
 __all__ = [
+    "BotTarget",
+    "BotDelivery",
     "Base",
     "CollectTarget",
     "CollectRun",

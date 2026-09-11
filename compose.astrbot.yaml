@@ -1,0 +1,11 @@
+# 启用方式：COMPOSE_FILE=compose.yaml:compose.astrbot.yaml（Linux 服务器 .env）。
+# 使用现有机器人通知网络，容器重建后仍可通过服务名互通。
+services:
+  app:
+    networks: [default, astrbot]
+  collector:
+    networks: [default, astrbot]
+networks:
+  astrbot:
+    external: true
+    name: ${ASTRBOT_NETWORK:-ap_notify_net}
