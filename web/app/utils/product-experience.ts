@@ -148,19 +148,31 @@ export function mountProductExperience(root: HTMLElement): () => void {
   const keyword = get<HTMLInputElement>('#as-keyword')
   const resultRows = all<HTMLElement>('[data-demo-result]')
   const presets = all<HTMLButtonElement>('[data-keyword]')
-  function filterResults() {
+  let resultTick = 0
+  function filterResults(animateRows = false) {
     const needle = keyword.value.trim().toLocaleLowerCase()
     let count = 0
+    let visibleIndex = 0
     resultRows.forEach(row => {
       const title = row.querySelector('h4')?.textContent || ''
       const haystack = mode === 'watch' ? title : `${title} ${row.dataset.keywords || ''}`
       const matches = (mode !== 'custom' || row.dataset.platform === 'bilibili') && haystack.toLocaleLowerCase().includes(needle)
       row.hidden = !matches
-      if (matches) count++
+      if (matches) {
+        row.style.setProperty('--row-i', String(visibleIndex++))
+        count++
+      }
     })
     text('[data-result-count]', `${count} 条`)
     get<HTMLElement>('[data-empty-results]').hidden = count !== 0
     presets.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.keyword?.toLocaleLowerCase() === needle)))
+    if (animateRows) {
+      const container = get<HTMLElement>('.as-demo-results')
+      container.classList.remove('as-rows-in')
+      void container.offsetWidth
+      container.classList.add('as-rows-in')
+      resultTick++
+    }
   }
   bindTabs('[data-mode-tabs]', button => {
     const next = button.dataset.mode
@@ -172,12 +184,12 @@ export function mountProductExperience(root: HTMLElement): () => void {
       text('[data-mode-title]', config.title)
       text('[data-mode-description]', config.description)
       get<HTMLElement>('#as-mode-panel').setAttribute('aria-labelledby', button.id)
-      filterResults()
+      filterResults(true)
     })
   })
   keyword.addEventListener('input', filterResults, { signal })
   get<HTMLButtonElement>('[data-clear-keyword]').addEventListener('click', () => { keyword.value = ''; filterResults(); keyword.focus() }, { signal })
-  presets.forEach(button => button.addEventListener('click', () => { keyword.value = button.dataset.keyword || ''; filterResults() }, { signal }))
+  presets.forEach(button => button.addEventListener('click', () => { keyword.value = button.dataset.keyword || ''; filterResults(true) }, { signal }))
   filterResults()
 
   const channels = {
@@ -214,61 +226,61 @@ export function mountProductExperience(root: HTMLElement): () => void {
     if (link.firstChild) link.firstChild.textContent = shipping ? '查看真实商品进展 ' : channel === 'web' ? '前往我的真实关注流 ' : '到工作台查看真实事件 '
     topicButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.deliveryTopic === topic)))
   }
-  function renderChannel() {
-    const config = channels[channel]
+  function renderChannelCopy(config: (typeof channels)[keyof typeof channels]) {
     text('[data-channel-label]', config.label)
     text('[data-channel-title]', config.title)
     text('[data-channel-description]', config.description)
-    text('[data-preview-heading]', config.heading)
-    text('[data-preview-subheading]', config.subheading)
     text('[data-route-middle]', config.middle)
     text('[data-route-end]', config.end)
+  }
+  function renderChannelPreview(config: (typeof channels)[keyof typeof channels]) {
+    text('[data-preview-heading]', config.heading)
+    text('[data-preview-subheading]', config.subheading)
     text('[data-bot-name]', config.bot)
     text('[data-message-footer]', config.footer)
     get<HTMLElement>('[data-channel-view]').dataset.channelView = channel
     get<HTMLElement>('[data-user-bubble]').hidden = channel !== 'qq'
     if (previewButton.firstChild) previewButton.firstChild.textContent = config.action
-    text('[data-delivery-feedback]', '选择关键词，再点击预览，体验不同消息内容。')
     renderMessage()
+  }
+  function renderChannel() {
+    const config = channels[channel]
+    renderChannelCopy(config)
+    renderChannelPreview(config)
+    text('[data-delivery-feedback]', '选择关键词，再点击预览，体验不同消息内容。')
   }
   bindTabs('[data-channel-tabs]', button => {
     const next = button.dataset.channel
     if (next !== 'qq' && next !== 'email' && next !== 'web') return
     channel = next
+    const config = channels[channel]
     get<HTMLElement>('#as-channel-panel').setAttribute('aria-labelledby', button.id)
-    swapPanel(get<HTMLElement>('#as-channel-panel'), renderChannel)
+    swapPanel(get<HTMLElement>('#as-channel-panel'), () => renderChannelCopy(config))
+    swapPanel(get<HTMLElement>('.as-chat-body'), () => renderChannelPreview(config))
   })
   topicButtons.forEach(button => button.addEventListener('click', () => {
     topic = button.dataset.deliveryTopic === 'shipping' ? 'shipping' : 'version'
-    renderMessage()
+    swapPanel(get<HTMLElement>('.as-chat-body'), renderMessage)
     text('[data-delivery-feedback]', '示例关注词已切换；不会修改任何真实会话配置。')
   }, { signal }))
   previewButton.addEventListener('click', () => {
-    renderMessage()
-    text('[data-delivery-feedback]', channel === 'qq' ? '群消息预览已更新 · 未向真实 QQ 群发送。' : channel === 'email' ? '邮件预览已更新 · 未向真实邮箱发送。' : '站内预览已更新 · 未保存关注词。')
-    window.clearTimeout(previewTimer)
-    window.cancelAnimationFrame(previewFrame)
-    delete root.dataset.previewing
+    const feedback = channel === 'qq' ? '群消息预览已更新 · 未向真实 QQ 群发送。' : channel === 'email' ? '邮件预览已更新 · 未向真实邮箱发送。' : '站内预览已更新 · 未保存关注词。'
     const typing = get<HTMLElement>('[data-typing]')
-    if (!motion) return
-    if (channel === 'qq') {
-      // 打字指示器 → 消息滑入，模拟真实会话节奏
+    const apply = () => {
+      renderMessage()
+      text('[data-delivery-feedback]', feedback)
+    }
+    window.clearTimeout(previewTimer)
+    if (motion && channel === 'qq') {
+      // 打字指示器 → 消息淡入，模拟真实会话节奏
       typing.hidden = false
       previewTimer = window.setTimeout(() => {
         if (disposed) return
         typing.hidden = true
-        previewFrame = window.requestAnimationFrame(() => {
-          if (disposed) return
-          root.dataset.previewing = 'true'
-          previewTimer = window.setTimeout(() => { delete root.dataset.previewing }, 1400)
-        })
-      }, 750)
+        swapPanel(get<HTMLElement>('.as-chat-body'), apply)
+      }, 720)
     } else {
-      previewFrame = window.requestAnimationFrame(() => {
-        if (disposed) return
-        root.dataset.previewing = 'true'
-        previewTimer = window.setTimeout(() => { delete root.dataset.previewing }, 1400)
-      })
+      swapPanel(get<HTMLElement>('.as-chat-body'), apply)
     }
   }, { signal })
   renderChannel()
