@@ -13,7 +13,10 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-@register("astrbot_plugin_anisignal", "AniSignal", "情报工具、人格播报与会话提醒", "1.2.0")
+VERSION = "1.2.0"
+
+
+@register("astrbot_plugin_anisignal", "AniSignal", "情报工具、人格播报与会话提醒", VERSION)
 class AniSignalPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -51,7 +54,7 @@ class AniSignalPlugin(Star):
                     except ValueError:
                         logger.warning("AniSignal delivery receipt expired; manual review required")
                     self.pending_ack = None
-                result = await self.api("/outbox/claim", {"version": "1.1.0"})
+                result = await self.api("/outbox/claim", {"version": VERSION})
                 if result.get("delivery"):
                     await self.send_delivery(result["delivery"])
             except asyncio.CancelledError:
