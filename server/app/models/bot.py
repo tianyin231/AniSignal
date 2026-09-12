@@ -29,6 +29,7 @@ class BotDelivery(Base):
     dedupe_key: Mapped[str] = mapped_column(String(190), unique=True)
     kind: Mapped[str] = mapped_column(String(20))
     body: Mapped[str] = mapped_column(Text)
+    media: Mapped[list | None] = mapped_column(JSON, nullable=True)
     rendered_body: Mapped[str | None] = mapped_column(Text)
     receipt: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(20), default="pending")
