@@ -319,6 +319,7 @@ docker compose up -d --build
   （上线首 48h 仅 4/18 条，消息零丢失）；重建 app 容器会让插件报瞬时 ClientConnectorError，15s 周期自愈；
   当前平台组合（qq_official + weixin_oc）**拿不到群名称/群资料**（平台 API 限制），会话辨认靠管理员命名
   + 尾号 + 活跃度，自动拉群名只有接入 aiocqhttp（NapCat/OneBot）后才可行。
+  2026-09-12 起首选模型 agnes-3.0-flash（空载延迟 ~7s），插件渲染超时已从 45s 放宽到 100s，人格渲染恢复稳定。
 
 ## 未完成 / 下一步选项
 

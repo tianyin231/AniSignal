@@ -90,7 +90,8 @@ class AniSignalPlugin(Star):
     async def send_delivery(self, row):
         text, note = row["body"], ""
         try:
-            text = await asyncio.wait_for(self.render_delivery(row), timeout=45)
+            # 新模型首 token 延迟较高（实测 agnes-3.0-flash 空载 ~7s），45s 会误杀正常渲染
+            text = await asyncio.wait_for(self.render_delivery(row), timeout=100)
         except Exception as exc:
             logger.warning("AniSignal persona rendering failed (%s)", type(exc).__name__)
             reason = {402: "模型余额不足", 429: "模型限流", 401: "模型鉴权失败", 403: "模型无访问权限"}.get(
