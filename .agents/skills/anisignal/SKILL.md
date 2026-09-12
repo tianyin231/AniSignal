@@ -300,6 +300,12 @@ docker compose up -d --build
   早报 /资讯 /商品 /聊点什么 /情报挑战；llm_tool anisignal_query/subscription/reminder 按会话
   tools/reminders_enabled/chat_controls 门禁；on_llm_request 注入北京时间与最近通知上下文（防把历史通知
   当新消息）。umo/actor_id 只取自真实消息事件。
+- **投递带图（2026-09-12，迁移 0032）**：bot_deliveries.media JSON 列存封面 URL；daily 取头条封面、
+  updates 取对应条目封面（manual 试发不带图），claim payload 带 `images`，插件用
+  `MessageChain().message(text).url_image(url)` 发送（qq_official 走富媒体上传 msg_type=7，已实测通过）。
+  人格渲染输出卫生已强化：禁止向群友自述工具能力（"我有搜索和抓取网页的能力"类话术）、禁止照抄搜索摘要
+  与 &&like 类乱码、禁止无下文话头，回复限 60 字内（AstrBot web_search 保留开启）。QQ 官方 API 不支持
+  消息编辑 → 流式输出不可行，靠短回复缓解。
 - **调度与管理**：scheduler bot-sweep 周期跑 send_bot_notifications（提醒到期→queued+投递、每日早报、
   即时更新按 quiet 时段、pending/failed 补投递）；管理端 /admin/bot（会话 CRUD/预览/手动发送/投递记录/
   重试，companion 状态：last_seen<2min 视为在线）。
