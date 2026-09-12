@@ -49,7 +49,10 @@ def plugin(monkeypatch):
     obj.api = AsyncMock(return_value={'ok':True})
     obj.render_delivery = AsyncMock(return_value='人格播报\n原始资料')
     obj.pending_ack = None
-    obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True))
+    obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True),
+        conversation_manager=SimpleNamespace(
+            get_curr_conversation_id=AsyncMock(return_value='cid-1'),
+            add_message_pair=AsyncMock()))
     return obj
 
 
@@ -152,3 +155,20 @@ async def test_delivery_cover_image_is_attached_to_chain(plugin):
     await plugin.send_delivery(row)
     chain = plugin.context.send_message.call_args.args[1]
     assert chain.image_url is None
+
+
+async def test_accepted_broadcast_is_recorded_into_conversation_history(plugin):
+    await plugin.send_delivery(delivery())
+    manager = plugin.context.conversation_manager
+    manager.get_curr_conversation_id.assert_awaited_once_with('qq:FriendMessage:self')
+    cid, user_msg, assistant_msg = manager.add_message_pair.await_args.args
+    assert cid == 'cid-1'
+    assert '每日早报' in user_msg['content'] or '资讯' in user_msg['content']
+    assert assistant_msg['content'] == '人格播报\n原始资料'
+
+
+async def test_history_recording_failure_does_not_break_receipt(plugin):
+    plugin.context.conversation_manager.add_message_pair.side_effect = RuntimeError('db down')
+    await plugin.send_delivery(delivery())
+    receipt = plugin.api.call_args.args[1]
+    assert receipt['status'] == 'accepted' and receipt['receipt'] == 'lease'

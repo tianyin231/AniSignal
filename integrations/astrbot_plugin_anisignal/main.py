@@ -116,6 +116,20 @@ class AniSignalPlugin(Star):
                 note = "未找到匹配的机器人连接"
         except Exception:
             status, note = "unknown", "发送异常，可能已送达；请核对后重试"
+        if status == "accepted":
+            # 播报写入 AstrBot 会话历史：否则正常聊天看不到之前发过什么
+            try:
+                kind_label = {"daily": "每日早报", "updates": "重要动态", "reminder": "定时提醒", "manual": "资讯"}.get(row.get("kind"), "资讯")
+                manager = self.context.conversation_manager
+                cid = await manager.get_curr_conversation_id(row["umo"])
+                if cid:
+                    await manager.add_message_pair(
+                        cid,
+                        {"role": "user", "content": f"（AniSignal 向本会话推送了一条{kind_label}）"},
+                        {"role": "assistant", "content": text},
+                    )
+            except Exception:
+                logger.warning("AniSignal broadcast was not recorded into conversation history")
         self.pending_ack = (f"/outbox/{row['id']}/complete", {
             "receipt": row["receipt"], "status": status, "rendered_body": text, "error": note,
         })
