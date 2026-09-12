@@ -16,7 +16,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 | 部分 | 位置 | 状态 |
 |---|---|---|
 | 产品设计文档 | `docs/superpowers/specs/` | 已定稿，评审通过 |
-| 后端 | `server/`（FastAPI + arq + SQLAlchemy 2 + Alembic，迁移至 0025） | 采集闭环 + 事件引擎 + AI 层 + 邮件通知在线运行中，169 个单测全绿 |
+| 后端 | `server/`（FastAPI + arq + SQLAlchemy 2 + Alembic） | 采集闭环 + 事件引擎 + AI 层 + 邮件通知在线运行中，210 个单测全绿 |
 | Web 前端 | `web/`（Nuxt 4 + Tailwind 4） | 全站真实数据（首页要闻/内容库/事件/商品/来源/账号中心/认证页），管理看板 7 页 |
 | 部署 | 根目录 `Dockerfile` + `compose.yaml` | 4 容器：mysql / redis / app（FastAPI+Nitro 同容器，对外仅 8090，`/api/**` 同源代理）/ collector（调度+worker 同容器，Redis 领导锁支持 `--scale collector=N`）。数据 bind mount 在 `./data/`；单镜像含 bili+python+node。服务器更新流程：`git bundle` 传输 → `git merge --ff-only` → `docker compose up -d --build`（注意：必须先 `git checkout -- .` 清工作区，否则 merge 静默失败） |
 
@@ -178,6 +178,14 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 动手写采集代码之前**必须先读 `references/data-sources.md**（唯一持久副本；.worktrees 里的原始笔记不被 git 跟踪）。速记：
 
 - B 站走 bili CLI（0.2.0，镜像内 /usr/local/bin/bili）：`dynamics <mid>` 入口（不要 `user --dynamics`）；搜索→BV→`video` 详情；匿名链路偶发返回空，已加隔 3 秒重试。
+- **B 站 `video` 详情端点风控门禁 + 熔断（2026-09-12）**：服务器 IP 对匿名 `video` 详情被持续拦截
+  （stderr 含 "risk control ... supply a logged-in cookie"；搜索/动态端点不受影响）。**不配 BILI_COOKIE**
+  （红线），改为：`BiliRiskControlError` 风控拒绝立即失败不重试（collectors/bilibili.py `_run_once`
+  检测 stderr 标记）+ 进程级按命令熔断（`_CIRCUIT_STATE` 模块级 dict——collector 每任务新建实例，
+  状态必须放模块级；连续 2 次拒绝熔断该命令 30 分钟，成功复位，冷却到期后下次调用自然探测）。
+  熔断期间 `search_videos` 直接用搜索结果兜底：**实测搜索响应自带 view/reply/danmaku/favorite**
+  （仅 coin/share/like/duration 为 0），min_views 门槛过滤与 🔥热门徽章不受影响。
+  部署首日实测：每次搜索任务详情请求从 ~60 次（20 视频×3 重试+退避）降到 2 次、任务耗时从 ~2 分钟降到 <1 秒。
 - 鸣潮官方 UID `1955897084` 必须配置化。B 站图文动态（DRAW）无正文/图片是硬边界。
 - kuro 公告列表包裹键是 `game`，tabTitle/tabBanner 多语言 dict，时间为毫秒（parser v2）。
 - 动态标题推导：正文首行跳过 #话题#（parser v3）。
