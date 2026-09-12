@@ -8,9 +8,11 @@
 import asyncio
 import json
 import logging
+from datetime import timedelta
 
 import httpx
 
+from app.clock import utcnow
 from app.collectors.base import CollectorError, extract_items
 from app.config import get_settings
 from app.models.enums import Platform
@@ -28,6 +30,39 @@ _DYNAMIC_DETAIL_PARAMS = {
 _DRAW_DETAIL_CACHE: dict[str, dict] = {}
 _DRAW_DETAIL_CACHE_LIMIT = 256
 
+# 进程级熔断：同一 bili 命令连续被风控拒绝时暂停一段时间，避免对已门禁端点
+# 持续硬打（collector 每个采集任务新建实例，状态必须放模块级才能跨任务生效）。
+_CIRCUIT_OPEN_AFTER = 2
+_CIRCUIT_COOLDOWN = timedelta(minutes=30)
+_CIRCUIT_STATE: dict[str, dict] = {}
+
+
+class BiliRiskControlError(CollectorError):
+    """B 站风控门禁拒绝匿名访问。门禁按 IP 持续生效，秒级重试只会加剧打点。"""
+
+
+def _circuit_open(command: str) -> bool:
+    state = _CIRCUIT_STATE.get(command)
+    until = state["until"] if state else None
+    return bool(until and until > utcnow())
+
+
+def _circuit_record_failure(command: str) -> None:
+    state = _CIRCUIT_STATE.setdefault(command, {"consecutive": 0, "until": None})
+    state["consecutive"] += 1
+    if state["consecutive"] >= _CIRCUIT_OPEN_AFTER:
+        state["until"] = utcnow() + _CIRCUIT_COOLDOWN
+        logger.warning(
+            "bili %s circuit opened for %s after %d consecutive risk-control refusals",
+            command,
+            _CIRCUIT_COOLDOWN,
+            state["consecutive"],
+        )
+
+
+def _circuit_reset(command: str) -> None:
+    _CIRCUIT_STATE.pop(command, None)
+
 
 class BilibiliCollector:
     platform = Platform.BILIBILI
@@ -39,16 +74,31 @@ class BilibiliCollector:
         self._max_retries = settings.bili_max_retries
 
     async def _run(self, *args: str) -> object:
-        """执行 bili 命令并解析 stdout JSON，带指数退避重试。"""
+        """执行 bili 命令并解析 stdout JSON，带指数退避重试。
+
+        风控门禁拒绝不重试：门禁按 IP 持续生效，秒级重试无意义；
+        连续两次拒绝即熔断该命令一段时间，冷却到期后由下一次调用自然探测。
+        """
+        command = args[0] if args else ""
+        if _circuit_open(command):
+            raise BiliRiskControlError(
+                f"bili {command} skipped: circuit open after risk-control refusals"
+            )
         last_error: Exception | None = None
         for attempt in range(self._max_retries + 1):
             if attempt:
                 await asyncio.sleep(min(2**attempt, 30))
             try:
-                return await self._run_once(*args)
+                payload = await self._run_once(*args)
+            except BiliRiskControlError:
+                _circuit_record_failure(command)
+                raise
             except Exception as exc:  # noqa: BLE001 - 统一按采集失败处理
                 last_error = exc
                 logger.warning("bili command %s failed (attempt %d): %s", args, attempt + 1, exc)
+            else:
+                _circuit_reset(command)
+                return payload
         raise CollectorError(f"bili command failed after retries: {last_error}")
 
     async def _run_once(self, *args: str) -> object:
@@ -64,9 +114,12 @@ class BilibiliCollector:
             proc.kill()
             raise CollectorError(f"bili command timed out after {self._timeout}s: {args}") from None
         if proc.returncode != 0:
-            raise CollectorError(
-                f"bili exited {proc.returncode}: {stderr.decode(errors='replace')[:500]}"
-            )
+            stderr_text = stderr.decode(errors="replace")
+            if "risk control" in stderr_text.casefold():
+                raise BiliRiskControlError(
+                    f"bili exited {proc.returncode}: {stderr_text[:500]}"
+                ) from None
+            raise CollectorError(f"bili exited {proc.returncode}: {stderr_text[:500]}")
         return _loads(stdout.decode(errors="replace"))
 
     async def fetch(self, target_type: str, target_value: str, limit: int) -> FetchResult:
@@ -101,6 +154,10 @@ class BilibiliCollector:
         for item in results[:limit]:
             bvid = item.get("bvid")
             if not bvid:
+                continue
+            if _circuit_open("video"):
+                # 熔断期间不触碰详情端点；搜索结果自带 view/reply 等核心指标，直接兜底
+                details.append(item)
                 continue
             try:
                 detail = await self._run("video", str(bvid), "-o", "json", "--no-cache")
