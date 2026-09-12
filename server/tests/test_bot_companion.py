@@ -145,3 +145,26 @@ async def test_activity_report_keeps_latest_and_ignores_unknown(client, session,
     await client.post('/api/bot/activity', headers=head, json=newer)
     overview = (await client.get('/api/admin/bot', headers=admin_headers)).json()
     assert overview['activity'][row.umo] == '2026-09-12T05:30:00'
+
+
+async def test_daily_digest_carries_cover_and_claim_returns_images(client, session, monkeypatch):
+    await set_setting(session, 'bot_bridge', {'tools_key': 'plugin-key'})
+    body = TargetBody(name='图群', umo='qq:GroupMessage:media', enabled=True,
+        daily_enabled=True, daily_time='08:00', delivery_mode='astrbot')
+    row = BotTarget(name=body.name, umo=body.umo, enabled=True,
+        config=body.model_dump(exclude={'name', 'umo', 'enabled'}))
+    row.created_at = utcnow().replace(hour=0, minute=0) - timedelta(days=1)
+    session.add(row)
+    await session.commit()
+
+    async def fake_query(session, target, tool='digest', query='', now=None, collected_after=None):
+        return {'text': '今日速报', 'items': [{'id': 7, 'image': 'https://img/cover.jpg', 'url': 'https://x', 'identity': 'official'}],
+                'instructions': '', 'grounding': ''}
+
+    monkeypatch.setattr(bot, 'query_target', fake_query)
+    await bot.run_bot_notifications(session, utcnow().replace(hour=10))
+    delivery = (await session.execute(select(bot.BotDelivery))).scalar_one()
+    assert delivery.media == ['https://img/cover.jpg']
+
+    claimed = (await client.post('/api/bot/outbox/claim', headers=HEADERS, json={})).json()['delivery']
+    assert claimed['images'] == ['https://img/cover.jpg']

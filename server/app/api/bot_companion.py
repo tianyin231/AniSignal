@@ -203,7 +203,7 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session)):
         await session.commit()
         if result.rowcount:
             return {"delivery": {"id": row.id, "receipt": receipt, "umo": target.umo, "body": row.body,
-                    "kind": row.kind, "provider_id": target.config.get("ai_provider_id", ""),
+                    "kind": row.kind, "images": (row.media or [])[:1], "provider_id": target.config.get("ai_provider_id", ""),
                     "instructions": target.config.get("ai_prompt", "")}}
     return {"delivery": None}
 

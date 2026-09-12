@@ -90,11 +90,11 @@ async def send_message(bridge: dict, umo: str, content: str) -> tuple[str, str |
         return "unknown", "网关连接或响应异常；请核对收件端后再重发"
 
 
-async def create_delivery(session, target, kind, text, key):
+async def create_delivery(session, target, kind, text, key, media=None):
     row = await session.scalar(select(BotDelivery).where(BotDelivery.dedupe_key == key))
     if row:
         return row
-    row = BotDelivery(target_id=target.id, kind=kind, body=text, dedupe_key=key)
+    row = BotDelivery(target_id=target.id, kind=kind, body=text, media=list(media) if media else None, dedupe_key=key)
     session.add(row)
     try:
         await session.commit()
@@ -155,7 +155,8 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                 key = f"daily:{target.id}:{local.date()}"
                 if not await session.scalar(select(BotDelivery.id).where(BotDelivery.dedupe_key == key)):
                     payload = await query_target(session, target, now=due)
-                    await create_delivery(session, target, "daily", payload["text"], key)
+                    covers = [i["image"] for i in payload["items"] if i.get("image")][:1]
+                    await create_delivery(session, target, "daily", payload["text"], key, media=covers)
         quiet_start, quiet_end = config.get("quiet_start", 23), config.get("quiet_end", 8)
         quiet = (quiet_start <= local.hour < quiet_end) if quiet_start < quiet_end else (local.hour >= quiet_start or local.hour < quiet_end) if quiet_start != quiet_end else False
         if config.get("updates_enabled") and not quiet:
@@ -169,7 +170,8 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                         f"{(item.get('summary') or item['text'])[:500]}\n"
                         f"来源：{item.get('source') or item['platform']} · {(item['published_at'] + timedelta(hours=8)).strftime('%Y/%m/%d %H:%M')}\n"
                         f"{item.get('url') or ''}")
-                await create_delivery(session, target, "updates", text, f"updates:{target.id}:{digest}")
+                await create_delivery(session, target, "updates", text, f"updates:{target.id}:{digest}",
+                                      media=[item["image"]] if item.get("image") else None)
             target.last_scan_at = now
             await session.commit()
         pending = list(await session.scalars(select(BotDelivery).where(

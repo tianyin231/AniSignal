@@ -106,7 +106,11 @@ class AniSignalPlugin(Star):
             adapter = self.context.get_platform_inst(platform)
             if kind == "GroupMessage" and adapter and hasattr(adapter, "remember_session_scene"):
                 adapter.remember_session_scene(session_id, "group")
-            sent = await asyncio.wait_for(self.context.send_message(row["umo"], MessageChain().message(text)), timeout=25)
+            chain = MessageChain().message(text)
+            for image in (row.get("images") or [])[:1]:
+                chain = chain.url_image(image)
+                break
+            sent = await asyncio.wait_for(self.context.send_message(row["umo"], chain), timeout=25)
             status = "accepted" if sent else "failed"
             if not sent:
                 note = "未找到匹配的机器人连接"

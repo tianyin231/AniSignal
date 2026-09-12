@@ -22,6 +22,11 @@ def plugin(monkeypatch):
     class Chain:
         def message(self, text):
             self.text = text
+            self.image_url = None
+            return self
+
+        def url_image(self, url):
+            self.image_url = url
             return self
 
     module('aiohttp', ClientError=ConnectionError)
@@ -134,3 +139,16 @@ async def test_message_events_track_last_activity_per_session(plugin):
     await plugin.select_conversation_provider(event('qq:GroupMessage:g1'))
     await plugin.select_conversation_provider(event('qq:GroupMessage:g2'))
     assert set(plugin.last_activity) == {'qq:GroupMessage:g1', 'qq:GroupMessage:g2'}
+
+
+async def test_delivery_cover_image_is_attached_to_chain(plugin):
+    row = delivery()
+    row['images'] = ['https://i0.hdslb.com/cover.jpg']
+    await plugin.send_delivery(row)
+    chain = plugin.context.send_message.call_args.args[1]
+    assert chain.image_url == 'https://i0.hdslb.com/cover.jpg'
+
+    row['images'] = []
+    await plugin.send_delivery(row)
+    chain = plugin.context.send_message.call_args.args[1]
+    assert chain.image_url is None
