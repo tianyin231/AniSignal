@@ -344,6 +344,35 @@ docker compose up -d --build
   + 尾号 + 活跃度，自动拉群名只有接入 aiocqhttp（NapCat/OneBot）后才可行。
   2026-09-12 起首选模型 agnes-3.0-flash（空载延迟 ~7s），插件渲染超时已从 45s 放宽到 100s，人格渲染恢复稳定。
 
+## 内容扩展功能（2026-09-12 上线，六件套）
+
+- **热度飙升（/api/trending）**：窗口内（hours≥6，默认 24h）播放增量榜。`curation.select_trending` —
+  metric_snapshots 窗口内 ≥2 条快照才参与（group_by+having），增量=末次-首次快照（按快照 id 定序），
+  PublicContentItem 加 `delta_view`。前端：内容库「🔥热度飙升」tab（query.tab）+ 首页卡片，RawFeedRow
+  加 deltaView prop。bot 工具 trending。**坑**：SQLAlchemy Result 只能迭代一次（skill 旧坑复发），
+  多趟遍历先 `list()` 物化。
+- **RSS（/api/rss.xml）**：RSS 2.0 内容流（community/q/limit），5 分钟进程内缓存；`/rss.xml` 经 nuxt
+  routeRules 代理。**坑**：直接调用 FastAPI endpoint 函数时 Query 默认值不解析（Query 实例为真值会污染
+  过滤条件），必须显式传全部参数。**坑**：Nitro 代理改写 Host，`request.base_url` 是内网地址——对外链接
+  用 `ANISIGNAL_PUBLIC_BASE_URL`（config.public_base_url，服务器 .env 已设）。
+- **事件时间线**：EventSourceOut 加每条证据 `identity`（views.py join Source），events/[id].vue 证据链
+  默认时间线视图（官方蓝点/社区灰点 + 官方徽章），右上角切换保留表格。
+- **实体抽取管线（services/extract.py，迁移 0033）**：`extract_entities(session, content_id)` 对官方内容
+  （Source.identity=official 门禁）一次 json_mode 抽取 `{schedules, codes}`（_parse_extraction 容忍围栏/
+  坏数据），表 content_schedules（raw_content_id+title 唯一，kind=activity/maintenance/pool/broadcast/delay，
+  delayed 标记延期）与 redeem_codes（community+code 唯一）。raw_contents.extracted_at 置位防重复付费
+  （空结果也算完成）；scheduler 5 分钟桶投 extract_entities_sweep（30 天窗口、每轮 10 条、失败不重试）。
+  新兑换码/延期公告即时进入 updates 推送通道（dedupe code:{community}:{code}）。
+- **活动日历（/api/calendar）**：ongoing（start≤now≤end，无 end 的维护按 48h）/upcoming/ended（14 天内）
+  分组；首页「活动日历」面板（kind 徽章+已延后徽章）。**兑换码（/api/codes）**：active 且未过期，首页
+  卡片点击复制。
+- **日历提醒（bot）**：run_bot_notifications 巡检——活动/卡池/直播结束前 2h、维护开始前 30min 创建
+  kind=calendar 投递（dedupe calendar:{schedule_id}:{stage}，静默时段跳过创建）。bot 查询工具新增
+  calendar/codes（TargetBody Literal 同步）。
+- **部署教训（迁移竞态）**：0033 部署时迁移中断（建列后建表前失败、未 stamp），容器重启循环撞
+  "Duplicate column"；恢复=手工补齐剩余 DDL+stamp 0033。start-app.sh 已加 alembic 3 次重试。
+  MySQL 注意 `delayed` 是保留字，手写 DDL 需反引号（SQLAlchemy 自动引用）。
+
 ## 未完成 / 下一步选项
 
 - 跨语言公告 AI 语义合并；用户内容 LLM 相关性判定（替代关键词匹配）。
