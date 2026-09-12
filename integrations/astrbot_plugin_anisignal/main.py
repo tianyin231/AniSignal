@@ -361,23 +361,18 @@ class AniSignalPlugin(Star):
     async def strip_residual_emotion_markup(self, event: AstrMessageEvent):
         """兜底清理表情插件未吸收的 &&标签&& 残留（如 &&reply&&），避免乱码发进群里。
 
-        正常标签由 meme_manager 吸收替换为表情；本钩子最后执行，只处理漏网残留。
+        正常标签由 meme_manager 吸收替换为表情；本钩子最后执行，清理所有文本分段里的漏网残留。
         """
         try:
             result = event.get_result()
             if result is None or not result.is_llm_result():
                 return
-            text = result.get_plain_text() or ""
-            if "&&" not in text:
-                return
-            cleaned = re.sub(r"&&[A-Za-z0-9_]{1,24}&&", "", text)
-            cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
-            if cleaned == text:
+            if "&&" not in (result.get_plain_text() or ""):
                 return
             for comp in getattr(result, "chain", None) or []:
-                if isinstance(comp, Plain):
-                    comp.text = cleaned
-                    break
+                if isinstance(comp, Plain) and "&&" in (comp.text or ""):
+                    comp.text = re.sub(r"&&[A-Za-z0-9_]{1,24}&&", "", comp.text)
+                    comp.text = re.sub(r"\s{2,}", " ", comp.text).strip()
         except Exception:
             logger.warning("AniSignal residual emotion markup cleanup failed")
 
