@@ -98,7 +98,8 @@ async def get_target(target_id, session):
 async def overview(session: AsyncSession = Depends(get_session)):
     bridge = await get_setting(session, "bot_bridge") or {}
     return {"bridge": {"endpoint": bridge.get("endpoint", ""), "api_key_set": bool(bridge.get("api_key")), "tools_key_set": bool(bridge.get("tools_key"))},
-            "targets": [target_view(t) for t in await session.scalars(select(BotTarget).order_by(BotTarget.id))], "tools": bot.TOOLS}
+            "targets": [target_view(t) for t in await session.scalars(select(BotTarget).order_by(BotTarget.id))], "tools": bot.TOOLS,
+            "activity": await get_setting(session, "bot_activity") or {}}
 
 
 @router.put("/bridge")
@@ -195,11 +196,14 @@ async def require_tools(x_bot_key: str = Header(default=""), session: AsyncSessi
 
 @tools_router.get("/targets", dependencies=[Depends(require_tools)])
 async def tool_targets(session: AsyncSession = Depends(get_session)):
-    return [{"umo": t.umo, "tools": t.config.get("tools", []), "instructions": t.config.get("ai_prompt", ""),
+    # 返回全部会话（含已暂停）：插件在聊天里回显注册状态需要名称与启停标记，
+    # 工具可用性由插件按 enabled 自行门禁。
+    return [{"umo": t.umo, "name": t.name, "enabled": t.enabled,
+             "tools": t.config.get("tools", []), "instructions": t.config.get("ai_prompt", ""),
              "provider_id": t.config.get("ai_provider_id", ""),
              "chat_controls": t.config.get("chat_controls", False), "reminders_enabled": t.config.get("reminders_enabled", False),
              "activities_enabled": t.config.get("activities_enabled", False)}
-            for t in await session.scalars(select(BotTarget).where(BotTarget.enabled.is_(True)))]
+            for t in await session.scalars(select(BotTarget).order_by(BotTarget.id))]
 
 
 @tools_router.post("/query", dependencies=[Depends(require_tools)])

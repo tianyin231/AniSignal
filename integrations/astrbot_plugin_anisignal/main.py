@@ -13,7 +13,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-@register("astrbot_plugin_anisignal", "AniSignal", "情报工具、人格播报与会话提醒", "1.1.0")
+@register("astrbot_plugin_anisignal", "AniSignal", "情报工具、人格播报与会话提醒", "1.2.0")
 class AniSignalPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -23,6 +23,7 @@ class AniSignalPlugin(Star):
         self.task = None
         self.outbox_task = None
         self.pending_ack = None
+        self.last_activity = {}
 
     async def initialize(self):
         self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
@@ -140,12 +141,23 @@ class AniSignalPlugin(Star):
                     for adapter in self.context.platform_manager.get_insts():
                         if adapter.meta().id == platform and adapter.meta().name == "qq_official" and hasattr(adapter, "remember_session_scene"):
                             adapter.remember_session_scene(session_id, "group")
+                await self.report_activity()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 self.targets = {}
                 logger.warning("AniSignal target refresh failed (%s)", type(exc).__name__)
             await asyncio.sleep(30)
+
+    async def report_activity(self):
+        """回传各会话最近活跃时间供管理端辨认；失败只影响本轮。"""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        self.last_activity = {umo: ts for umo, ts in self.last_activity.items() if ts > cutoff}
+        if self.last_activity:
+            try:
+                await self.api("/activity", {"activities": dict(self.last_activity)})
+            except Exception:
+                logger.warning("AniSignal activity report failed this round")
 
     async def _query(self, event, tool, query=""):
         """Query within the caller's server-enforced subscription and tool scope.
@@ -168,9 +180,21 @@ class AniSignalPlugin(Star):
         except (aiohttp.ClientError, asyncio.TimeoutError):
             return {"text": "情报查询暂时不可用，请稍后再试；当前无法确认最新消息。"}
 
+    def session_target(self, event) -> dict | None:
+        """已注册且启用的会话配置；未启用视为未接入（工具与提醒都不可用）。"""
+        target = self.targets.get(event.unified_msg_origin)
+        return target if target and target.get("enabled") else None
+
     @filter.command("情报会话")
     async def session_info(self, event: AstrMessageEvent):
-        yield event.plain_result(f"本会话标识：\n{event.unified_msg_origin}\n你的管理标识：{event.get_sender_id()}\n可用命令：/早报、/资讯 关键词、/商品 关键词、/情报订阅、/我的提醒、/聊点什么、/情报挑战。")
+        umo = event.unified_msg_origin
+        registered = self.targets.get(umo)
+        if registered:
+            state = "已启用" if registered.get("enabled") else "已暂停"
+            status = f"此会话已在 AniSignal 注册为「{registered.get('name', '')}」（{state}）。"
+        else:
+            status = "此会话尚未注册，请把下面的会话标识交给管理员，在 AniSignal 机器人面板添加。"
+        yield event.plain_result(f"{status}\n本会话标识：\n{umo}\n你的管理标识：{event.get_sender_id()}\n可用命令：/早报、/资讯 关键词、/商品 关键词、/情报订阅、/我的提醒、/聊点什么、/情报挑战。")
 
     @filter.command("情报订阅")
     async def subscriptions(self, event: AstrMessageEvent):
@@ -217,7 +241,7 @@ class AniSignalPlugin(Star):
         return json.dumps(result, ensure_ascii=False)
 
     async def activity(self, event, quiz=False):
-        target = self.targets.get(event.unified_msg_origin, {})
+        target = self.session_target(event) or {}
         if not target.get("activities_enabled"):
             yield event.plain_result("此会话尚未开启资讯互动。")
             return
@@ -273,7 +297,7 @@ class AniSignalPlugin(Star):
 
     @filter.on_llm_request()
     async def add_instructions(self, event: AstrMessageEvent, req: ProviderRequest):
-        target = self.targets.get(event.unified_msg_origin)
+        target = self.session_target(event)
         now = datetime.now(timezone(timedelta(hours=8))).isoformat()
         if target:
             req.system_prompt += f"\n当前北京时间：{now}。订阅或提醒只有工具返回成功才算完成。"
@@ -304,7 +328,8 @@ class AniSignalPlugin(Star):
     @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
     async def select_conversation_provider(self, event: AstrMessageEvent):
         """Apply an explicit provider only to configured AniSignal conversations."""
-        target = self.targets.get(event.unified_msg_origin)
+        self.last_activity[event.unified_msg_origin] = datetime.now(timezone.utc).isoformat()
+        target = self.session_target(event)
         if target and target.get("tools") and target.get("provider_id"):
             event.set_extra("selected_provider", target["provider_id"])
 

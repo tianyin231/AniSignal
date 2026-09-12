@@ -15,6 +15,7 @@ interface Target {
 interface Delivery { id: number; target_id: number; name: string; kind: string; status: string; error: string | null; body: string; rendered_body?: string; attempts: number; created_at: string }
 interface Reminder { id: number; name: string; body: string; due_at: string; status: string }
 const companion = ref<{ runtime: { online: boolean; version?: string }; counts: Record<string, number>; reminders: Reminder[] }>({ runtime: { online: false }, counts: {}, reminders: [] })
+const activity = ref<Record<string, string>>({})
 const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。', ai_provider_id: '', delivery_mode: 'astrbot', chat_controls: false, reminders_enabled: false, activities_enabled: false, manager_ids: [] })
 const targets = ref<Target[]>([])
 const deliveries = ref<Delivery[]>([])
@@ -62,16 +63,32 @@ const selected = computed(() => targets.value.find(t => t.id === selectedId.valu
 const activeCount = computed(() => targets.value.filter(t => t.enabled).length)
 const inputClass = 'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-white/15 dark:bg-zinc-900'
 
+function umoTail(umo: string) {
+  return (umo.split(':')[2] || '').slice(-8) || umo
+}
+function relTime(iso?: string) {
+  if (!iso) return '从未活跃'
+  const ts = new Date(/[z+]/i.test(iso) ? iso : `${iso}Z`).getTime()
+  if (!Number.isFinite(ts)) return '从未活跃'
+  const minutes = Math.floor((Date.now() - ts) / 60000)
+  if (minutes < 1) return '刚刚活跃'
+  if (minutes < 60) return `${minutes} 分钟前活跃`
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时前活跃`
+  if (minutes < 10080) return `${Math.floor(minutes / 1440)} 天前活跃`
+  return `最近活跃 ${fmtTime(iso)}`
+}
+
 async function refresh() {
   loading.value = true
   loadError.value = ''
   try {
     const [data, logs, companionData] = await Promise.all([
-      api<{ bridge: { endpoint: string; api_key_set: boolean }; targets: Target[] }>('/api/admin/bot'),
+      api<{ bridge: { endpoint: string; api_key_set: boolean }; targets: Target[]; activity: Record<string, string> }>('/api/admin/bot'),
       api<Delivery[]>('/api/admin/bot/deliveries'),
       api<typeof companion.value>('/api/admin/bot/companion'),
     ])
     targets.value = data.targets
+    activity.value = data.activity || {}
     Object.assign(bridge, data.bridge)
     deliveries.value = logs
     companion.value = companionData
@@ -198,8 +215,9 @@ function cancelReminder(row: Reminder) {
     <div v-if="!targets.length && !loading" class="panel rounded-xl p-10 text-center text-slate-500">添加第一个群聊或私聊，设置它关心的资讯。</div>
     <div class="grid gap-4 sm:grid-cols-2">
       <article v-for="target in targets" :key="target.id" class="panel rounded-xl p-5">
-        <div class="flex items-start justify-between gap-3"><div><h2 class="font-semibold">{{ target.name }}</h2><p class="mt-1 text-sm text-slate-500">{{ target.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ ADMIN_COMMUNITY_LABELS[target.community] || '全站' }}</p></div><span class="rounded-full px-2 py-1 text-xs" :class="target.enabled ? 'bg-emerald-500/10 text-emerald-600' : 'bg-slate-500/10 text-slate-500'">{{ target.enabled ? '已启用' : '已暂停' }}</span></div>
+        <div class="flex items-start justify-between gap-3"><div><h2 class="font-semibold">{{ target.name }}</h2><p class="mt-1 text-sm text-slate-500">{{ target.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ ADMIN_COMMUNITY_LABELS[target.community] || '全站' }} · <span class="mono" :title="target.umo">{{ target.umo.split(':')[0] }} · 尾号 {{ umoTail(target.umo) }}</span></p></div><span class="rounded-full px-2 py-1 text-xs" :class="target.enabled ? 'bg-emerald-500/10 text-emerald-600' : 'bg-slate-500/10 text-slate-500'">{{ target.enabled ? '已启用' : '已暂停' }}</span></div>
         <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? '重要动态推送' : '即时推送关闭' }}</p>
+        <p class="mt-2 text-sm" :class="activity[target.umo] ? 'text-slate-500' : 'text-amber-600'">{{ relTime(activity[target.umo]) }}</p>
         <p class="mt-2 text-sm text-slate-500">{{ target.keywords.length ? target.keywords.join(' / ') : '不限关键词' }}</p>
         <p class="mt-2 text-sm text-slate-500">查询工具：{{ target.tools.map(t => toolNames[t]).join('、') || '全部关闭' }}</p>
         <div class="mt-3 flex flex-wrap gap-2 text-xs"><span class="rounded bg-blue-500/10 px-2 py-1">{{ target.delivery_mode === 'astrbot' ? 'AstrBot 人格播报' : '原文推送' }}</span><span v-if="target.chat_controls" class="rounded bg-blue-500/10 px-2 py-1">聊天管理订阅</span><span v-if="target.reminders_enabled" class="rounded bg-blue-500/10 px-2 py-1">定时提醒</span><span v-if="target.activities_enabled" class="rounded bg-blue-500/10 px-2 py-1">话题与挑战</span></div>
@@ -218,7 +236,7 @@ function cancelReminder(row: Reminder) {
         <p v-if="editorError" role="alert" class="rounded-lg bg-red-500/10 p-3 text-sm text-red-600 sm:col-span-2 dark:text-red-400">{{ editorError }}</p>
         <label class="text-sm">名称<input v-model.trim="form.name" autofocus required maxlength="100" :class="inputClass" placeholder="我的私聊 / 鸣潮交流群"></label>
         <label class="text-sm">范围<select v-model="form.community" :class="inputClass"><option value="all">全站</option><option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option></select></label>
-        <label class="text-sm sm:col-span-2">会话标识（UMO）<input v-model.trim="form.umo" required maxlength="255" :class="inputClass" placeholder="机器人名称:FriendMessage:用户标识 或 机器人名称:GroupMessage:群标识"><span class="mt-1 block text-xs text-slate-500">在机器人会话发送 /情报会话 获取，群标识不是普通 QQ 群号。</span></label>
+        <label class="text-sm sm:col-span-2">会话标识（UMO）<input v-model.trim="form.umo" required maxlength="255" :class="inputClass" placeholder="机器人名称:FriendMessage:用户标识 或 机器人名称:GroupMessage:群标识"><span v-if="form.umo" class="mt-1 block text-xs text-slate-500">{{ form.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ form.umo.split(':')[0] }} · 尾号 {{ umoTail(form.umo) }}</span><span v-else class="mt-1 block text-xs text-slate-500">在机器人会话发送 /情报会话 获取，群标识不是普通 QQ 群号。</span></label>
         <label class="text-sm sm:col-span-2">关键词（留空不限，逗号分隔）<input v-model="keywordInput" :class="inputClass" placeholder="爱弥斯，联名键盘"></label>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.enabled" type="checkbox">启用此会话的推送与查询</label>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.updates_enabled" type="checkbox">推送新采集的官方或重要动态</label>
