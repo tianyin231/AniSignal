@@ -278,6 +278,24 @@ export function mountProductExperience(root: HTMLElement): () => void {
   window.addEventListener('resize', queueProgress, { signal, passive: true })
   updateProgress()
 
+  // 页内锚点：平滑滚动且不把 #hash 留在 URL 里，避免刷新总落在锚点位置
+  all<HTMLAnchorElement>('a[href^="#"]').forEach(link => {
+    link.addEventListener('click', event => {
+      const id = decodeURIComponent((link.getAttribute('href') || '').slice(1))
+      const target = id ? document.getElementById(id) : null
+      if (!target) return
+      event.preventDefault()
+      target.scrollIntoView({ behavior: motion ? 'smooth' : 'auto', block: 'start' })
+      history.replaceState(null, '', window.location.pathname + window.location.search)
+      queueProgress()
+    }, { signal })
+  })
+  if (window.location.hash) {
+    // 历史遗留的锚点地址：回到页顶并清掉，刷新不再定位到锚点
+    window.scrollTo({ top: 0, behavior: 'auto' })
+    history.replaceState(null, '', window.location.pathname + window.location.search)
+  }
+
   return () => {
     disposed = true
     controller.abort()
