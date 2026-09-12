@@ -273,9 +273,34 @@ docker compose up -d --build
   + /custom/{id} 监控详情流；账号中心"定制监控"区块（创建表单 kind/target/name/min_views/推送/
   公开 + 行内推送开关/删除/公开徽章）；管理端 /admin/customs（巡查表 + 停用/公开切换/手动抓取/删除）。
 
+## AstrBot 机器人通道（2026-09-11 上线）
+
+- **模型**：bot_targets（管理端配置的会话，config JSON：community/keywords/daily*/updates*/quiet_start·end/
+  tools/ai_prompt/ai_provider_id/delivery_mode/chat_controls/reminders_enabled/activities_enabled/manager_ids）+
+  bot_deliveries（outbox：dedupe_key 唯一幂等，status pending→sending→accepted/failed/unknown，attempts<3，
+  receipt 发送凭据）+ bot_reminders（owner_id=真实发送者，request_key=sha256(target:actor:message_id) 幂等，
+  pending→queued）。服务端 `services/bot.py`（query_target 查询工具/run_bot_notifications 巡检/直推）+
+  `api/bot.py`（管理 CRUD+/api/bot 查询）+ `api/bot_companion.py`（订阅/提醒/上下文/outbox）。
+- **两种投递模式**：direct=服务端经 bot_bridge（site_settings：endpoint+api_key）直推 AstrBot 网关；
+  astrbot=插件每 15s 轮询 `/api/bot/outbox/claim` 领取（领取即 attempts+1 并发 receipt），用会话人格 +LLM
+  渲染开场白后经 AstrBot 自身连接发送，回执 POST `/outbox/{id}/complete`（receipt 比对，409=凭据失效需人工）。
+  **发送中断绝不自动重发**：sending 超 5 分钟标 unknown；failed 5 分钟冷却；attempts<3。
+- **去重键**：`daily:{target_id}:{北京时间日期}`、`updates:{target_id}:{sha256(event:{id}:{conclusion}|content:{id})}`
+  （同一公告跨平台补证据不重复推送，履约结论变化才再推）、`reminder:{id}`、`manual:{hex}`。
+- **插件** `integrations/astrbot_plugin_anisignal`（v1.1.0，部署在 astrbot 容器 /AstrBot/data/plugins/，
+  **改插件代码需手动同步进容器**——对日志行号可确认容器版本）。每 30s 拉 `/api/bot/targets` 恢复
+  qq_official 群场景路由并刷新配置；命令 /情报会话 /情报订阅 /我的提醒 /早报 /资讯 /商品 /聊点什么 /
+  情报挑战；llm_tool anisignal_query/subscription/reminder 按会话 tools/reminders_enabled/chat_controls 门禁；
+  on_llm_request 注入北京时间与最近通知上下文（防把历史通知当新消息）。umo/actor_id 只取自真实消息事件。
+- **调度与管理**：scheduler bot-sweep 周期跑 send_bot_notifications（提醒到期→queued+投递、每日早报、
+  即时更新按 quiet 时段、pending/failed 补投递）；管理端 /admin/bot（会话 CRUD/预览/手动发送/投递记录/
+  重试，companion 状态：last_seen<2min 视为在线）。
+- **部署**：compose.astrbot.yaml 把 app/collector 加入外部网络 ap_notify_net（COMPOSE_FILE=compose.yaml:compose.astrbot.yaml）。
+- **运维实况**：agnes 免费模型在 08:00 北京高峰常 429——人格渲染失败自动降级"原始资料+原因注记"发送
+  （上线首 48h 仅 4/18 条，消息零丢失）；重建 app 容器会让插件报瞬时 ClientConnectorError，15s 周期自愈。
+
 ## 未完成 / 下一步选项
 
-- **邮件通知与早报**（设计文档 §10）：账号+SMTP+监控关键词都就绪，差发送管线与 08:00 调度。
 - 跨语言公告 AI 语义合并；用户内容 LLM 相关性判定（替代关键词匹配）。
 - HTTPS/域名（nginx 80 端口被其他服务占用，需所有者确认划分）。
 - 支付/订阅（远期，设计文档阶段 C）。
