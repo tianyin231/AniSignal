@@ -234,7 +234,21 @@ export function mountProductExperience(root: HTMLElement): () => void {
     window.clearTimeout(previewTimer)
     window.cancelAnimationFrame(previewFrame)
     delete root.dataset.previewing
-    if (motion) {
+    const typing = get<HTMLElement>('[data-typing]')
+    if (!motion) return
+    if (channel === 'qq') {
+      // 打字指示器 → 消息滑入，模拟真实会话节奏
+      typing.hidden = false
+      previewTimer = window.setTimeout(() => {
+        if (disposed) return
+        typing.hidden = true
+        previewFrame = window.requestAnimationFrame(() => {
+          if (disposed) return
+          root.dataset.previewing = 'true'
+          previewTimer = window.setTimeout(() => { delete root.dataset.previewing }, 1400)
+        })
+      }, 750)
+    } else {
       previewFrame = window.requestAnimationFrame(() => {
         if (disposed) return
         root.dataset.previewing = 'true'
@@ -243,6 +257,13 @@ export function mountProductExperience(root: HTMLElement): () => void {
     }
   }, { signal })
   renderChannel()
+
+  // 送达链路动画仅在区块进入视口时运行（配合动效开关与 reduced-motion）
+  const flowRoot = get<HTMLElement>('.as-delivery-section')
+  const flowObserver = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
+    entries.forEach(entry => flowRoot.classList.toggle('is-inview', entry.isIntersecting))
+  }, { threshold: .2 }) : null
+  flowObserver?.observe(flowRoot)
 
   const reveals = all<HTMLElement>('[data-reveal]')
   const observer = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
