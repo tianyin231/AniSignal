@@ -41,7 +41,7 @@ onBeforeUnmount(() => dispose?.())
 <a class="as-skip" href="#as-main">跳到主要内容</a>
 <header class="as-header">
  <div class="as-nav as-wrap">
-  <a href="/intro" class="as-brand" aria-label="AniSignal 产品介绍"><span class="as-brand-mark"><svg class="as-icon " aria-hidden="true"><use href="#as-i-signal" /></svg></span>AniSignal<span class="as-brand-label">产品介绍</span></a>
+  <a href="/intro" class="as-brand" aria-label="AniSignal 产品介绍"><span class="as-brand-mark"><img src="/icon.png" alt=""></span>AniSignal<span class="as-brand-label">产品介绍</span></a>
   <nav class="as-nav-links" aria-label="产品导航"><a href="#capabilities">核心能力</a><a href="#workflow">关键词定制</a><a href="#delivery">消息送达</a></nav>
   <div class="as-nav-actions"><button type="button" class="as-motion" data-motion-toggle aria-pressed="false" aria-label="暂停页面动效" hidden><svg class="as-icon " aria-hidden="true"><use href="#as-i-pause" /></svg><span>动效开启</span></button><a href="/" class="as-button as-button-small">进入工作台 <svg class="as-icon " aria-hidden="true"><use href="#as-i-arrow" /></svg></a></div>
  </div><div class="as-reading-progress" aria-hidden="true"><i></i></div>
@@ -94,7 +94,7 @@ onBeforeUnmount(() => dispose?.())
   <noscript class="as-noscript">开启 JavaScript 可展开卡片并体验筛选；页面介绍与入口仍可正常阅读。</noscript>
  </div>
 </section>
-<div class="as-source-strip as-wrap"><span>多来源输入，统一阅读</span><div><b>Bilibili</b><b>米游社</b><b>YouTube <small>RSS</small></b><b>官网公告<small>已适配来源</small></b></div><a href="/sources">查看来源与状态 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div>
+<div class="as-source-strip as-wrap"><span>多来源输入，统一阅读</span><div><b>Bilibili</b><b>米游社<small>适配就绪</small></b><b>YouTube <small>RSS</small></b><b>官网公告<small>已适配来源</small></b></div><a href="/sources">查看来源与状态 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div>
 <section class="as-section as-wrap" id="capabilities" aria-labelledby="as-capabilities-title">
  <div class="as-section-heading" data-reveal><div><span class="as-overline">01 / THE WHOLE PICTURE</span><h2 id="as-capabilities-title">不止收到消息，<br>更能理解来龙去脉。</h2></div><p>采集、整理、追踪与送达，组成完整的信息链路。<br>当前展示什么，由关键词与采集配置决定。</p></div>
  <div class="as-features"><article class="as-feature as-feature-collection" data-reveal>
@@ -175,7 +175,7 @@ onBeforeUnmount(() => dispose?.())
 </section>
 <section class="as-final as-wrap" data-reveal><div class="as-final-orbits" aria-hidden="true"></div><span class="as-overline">LESS NOISE. MORE SIGNAL.</span><h2>把注意力，<br>留给真正关心的变化。</h2><p>从一个关键词开始，找到适合自己的信息路径。</p><div><a href="/" class="as-button">进入信息工作台 <svg class="as-icon " aria-hidden="true"><use href="#as-i-arrow" /></svg></a><a href="/account" class="as-button as-button-quiet">建立我的关注 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div></section>
 </main>
-<footer class="as-footer as-wrap"><div><a href="/intro" class="as-brand"><span class="as-brand-mark"><svg class="as-icon " aria-hidden="true"><use href="#as-i-signal" /></svg></span>AniSignal</a><p>关键词驱动的信息采集、事件追踪与订阅工具。</p></div><nav aria-label="页脚导航"><a href="/about">关于与边界</a><a href="/sources">来源健康</a><a href="https://github.com/tianyin231/AniSignal" target="_blank" rel="noopener noreferrer">GitHub <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></nav><span class="as-footer-note">产品试运行 · 功能以当前部署为准</span></footer>
+<footer class="as-footer as-wrap"><div><a href="/intro" class="as-brand"><span class="as-brand-mark"><img src="/icon.png" alt=""></span>AniSignal</a><p>关键词驱动的信息采集、事件追踪与订阅工具。</p></div><nav aria-label="页脚导航"><a href="/about">关于与边界</a><a href="/sources">来源健康</a><a href="https://github.com/tianyin231/AniSignal" target="_blank" rel="noopener noreferrer">GitHub <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></nav><span class="as-footer-note">产品试运行 · 功能以当前部署为准</span></footer>
 </div>
 </template>
 
