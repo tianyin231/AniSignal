@@ -1,54 +1,50 @@
 # AniSignal Server
 
-FastAPI + arq 常驻 worker + 事件聚合引擎 + AI 层。架构决策与数据链路背景见 `.agents/skills/anisignal/SKILL.md`（新会话必读）。
+[产品首页](../README.md) · [功能指南](../docs/features.md) · [部署指南](../docs/deployment.md)
 
-## 结构
+后端负责多源采集、分类与版本化入库、规则事件归并、证据追溯、个人监控及通知。主要组件为 FastAPI、SQLAlchemy、Alembic 和 arq；完整部署使用 MySQL 与 Redis，本地模式使用 SQLite 与进程内队列。
 
-```text
-app/
-├── api/           # 路由：public（/api/*）admin（/api/admin/*）admin_ai admin_settings auth account
-├── collectors/    # 平台采集器（bilibili 走 bili CLI subprocess；其余 httpx）
-├── parsers/       # 原始 JSON → 统一 NormalizedContent（parser_version 版本化）
-├── services/
-│   ├── classify.py    # 规则分类（词典种子 + HIDDEN_CATEGORIES 降噪）
-│   ├── events.py      # 聚合引擎（公告聚类 / 商品履约 / facts 模板）
-│   ├── ai.py          # LLM 客户端 / 事件摘要 / 翻译 / ai_usage 记账
-│   ├── ingest.py      # 幂等入库 + reparse 全量重算
-│   ├── collect.py     # 采集编排 + filter_relevant 降噪 + 关键词打标
-│   ├── settings.py    # 站点配置 KV（smtp/公告/文案）
-│   ├── auth.py        # scrypt 密码 / 会话 / 验证码 / 限频
-│   └── queue.py       # ArqQueue / LocalQueue
-├── scheduler/     # 调度循环（Redis 领导锁，多副本安全）
-├── worker/        # arq 任务（collect_target / summarize_event / translate_content）
-└── models/        # 9 次迁移后的全部表
-```
+## 主要模块
 
-数据链路：`采集 → filter_relevant 降噪 → 幂等入库（raw 不可覆盖）→ 分类 → 聚合成事件 → AI 摘要 → 公开 API`。全量重算入口：`POST /api/admin/reparse`（解析+分类+聚合）与 `POST /api/admin/ai/summarize-all`（摘要）。
+| 路径 | 职责 |
+| --- | --- |
+| `app/api/` | 公开、账号与管理员 API。 |
+| `app/collectors/`、`app/parsers/` | 平台采集与统一内容解析；B 站采集依赖 `bili` CLI。 |
+| `app/services/collect.py`、`ingest.py` | 采集编排、降噪、来源状态、幂等入库及解析版本。 |
+| `app/services/events.py` | 规则事件归并、证据关联与人工修正保护。 |
+| `app/services/ai.py`、`curation.py` | 可选摘要、翻译、内容筛选及用量记录。 |
+| `app/services/custom_feeds.py` | 用户 B 站 UID／关键词定制监控，使用独立条目存储。 |
+| `app/services/notifications.py`、`bot.py` | 邮件早报、手动通知、投递记录与可选 AstrBot 集成。 |
+| `app/scheduler/`、`app/worker/` | 定时调度与后台任务。 |
+| `app/communities.py`、`app/models/` | 分区元数据与数据模型。 |
 
-## 本地测试（推荐，免 Docker）
+主数据链路为 `采集目标 → 筛选 → 版本化入库 → 分类与事件 → 公开 API / 关注 / 通知`。定制监控走独立链路，不进入主内容库及事件引擎。
+
+## 本地运行与测试
+
+从仓库根目录进入 `server`，需要 Python 3.12+ 和 uv：
 
 ```bash
 cd server
 uv run python -m app.local
-# SQLite + 进程内队列；API 127.0.0.1:8000，Token local-dev，自动播种演示采集目标
 ```
 
-## 测试与开发
+API 监听 `127.0.0.1:8000`，本地 Token 默认为 `local-dev`。入口会创建 SQLite 数据库并按条件播种演示目标；部分目标会访问真实来源，B 站示例默认停用。完整说明见[本地开发](../docs/deployment.md#本地开发免-mysql--redis--docker)。
+
+在 `server` 目录运行测试：
 
 ```bash
-uv run pytest                       # 75 个单测（SQLite 内存库）
-uv run uvicorn app.api.main:app --reload
-uv run arq app.worker.settings.WorkerSettings   # Redis 模式 worker
+uv run pytest
 ```
 
-## 迁移
+不要将历史测试数量或旧版本通过结果当作本次验证。生产 worker 入口为 `app.worker.settings.WorkerSettings`；完整运行方式以根目录 Compose 和 `deploy/` 脚本为准。
 
-Alembic 迁移随 app 容器启动自动执行（`deploy/start-app.sh`）。手写新迁移时**必须给存量行回填默认值**（0007 漏回填曾致管理端 500）。
+## 变更约定
 
-## 环境变量（前缀 ANISIGNAL_，见 app/config.py）
+原始内容、解析版本和事件结论分层维护；修正应保留可追溯记录。人工锁定的事件不能被自动流程覆盖，未核验的商品候选信号不能计入公开结论。新增分区或平台时，要同步注册、校验、适配器与必要的数据迁移。
 
-`ADMIN_TOKEN`（必改）、`DATABASE_URL`、`REDIS_URL`、`AI_BASE_URL/AI_API_KEY/AI_MODEL`（管理端配置优先）、`SMTP_*`、`WUTHERING_WAVES_BILI_MID`（鸣潮官方 UID，禁止硬编码）。
+迁移位于 `alembic/`，完整部署在应用启动时执行 `alembic upgrade head`。新增字段时应考虑存量回填；SQLite 本地模式不代替 MySQL 迁移验证。
 
-## 范围外（未实现）
+配置定义见 [app/config.py](app/config.py)。SMTP、AI 和机器人均需要额外服务配置；邮件早报与定制监控已有任务实现，是否启用取决于部署配置。当前事件归并仍以规则为主，不宣称跨语言 AI 语义合并。
 
-邮件通知与早报（SMTP/账号/监控词已就绪）、跨语言公告 AI 语义合并、支付订阅。
+[项目维护参考](../.agents/skills/anisignal/SKILL.md)与[早期设计](../docs/superpowers/specs/2026-08-12-wuthering-waves-event-radar-design.md)保留历史背景；旧日期的功能状态、主题范围与运维示例应以当前代码和部署配置复核。

@@ -1,53 +1,74 @@
+<div align="center">
+
 # AniSignal
 
-《鸣潮》跨平台事件雷达：把多平台原始内容归并为可追溯的事件，用户订阅后不再蹲评论区。
+**聚合多平台更新，追踪你关心的变化。**
 
-**线上**：`http://154.40.58.230:8090`（公开站）· `/admin` 管理看板 · `/login` 用户登录
+关键词驱动的信息采集、事件追踪与订阅工具。
 
-- 产品与系统设计：`docs/superpowers/specs/2026-08-12-wuthering-waves-event-radar-design.md`
-- 项目专属 agent 指南（**新会话必读**：架构决策、数据链路、降噪规则、AI 层、部署速查、已知边界）：`.agents/skills/anisignal/SKILL.md`
-- 已验证数据源方案（B 站 bili-cli / 米游社 / 库洛官网 CDN / YouTube RSS，含字段与陷阱）：`.agents/skills/anisignal/references/data-sources.md`
-- 后端（FastAPI + arq worker + 事件引擎 + AI 层）：`server/`（75 个单测）
-- 公开站点与管理看板（Nuxt 4 + Tailwind 4）：`web/`
+`Python 3.12+` · `Nuxt 4` · `自托管`
 
-## 功能总览（2026-08-23）
+[在线试运行](http://anisignal.nanamiyako.cn/) · [功能指南](docs/features.md) · [部署指南](docs/deployment.md) · [反馈问题](https://github.com/tianyin231/AniSignal/issues)
 
-| 模块 | 状态 |
-|---|---|
-| 四平台采集（B站/米游社/官网国服+国际服/YouTube RSS） | ✅ 运行中，关键词溯源+共现词/热度降噪 |
-| 事件引擎 v1（公告聚类合并 / 商品履约阶梯 / 证据链 / 修订史） | ✅ 规则版在线 |
-| AI 层（事件摘要 / 外语翻译 / 用量记账） | ✅ OpenAI 兼容接口，管理端 `/admin/ai` 可视化用量与费用 |
-| 账号系统（邮箱验证 / 改密找回 / 关键词监控 / 关注流 / 头像昵称） | ✅ |
-| 管理看板（采集目标 / 事件审核+置顶 / 商品 / 分类词典 / 内容 / 站点设置 / AI 层） | ✅ 全部真实操作 |
-| 站内内容详情（解析正文/消毒/指标历史/媒体灯箱/关联事件） | ✅ |
-| 邮件通知与早报 | ⏳ 未实现（SMTP/账号/监控词已就绪） |
+**简体中文** · [English](README.en.md)
 
-## 部署（4 容器）
+</div>
 
-mysql / redis / **app**（FastAPI+Nitro 同容器，对外仅 8090，`/api/**` 同源代理）/ **collector**（调度+worker，Redis 领导锁，可 `--scale collector=N`）。数据 bind mount 在 `./data/`。
+---
 
-```bash
-# —— 本地看面板（零依赖，不需要 Docker）——
-cd server && uv run python -m app.local    # API: 127.0.0.1:8000, Token: local-dev
-cd web && npm install && npm run dev       # http://localhost:3000
+AniSignal 将分散在不同平台的公开信息集中到一个工作区：按配置采集，筛选重复与低相关内容，将符合规则的线索归并为事件，并保留原始来源、证据和修订记录。读者可以浏览更新、建立关键词关注流，或创建独立监控，通过邮件与可选的机器人通道接收消息。
 
-# —— 服务器全栈（需要 Docker）——
-cp .env.example .env    # 修改 ANISIGNAL_ADMIN_TOKEN
-docker compose up -d --build    # 建表随启动自动执行
+**关注什么由关键词与采集目标决定，不由首页当前展示的作品或商品决定。** 试运行站的内容是当前配置的结果；可接入的平台、分区与监控方式仍以已实现的适配器和注册配置为边界。
+
+## 核心能力
+
+| 能力 | 可以做什么 |
+| --- | --- |
+| **多源采集与降噪** | 配置关键词、账号或公告来源，设置采集周期、共现词与热度门槛；查看采集结果和来源健康状态。 |
+| **分区浏览与检索** | 在聚合首页或单个分区浏览内容，按平台、分类与关键词检索，查看站内预览并回到原始链接。 |
+| **事件归并与追溯** | 将符合规则的官方公告归并，集中查看事件事实、来源证据与修订历史，保留人工修正。 |
+| **商品进展追踪** | 按监控词关联公告与社区线索，分别展示官方进展、消费者到货及质量反馈；待核验信号不等于已确认结论。 |
+| **个人关注与定制监控** | 用关注词筛选站内内容；另可创建 B 站 UID／关键词监控，选择公开或私有，并独立保存采集结果。 |
+| **摘要、翻译与通知** | 配置 AI 后启用摘要、翻译与内容筛选；配置 SMTP 后使用邮件早报、手动通知与投递记录。AstrBot 为可选集成。 |
+| **管理与维护** | 在管理端维护采集目标、内容、事件、商品、分类规则、用户与站点设置，查看 AI 用量及消息投递状态。 |
+
+```text
+站点采集目标 → 定时采集 → 筛选与版本化入库 → 事件与证据 → 浏览、关注与通知
+个人定制监控 → 独立采集与存储 → 私有查看或公开分享 → 可选邮件推送
 ```
 
-服务器代码更新走 `git bundle`（私有仓库无服务器凭据）+ `docker compose up -d --build`，完整流程见 skill「部署速查」。后端测试：`cd server && uv run pytest`。
+> **三种关键词，不是同一功能。** 管理员的采集关键词决定站点抓取范围；用户的关注词筛选站内已采集内容；定制监控则创建独立的 B 站采集任务，不进入主内容库与事件引擎。
 
-## 恢复服务器监控
+## 快速开始
 
-监控配置和历史数据保留在服务器 `/www/monitoring`。需要恢复时执行：
+完整运行环境使用 **Docker Compose**。首次部署：
 
 ```bash
-ssh us3q
-sudo systemctl enable --now cloudphone-collect.service
-cd /www/monitoring
-docker compose up -d
-docker compose ps
+git clone https://github.com/tianyin231/AniSignal.git
+cd AniSignal
+cp .env.example .env
 ```
 
-Grafana 地址：`http://154.40.58.230:3000`。再次停用时执行 `docker compose down`，并运行 `sudo systemctl disable --now cloudphone-collect.service`。
+编辑 `.env`：为 `ANISIGNAL_ADMIN_TOKEN` 和 `MYSQL_ROOT_PASSWORD` 设置不同的随机长字符串；添加 `WEB_PORT=127.0.0.1:8090`，先限制为本机访问。随后运行：
+
+```bash
+docker compose up -d --build
+```
+
+打开 **[http://127.0.0.1:8090](http://127.0.0.1:8090)**；管理入口为 `/admin`，使用上面设置的管理员 Token。在管理端配置采集目标，再按需配置 SMTP、AI 和机器人通道。
+
+不使用 Docker 的本地开发模式、环境变量传递与首次配置说明见[部署指南](docs/deployment.md)。本地模式使用 SQLite 和进程内队列，不等同于完整部署。
+
+## 使用边界
+
+- **覆盖不等于全网。** 只处理已接入来源和已配置目标，不承诺全网覆盖、实时更新或永久可用。新增平台需要适配器，新增分区需要相应注册与配置。
+- **归并不等于事实认证。** 当前事件引擎以规则为主，不承诺跨语言语义去重；AI 输出和商品候选线索应结合原始证据核对，也不能用于预测个人订单的发货日期。
+- **通知需要服务配置。** 邮件依赖 SMTP，AI 能力依赖模型服务，机器人依赖额外通道。试运行地址不代表这些能力均已启用或经过生产验收。
+
+## 文档与反馈
+
+[功能与使用指南](docs/features.md) · [部署与本地开发](docs/deployment.md) · [后端说明](server/README.md) · [前端说明](web/README.md)
+
+反馈问题时请提供页面路径、复现步骤、部署方式与脱敏日志，不要提交管理员 Token、邮箱密码、模型密钥或个人订阅数据。
+
+许可证尚未指定；仓库当前未附带 `LICENSE` 文件。
