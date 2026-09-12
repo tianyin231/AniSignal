@@ -318,6 +318,11 @@ docker compose up -d --build
   AstrBot 的 web_search 仍开启，但人格已禁止向群友自述工具能力。
 - **运维教训**：往服务器 MySQL 手插中文必须 `--default-character-set=utf8mb4`，否则客户端 latin1 双重编码
   直接产出乱码入库（曾污染一条测试投递并发到群里）。
+- **流式输出与清理钩子互斥（2026-09-12 已定）**：AstrBot 4.28 的 `streaming_response=true`（实时分段模拟
+  流式）会绕过所有 `on_decorating_result` 发送前钩子——meme_manager 的标签吸收、stealer 的清理、
+  AniSignal 的兜底全部失效，`&&标签&&` 原样漏到群里（日志明示此警告）。QQ 官方平台本无真流式，已把
+  `streaming_response` 关掉保住清理链路；若用户想要分段发送效果重开它，标签会再漏（二选一）。
+  兜底钩子本身清理 chain 里**每个** Plain 分段的残留 `&&[A-Za-z0-9_]{1,24}&&`。
 - **调度与管理**：scheduler bot-sweep 周期跑 send_bot_notifications（提醒到期→queued+投递、每日早报、
   即时更新按 quiet 时段、pending/failed 补投递）；管理端 /admin/bot（会话 CRUD/预览/手动发送/投递记录/
   重试，companion 状态：last_seen<2min 视为在线）。
