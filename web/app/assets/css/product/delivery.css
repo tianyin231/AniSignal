@@ -32,3 +32,25 @@
 .as-product[data-motion="off"] [data-reveal] { opacity: 1; transform: none; }
 .as-product[data-motion="off"] .as-card-space { transform: none; }
 .as-product[data-motion="off"] .as-feature:hover,.as-product[data-motion="off"] .as-button:hover { transform: none; }
+
+/* ── 送达链路动效：分段绘制 + 数据包流动 + 到达脉冲（进视口才运行） ── */
+.as-routing>i { transform: scaleX(0); transform-origin: left center; transition: transform .8s cubic-bezier(.2,.7,.2,1); }
+.as-delivery-section.is-inview .as-routing>i { transform: scaleX(1); }
+.as-delivery-section.is-inview .as-routing>i:nth-of-type(2) { transition-delay: .5s; }
+.as-route-seg { position: relative; }
+.as-route-seg::before { content: ''; position: absolute; top: -2.5px; left: 0; width: 6px; height: 6px; border-radius: 50%; background: #9cbeff; box-shadow: 0 0 10px #9cbeff; opacity: 0; pointer-events: none; }
+.as-delivery-section.is-inview .as-route-seg::before { animation: as-packet 1.7s cubic-bezier(.4,0,.6,1) infinite; }
+.as-delivery-section.is-inview .as-route-seg:nth-of-type(2)::before { animation-delay: .85s; }
+@keyframes as-packet { 0% { left: 0; opacity: 0 } 15% { opacity: 1 } 85% { opacity: 1 } 100% { left: calc(100% - 5px); opacity: 0 } }
+.as-delivery-section.is-inview [data-route-end] { animation: as-arrive 3.4s ease-in-out infinite; }
+@keyframes as-arrive { 0%, 82% { box-shadow: 0 0 0 #9cbeff00; } 92% { box-shadow: 0 0 18px #9cbeff66; background: #2d548c; } 100% { box-shadow: 0 0 0 #9cbeff00; } }
+
+/* 打字指示器 */
+.as-typing { display: grid; grid-template-columns: 28px 1fr; gap: 10px; margin: 6px 0 14px; }
+.as-typing-dots { display: inline-flex; align-items: center; gap: 5px; width: fit-content; background: white; border: 1px solid #e0e9f6; border-radius: 3px 10px 10px 10px; padding: 13px 14px; }
+.dark .as-typing-dots { background: #18181b; border-color: #2e2e33; }
+.as-typing-dots i { width: 6px; height: 6px; border-radius: 50%; background: #94a9c9; animation: as-typing 1.1s infinite; }
+.as-typing-dots i:nth-child(2) { animation-delay: .18s; }
+.as-typing-dots i:nth-child(3) { animation-delay: .36s; }
+@keyframes as-typing { 0%, 60%, 100% { transform: none; opacity: .45 } 30% { transform: translateY(-4px); opacity: 1 } }
+.as-product[data-motion="off"] .as-typing-dots i { animation: none; }

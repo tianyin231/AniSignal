@@ -18,3 +18,13 @@
 .as-mini-summary { display: flex; align-items: center; gap: 12px; font-size: 10px; }.as-mini-summary>i { width: 25px; height: 1px; background: #b8c9e4; }.as-mini-summary>b { font-weight: 500; color: #3867a7; }
 .as-mini-status { display: flex; flex-wrap: wrap; gap: 12px; font-size: 10px; }.as-mini-status>span:first-child { display: flex; align-items: center; gap: 6px; }.as-mini-status i { width: 5px; height: 5px; border-radius: 50%; background: #509d84; }
 .as-text-link { display: inline-flex; align-items: center; gap: 9px; color: #366293 !important; font-size: 11px; font-weight: 550; margin-top: auto; width: fit-content; }.as-text-link .as-icon { width: 15px; height: 15px; transition: transform .2s; }
+
+/* ── 分层交错渐显：特性卡与追溯步骤依次进场 ── */
+.as-product [data-reveal="pending"] { opacity: 0; transform: translateY(18px); }
+.as-product [data-reveal="shown"] { animation: as-reveal-in .65s cubic-bezier(.2,.7,.2,1) backwards; animation-delay: calc(var(--reveal-i, 0) * 90ms); }
+@keyframes as-reveal-in { from { opacity: 0; transform: translateY(18px) } to { opacity: 1; transform: none } }
+.as-features .as-feature:nth-child(2) { --reveal-i: 1; }
+.as-features .as-feature:nth-child(3) { --reveal-i: 2; }
+.as-features .as-feature:nth-child(4) { --reveal-i: 3; }
+.as-features .as-feature:nth-child(5) { --reveal-i: 4; }
+.as-features .as-feature:nth-child(6) { --reveal-i: 5; }
