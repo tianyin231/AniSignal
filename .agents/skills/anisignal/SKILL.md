@@ -309,10 +309,13 @@ docker compose up -d --build
 - **会话记忆融合（2026-09-12）**：播报此前经 `context.send_message` 直发、绕过 AstrBot 会话管理，正常聊天
   "不记得"刚发过什么。现在投递 accepted 后用 `conversation_manager.add_message_pair(cid, user, assistant)`
   把（"AniSignal 向本会话推送了一条XX"，实发文本）写入当前会话历史（cid 不存在则跳过；失败只告警不阻断回执）。
-- **&&reply&&/&&like&& 乱码根因（2026-09-12 已修）**：是 `astrbot_plugin_stealer` 插件的情绪标签协议
-  （`&&[a-zA-Z]*&&`，要求回复开头用 && 包裹情绪标签供表情包选择），经 system prompt 注入所有 LLM 请求；
-  其服务的 steal/auto_send 功能本就是关的，已把 `enable_natural_emotion_analysis` 置 false（配置文件带 BOM，
-  utf-8-sig 读写）。 AstrBot 的 web_search 仍开启，但人格已禁止向群友自述工具能力。
+- **&&reply&&/&&like&& 乱码根因与防线（2026-09-12 定稿）**：`&&标签&&` 协议的合法主人是 **meme_manager**
+  插件（云端图池 Stardots，generation.prompt 注入"表情需用&&包裹"指令、50% 概率、每条最多 2 个）；
+  它只吸收列表内有效标签，模型偶发的无效 &&reply&&/&&like&& 不在 `remove_invalid_alternative` 清理范围
+  （那只管 ()/[] 标记）→ 原样漏到群里。防线：AniSignal 插件加了最低优先级（priority=1）的
+  `on_decorating_result` 兜底钩子，发出前 `re.sub(r"&&[A-Za-z0-9_]{1,24}&&", "")` 清掉所有残留。
+  astrbot_plugin_stealer 的表情功能保持关闭（本地池为空、避免与 meme_manager 双重注入 && 指令）。
+  AstrBot 的 web_search 仍开启，但人格已禁止向群友自述工具能力。
 - **运维教训**：往服务器 MySQL 手插中文必须 `--default-character-set=utf8mb4`，否则客户端 latin1 双重编码
   直接产出乱码入库（曾污染一条测试投递并发到群里）。
 - **调度与管理**：scheduler bot-sweep 周期跑 send_bot_notifications（提醒到期→queued+投递、每日早报、
