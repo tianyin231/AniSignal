@@ -285,19 +285,29 @@ docker compose up -d --build
   astrbot=插件每 15s 轮询 `/api/bot/outbox/claim` 领取（领取即 attempts+1 并发 receipt），用会话人格 +LLM
   渲染开场白后经 AstrBot 自身连接发送，回执 POST `/outbox/{id}/complete`（receipt 比对，409=凭据失效需人工）。
   **发送中断绝不自动重发**：sending 超 5 分钟标 unknown；failed 5 分钟冷却；attempts<3。
+- **会话可辨认（2026-09-12，插件 v1.2.0）**：`/api/bot/targets` 返回**全部会话含已暂停**（携带 name/enabled，
+  插件按 enabled 自行门禁，`session_target()` 统一判断）；插件 `/情报会话` 回显注册状态（已注册为「名称」
+  （已启用/已暂停）或未注册提示）；插件在全量消息钩子里追踪各 umo 最近活跃，30s 刷新时 POST
+  `/api/bot/activity` 回传（服务端存 site_settings `bot_activity`，仅保留已知会话、旧时间不覆盖新时间）；
+  管理端会话卡显示 平台·群聊/私聊·尾号8位（title 悬停完整 UMO）+ 最近活跃。**版本号单一来源 main.py
+  顶部 VERSION 常量**（register 与 claim payload 共用；曾因 claim 硬编码漏 bump）。
 - **去重键**：`daily:{target_id}:{北京时间日期}`、`updates:{target_id}:{sha256(event:{id}:{conclusion}|content:{id})}`
   （同一公告跨平台补证据不重复推送，履约结论变化才再推）、`reminder:{id}`、`manual:{hex}`。
-- **插件** `integrations/astrbot_plugin_anisignal`（v1.1.0，部署在 astrbot 容器 /AstrBot/data/plugins/，
-  **改插件代码需手动同步进容器**——对日志行号可确认容器版本）。每 30s 拉 `/api/bot/targets` 恢复
-  qq_official 群场景路由并刷新配置；命令 /情报会话 /情报订阅 /我的提醒 /早报 /资讯 /商品 /聊点什么 /
-  情报挑战；llm_tool anisignal_query/subscription/reminder 按会话 tools/reminders_enabled/chat_controls 门禁；
-  on_llm_request 注入北京时间与最近通知上下文（防把历史通知当新消息）。umo/actor_id 只取自真实消息事件。
+- **插件** `integrations/astrbot_plugin_anisignal`（v1.2.0，部署在 astrbot 容器 /AstrBot/data/plugins/，
+  **改插件代码需手动同步进容器**：scp 到 /tmp → docker cp 三个文件 → docker restart astrbot_nnjs-astrbot_nNjs-1；
+  AstrBot 面板显示的版本号来自 metadata.yaml，心跳版本来自 main.py VERSION——两处都要对齐）。
+  每 30s 拉 `/api/bot/targets` 恢复 qq_official 群场景路由并刷新配置；命令 /情报会话 /情报订阅 /我的提醒 /
+  早报 /资讯 /商品 /聊点什么 /情报挑战；llm_tool anisignal_query/subscription/reminder 按会话
+  tools/reminders_enabled/chat_controls 门禁；on_llm_request 注入北京时间与最近通知上下文（防把历史通知
+  当新消息）。umo/actor_id 只取自真实消息事件。
 - **调度与管理**：scheduler bot-sweep 周期跑 send_bot_notifications（提醒到期→queued+投递、每日早报、
   即时更新按 quiet 时段、pending/failed 补投递）；管理端 /admin/bot（会话 CRUD/预览/手动发送/投递记录/
   重试，companion 状态：last_seen<2min 视为在线）。
 - **部署**：compose.astrbot.yaml 把 app/collector 加入外部网络 ap_notify_net（COMPOSE_FILE=compose.yaml:compose.astrbot.yaml）。
 - **运维实况**：agnes 免费模型在 08:00 北京高峰常 429——人格渲染失败自动降级"原始资料+原因注记"发送
-  （上线首 48h 仅 4/18 条，消息零丢失）；重建 app 容器会让插件报瞬时 ClientConnectorError，15s 周期自愈。
+  （上线首 48h 仅 4/18 条，消息零丢失）；重建 app 容器会让插件报瞬时 ClientConnectorError，15s 周期自愈；
+  当前平台组合（qq_official + weixin_oc）**拿不到群名称/群资料**（平台 API 限制），会话辨认靠管理员命名
+  + 尾号 + 活跃度，自动拉群名只有接入 aiocqhttp（NapCat/OneBot）后才可行。
 
 ## 未完成 / 下一步选项
 
