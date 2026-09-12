@@ -133,3 +133,30 @@
 .dark .as-product .as-footer nav { color: #a1a1aa; }
 .dark .as-product .as-footer-note { border-top-color: #1f1f23; color: #71717a; }
 .dark .as-product .as-skip { background: #18181b; color: #e4e4e7; }
+
+/* ── 暗色模式：送达区块回退到 zinc 深色 + 蓝色极光 ── */
+.dark .as-delivery-section { background: radial-gradient(1000px 620px at 14% -10%, rgb(59 130 246 / 0.15), transparent 58%), radial-gradient(820px 520px at 100% 115%, rgb(8 145 178 / 0.11), transparent 58%), #09090b; }
+.dark .as-delivery-section::before { border-color: rgb(59 130 246 / 0.14); }
+.dark .as-delivery-section .as-overline { color: #8091ad; }
+.dark .as-delivery-section .as-delivery-heading>p { color: #a1a1aa; }
+.dark .as-delivery-section .as-delivery-heading em { color: #93c5fd; }
+.dark .as-delivery-section .as-channel-tabs { border-color: #27272a; background: #101012; }
+.dark .as-delivery-section .as-channel-tabs>button { color: #a1a1aa; }
+.dark .as-delivery-section .as-channel-tabs>button[aria-selected="true"] { background: #eff6ff; color: #1e40af; }
+.dark .as-delivery-section .as-integration-label { color: #7b8ba6; }
+.dark .as-delivery-section .as-delivery-options [role="tabpanel"]>p { color: #a1a1aa; }
+.dark .as-delivery-section .as-routing>span, .dark .as-delivery-section .as-routing>b { border-color: #2e2e33; color: #d4d4d8; background: transparent; }
+.dark .as-delivery-section .as-routing>b { background: rgb(59 130 246 / 0.16); border-color: rgb(59 130 246 / 0.45); }
+.dark .as-delivery-section .as-routing>i { background: #2e2e33; }
+.dark .as-delivery-section .as-route-seg::before { background: #9cbeff; box-shadow: 0 0 10px #9cbeff; }
+.dark .as-delivery-section .as-delivery-keywords>span { color: #a1a1aa; }
+.dark .as-delivery-section .as-delivery-keywords>button { border-color: #2e2e33; color: #a1a1aa; }
+.dark .as-delivery-section .as-delivery-keywords>button[aria-pressed="true"] { color: #93c5fd; border-color: rgb(59 130 246 / 0.5); background: rgb(59 130 246 / 0.14); }
+.dark .as-delivery-section .as-delivery-bottom { border-top-color: #1f1f23; color: #a1a1aa; }
+.dark .as-delivery-section .as-delivery-bottom>span::before { color: #60a5fa; }
+.dark .as-delivery-section .as-delivery-bottom>a { color: #93c5fd; }
+.dark .as-delivery-section .as-delivery-disclaimer { color: #71717a; }
+.dark .as-delivery-section.is-inview [data-route-end] { animation: as-arrive-dark 3.4s ease-in-out infinite; }
+@keyframes as-arrive-dark { 0%, 82% { box-shadow: 0 0 0 transparent; } 92% { box-shadow: 0 0 18px rgb(59 130 246 / 0.45); background: rgb(59 130 246 / 0.2); } 100% { box-shadow: 0 0 0 transparent; } }
+.dark .as-delivery-section .as-product button.as-button-white, .dark .as-product button.as-button-white { background: #eff6ff; color: #1e40af; }
+.dark .as-delivery-section .as-product button.as-button-white:hover, .dark .as-product button.as-button-white:hover { background: #dbeafe; }
