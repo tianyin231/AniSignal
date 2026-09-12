@@ -167,11 +167,13 @@ export function mountProductExperience(root: HTMLElement): () => void {
     if (next !== 'collect' && next !== 'watch' && next !== 'custom') return
     mode = next
     const config = modes[next]
-    text('[data-mode-tag]', config.tag)
-    text('[data-mode-title]', config.title)
-    text('[data-mode-description]', config.description)
-    get<HTMLElement>('#as-mode-panel').setAttribute('aria-labelledby', button.id)
-    filterResults()
+    swapPanel(get<HTMLElement>('#as-mode-panel'), () => {
+      text('[data-mode-tag]', config.tag)
+      text('[data-mode-title]', config.title)
+      text('[data-mode-description]', config.description)
+      get<HTMLElement>('#as-mode-panel').setAttribute('aria-labelledby', button.id)
+      filterResults()
+    })
   })
   keyword.addEventListener('input', filterResults, { signal })
   get<HTMLButtonElement>('[data-clear-keyword]').addEventListener('click', () => { keyword.value = ''; filterResults(); keyword.focus() }, { signal })
@@ -187,6 +189,19 @@ export function mountProductExperience(root: HTMLElement): () => void {
   let topic: 'version' | 'shipping' = 'version'
   const previewButton = get<HTMLButtonElement>('[data-preview-delivery]')
   const topicButtons = all<HTMLButtonElement>('[data-delivery-topic]')
+
+  // 面板内容切换：淡出 → 更新 → 滑入，避免瞬变
+  function swapPanel(el: HTMLElement, update: () => void) {
+    if (!motion) { update(); return }
+    el.classList.add('as-swap-out')
+    window.setTimeout(() => {
+      if (disposed) return
+      update()
+      el.classList.remove('as-swap-out')
+      el.classList.add('as-swap-in')
+      window.setTimeout(() => el.classList.remove('as-swap-in'), 320)
+    }, 130)
+  }
   function renderMessage() {
     const shipping = topic === 'shipping'
     const label = shipping ? '商品进展' : '版本更新'
@@ -221,7 +236,7 @@ export function mountProductExperience(root: HTMLElement): () => void {
     if (next !== 'qq' && next !== 'email' && next !== 'web') return
     channel = next
     get<HTMLElement>('#as-channel-panel').setAttribute('aria-labelledby', button.id)
-    renderChannel()
+    swapPanel(get<HTMLElement>('#as-channel-panel'), renderChannel)
   })
   topicButtons.forEach(button => button.addEventListener('click', () => {
     topic = button.dataset.deliveryTopic === 'shipping' ? 'shipping' : 'version'
