@@ -6,10 +6,12 @@ from app.models.content import (
     AiUsage,
     ContentMatch,
     ContentReview,
+    ContentSchedule,
     ContentTranslation,
     ContentVersion,
     MetricSnapshot,
     RawContent,
+    RedeemCode,
 )
 from app.models.enums import (
     ANNOUNCE_CATEGORIES,
@@ -50,7 +52,9 @@ __all__ = [
     "CollectionDailyStat",
     "RawContent",
     "ContentVersion",
+    "ContentSchedule",
     "MetricSnapshot",
+    "RedeemCode",
     "ContentTranslation",
     "AiUsage",
     "ContentMatch",

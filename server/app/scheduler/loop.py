@@ -148,6 +148,14 @@ async def main() -> None:
                             f"anisignal:custom-sweep-enqueued:{bucket}", "1",
                             nx=True, px=6 * 60 * 60 * 1000)
                         logger.info("enqueued custom sweep job=%s", getattr(job, "job_id", None))
+                    # 官方内容实体抽取：同 5 分钟桶去重（日程/兑换码）
+                    if not await redis.get(f"anisignal:extract-sweep-enqueued:{bucket}"):
+                        job = await redis.enqueue_job(
+                            "extract_entities_sweep", _job_id=f"extract-sweep:{bucket}")
+                        await redis.set(
+                            f"anisignal:extract-sweep-enqueued:{bucket}", "1",
+                            nx=True, px=6 * 60 * 60 * 1000)
+                        logger.info("enqueued extract sweep job=%s", getattr(job, "job_id", None))
             except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
                 logger.exception("scheduler tick failed")
             await asyncio.sleep(settings.scheduler_poll_seconds)

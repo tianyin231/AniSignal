@@ -52,6 +52,8 @@ class RawContent(Base):
     matched_keywords: Mapped[list] = mapped_column(JSON, default=list)
     # 内容审核下架：AI 判定违规/不相关自动置位，管理端可随时切换
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    # 官方内容实体抽取（日程/兑换码）完成时间；NULL = 待抽取
+    extracted_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     versions: Mapped[list["ContentVersion"]] = relationship(
         back_populates="raw_content",
@@ -100,6 +102,49 @@ class MetricSnapshot(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     raw_content: Mapped[RawContent] = relationship(back_populates="snapshots")
+
+
+class ContentSchedule(Base):
+    """从官方公告抽取的活动/维护/卡池日程（AI 层产物，可重算）。"""
+
+    __tablename__ = "content_schedules"
+    __table_args__ = (
+        UniqueConstraint("raw_content_id", "title", name="uq_content_schedule"),
+        Index("ix_content_schedules_community_start", "community", "start_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    raw_content_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_contents.id", name="fk_content_schedules_raw_content_id_raw_contents", ondelete="CASCADE"),
+    )
+    community: Mapped[str] = mapped_column(String(32), default=DEFAULT_COMMUNITY)
+    title: Mapped[str] = mapped_column(String(200))
+    # activity / maintenance / pool / broadcast / delay
+    kind: Mapped[str] = mapped_column(String(20))
+    start_at: Mapped[datetime] = mapped_column(DateTime)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime)
+    delayed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class RedeemCode(Base):
+    """从官方内容抽取的兑换码（AI 层产物；community+code 唯一）。"""
+
+    __tablename__ = "redeem_codes"
+    __table_args__ = (
+        UniqueConstraint("community", "code", name="uq_redeem_code"),
+        Index("ix_redeem_codes_community_status", "community", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    raw_content_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_contents.id", name="fk_redeem_codes_raw_content_id_raw_contents", ondelete="CASCADE"),
+    )
+    community: Mapped[str] = mapped_column(String(32), default=DEFAULT_COMMUNITY)
+    code: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class ContentTranslation(Base):

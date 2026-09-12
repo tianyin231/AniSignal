@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { RefreshCw } from 'lucide-vue-next'
-import type { ApiEventList, PublicContentList, PublicContentItem } from '~/composables/usePublicApi'
+import type { ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto } from '~/composables/usePublicApi'
 import { toAppEvent, toRawItem } from '~/utils/public-utils'
+import { fmtTime } from '~/utils/admin-types'
 
 useSeoMeta({ title: '首页 · AniSignal' })
 
@@ -74,6 +75,16 @@ const trendingRequest = useAsyncData(
   () => api<PublicContentList>('/api/trending', { query: { community: homeCommunity.value, hours: 24, limit: 5 } }),
   { watch: [homeCommunity] },
 )
+const calendarRequest = useAsyncData(
+  () => `home-calendar-${homeCommunity.value}`,
+  () => api<CalendarDto>('/api/calendar', { query: { community: homeCommunity.value } }),
+  { watch: [homeCommunity] },
+)
+const codesRequest = useAsyncData(
+  () => `home-codes-${homeCommunity.value}`,
+  () => api<CodesDto>('/api/codes', { query: { community: homeCommunity.value } }),
+  { watch: [homeCommunity] },
+)
 
 const [
   { data: eventsData, status: eventsStatus },
@@ -81,12 +92,16 @@ const [
   { data: communityData, status: communityStatus },
   { data: highlightsData },
   { data: trendingData },
+  { data: calendarData },
+  { data: codesData },
 ] = await Promise.all([
   eventsRequest,
   officialRequest,
   communityRequest,
   highlightsRequest,
   trendingRequest,
+  calendarRequest,
+  codesRequest,
 ])
 
 const featuredHighlights = computed(() => (highlightsData.value?.items ?? []).map(toRawItem))
@@ -95,10 +110,30 @@ const trendingList = computed(() => (trendingData.value?.items ?? []).map(toRawI
 const trendingDelta = computed(() =>
   new Map((trendingData.value?.items ?? []).map(item => [item.id, item.delta_view ?? 0])),
 )
+const calendarOngoing = computed(() => calendarData.value?.ongoing ?? [])
+const calendarUpcoming = computed(() => calendarData.value?.upcoming ?? [])
 
 function deltaLabel(n: number): string {
   if (n >= 10_000) return `+${(n / 10_000).toFixed(1)}万`
   return `+${n.toLocaleString('zh-CN')}`
+}
+
+// 活动日历：kind → 展示名 + chip 色系（站点无紫色系）
+const kindMeta: Record<string, { label: string; chip: string }> = {
+  activity: { label: '活动', chip: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
+  maintenance: { label: '维护', chip: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' },
+  pool: { label: '卡池', chip: 'bg-sky-500/10 text-sky-700 dark:text-sky-300' },
+  broadcast: { label: '直播', chip: 'bg-blue-500/10 text-blue-700 dark:text-blue-300' },
+  delay: { label: '变更', chip: 'bg-red-500/10 text-red-700 dark:text-red-300' },
+}
+const codesList = computed(() => codesData.value?.items ?? [])
+const copiedCode = ref('')
+async function copyCode(code: string) {
+  try {
+    await navigator.clipboard.writeText(code)
+    copiedCode.value = code
+    setTimeout(() => (copiedCode.value = ''), 1500)
+  } catch {}
 }
 
 // 最新最热混合流：官方内容视作更新 36h、高播放内容视作更新 12h，
@@ -283,6 +318,49 @@ onBeforeUnmount(() => {
           <p v-if="!eventList.length" class="px-4 py-8 text-center text-sm text-slate-400">
             近 7 天暂无新事件。
           </p>
+        </div>
+      </section>
+
+      <!-- 活动日历：官方公告抽取的日程，进行中/即将开始 -->
+      <section v-if="calendarOngoing.length || calendarUpcoming.length" aria-labelledby="calendar-title" class="mb-6">
+        <header class="mb-3 flex items-end justify-between gap-4 px-1">
+          <h2 id="calendar-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">活动日历</h2>
+        </header>
+        <div class="panel overflow-hidden">
+          <div v-for="e in calendarOngoing" :key="`on-${e.id}`" class="flex flex-wrap items-baseline gap-x-2 border-b border-slate-900/5 px-4 py-2.5 text-sm dark:border-white/5">
+            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium" :class="kindMeta[e.kind]?.chip">{{ kindMeta[e.kind]?.label || e.kind }}</span>
+            <span class="text-slate-800 dark:text-zinc-200">{{ e.title }}</span>
+            <span v-if="e.delayed" class="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">已延后</span>
+            <span v-if="e.end_at" class="mono ml-auto text-xs text-slate-400 dark:text-zinc-500">{{ fmtTime(e.end_at) }} 结束</span>
+          </div>
+          <div v-for="e in calendarUpcoming" :key="`up-${e.id}`" class="flex flex-wrap items-baseline gap-x-2 border-b border-slate-900/5 px-4 py-2.5 text-sm last:border-b-0 dark:border-white/5">
+            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium" :class="kindMeta[e.kind]?.chip">{{ kindMeta[e.kind]?.label || e.kind }}</span>
+            <span class="text-slate-800 dark:text-zinc-200">{{ e.title }}</span>
+            <span v-if="e.delayed" class="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">已延后</span>
+            <span class="mono ml-auto text-xs text-slate-400 dark:text-zinc-500">{{ fmtTime(e.start_at) }} 开始</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 兑换码：官方内容抽取，点击复制 -->
+      <section v-if="codesList.length" aria-labelledby="codes-title" class="mb-6">
+        <header class="mb-3 flex items-end justify-between gap-4 px-1">
+          <h2 id="codes-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">兑换码</h2>
+        </header>
+        <div class="panel overflow-hidden">
+          <div v-for="c in codesList" :key="c.code" class="flex flex-wrap items-center gap-x-3 border-b border-slate-900/5 px-4 py-2.5 text-sm last:border-b-0 dark:border-white/5">
+            <button
+              class="mono rounded bg-blue-500/10 px-2.5 py-1 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-500/20 dark:text-blue-300"
+              :title="copiedCode === c.code ? '已复制' : '点击复制'"
+              @click="copyCode(c.code)"
+            >
+              {{ copiedCode === c.code ? '已复制 ✓' : c.code }}
+            </button>
+            <span class="text-xs text-slate-400 dark:text-zinc-500">
+              {{ c.expires_at ? `${fmtTime(c.expires_at)} 前有效` : '有效期待公布' }}
+            </span>
+            <a v-if="c.url" :href="c.url" target="_blank" rel="noopener" class="ml-auto link text-xs">来源 ↗</a>
+          </div>
         </div>
       </section>
 

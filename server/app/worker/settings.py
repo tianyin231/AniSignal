@@ -66,6 +66,18 @@ async def collect_custom_feeds(ctx) -> dict:
         return await sweep_custom_feeds(session, ctx["redis"])
 
 
+async def extract_entities_sweep(ctx) -> dict:
+    """官方内容实体抽取轮询：日程与兑换码（每轮限量）。"""
+    from app.db import SessionLocal
+    from app.services.extract import sweep_extractions
+
+    async with SessionLocal() as session:
+        result = await sweep_extractions(session)
+        if result["candidates"]:
+            logger.info("extract_entities_sweep -> %s", result)
+        return result
+
+
 async def send_admin_emails(ctx, delivery_ids: list[int]) -> dict:
     """管理端单发/广播邮件批次：逐条 SMTP，失败不阻断批次。"""
     from app.db import SessionLocal
@@ -125,6 +137,7 @@ class WorkerSettings:
         send_morning_notifications,
         send_admin_emails,
         collect_custom_feeds,
+        extract_entities_sweep,
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4
