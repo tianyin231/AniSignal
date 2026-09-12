@@ -34,8 +34,10 @@ def plugin(monkeypatch):
     module('astrbot.api', llm_tool=decorator, logger=SimpleNamespace(warning=lambda *a: None))
     module('astrbot.api.event', AstrMessageEvent=object,
         filter=SimpleNamespace(command=decorator, on_llm_request=decorator, event_message_type=decorator,
+            on_decorating_result=decorator,
             EventMessageType=SimpleNamespace(ALL='all')))
     module('astrbot.api.star', Context=object, Star=object, register=decorator)
+    module('astrbot.api.message_components', Plain=type('Plain', (), {'__init__': lambda self, text=None: setattr(self, 'text', text or '')}))
     module('astrbot.core')
     module('astrbot.core.provider')
     module('astrbot.core.provider.entities', ProviderRequest=object)
@@ -172,3 +174,19 @@ async def test_history_recording_failure_does_not_break_receipt(plugin):
     await plugin.send_delivery(delivery())
     receipt = plugin.api.call_args.args[1]
     assert receipt['status'] == 'accepted' and receipt['receipt'] == 'lease'
+
+
+async def test_residual_emotion_markup_is_stripped_from_replies(plugin):
+    Plain = sys.modules['astrbot.api.message_components'].Plain
+    chain = [Plain('你好 &&reply&& 不错，&&happy&&')]
+    ev = event('qq:GroupMessage:g')
+    ev.get_result = lambda: SimpleNamespace(is_llm_result=lambda: True,
+        get_plain_text=lambda: chain[0].text, chain=chain)
+    await plugin.strip_residual_emotion_markup(ev)
+    assert chain[0].text == '你好 不错，'
+
+    chain = [Plain('正常回复没有标记')]
+    ev.get_result = lambda: SimpleNamespace(is_llm_result=lambda: True,
+        get_plain_text=lambda: chain[0].text, chain=chain)
+    await plugin.strip_residual_emotion_markup(ev)
+    assert chain[0].text == '正常回复没有标记'
