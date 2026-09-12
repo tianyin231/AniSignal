@@ -297,7 +297,10 @@ async def rss_feed(
         offset=0,
         session=session,
     )
-    base = str(request.base_url).rstrip("/")
+    from app.config import get_settings
+
+    configured_base = get_settings().public_base_url.strip().rstrip("/")
+    base = configured_base or str(request.base_url).rstrip("/")
     label = "跨分区聚合" if is_all_community(community) else community
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',

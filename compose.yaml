@@ -39,6 +39,7 @@ services:
       ANISIGNAL_DATABASE_URL: mysql+asyncmy://root:${MYSQL_ROOT_PASSWORD:-anisignal}@mysql:3306/anisignal
       ANISIGNAL_REDIS_URL: redis://redis:6379/0
       ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:-change-me}
+      ANISIGNAL_PUBLIC_BASE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
       TZ: Asia/Shanghai
     depends_on:
       mysql:
