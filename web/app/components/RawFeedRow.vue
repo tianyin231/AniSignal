@@ -3,7 +3,7 @@ import { ArrowUpRight } from 'lucide-vue-next'
 import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
 import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 
-const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean }>()
+const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean; deltaView?: number | null }>()
 const { mediaMode } = useSiteConfig()
 const detailTo = computed(() => props.to ?? `/contents/${props.item.id}`)
 const coverFailed = ref(false)
@@ -23,6 +23,11 @@ const communityBadge = computed(() => {
 const HOT_VIEWS = 10_000
 const viewCount = computed(() => props.item.metrics?.view)
 const isHot = computed(() => (viewCount.value ?? 0) >= HOT_VIEWS)
+const deltaLabel = computed(() => {
+  const n = props.deltaView ?? 0
+  if (n <= 0) return ''
+  return n >= 10_000 ? `+${(n / 10_000).toFixed(1)}万` : `+${n.toLocaleString('zh-CN')}`
+})
 
 </script>
 
@@ -65,6 +70,7 @@ const isHot = computed(() => (viewCount.value ?? 0) >= HOT_VIEWS)
           v-if="isHot"
           class="rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600 dark:text-orange-300"
         >🔥 热门</span>
+        <span v-if="deltaLabel" class="rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-orange-600 dark:text-orange-300">飙升 {{ deltaLabel }}/24h</span>
         <span v-if="viewCount" class="mono">{{ viewCount.toLocaleString('zh-CN') }} 播放 · </span>
         <span>{{ platformMeta[item.platform].label }} · {{ item.account }}</span>
         <span

@@ -15,7 +15,7 @@ from app.services.notifications import group_candidates, load_candidates
 from app.services.settings import get_setting
 from app.services.views import product_to_out
 
-TOOLS = {"digest": "今日速报", "news": "资讯查询", "products": "商品进展"}
+TOOLS = {"digest": "今日速报", "news": "资讯查询", "products": "商品进展", "trending": "热度飙升"}
 
 
 async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None) -> dict:
@@ -24,7 +24,28 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
     community = config.get("community", "all")
     keywords = config.get("keywords", [])
     scope = COMMUNITY_LABELS.get(community, "全站")
-    if tool == "products":
+    if tool == "trending":
+        from app.services.curation import select_trending
+
+        items = await select_trending(session, 5, community=community, hours=24)
+        lines = [
+            f"{scope} · 热度飙升（24 小时播放增量）",
+            (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）"),
+        ]
+        for i, it in enumerate(items, 1):
+            label = COMMUNITY_LABELS.get(it.get("community"), "")
+            views = int((it.get("metrics") or {}).get("view") or 0)
+            lines.extend(
+                [
+                    f"\n{i}. [{label}] {it['title']}",
+                    f"24 小时播放 +{it['delta_view']:,} · 当前 {views:,}",
+                ]
+            )
+            if it.get("url"):
+                lines.append(it["url"])
+        if not items:
+            lines.append("窗口内还没有明显的热度变化。")
+    elif tool == "products":
         stmt = select(Product).order_by(Product.id)
         if community != "all":
             stmt = stmt.where(Product.community == community)

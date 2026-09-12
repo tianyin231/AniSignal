@@ -7,7 +7,7 @@ import asyncio
 import logging
 import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -69,6 +69,25 @@ async def list_highlights(
     items = [
         PublicContentItem(**item)
         for item in await select_highlights(session, limit, community=community)
+    ]
+    return PublicContentList(items=items, total=len(items))
+
+
+@router.get("/trending", response_model=PublicContentList)
+async def list_trending(
+    community: str = COMMUNITY_AGGREGATE_QUERY,
+    hours: int = Query(default=24, ge=6, le=168, description="增量统计窗口"),
+    limit: int = Query(default=10, ge=1, le=20),
+    session: AsyncSession = Depends(get_session),
+):
+    """热度飙升：窗口内播放增量最高的内容（需 ≥2 个指标快照）。"""
+    from app.services.curation import select_trending
+
+    items = [
+        PublicContentItem(**item)
+        for item in await select_trending(
+            session, limit, community=community, hours=hours
+        )
     ]
     return PublicContentList(items=items, total=len(items))
 
@@ -240,6 +259,81 @@ def _excerpt(text: str) -> str | None:
 
         text = bleach.clean(text, tags=[], strip=True).strip()
     return text[:_EXCERPT_LEN] + ("…" if len(text) > _EXCERPT_LEN else "")
+
+
+_RSS_CACHE: dict[str, tuple[float, str]] = {}
+_RSS_TTL_SECONDS = 300
+
+
+@router.get("/rss.xml", response_class=Response)
+async def rss_feed(
+    request: Request,
+    community: str = COMMUNITY_AGGREGATE_QUERY,
+    q: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=30, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
+):
+    """RSS 2.0 订阅源：默认最新内容流，5 分钟进程内缓存。"""
+    from xml.sax.saxutils import escape
+    from email.utils import format_datetime
+
+    cache_key = f"{community}|{q or ''}|{limit}"
+    cached = _RSS_CACHE.get(cache_key)
+    if cached and cached[0] > time.time():
+        return Response(content=cached[1], media_type="application/rss+xml; charset=utf-8")
+
+    # 直接调用 endpoint 函数时 FastAPI 的 Query 默认值不会解析，必须显式传全部参数
+    listing = await list_contents(
+        platform=None,
+        community=community,
+        content_type=None,
+        identity=None,
+        exclude_identity=None,
+        published_within_hours=None,
+        include_chat=False,
+        sort="time",
+        q=q,
+        limit=limit,
+        offset=0,
+        session=session,
+    )
+    base = str(request.base_url).rstrip("/")
+    label = "跨分区聚合" if is_all_community(community) else community
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0">',
+        "<channel>",
+        f"<title>AniSignal 情报流 · {escape(label)}</title>",
+        f"<link>{escape(base)}</link>",
+        "<description>游戏动态与商品履约追踪</description>",
+        "<generator>AniSignal</generator>",
+    ]
+    for item in listing.items:
+        published = item.published_at or item.collected_at
+        pub_date = format_datetime(published.replace(tzinfo=timezone.utc))
+        link = item.url or f"{base}/contents/{item.id}"
+        parts.extend(
+            [
+                "<item>",
+                f"<title>{escape(item.title or item.external_id)}</title>",
+                f"<link>{escape(link)}</link>",
+                f"<guid>{escape(f'anisignal-content-{item.id}')}</guid>",
+                f"<pubDate>{pub_date}</pubDate>",
+                f"<description>{escape(item.text_excerpt or item.title or '')}</description>",
+            ]
+        )
+        if item.cover:
+            parts.append(
+                f'<enclosure url="{escape(item.cover)}" type="image/jpeg" length="0"/>'
+            )
+        parts.append("</item>")
+    parts.extend(["</channel>", "</rss>"])
+    xml = "\n".join(parts)
+    _RSS_CACHE[cache_key] = (time.time() + _RSS_TTL_SECONDS, xml)
+    if len(_RSS_CACHE) > 32:
+        for stale_key in [k for k, v in _RSS_CACHE.items() if v[0] <= time.time()]:
+            _RSS_CACHE.pop(stale_key, None)
+    return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
 
 
 @router.get("/sources", response_model=PublicSourceList)

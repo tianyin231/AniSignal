@@ -20,6 +20,7 @@ export interface PublicContentItem {
   preview_mode: 'full' | 'partial' | 'external_only'
   matched_keywords: string[]
   community?: string
+  delta_view?: number | null
 }
 
 export interface PublicContentList {
@@ -112,6 +113,7 @@ export interface ApiEventSource {
   published_at: string | null
   url: string | null
   content_id: number | null
+  identity?: string
 }
 
 export interface ApiEventCorrection {

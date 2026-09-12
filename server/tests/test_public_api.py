@@ -5,7 +5,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import CollectTarget, RawContent
+from app.models import CollectTarget, MetricSnapshot, RawContent
 from app.services.ingest import ingest_items
 
 from tests.test_parsers_bilibili import DYNAMIC_RAW, VIDEO_RAW
@@ -34,6 +34,52 @@ async def test_public_contents_no_auth(client, session):
     assert body["total"] == 2
     ids = {i["external_id"] for i in body["items"]}
     assert ids == {"BV1Mcgp6ME1x", "50553"}
+
+
+async def test_public_trending_ranks_by_view_delta(client, session):
+    await _seed(session)
+    raw_id = (
+        await session.execute(select(RawContent.id).where(RawContent.external_id == "BV1Mcgp6ME1x"))
+    ).scalar_one()
+    now = utcnow()
+    session.add_all(
+        [
+            MetricSnapshot(raw_content_id=raw_id, metrics={"view": 1000}, captured_at=now - timedelta(hours=12)),
+            MetricSnapshot(raw_content_id=raw_id, metrics={"view": 45000}, captured_at=now - timedelta(hours=6)),
+            MetricSnapshot(raw_content_id=raw_id, metrics={"view": 90000}, captured_at=now - timedelta(hours=1)),
+        ]
+    )
+    await session.commit()
+
+    resp = await client.get("/api/trending", params={"hours": 24})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == raw_id
+    # 种子自身入库时也有一条快照，增量应落在 89000~90000 区间
+    assert 89000 <= body["items"][0]["delta_view"] <= 90000
+    assert body["items"][0]["metrics"]["view"] == 90000
+
+    # ≥2 快照规则：只有 1 个快照的内容（kuro 公告）不得上榜
+    kuro_id = (
+        await session.execute(select(RawContent.id).where(RawContent.external_id == "50553"))
+    ).scalar_one()
+    session.add(
+        MetricSnapshot(raw_content_id=kuro_id, metrics={"view": 999999}, captured_at=utcnow())
+    )
+    await session.commit()
+    resp = await client.get("/api/trending", params={"hours": 24})
+    assert [i["id"] for i in resp.json()["items"]] == [raw_id]
+
+
+async def test_public_rss_feed(client, session):
+    await _seed(session)
+    resp = await client.get("/api/rss.xml")
+    assert resp.status_code == 200
+    assert "application/rss+xml" in resp.headers["content-type"]
+    assert '<rss version="2.0">' in resp.text
+    assert "<item>" in resp.text
+    assert "BV1Mcgp6ME1x" in resp.text
 
 
 async def test_public_contents_identity_filter(client, session):

@@ -69,21 +69,37 @@ const highlightsRequest = useAsyncData(
   () => api<PublicContentList>('/api/highlights', { query: { community: homeCommunity.value, limit: 5 } }),
   { watch: [homeCommunity] },
 )
+const trendingRequest = useAsyncData(
+  () => `home-trending-${homeCommunity.value}`,
+  () => api<PublicContentList>('/api/trending', { query: { community: homeCommunity.value, hours: 24, limit: 5 } }),
+  { watch: [homeCommunity] },
+)
 
 const [
   { data: eventsData, status: eventsStatus },
   { data: officialData, status: officialStatus },
   { data: communityData, status: communityStatus },
   { data: highlightsData },
+  { data: trendingData },
 ] = await Promise.all([
   eventsRequest,
   officialRequest,
   communityRequest,
   highlightsRequest,
+  trendingRequest,
 ])
 
 const featuredHighlights = computed(() => (highlightsData.value?.items ?? []).map(toRawItem))
 const eventList = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
+const trendingList = computed(() => (trendingData.value?.items ?? []).map(toRawItem))
+const trendingDelta = computed(() =>
+  new Map((trendingData.value?.items ?? []).map(item => [item.id, item.delta_view ?? 0])),
+)
+
+function deltaLabel(n: number): string {
+  if (n >= 10_000) return `+${(n / 10_000).toFixed(1)}万`
+  return `+${n.toLocaleString('zh-CN')}`
+}
 
 // 最新最热混合流：官方内容视作更新 36h、高播放内容视作更新 12h，
 // 页内按"有效时间"排序——同一屏里最新、最热、官方三者兼顾。
@@ -267,6 +283,25 @@ onBeforeUnmount(() => {
           <p v-if="!eventList.length" class="px-4 py-8 text-center text-sm text-slate-400">
             近 7 天暂无新事件。
           </p>
+        </div>
+      </section>
+
+      <!-- 热度飙升：窗口内播放增量最高的内容（快照增量，非绝对播放量） -->
+      <section v-if="trendingList.length" aria-labelledby="trending-title" class="mb-6">
+        <header class="mb-3 flex items-end justify-between gap-4 px-1">
+          <h2 id="trending-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">🔥 热度飙升</h2>
+          <NuxtLink :to="{ path: '/contents', query: { ...sectionQuery, tab: 'trending' } }" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+            查看内容库
+          </NuxtLink>
+        </header>
+        <div class="panel overflow-hidden">
+          <RawFeedRow
+            v-for="row in trendingList"
+            :key="`trend-${row.id}`"
+            :item="row"
+            :show-community="aggregate"
+            :delta-view="trendingDelta.get(row.id) ?? 0"
+          />
         </div>
       </section>
 
