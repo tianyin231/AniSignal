@@ -97,3 +97,40 @@ async def test_quota_429_is_distinguished_from_rate_limit_without_leaking_detail
     assert receipt['status'] == 'accepted'
     assert receipt['error'] == '模型余额或额度不足，已使用原始资料'
     assert 'account-private' not in str(receipt)
+
+
+def event(umo, targets=None):
+    return SimpleNamespace(unified_msg_origin=umo, get_sender_id=lambda: 'user',
+        plain_result=lambda text: text, set_extra=lambda key, value: None)
+
+
+async def test_session_info_reports_registration_state(plugin):
+    plugin.targets = {'qq:GroupMessage:real': {'name': '鸣潮群', 'enabled': True}}
+    text = [r async for r in plugin.session_info(event('qq:GroupMessage:real'))][0]
+    assert '注册为「鸣潮群」' in text and '已启用' in text
+
+    plugin.targets['qq:GroupMessage:real']['enabled'] = False
+    text = [r async for r in plugin.session_info(event('qq:GroupMessage:real'))][0]
+    assert '已暂停' in text
+
+    plugin.targets = {}
+    text = [r async for r in plugin.session_info(event('qq:GroupMessage:other'))][0]
+    assert '尚未注册' in text and 'qq:GroupMessage:other' in text
+
+
+async def test_paused_session_does_not_activate_tools_or_provider(plugin):
+    plugin.targets = {'qq:GroupMessage:paused': {'name': 'x', 'enabled': False, 'tools': ['digest'], 'provider_id': 'p'}}
+    plugin.last_activity = {}
+    paused = event('qq:GroupMessage:paused')
+    assert plugin.session_target(paused) is None
+    await plugin.select_conversation_provider(paused)
+    plugin.targets['qq:GroupMessage:paused']['enabled'] = True
+    assert plugin.session_target(paused) is not None
+
+
+async def test_message_events_track_last_activity_per_session(plugin):
+    plugin.targets = {}
+    plugin.last_activity = {}
+    await plugin.select_conversation_provider(event('qq:GroupMessage:g1'))
+    await plugin.select_conversation_provider(event('qq:GroupMessage:g2'))
+    assert set(plugin.last_activity) == {'qq:GroupMessage:g1', 'qq:GroupMessage:g2'}

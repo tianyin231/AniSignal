@@ -116,3 +116,32 @@ async def test_disabled_features_and_reminder_limit(client, session):
     row.enabled = False
     await session.commit()
     assert (await client.post('/api/bot/reminders', headers=HEADERS, json=body)).status_code == 403
+
+
+async def test_targets_listing_includes_paused_sessions_with_names(client, session):
+    row = await setup(session)
+    row.enabled = False
+    paused = BotTarget(name='私聊', umo='qq:FriendMessage:alice', enabled=False, config={})
+    session.add(paused)
+    await session.commit()
+    rows = (await client.get('/api/bot/targets', headers=HEADERS)).json()
+    by_umo = {r['umo']: r for r in rows}
+    assert by_umo[row.umo]['name'] == '测试群' and by_umo[row.umo]['enabled'] is False
+    assert by_umo[paused.umo]['name'] == '私聊' and by_umo[paused.umo]['enabled'] is False
+
+
+async def test_activity_report_keeps_latest_and_ignores_unknown(client, session, admin_headers):
+    row = await setup(session)
+    head = {'X-Bot-Key': 'plugin-key'}
+    body = {'activities': {row.umo: '2026-09-12T02:00:00+00:00', 'qq:GroupMessage:ghost': '2026-09-12T03:00:00+00:00'}}
+    assert (await client.post('/api/bot/activity', headers=head, json=body)).status_code == 200
+    overview = (await client.get('/api/admin/bot', headers=admin_headers)).json()
+    assert overview['activity'] == {row.umo: '2026-09-12T02:00:00'}
+    older = {'activities': {row.umo: '2026-09-11T00:00:00+00:00'}}
+    await client.post('/api/bot/activity', headers=head, json=older)
+    overview = (await client.get('/api/admin/bot', headers=admin_headers)).json()
+    assert overview['activity'][row.umo] == '2026-09-12T02:00:00'
+    newer = {'activities': {row.umo: '2026-09-12T05:30:00+00:00'}}
+    await client.post('/api/bot/activity', headers=head, json=newer)
+    overview = (await client.get('/api/admin/bot', headers=admin_headers)).json()
+    assert overview['activity'][row.umo] == '2026-09-12T05:30:00'

@@ -150,6 +150,31 @@ class ClaimBody(BaseModel):
     version: str = Field(default="", max_length=30)
 
 
+class ActivityBody(BaseModel):
+    activities: dict[str, str] = Field(default_factory=dict, max_length=200)
+
+
+@router.post("/activity")
+async def report_activity(body: ActivityBody, session: AsyncSession = Depends(get_session)):
+    """插件回传各会话最近活跃时间；仅运营参考数据，失败不影响主流程。"""
+    known = set(await session.scalars(select(BotTarget.umo)))
+    current = {umo: ts for umo, ts in (await get_setting(session, "bot_activity") or {}).items() if umo in known}
+    for umo, value in body.activities.items():
+        if umo not in known:
+            continue
+        try:
+            ts = datetime.fromisoformat(value)
+        except ValueError:
+            continue
+        if ts.tzinfo:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        prev = current.get(umo)
+        if not prev or ts > datetime.fromisoformat(prev):
+            current[umo] = ts.isoformat()
+    await set_setting(session, "bot_activity", current)
+    return {"ok": True}
+
+
 @router.post("/outbox/claim")
 async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session)):
     now = utcnow()
