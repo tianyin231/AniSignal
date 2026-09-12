@@ -1,7 +1,7 @@
 """AstrBot 消息通道、只读查询工具和按会话调度。"""
 
 import hashlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import httpx
 from sqlalchemy import select, update
@@ -10,12 +10,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models.enums import COMMUNITY_LABELS
-from app.models import BotDelivery, BotReminder, BotTarget, Event, Product
+from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Product, RawContent, RedeemCode
 from app.services.notifications import group_candidates, load_candidates
 from app.services.settings import get_setting
 from app.services.views import product_to_out
 
-TOOLS = {"digest": "今日速报", "news": "资讯查询", "products": "商品进展", "trending": "热度飙升"}
+TOOLS = {
+    "digest": "今日速报",
+    "news": "资讯查询",
+    "products": "商品进展",
+    "trending": "热度飙升",
+    "calendar": "活动日历",
+    "codes": "兑换码",
+}
 
 
 async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None) -> dict:
@@ -45,6 +52,64 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
                 lines.append(it["url"])
         if not items:
             lines.append("窗口内还没有明显的热度变化。")
+    elif tool == "calendar":
+        items = []
+        conditions = [] if community == "all" else [ContentSchedule.community == community]
+        conditions.append(RawContent.hidden.is_(False))
+        rows = await session.execute(
+            select(ContentSchedule, RawContent.url)
+            .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
+            .where(*conditions)
+            .order_by(ContentSchedule.start_at)
+            .limit(40)
+        )
+        kind_labels = {"activity": "活动", "maintenance": "维护", "pool": "卡池", "broadcast": "直播", "delay": "变更"}
+        fmt = lambda dt: (dt + timedelta(hours=8)).strftime("%m/%d %H:%M")  # noqa: E731
+        lines = [
+            f"{scope} · 活动日历",
+            (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）"),
+        ]
+        count = 0
+        for schedule, url in rows:
+            end = schedule.end_at
+            if schedule.start_at <= now and (end is None or end >= now):
+                when = f"进行中 · {fmt(end) if end else '长期'} 结束"
+            elif schedule.start_at > now:
+                when = f"{fmt(schedule.start_at)} 开始"
+            else:
+                continue
+            delayed = "（已延后）" if schedule.delayed else ""
+            kind = kind_labels.get(schedule.kind, schedule.kind)
+            lines.append(f"\n[{kind}]{delayed} {schedule.title}\n{when}")
+            if url:
+                lines.append(url)
+            count += 1
+            if count >= 8:
+                break
+        if not count:
+            lines.append("暂无可展示的日程。")
+    elif tool == "codes":
+        items = []
+        conditions = [RedeemCode.status == "active", RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now)]
+        if community != "all":
+            conditions.append(RedeemCode.community == community)
+        rows = await session.execute(
+            select(RedeemCode, RawContent.url)
+            .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
+            .where(*conditions)
+            .order_by(RedeemCode.created_at.desc())
+            .limit(8)
+        )
+        lines = [f"{scope} · 可用兑换码", (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）")]
+        found = 0
+        for code, url in rows:
+            expiry = f"（{fmt(code.expires_at)} 前）" if code.expires_at else ""
+            lines.append(f"\n{code.code}{expiry}")
+            if url:
+                lines.append(url)
+            found += 1
+        if not found:
+            lines.append("当前没有可用的兑换码。")
     elif tool == "products":
         stmt = select(Product).order_by(Product.id)
         if community != "all":
@@ -181,6 +246,33 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
         quiet_start, quiet_end = config.get("quiet_start", 23), config.get("quiet_end", 8)
         quiet = (quiet_start <= local.hour < quiet_end) if quiet_start < quiet_end else (local.hour >= quiet_start or local.hour < quiet_end) if quiet_start != quiet_end else False
         if config.get("updates_enabled") and not quiet:
+            # 日历提醒：活动/卡池/直播结束前 2 小时、维护开始前 30 分钟（静默时段直接跳过该时刻）
+            target_community = config.get("community", "all")
+            sched_conditions = [RawContent.hidden.is_(False)]
+            if target_community != "all":
+                sched_conditions.append(ContentSchedule.community == target_community)
+            schedule_rows = await session.execute(
+                select(ContentSchedule)
+                .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
+                .where(*sched_conditions, ContentSchedule.start_at <= now + timedelta(days=45))
+            )
+            for schedule in schedule_rows.scalars():
+                stage_at: datetime | None = None
+                if schedule.kind in ("activity", "pool", "broadcast") and schedule.end_at and now < schedule.end_at <= now + timedelta(hours=2):
+                    stage_at = schedule.end_at
+                elif schedule.kind == "maintenance" and now < schedule.start_at <= now + timedelta(minutes=30):
+                    stage_at = schedule.start_at
+                if stage_at is None:
+                    continue
+                stage = schedule.kind if stage_at == schedule.end_at else "maintenance_start"
+                due = (stage_at + timedelta(hours=8)).strftime("%Y/%m/%d %H:%M")
+                text = (
+                    f"⏰ 日历提醒\n{schedule.title}\n"
+                    f"{(stage_at + timedelta(hours=8)).strftime('%Y/%m/%d %H:%M')}（北京时间）"
+                    f"{'结束' if stage_at == schedule.end_at else '开始'}"
+                )
+                await create_delivery(session, target, "calendar", text, f"calendar:{schedule.id}:{stage}")
+        if config.get("updates_enabled") and not quiet:
             payload = await query_target(session, target, now=now, collected_after=target.last_scan_at)
             for item in payload["items"]:
                 event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
@@ -197,13 +289,13 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             await session.commit()
         pending = list(await session.scalars(select(BotDelivery).where(
             BotDelivery.target_id == target.id,
-            BotDelivery.kind.in_(["daily", "updates", "reminder"]),
+            BotDelivery.kind.in_(["daily", "updates", "reminder", "calendar"]),
             BotDelivery.status.in_(["pending", "failed"]), BotDelivery.attempts < 3,
         ).order_by(BotDelivery.id).limit(10)))
         for row in pending:
             if row.kind == "reminder" and not config.get("reminders_enabled"):
                 continue
-            if row.kind == "updates" and quiet:
+            if row.kind in ("updates", "calendar") and quiet:
                 continue
             if row.status == "failed" and row.updated_at > now - timedelta(minutes=5):
                 continue

@@ -30,6 +30,36 @@ export interface PublicContentList {
   new_today?: number | null
 }
 
+export interface CalendarEntry {
+  id: number
+  title: string
+  kind: string
+  start_at: string | null
+  end_at: string | null
+  delayed: boolean
+  community?: string
+  url: string | null
+}
+
+export interface CalendarDto {
+  ongoing: CalendarEntry[]
+  upcoming: CalendarEntry[]
+  ended: CalendarEntry[]
+}
+
+export interface RedeemCodeDto {
+  code: string
+  community?: string
+  expires_at: string | null
+  created_at: string
+  url: string | null
+}
+
+export interface CodesDto {
+  items: RedeemCodeDto[]
+  total: number
+}
+
 export interface PublicSource {
   name: string
   platform: string

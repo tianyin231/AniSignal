@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.api.bot import TargetBody
 from app.clock import utcnow
-from app.models import BotDelivery, BotReminder, BotTarget
+from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, RawContent, RedeemCode
 from app.services import bot
 from app.services.settings import set_setting
 
@@ -145,6 +145,43 @@ async def test_activity_report_keeps_latest_and_ignores_unknown(client, session,
     await client.post('/api/bot/activity', headers=head, json=newer)
     overview = (await client.get('/api/admin/bot', headers=admin_headers)).json()
     assert overview['activity'][row.umo] == '2026-09-12T05:30:00'
+
+
+async def test_calendar_reminders_and_query_tools(client, session):
+    await set_setting(session, 'bot_bridge', {'tools_key': 'plugin-key'})
+    body = TargetBody(name='日历群', umo='qq:GroupMessage:cal', enabled=True, daily_enabled=False,
+        updates_enabled=True, delivery_mode='astrbot', community='wuwa')
+    row = BotTarget(name=body.name, umo=body.umo, enabled=True,
+        config=body.model_dump(exclude={'name', 'umo', 'enabled'}))
+    session.add(row)
+    content = RawContent(platform='kuro_cn', content_type='notice', external_id='cal-1',
+        community='wuwa', url='https://example.com/post')
+    session.add(content)
+    await session.commit()
+    session.add(ContentSchedule(raw_content_id=content.id, community='wuwa', title='限时活动「回响」',
+        kind='activity', start_at=utcnow() - timedelta(days=3),
+        end_at=utcnow() + timedelta(hours=1, minutes=30), created_at=utcnow()))
+    session.add(RedeemCode(raw_content_id=content.id, community='wuwa', code='CAL2026',
+        status='active', created_at=utcnow()))
+    await session.commit()
+
+    await bot.run_bot_notifications(session)
+    deliveries = list(await session.scalars(select(BotDelivery)))
+    assert len(deliveries) == 1 and deliveries[0].kind == 'calendar'
+    assert '限时活动「回响」' in deliveries[0].body
+    dedupe_key = deliveries[0].dedupe_key
+    assert dedupe_key.startswith('calendar:')
+
+    # 同一时刻重复扫描去重
+    await bot.run_bot_notifications(session)
+    assert len(list(await session.scalars(select(BotDelivery)))) == 1
+
+    calendar = (await client.post('/api/bot/query', headers=HEADERS,
+        json={'umo': row.umo, 'tool': 'calendar'})).json()
+    assert '限时活动「回响」' in calendar['text']
+    codes = (await client.post('/api/bot/query', headers=HEADERS,
+        json={'umo': row.umo, 'tool': 'codes'})).json()
+    assert 'CAL2026' in codes['text']
 
 
 async def test_daily_digest_carries_cover_and_claim_returns_images(client, session, monkeypatch):
