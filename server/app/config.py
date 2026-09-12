@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # 单管理员 Token；生产必须通过环境变量覆盖
     admin_token: str = "change-me"
 
+    # 对外站点基址（生成 RSS 等外部引用链接用；留空则回落到请求基址）
+    public_base_url: str = ""
+
     # 允许的跨域来源（逗号分隔；web 部署地址变化时在此追加）
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
