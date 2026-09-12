@@ -121,6 +121,7 @@ class PublicContentItem(BaseModel):
     preview_mode: str  # full / partial / external_only
     matched_keywords: list[str] = []
     community: str = _DEFAULT_COMMUNITY
+    delta_view: int | None = None
 
 
 class PublicContentList(BaseModel):
@@ -281,6 +282,7 @@ class EventSourceOut(BaseModel):
     published_at: datetime | None
     url: str | None
     content_id: int | None = None
+    identity: str = "unknown"
 
 
 class EventCorrectionOut(BaseModel):

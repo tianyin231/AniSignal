@@ -13,6 +13,7 @@ const router = useRouter()
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const platform = computed(() => String(route.query.platform || ''))
 const q = computed(() => String(route.query.q || ''))
+const tab = computed(() => String(route.query.tab || 'latest'))
 const searchInput = ref(q.value)
 watch(q, (v) => (searchInput.value = v))
 const pageSize = 30
@@ -21,21 +22,35 @@ const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐行标注分区
 const { scope, isAll } = useCommunityScope()
 const { data, status } = await useAsyncData(
-  () => `contents-${scope.value}-${platform.value}-${q.value}-${page.value}`,
+  () => `contents-${scope.value}-${platform.value}-${q.value}-${page.value}-${tab.value}`,
   () =>
-    api<PublicContentList>('/api/contents', {
-      query: {
-        community: scope.value,
-        limit: pageSize,
-        offset: (page.value - 1) * pageSize,
-        ...(platform.value ? { platform: platform.value } : {}),
-        ...(q.value ? { q: q.value } : {}),
-      },
-    }),
-  { watch: [scope, platform, q, page] },
+    tab.value === 'trending'
+      ? Promise.resolve({ items: [], total: 0 })
+      : api<PublicContentList>('/api/contents', {
+          query: {
+            community: scope.value,
+            limit: pageSize,
+            offset: (page.value - 1) * pageSize,
+            ...(platform.value ? { platform: platform.value } : {}),
+            ...(q.value ? { q: q.value } : {}),
+          },
+        }),
+  { watch: [scope, platform, q, page, tab] },
+)
+const trendingData = await useAsyncData(
+  () => `trending-${scope.value}`,
+  () => api<PublicContentList>('/api/trending', { query: { community: scope.value, hours: 24, limit: 20 } }),
+  { watch: [scope] },
 )
 
-const list = computed(() => (data.value?.items ?? []).map(toRawItem))
+const list = computed(() =>
+  tab.value === 'trending'
+    ? (trendingData.value?.items ?? []).map(toRawItem)
+    : (data.value?.items ?? []).map(toRawItem),
+)
+const trendingDelta = computed(() =>
+  new Map((trendingData.value?.items ?? []).map(item => [item.id, item.delta_view ?? 0])),
+)
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 
 // 平台筛选随分区变化（映射统一在 useGameSection）：碧蓝航线当前只有 B 站来源
@@ -64,9 +79,25 @@ function applyQuery(patch: Record<string, string | undefined>) {
         </div>
         <button type="submit" class="btn-primary px-3 py-1.5 text-xs">搜索</button>
       </form>
+      <div class="flex gap-1.5">
+        <button
+          class="rounded-full px-3 py-1 text-xs transition-colors"
+          :class="tab !== 'trending' ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
+          @click="applyQuery({ tab: undefined })"
+        >
+          最新
+        </button>
+        <button
+          class="rounded-full px-3 py-1 text-xs transition-colors"
+          :class="tab === 'trending' ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
+          @click="applyQuery({ tab: 'trending' })"
+        >
+          🔥 热度飙升
+        </button>
+      </div>
     </div>
 
-    <div class="mb-3 flex flex-wrap gap-1.5">
+    <div v-if="tab !== 'trending'" class="mb-3 flex flex-wrap gap-1.5">
       <button
         class="rounded-full px-3 py-1 text-xs transition-colors"
         :class="!platform ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
@@ -85,11 +116,19 @@ function applyQuery(patch: Record<string, string | undefined>) {
       </button>
     </div>
 
-    <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
+    <section v-if="tab !== 'trending' && status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
     <section v-else class="panel overflow-hidden">
-      <RawFeedRow v-for="item in list" :key="item.id" :item="item" :show-community="isAll" />
-      <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">没有匹配的内容。</p>
-      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
+      <RawFeedRow
+        v-for="item in list"
+        :key="item.id"
+        :item="item"
+        :show-community="isAll"
+        :delta-view="tab === 'trending' ? trendingDelta.get(item.id) ?? 0 : 0"
+      />
+      <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
+        {{ tab === 'trending' ? '24 小时内还没有明显的热度变化。' : '没有匹配的内容。' }}
+      </p>
+      <div v-if="tab !== 'trending' && totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
         <span>共 {{ data?.total ?? 0 }} 条</span>
         <div class="flex items-center gap-3">
           <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="applyQuery({ page: String(page - 1) })">« 上一页</button>

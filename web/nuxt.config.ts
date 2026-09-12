@@ -18,6 +18,8 @@ export default defineNuxtConfig({
     // 后端所有 HTTP API 都在 /api/** 下（含 /api/admin 管理接口）；
     // /admin/** 是 Nuxt 页面路由，不代理
     '/api/**': { proxy: 'http://127.0.0.1:8000/api/**' },
+    // RSS 订阅源：后端生成 XML，这里映射到站点根路径
+    '/rss.xml': { proxy: 'http://127.0.0.1:8000/api/rss.xml' },
   },
   vite: {
     plugins: [tailwindcss()],

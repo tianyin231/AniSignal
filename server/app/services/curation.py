@@ -276,6 +276,107 @@ async def review_recent_contents(
     return await review_contents(session, ids)
 
 
+async def select_trending(
+    session: AsyncSession, limit: int = 10, community: str = DEFAULT_COMMUNITY, hours: int = 24
+) -> list[dict]:
+    """热度飙升：窗口内播放增量最高的内容（≥2 个快照才可参与）。
+
+    返回 PublicContentItem 兼容 dict，额外带 delta_view（窗口内播放增量）。
+    """
+    from app.services import settings as settings_service
+
+    window_start = utcnow() - timedelta(hours=hours)
+    latest = _latest_version_subquery()
+    conditions: list = [] if is_all_community(community) else [RawContent.community == community]
+    conditions.append(RawContent.hidden.is_(False))
+    hidden_platforms = settings_service.hidden_platforms(
+        await settings_service.get_media_visibility(session)
+    )
+    if hidden_platforms:
+        conditions.append(RawContent.platform.notin_(hidden_platforms))
+    conditions.append(
+        ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None)
+    )
+
+    snap_sq = (
+        select(
+            MetricSnapshot.raw_content_id.label("rid"),
+            func.min(MetricSnapshot.id).label("first_id"),
+            func.max(MetricSnapshot.id).label("last_id"),
+        )
+        .where(MetricSnapshot.captured_at >= window_start)
+        .group_by(MetricSnapshot.raw_content_id)
+        .having(func.count(MetricSnapshot.id) >= 2)
+        .subquery()
+    )
+    rows = list(
+        await session.execute(
+            select(
+                snap_sq.c.first_id,
+                snap_sq.c.last_id,
+                RawContent,
+                Source.name,
+                Source.identity,
+                ContentVersion,
+            )
+            .join(RawContent, RawContent.id == snap_sq.c.rid)
+            .join(latest, latest.c.rid == RawContent.id)
+            .join(
+                ContentVersion,
+                (ContentVersion.raw_content_id == latest.c.rid)
+                & (ContentVersion.version == latest.c.version),
+            )
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .where(*conditions)
+        )
+    )
+    edge_ids = {snap_id for row in rows for snap_id in (row.first_id, row.last_id)}
+    edge_metrics: dict[int, dict] = {}
+    if edge_ids:
+        edge_rows = await session.execute(
+            select(MetricSnapshot).where(MetricSnapshot.id.in_(edge_ids))
+        )
+        edge_metrics = {snap.id: (snap.metrics or {}) for snap in edge_rows.scalars()}
+
+    items: list[dict] = []
+    for first_id, last_id, raw, source_name, source_identity, version in rows:
+        delta = _views(edge_metrics.get(last_id)) - _views(edge_metrics.get(first_id))
+        if delta <= 0:
+            continue
+        normalized = version.normalized_json if version else None
+        media = (normalized or {}).get("media") or []
+        text = (version.text if version else None) or str((normalized or {}).get("text") or "")
+        excerpt = text.strip()
+        if "<" in excerpt and ">" in excerpt:
+            excerpt = re.sub(r"<[^>]+>", "", unescape(excerpt))
+        items.append(
+            {
+                "id": raw.id,
+                "platform": raw.platform,
+                "content_type": raw.content_type,
+                "external_id": raw.external_id,
+                "url": raw.url,
+                "title": (version.title if version else None) or raw.external_id,
+                "text_excerpt": excerpt[:140] + ("…" if len(excerpt) > 140 else ""),
+                "published_at": raw.published_at,
+                "collected_at": raw.collected_at,
+                "source_name": source_name,
+                "identity": source_identity or "unknown",
+                "category": version.category,
+                "metrics": edge_metrics.get(last_id),
+                "cover": media[0] if isinstance(media, list) and media else None,
+                "preview_mode": (
+                    "full" if text and text.strip() else ("partial" if media else "external_only")
+                ),
+                "matched_keywords": (raw.matched_keywords or []),
+                "community": (raw.community or DEFAULT_COMMUNITY),
+                "delta_view": delta,
+            }
+        )
+    items.sort(key=lambda x: x["delta_view"], reverse=True)
+    return items[:limit]
+
+
 async def select_highlights(
     session: AsyncSession, limit: int = 5, community: str = DEFAULT_COMMUNITY
 ) -> list[dict]:

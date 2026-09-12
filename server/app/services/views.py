@@ -81,6 +81,7 @@ async def events_to_out(
             published_at=raw.published_at,
             url=raw.url,
             content_id=raw.id,
+            identity=(source.identity if source else "unknown"),
         )
         bucket = (
             conflicts_by_event if evidence.role == "conflict" else evidences_by_event

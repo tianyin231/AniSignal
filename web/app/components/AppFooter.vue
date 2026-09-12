@@ -11,6 +11,7 @@ const { t } = useSiteConfig()
       <nav class="flex gap-4">
         <NuxtLink to="/about" class="transition-colors hover:text-slate-600 dark:hover:text-zinc-300">关于</NuxtLink>
         <NuxtLink to="/sources" class="transition-colors hover:text-slate-600 dark:hover:text-zinc-300">来源与边界</NuxtLink>
+        <a href="/rss.xml" class="transition-colors hover:text-slate-600 dark:hover:text-zinc-300">RSS 订阅</a>
       </nav>
     </div>
   </footer>

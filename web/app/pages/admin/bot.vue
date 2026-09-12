@@ -20,7 +20,7 @@ const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 
 const targets = ref<Target[]>([])
 const deliveries = ref<Delivery[]>([])
 const bridge = reactive({ endpoint: '', api_key: '', api_key_set: false })
-const toolNames: Record<string, string> = { digest: '今日速报', news: '资讯查询', products: '商品进展' }
+const toolNames: Record<string, string> = { digest: '今日速报', news: '资讯查询', products: '商品进展', trending: '热度飙升' }
 const statuses: Record<string, string> = { pending: '待发送', sending: '发送中', accepted: '网关已接收', failed: '发送失败', unknown: '结果待核对', cancelled: '已取消' }
 const form = ref<Target>(defaults())
 const editorOpen = ref(false)
