@@ -1,10 +1,28 @@
 /* Product route only. No global theme, scrollbar or application layout mutations. */
 .as-product {
-  --as-ink: #12263e; --as-muted: #64758b; --as-blue: #2461e8; --as-line: #dfe6ef;
-  --as-paper: #f8fafc; --as-scroll: 0%; color: var(--as-ink); background: var(--as-paper);
+  --as-ink: #12263e; --as-muted: #64758b; --as-blue: #2563eb; --as-line: #dfe6ef;
+  --as-paper: #f1f5f9; --as-card: #ffffff; --as-card-line: #dfe6ef; --as-scroll: 0%;
+  color: var(--as-ink); color-scheme: light; overflow-x: clip; isolation: isolate; min-height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", "Segoe UI", sans-serif;
-  font-size: 15px; line-height: 1.65; color-scheme: light; overflow-x: clip; isolation: isolate;
-  min-height: 100vh; -webkit-font-smoothing: antialiased;
+  font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  background:
+    radial-gradient(1200px 700px at 15% -10%, rgb(37 99 235 / 0.16), transparent 60%),
+    radial-gradient(1000px 600px at 92% -5%, rgb(6 182 212 / 0.13), transparent 60%),
+    radial-gradient(900px 700px at 55% 115%, rgb(20 184 166 / 0.1), transparent 65%),
+    radial-gradient(700px 500px at -5% 55%, rgb(251 191 36 / 0.05), transparent 60%),
+    var(--as-paper);
+  background-attachment: fixed;
+}
+/* 暗色模式：对齐主站 zinc-950 + 深色极光 */
+.dark .as-product {
+  --as-ink: #f4f4f5; --as-muted: #a1a1aa; --as-line: #27272a;
+  --as-paper: #09090b; --as-card: #18181b; --as-card-line: #2e2e33; --as-blue: #3b82f6;
+  color-scheme: dark;
+  background:
+    radial-gradient(1200px 700px at 15% -10%, rgb(59 130 246 / 0.22), transparent 60%),
+    radial-gradient(1000px 600px at 92% -5%, rgb(8 145 178 / 0.14), transparent 60%),
+    radial-gradient(900px 700px at 55% 118%, rgb(45 212 191 / 0.08), transparent 65%),
+    var(--as-paper);
 }
 .as-product :where(*, *::before, *::after) { box-sizing: border-box; }
 .as-product :where(h1,h2,h3,h4,p) { margin: 0; }
@@ -20,10 +38,12 @@
 .as-wrap { width: min(1240px, calc(100% - 96px)); margin-inline: auto; }
 .as-skip { position: fixed; top: -90px; left: 20px; z-index: 100; padding: 12px 20px; border-radius: 8px; background: white; }
 .as-skip:focus { top: 10px; }
-.as-header { position: sticky; top: 0; z-index: 80; background: #f8fafce8; backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-bottom: 1px solid #dfe6ef90; }
+.as-header { position: sticky; top: 0; z-index: 80; background: rgb(255 255 255 / 0.55); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border-bottom: 1px solid rgb(15 23 42 / 0.06); box-shadow: 0 1px 12px rgb(15 23 42 / 0.04); }
+.dark .as-header { background: rgb(10 10 18 / 0.6); border-bottom-color: rgb(255 255 255 / 0.08); }
 .as-nav { height: 78px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }
 .as-brand { display: inline-flex; align-items: center; gap: 11px; font-size: 22px; font-weight: 760; letter-spacing: -.7px; white-space: nowrap; }
-.as-brand-mark { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 10px; background: var(--as-blue); color: white; box-shadow: inset 0 1px 1px #ffffff60, 0 3px 7px #2461e827; }
+.as-brand-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; overflow: hidden; }
+.as-brand-mark img { width: 100%; height: 100%; object-fit: contain; }
 .as-brand-mark .as-icon { width: 21px; height: 21px; }
 .as-brand-label { margin-left: 7px; border-left: 1px solid #d5deeb; padding-left: 16px; font-size: 12px; font-weight: 450; color: var(--as-muted); letter-spacing: 1px; }
 .as-nav-links,.as-nav-actions { display: flex; align-items: center; gap: 26px; }
