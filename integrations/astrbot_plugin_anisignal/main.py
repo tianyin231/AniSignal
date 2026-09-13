@@ -15,7 +15,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.3.7"
+VERSION = "1.3.8"
 
 # 固定人设开场（明石）：指令回复不走 LLM，用池子轮换，稳定且不暴露工具身份。
 _INTRO_POOLS = {
@@ -464,16 +464,16 @@ class AniSignalPlugin(Star):
             yield out
 
     @llm_tool(name="anisignal_query")
-    async def query_tool(self, event: AstrMessageEvent, tool: str = "digest", query: str = "") -> str:
+    async def query_tool(self, event: AstrMessageEvent, query_type: str = "digest", search: str = "") -> str:
         """Look up game news, daily digest, trending contents, event calendar, redeem codes or verified merchandise shipping evidence.
 
         Args:
-            tool(string): One of digest (last 24h), news (last 7 days), trending (24h view-velocity), calendar (schedules), codes (redeem codes), products (shipping evidence).
-            query(string): Short search keyword, e.g. 爱弥斯 or 键盘. Empty returns the subscribed scope.
+            query_type(string): One of digest (last 24h), news (last 7 days), trending (24h view-velocity), calendar (schedules), codes (redeem codes), products (shipping evidence).
+            search(string): Short search keyword, e.g. 爱弥斯 or 键盘. Empty returns the subscribed scope.
         """
-        if tool not in ("digest", "news", "products", "trending", "calendar", "codes"):
+        if query_type not in ("digest", "news", "products", "trending", "calendar", "codes"):
             return "仅支持 digest、news、products、trending、calendar、codes。"
-        return json.dumps(await self._query(event, tool, query), ensure_ascii=False)
+        return json.dumps(await self._query(event, query_type, search), ensure_ascii=False)
 
     @filter.on_llm_request()
     async def add_instructions(self, event: AstrMessageEvent, req: ProviderRequest):
