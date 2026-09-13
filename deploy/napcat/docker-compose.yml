@@ -1,0 +1,31 @@
+# NapCat（个人 QQ / OneBot）— 与 AstrBot 同网，便于反向 WS
+# 数据目录与 compose 同级，宝塔 Docker 可管理容器
+services:
+  napcat_nNjs:
+    image: mlikiowa/napcat-docker:${VERSION:-latest}
+    container_name: napcat_nNjs
+    restart: always
+    environment:
+      - TZ=Asia/Shanghai
+      - NAPCAT_UID=${NAPCAT_UID:-0}
+      - NAPCAT_GID=${NAPCAT_GID:-0}
+    ports:
+      - ${HOST_IP:-127.0.0.1}:${WEB_HTTP_PORT:-6099}:6099
+      - ${HOST_IP:-127.0.0.1}:${ONEBOT_PORT:-3001}:3001
+    volumes:
+      - ${APP_PATH}/qq:/app/.config/QQ
+      - ${APP_PATH}/napcat:/app/napcat/config
+    mem_limit: ${MEMORY_LIMIT:-768m}
+    cpus: ${CPUS:-1.0}
+    labels:
+      createdBy: "bt_apps"
+    networks:
+      - baota_net
+      - notify
+
+networks:
+  baota_net:
+    external: true
+  notify:
+    external: true
+    name: ${NOTIFY_NETWORK:-ap_notify_net}
