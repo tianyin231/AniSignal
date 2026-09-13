@@ -15,7 +15,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.3.6"
+VERSION = "1.3.7"
 
 # 固定人设开场（明石）：指令回复不走 LLM，用池子轮换，稳定且不暴露工具身份。
 _INTRO_POOLS = {
@@ -436,20 +436,20 @@ class AniSignalPlugin(Star):
                 )
         except Exception:
             logger.warning("AniSignal digest reply was not recorded into conversation history")
-        # 先回文字（命令通道稳定），再单独发一张封面：
-        # 整链 message+url_image 在 QQ 官方命令路径上偶发只出文字。
+        # QQ 官方 msg_type=7 支持 content(文本)+media(图) 同一条消息；
+        # 必须同链一次 send，拆成两次会变成两条气泡。
+        if cover:
+            try:
+                chain = MessageChain().message(text).url_image(cover)
+                sent = await asyncio.wait_for(
+                    self.context.send_message(event.unified_msg_origin, chain), timeout=25,
+                )
+                if sent:
+                    return
+                logger.warning("AniSignal digest combined send returned empty")
+            except Exception as exc:
+                logger.warning("AniSignal digest combined send failed (%s)", type(exc).__name__)
         yield event.plain_result(text)
-        if not cover:
-            return
-        try:
-            chain = MessageChain().url_image(cover)
-            sent = await asyncio.wait_for(
-                self.context.send_message(event.unified_msg_origin, chain), timeout=25,
-            )
-            if not sent:
-                logger.warning("AniSignal digest cover send returned empty")
-        except Exception as exc:
-            logger.warning("AniSignal digest cover send failed (%s)", type(exc).__name__)
 
     @filter.command("资讯")
     async def news(self, event: AstrMessageEvent, keyword: str = ""):
