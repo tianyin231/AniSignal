@@ -40,6 +40,7 @@ services:
       ANISIGNAL_REDIS_URL: redis://redis:6379/0
       ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:-change-me}
       ANISIGNAL_PUBLIC_BASE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
+      ANISIGNAL_YOUTUBE_API_KEY: ${ANISIGNAL_YOUTUBE_API_KEY:-}
       TZ: Asia/Shanghai
     depends_on:
       mysql:
