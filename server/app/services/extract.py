@@ -214,7 +214,7 @@ async def extract_entities(session: AsyncSession, content_id: int) -> dict:
         pushed = await _push_to_targets(
             session,
             community,
-            "updates",
+            "critical",
             f"🎫 新兑换码：{entry['code']}\n来自：{title}\n记得尽快兑换，过期作废。",
             f"code:{community}:{entry['code']}",
         )
@@ -240,7 +240,7 @@ async def extract_entities(session: AsyncSession, content_id: int) -> dict:
             pushed = await _push_to_targets(
                 session,
                 community,
-                "updates",
+                "critical",
                 f"⚠️ 日程变更：{entry['title']}\n新时间：{(entry['start_at'] + timedelta(hours=8)).strftime('%Y/%m/%d %H:%M')}（北京时间）",
                 f"delay:{community}:{content_id}:{int(entry['start_at'].timestamp())}",
             )

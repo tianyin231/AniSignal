@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime, timedelta
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +12,7 @@ from app.clock import utcnow
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Product, RawContent, RedeemCode
 from app.services.notifications import group_candidates, load_candidates
-from app.services.settings import get_setting
+from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 
 TOOLS = {
@@ -23,6 +23,98 @@ TOOLS = {
     "calendar": "活动日历",
     "codes": "兑换码",
 }
+
+# 合并缓冲存 site_settings，避免为一期加表迁移；key 按目标隔离。
+_MERGE_KEY_PREFIX = "bot_merge_"
+
+
+def _community_label(community: str | None) -> str:
+    return COMMUNITY_LABELS.get(community or "", "")
+
+
+def _fmt_bj(dt: datetime, fmt: str = "%m/%d %H:%M") -> str:
+    return (dt + timedelta(hours=8)).strftime(fmt)
+
+
+def format_short_update(item: dict) -> str:
+    """结构化短讯：分区徽章 + 标题 + 一句话 + 时间/链接。"""
+    label = _community_label(item.get("community"))
+    title = item.get("title") or "未命名动态"
+    summary = (item.get("summary") or item.get("text") or "").replace("\n", " ").strip()
+    if len(summary) > 80:
+        summary = summary[:79] + "…"
+    when = _fmt_bj(item.get("published_at") or utcnow())
+    url = (item.get("url") or "").strip()
+    lines = [f"[{label}] {title}" if label else title]
+    if summary:
+        lines.append(summary)
+    lines.append(f"{when} · {url}" if url else when)
+    return "\n".join(lines)
+
+
+def format_merged_updates(items: list[dict], now: datetime) -> str:
+    """合并窗口内多条 updates 压成一条列表，避免连环刷屏。"""
+    lines = [f"重要动态 ×{len(items)}", _fmt_bj(now, "%m/%d %H:%M 更新")]
+    for i, item in enumerate(items[:8], 1):
+        label = _community_label(item.get("community"))
+        title = item.get("title") or "未命名动态"
+        prefix = f"[{label}] " if label else ""
+        lines.append(f"{i}. {prefix}{title}")
+        url = (item.get("url") or "").strip()
+        if url:
+            lines.append(url)
+    if len(items) > 8:
+        lines.append(f"…共 {len(items)} 条")
+    return "\n".join(lines)
+
+
+def collect_images(items: list[dict], limit: int) -> list[str]:
+    images: list[str] = []
+    for item in items:
+        image = item.get("image")
+        if image and image not in images:
+            images.append(image)
+        if len(images) >= limit:
+            break
+    return images
+
+
+def _merge_setting_key(target_id: int) -> str:
+    return f"{_MERGE_KEY_PREFIX}{target_id}"
+
+
+async def load_merge_buffer(session: AsyncSession, target_id: int) -> dict:
+    return (await get_setting(session, _merge_setting_key(target_id))) or {"items": [], "flush_at": None}
+
+
+async def save_merge_buffer(session: AsyncSession, target_id: int, buffer: dict) -> None:
+    await set_setting(session, _merge_setting_key(target_id), buffer)
+
+
+def _is_quiet(local_hour: int, config: dict) -> bool:
+    start, end = config.get("quiet_start", 23), config.get("quiet_end", 8)
+    if start == end:
+        return False
+    if start < end:
+        return start <= local_hour < end
+    return local_hour >= start or local_hour < end
+
+
+async def _hourly_updates_count(session: AsyncSession, target_id: int, now: datetime) -> int:
+    return await session.scalar(
+        select(func.count()).select_from(BotDelivery).where(
+            BotDelivery.target_id == target_id,
+            BotDelivery.kind.in_(["updates", "critical", "calendar"]),
+            BotDelivery.created_at >= now - timedelta(hours=1),
+        )
+    ) or 0
+
+
+def classify_item(item: dict) -> str:
+    """critical 立即推（可穿透静默）；normal 进合并窗口。"""
+    if item.get("importance"):
+        return "critical"
+    return "normal"
 
 
 async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None) -> dict:
@@ -209,6 +301,31 @@ async def deliver(session, target, row, *, force=False):
     return row
 
 
+async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, quiet: bool, quiet_critical: bool,
+                              hourly_limit: int, max_images: int) -> None:
+    if not (buffer.get("items") and buffer.get("flush_at")):
+        return
+    flush_at = datetime.fromisoformat(buffer["flush_at"])
+    if now < flush_at:
+        return
+    can_send = True
+    if quiet and not quiet_critical:
+        can_send = False
+    elif hourly_limit and await _hourly_updates_count(session, target.id, now) >= hourly_limit:
+        can_send = False
+    if can_send:
+        images = collect_images(buffer["items"], max_images)
+        text = format_merged_updates(buffer["items"], now)
+        window_key = hashlib.sha256(
+            (f"merge:{target.id}:{buffer['flush_at']}:" + "".join(i["dedupe"] for i in buffer["items"])).encode()
+        ).hexdigest()[:32]
+        await create_delivery(session, target, "updates", text, f"updates:{target.id}:{window_key}", media=images)
+        await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
+    else:
+        buffer["flush_at"] = (now + timedelta(minutes=5)).isoformat()
+        await save_merge_buffer(session, target.id, buffer)
+
+
 async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
     now = now or utcnow()
     local = now + timedelta(hours=8)
@@ -221,6 +338,11 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
     for target_id in ids:
         target = await session.get(BotTarget, target_id)
         config = target.config
+        quiet = _is_quiet(local.hour, config)
+        quiet_critical = bool(config.get("quiet_critical", True))
+        merge_minutes = int(config.get("merge_minutes", 5) or 0)
+        hourly_limit = int(config.get("hourly_limit", 6) or 0)
+        max_images = max(1, min(9, int(config.get("max_images", 3) or 3)))
         if config.get("reminders_enabled"):
             reminder_ids = list(await session.scalars(select(BotReminder.id).where(
                 BotReminder.target_id == target.id, BotReminder.status == "pending", BotReminder.due_at <= now,
@@ -230,7 +352,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     BotReminder.status == "pending").with_for_update())
                 if not reminder:
                     continue
-                due = (reminder.due_at + timedelta(hours=8)).strftime("%Y/%m/%d %H:%M")
+                due = _fmt_bj(reminder.due_at, "%Y/%m/%d %H:%M")
                 reminder.status = "queued"
                 await create_delivery(session, target, "reminder", f"约定提醒 #{reminder.id} · {due}（北京时间）\n{reminder.body}", f"reminder:{reminder.id}")
             await session.commit()
@@ -241,12 +363,23 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                 key = f"daily:{target.id}:{local.date()}"
                 if not await session.scalar(select(BotDelivery.id).where(BotDelivery.dedupe_key == key)):
                     payload = await query_target(session, target, now=due)
-                    covers = [i["image"] for i in payload["items"] if i.get("image")][:1]
-                    await create_delivery(session, target, "daily", payload["text"], key, media=covers)
-        quiet_start, quiet_end = config.get("quiet_start", 23), config.get("quiet_end", 8)
-        quiet = (quiet_start <= local.hour < quiet_end) if quiet_start < quiet_end else (local.hour >= quiet_start or local.hour < quiet_end) if quiet_start != quiet_end else False
-        if config.get("updates_enabled") and not quiet:
-            # 日历提醒：活动/卡池/直播结束前 2 小时、维护开始前 30 分钟（静默时段直接跳过该时刻）
+                    items = payload.get("items") or []
+                    style = config.get("daily_style", "compact")
+                    covers = collect_images(items, max_images if style == "compact" else 1)
+                    if style == "split" and items:
+                        head = payload["text"].split("\n", 2)[0]
+                        await create_delivery(session, target, "daily", f"{head}\n共 {len(items)} 条重点，详情如下", key, media=covers[:1])
+                        for idx, item in enumerate(items[:2], 1):
+                            await create_delivery(
+                                session, target, "updates",
+                                format_short_update(item),
+                                f"daily:{target.id}:{local.date()}:{idx}",
+                                media=[item["image"]] if item.get("image") else None,
+                            )
+                    else:
+                        await create_delivery(session, target, "daily", payload["text"], key, media=covers)
+        # 日历：默认静默跳过；quiet_critical 时穿透静默，避免临期事项丢失。
+        if config.get("updates_enabled") and (not quiet or quiet_critical):
             target_community = config.get("community", "all")
             sched_conditions = [RawContent.hidden.is_(False)]
             if target_community != "all":
@@ -265,37 +398,94 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                 if stage_at is None:
                     continue
                 stage = schedule.kind if stage_at == schedule.end_at else "maintenance_start"
-                due = (stage_at + timedelta(hours=8)).strftime("%Y/%m/%d %H:%M")
+                due = _fmt_bj(stage_at, "%Y/%m/%d %H:%M")
                 text = (
                     f"⏰ 日历提醒\n{schedule.title}\n"
-                    f"{(stage_at + timedelta(hours=8)).strftime('%Y/%m/%d %H:%M')}（北京时间）"
+                    f"{due}（北京时间）"
                     f"{'结束' if stage_at == schedule.end_at else '开始'}"
                 )
                 await create_delivery(session, target, "calendar", text, f"calendar:{schedule.id}:{stage}")
-        if config.get("updates_enabled") and not quiet:
+        buffer = await load_merge_buffer(session, target.id)
+        if config.get("updates_enabled"):
             payload = await query_target(session, target, now=now, collected_after=target.last_scan_at)
+            critical_items = []
+            normal_items = []
             for item in payload["items"]:
+                if classify_item(item) == "critical":
+                    critical_items.append(item)
+                else:
+                    normal_items.append(item)
+            for item in critical_items:
                 event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
-                # 同一公告跨平台补证据不重复推送；履约结论改变时才再次通知。
-                identity = f"event:{event.id}:{event.conclusion}" if event else f"content:{item['id']}"
+                if event is not None:
+                    identity = f"event:{event.id}:{event.conclusion}"
+                else:
+                    identity = f"content:{item['id']}"
                 digest = hashlib.sha256(identity.encode()).hexdigest()[:32]
-                text = (f"{COMMUNITY_LABELS.get(item.get('community'), '')} · 重要动态\n{item['title']}\n"
-                        f"{(item.get('summary') or item['text'])[:500]}\n"
-                        f"来源：{item.get('source') or item['platform']} · {(item['published_at'] + timedelta(hours=8)).strftime('%Y/%m/%d %H:%M')}\n"
-                        f"{item.get('url') or ''}")
-                await create_delivery(session, target, "updates", text, f"updates:{target.id}:{digest}",
-                                      media=[item["image"]] if item.get("image") else None)
+                await create_delivery(
+                    session, target, "critical", format_short_update(item),
+                    f"critical:{target.id}:{digest}",
+                    media=[item["image"]] if item.get("image") else None,
+                )
+            if normal_items and merge_minutes <= 0:
+                for item in normal_items:
+                    event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
+                    if event is not None:
+                        identity = f"event:{event.id}:{event.conclusion}"
+                    else:
+                        identity = f"content:{item['id']}"
+                    digest = hashlib.sha256(identity.encode()).hexdigest()[:32]
+                    await create_delivery(
+                        session, target, "updates", format_short_update(item),
+                        f"updates:{target.id}:{digest}",
+                        media=[item["image"]] if item.get("image") else None,
+                    )
+            elif normal_items:
+                known = {entry.get("dedupe") for entry in buffer.get("items", [])}
+                for item in normal_items:
+                    event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
+                    if event is not None:
+                        identity = f"event:{event.id}:{event.conclusion}"
+                    else:
+                        identity = f"content:{item['id']}"
+                    digest = hashlib.sha256(identity.encode()).hexdigest()[:32]
+                    if digest in known:
+                        continue
+                    published = item.get("published_at")
+                    buffer.setdefault("items", []).append({
+                        "dedupe": digest,
+                        "title": item.get("title"),
+                        "community": item.get("community"),
+                        "summary": (item.get("summary") or item.get("text") or "")[:200],
+                        "url": item.get("url"),
+                        "image": item.get("image"),
+                        "published_at": published.isoformat() if isinstance(published, datetime) else None,
+                    })
+                if buffer["items"] and not buffer.get("flush_at"):
+                    buffer["flush_at"] = (now + timedelta(minutes=merge_minutes)).isoformat()
+                # 新条目进缓冲后立刻落库，进程重启也不丢。
+                await save_merge_buffer(session, target.id, buffer)
             target.last_scan_at = now
             await session.commit()
+            await _flush_merge_buffer(
+                session, target, buffer, now,
+                quiet=quiet, quiet_critical=quiet_critical, hourly_limit=hourly_limit, max_images=max_images,
+            )
+        elif buffer.get("items"):
+            await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
         pending = list(await session.scalars(select(BotDelivery).where(
             BotDelivery.target_id == target.id,
-            BotDelivery.kind.in_(["daily", "updates", "reminder", "calendar"]),
+            BotDelivery.kind.in_(["daily", "updates", "critical", "reminder", "calendar"]),
             BotDelivery.status.in_(["pending", "failed"]), BotDelivery.attempts < 3,
         ).order_by(BotDelivery.id).limit(10)))
         for row in pending:
             if row.kind == "reminder" and not config.get("reminders_enabled"):
                 continue
-            if row.kind in ("updates", "calendar") and quiet:
+            if row.kind == "updates" and quiet:
+                continue
+            if row.kind == "calendar" and quiet and not quiet_critical:
+                continue
+            if row.kind == "critical" and quiet and not quiet_critical:
                 continue
             if row.status == "failed" and row.updated_at > now - timedelta(minutes=5):
                 continue

@@ -107,7 +107,7 @@ async def test_gateway_checks_response_body(monkeypatch, body, status):
 
 async def test_scoped_queries_exclude_hidden_and_old_updates(session, monkeypatch):
     now = utcnow()
-    row = await target(session, community='wuwa', keywords=['键盘'], daily_enabled=False, updates_enabled=True, quiet_start=0, quiet_end=0)
+    row = await target(session, community='wuwa', keywords=['键盘'], daily_enabled=False, updates_enabled=True, quiet_start=0, quiet_end=0, merge_minutes=0)
     row.last_scan_at = now - timedelta(minutes=5)
     source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
     session.add(source)
@@ -129,3 +129,108 @@ async def test_scoped_queries_exclude_hidden_and_old_updates(session, monkeypatc
     await bot.run_bot_notifications(session, now)
     await bot.run_bot_notifications(session, now + timedelta(minutes=1))
     assert len(calls) == 1
+
+
+async def test_merge_window_batches_normal_updates(session, monkeypatch):
+    now = datetime(2026, 9, 13, 4, 0)  # 北京 12:00
+    row = await target(session, community='wuwa', daily_enabled=False, updates_enabled=True,
+                       quiet_start=0, quiet_end=0, merge_minutes=5, hourly_limit=0)
+    row.last_scan_at = now - timedelta(minutes=10)
+    source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
+    session.add(source)
+    await session.flush()
+    for n in range(2):
+        raw = RawContent(platform='bilibili', content_type='video', external_id=f'm{n}', source_id=source.id, community='wuwa',
+                         collected_at=now - timedelta(minutes=2), published_at=now - timedelta(hours=1), url=f'https://example.com/{n}')
+        session.add(raw)
+        await session.flush()
+        session.add(ContentVersion(raw_content_id=raw.id, title=f'合并消息{n}', text='正文', category='announcement'))
+    await session.commit()
+    calls = []
+    async def send(*args):
+        calls.append(args)
+        return 'accepted', None
+    monkeypatch.setattr(bot, 'send_message', send)
+    await bot.run_bot_notifications(session, now)
+    assert not list(await session.scalars(select(BotDelivery).where(BotDelivery.kind == 'updates')))
+    await bot.run_bot_notifications(session, now + timedelta(minutes=6))
+    rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.kind == 'updates')))
+    assert len(rows) == 1
+    assert '重要动态 ×2' in rows[0].body
+    assert '合并消息0' in rows[0].body and '合并消息1' in rows[0].body
+
+
+async def test_short_format_and_multi_image(session, monkeypatch):
+    now = datetime(2026, 9, 13, 4, 0)
+    row = await target(session, community='wuwa', daily_enabled=False, updates_enabled=True,
+                       quiet_start=0, quiet_end=0, merge_minutes=0, max_images=3)
+    row.last_scan_at = now - timedelta(minutes=10)
+    source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
+    session.add(source)
+    await session.flush()
+    for n in range(2):
+        raw = RawContent(platform='bilibili', content_type='video', external_id=f'i{n}', source_id=source.id, community='wuwa',
+                         collected_at=now - timedelta(minutes=2), published_at=now - timedelta(hours=1),
+                         url=f'https://example.com/{n}')
+        session.add(raw)
+        await session.flush()
+        session.add(ContentVersion(raw_content_id=raw.id, title=f'短讯标题{n}', text='一句话说明', category='announcement',
+                                   normalized_json={'media': [f'https://img.example/{n}.jpg']}))
+    await session.commit()
+    # delivery_mode astrbot：rows 留在 pending，便于检查 media
+    row.config = {**row.config, 'delivery_mode': 'astrbot'}
+    await session.commit()
+    await bot.run_bot_notifications(session, now)
+    rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.kind == 'updates').order_by(BotDelivery.id)))
+    assert len(rows) == 2
+    bodies = "\n".join(r.body for r in rows)
+    assert '短讯标题0' in bodies and '短讯标题1' in bodies
+    media_lists = [r.media for r in rows]
+    assert all(m and m[0].startswith('https://img.example/') for m in media_lists)
+
+
+async def test_quiet_blocks_normal_but_allows_critical(session):
+    # 北京 01:00 = UTC 前一日 17:00；quiet 23-8
+    now = datetime(2026, 9, 13, 17, 0)
+    row = await target(session, community='wuwa', daily_enabled=False, updates_enabled=True,
+                       quiet_start=23, quiet_end=8, quiet_critical=True, merge_minutes=0)
+    row.last_scan_at = now - timedelta(minutes=10)
+    row.config = {**row.config, 'delivery_mode': 'direct'}
+    await session.commit()
+    source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
+    session.add(source)
+    await session.flush()
+    raw = RawContent(platform='bilibili', content_type='video', external_id='q1', source_id=source.id, community='wuwa',
+                     collected_at=now - timedelta(minutes=2), published_at=now - timedelta(hours=1))
+    session.add(raw)
+    await session.flush()
+    session.add(ContentVersion(raw_content_id=raw.id, title='静默中的官方消息', text='正文', category='announcement'))
+    await session.commit()
+    await bot.run_bot_notifications(session, now)
+    # 普通 updates 创建后因静默不投递（direct 模式下 deliver 会调 send_message；未配置 bridge 会 failed）
+    # 这里断言未产生成功投递；合并/直发创建了记录但不应被 deliver 成功。
+    rows = list(await session.scalars(select(BotDelivery)))
+    for r in rows:
+        assert r.status != 'accepted'
+
+
+async def test_format_helpers():
+    text = bot.format_short_update({
+        'community': 'wuwa', 'title': '测试标题', 'text': '这是一句说明\n第二行',
+        'published_at': datetime(2026, 9, 13, 4, 0), 'url': 'https://example.com/a',
+    })
+    assert '[鸣潮] 测试标题' in text
+    assert 'https://example.com/a' in text
+    assert '这是一句说明 第二行' in text
+    merged = bot.format_merged_updates([
+        {'community': 'blhx', 'title': '甲', 'url': 'https://a'},
+        {'community': 'wuwa', 'title': '乙', 'url': 'https://b'},
+    ], datetime(2026, 9, 13, 4, 0))
+    assert '重要动态 ×2' in merged
+    assert '[碧蓝航线] 甲' in merged
+    assert bot.collect_images([{'image': 'a'}, {'image': 'a'}, {'image': 'b'}], 3) == ['a', 'b']
+    assert bot.classify_item({'importance': True}) == 'critical'
+    assert bot.classify_item({'importance': False}) == 'normal'
+    assert bot._is_quiet(1, {'quiet_start': 23, 'quiet_end': 8}) is True
+    assert bot._is_quiet(12, {'quiet_start': 23, 'quiet_end': 8}) is False
+

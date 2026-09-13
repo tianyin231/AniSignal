@@ -149,7 +149,7 @@ async def test_delay_notice_marks_maintenance_and_pushes(client, session, monkey
     await extract_entities(session, content_id)
     maintenance = (await session.execute(select(ContentSchedule).where(ContentSchedule.kind == "maintenance"))).scalar_one()
     assert maintenance.delayed is True
-    delivery = (await session.execute(select(BotDelivery).where(BotDelivery.kind == "updates"))).scalar_one()
+    delivery = (await session.execute(select(BotDelivery).where(BotDelivery.kind == "critical"))).scalar_one()
     assert "日程变更" in delivery.body
 
 

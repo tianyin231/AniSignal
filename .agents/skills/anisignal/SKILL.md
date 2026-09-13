@@ -278,14 +278,23 @@ docker compose up -d --build
   + /custom/{id} 监控详情流；账号中心"定制监控"区块（创建表单 kind/target/name/min_views/推送/
   公开 + 行内推送开关/删除/公开徽章）；管理端 /admin/customs（巡查表 + 停用/公开切换/手动抓取/删除）。
 
-## AstrBot 机器人通道（2026-09-11 上线）
+## AstrBot 机器人通道（2026-09-11 上线；2026-09-13 通知增强一期）
 
 - **模型**：bot_targets（管理端配置的会话，config JSON：community/keywords/daily*/updates*/quiet_start·end/
-  tools/ai_prompt/ai_provider_id/delivery_mode/chat_controls/reminders_enabled/activities_enabled/manager_ids）+
+  quiet_critical/merge_minutes/hourly_limit/daily_style/max_images/tools/ai_prompt/ai_provider_id/delivery_mode/chat_controls/reminders_enabled/activities_enabled/manager_ids）+
   bot_deliveries（outbox：dedupe_key 唯一幂等，status pending→sending→accepted/failed/unknown，attempts<3，
-  receipt 发送凭据）+ bot_reminders（owner_id=真实发送者，request_key=sha256(target:actor:message_id) 幂等，
-  pending→queued）。服务端 `services/bot.py`（query_target 查询工具/run_bot_notifications 巡检/直推）+
+  receipt 发送凭据；kind= daily|updates|critical|calendar|reminder|manual）+ bot_reminders（owner_id=真实发送者，
+  request_key=sha256(target:actor:message_id) 幂等，pending→queued）。服务端 `services/bot.py`（query_target 查询工具/run_bot_notifications 巡检/直推）+
   `api/bot.py`（管理 CRUD+/api/bot 查询）+ `api/bot_companion.py`（订阅/提醒/上下文/outbox）。
+- **通知增强一期（2026-09-13）**：
+  - **消息形态**：`format_short_update` 结构化短讯（[分区] 标题 / 一句话≤80字 / 时间·链接）；`format_merged_updates`
+    合并列表；`collect_images` 多图（max_images 默认 3，claim `images` 与插件 `url_image` 循环均按上限）；
+    `daily_style=compact|split`（split=总览 1 条 + top2 短讯）。
+  - **触发策略**：`classify_item` importance→kind=critical（穿透静默）否则 normal；normal 进 `merge_minutes`
+    （默认 5）合并窗口，缓冲落 site_settings `bot_merge_{target_id}`（无迁移）；`hourly_limit`（默认 6，
+    0 不限）只限非合并外的 updates/critical/calendar 计数，超限顺延 5 分钟；`quiet_critical`（默认 true）
+    控制 critical/日历临期是否穿透静默。兑换码/延期抽取推送 kind 已改为 critical。
+  - **claim**：images 按 max_images 截断；quiet 只拦 kind=updates。
 - **两种投递模式**：direct=服务端经 bot_bridge（site_settings：endpoint+api_key）直推 AstrBot 网关；
   astrbot=插件每 15s 轮询 `/api/bot/outbox/claim` 领取（领取即 attempts+1 并发 receipt），用会话人格 +LLM
   渲染开场白后经 AstrBot 自身连接发送，回执 POST `/outbox/{id}/complete`（receipt 比对，409=凭据失效需人工）。
@@ -298,7 +307,7 @@ docker compose up -d --build
   顶部 VERSION 常量**（register 与 claim payload 共用；曾因 claim 硬编码漏 bump）。
 - **去重键**：`daily:{target_id}:{北京时间日期}`、`updates:{target_id}:{sha256(event:{id}:{conclusion}|content:{id})}`
   （同一公告跨平台补证据不重复推送，履约结论变化才再推）、`reminder:{id}`、`manual:{hex}`。
-- **插件** `integrations/astrbot_plugin_anisignal`（v1.2.0，部署在 astrbot 容器 /AstrBot/data/plugins/，
+- **插件** `integrations/astrbot_plugin_anisignal`（v1.3.0，部署在 astrbot 容器 /AstrBot/data/plugins/，
   **改插件代码需手动同步进容器**：scp 到 /tmp → docker cp 三个文件 → docker restart astrbot_nnjs-astrbot_nNjs-1；
   AstrBot 面板显示的版本号来自 metadata.yaml，心跳版本来自 main.py VERSION——两处都要对齐）。
   每 30s 拉 `/api/bot/targets` 恢复 qq_official 群场景路由并刷新配置；命令 /情报会话 /情报订阅 /我的提醒 /
