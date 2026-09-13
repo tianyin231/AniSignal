@@ -40,9 +40,17 @@ async def put_config(body: dict, session: AsyncSession = Depends(get_session)):
     api_key = body.get("api_key")
     if api_key is None or api_key == "":
         api_key = stored.get("api_key") or ""
+    raw_keys = body.get("api_keys")
+    if raw_keys is None:
+        api_keys = stored.get("api_keys") or []
+    else:
+        if isinstance(raw_keys, str):
+            raw_keys = raw_keys.replace("，", ",").replace(",", "\n").split("\n")
+        api_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
     value = {
         "base_url": str(body.get("base_url") or "").strip().rstrip("/"),
         "api_key": api_key,
+        "api_keys": api_keys,
         "model": str(body.get("model") or "").strip(),
         "price_in": float(body.get("price_in") or 0),
         "price_out": float(body.get("price_out") or 0),

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # 对外站点基址（生成 RSS 等外部引用链接用；留空则回落到请求基址）
     public_base_url: str = ""
 
+    # AI 密钥池 env 兜底（逗号分隔；DB site_settings 的 api_keys 优先）
+    ai_api_keys: str = ""
+
     # YouTube Data API v3 key（配置后 YouTube 目标改走官方接口，RSS 作为失败回退）
     youtube_api_key: str = ""
 

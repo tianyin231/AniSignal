@@ -39,9 +39,11 @@ async def get_ai_config(session: AsyncSession) -> dict:
 
     env = get_settings()
     stored = (await get_setting(session, "ai")) or {}
+    env_keys = [k.strip() for k in (env.ai_api_keys or "").split(",") if k.strip()]
     return {
         "base_url": (stored.get("base_url") or env.ai_base_url or "").rstrip("/"),
         "api_key": stored.get("api_key") or env.ai_api_key or "",
+        "api_keys": [k.strip() for k in (stored.get("api_keys") or []) if k.strip()] or env_keys,
         "model": stored.get("model") or env.ai_model or "",
         "price_in": float(stored.get("price_in") or 0),  # 每百万输入 token 单价（元/美元由你定）
         "price_out": float(stored.get("price_out") or 0),
@@ -81,16 +83,29 @@ async def record_usage(
     await session.commit()
 
 
-async def chat(
-    config: dict, system: str, user: "str | list", *, json_mode: bool = False
+# ---------- 账号池：多密钥轮询分摊 + 限流冷却（sub2api 思路的零依赖实现） ----------
+
+_POOL_INDEX = 0
+_KEY_COOLDOWN: dict[str, float] = {}
+_KEY_COOLDOWN_SECONDS = 60.0
+_POOL_ROTATE_STATUSES = {401, 402, 403, 429}  # 密钥级失败：换下一把并冷却
+
+
+def _pool_keys(config: dict) -> list[str]:
+    """密钥池 = api_keys 列表 + 主 api_key 兜底（去重保序）。"""
+    keys: list[str] = []
+    for key in [str(k).strip() for k in (config.get("api_keys") or [])]:
+        if key and key not in keys:
+            keys.append(key)
+    primary = str(config.get("api_key") or "").strip()
+    if primary and primary not in keys:
+        keys.insert(0, primary)
+    return keys or [""]
+
+
+async def _chat_once(
+    config: dict, api_key: str, system: str, user: "str | list", *, json_mode: bool = False
 ) -> tuple[str, dict | None]:
-    """OpenAI 兼容 chat/completions；返回 (回复文本, usage)。
-
-    user 为 str 时是纯文本；为 list 时是 OpenAI 多模态 content 分片
-    （如 [{"type": "text", ...}, {"type": "image_url", ...}]），原样透传。
-    """
-    import asyncio
-
     body: dict = {
         "model": config["model"],
         "messages": [
@@ -104,7 +119,7 @@ async def chat(
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
             f"{config['base_url']}/chat/completions",
-            headers={"Authorization": f"Bearer {config['api_key']}"},
+            headers={"Authorization": f"Bearer {api_key}"},
             json=body,
         )
         resp.raise_for_status()
@@ -112,11 +127,53 @@ async def chat(
     return data["choices"][0]["message"]["content"], data.get("usage")
 
 
+async def chat(
+    config: dict, system: str, user: "str | list", *, json_mode: bool = False
+) -> tuple[str, dict | None]:
+    """OpenAI 兼容 chat/completions（多密钥池化）；返回 (回复文本, usage)。
+
+    user 为 str 时是纯文本；为 list 时是 OpenAI 多模态 content 分片
+    （如 [{"type": "text", ...}, {"type": "image_url", ...}]），原样透传。
+    密钥池轮询：成功一次推进起点，把连续调用摊到各密钥上；密钥级失败
+    （429/401/402/403）立即换下一把并给该密钥 60 秒冷却；全部密钥失败时
+    抛出最后一个异常，由上层任务按既有退避逻辑处理。
+    """
+    global _POOL_INDEX
+    keys = _pool_keys(config)
+    last_error: Exception | None = None
+    for offset in range(len(keys)):
+        index = (_POOL_INDEX + offset) % len(keys)
+        api_key = keys[index]
+        in_cooldown = _KEY_COOLDOWN.get(api_key, 0) > time.monotonic()
+        if in_cooldown and offset < len(keys) - 1:
+            continue  # 冷却中的密钥让位；全部冷却时仍按序兜底尝试
+        try:
+            result = await _chat_once(config, api_key, system, user, json_mode=json_mode)
+        except httpx.HTTPStatusError as exc:
+            last_error = exc
+            status = exc.response.status_code
+            if status in _POOL_ROTATE_STATUSES:
+                _KEY_COOLDOWN[api_key] = time.monotonic() + _KEY_COOLDOWN_SECONDS
+            continue
+        except (httpx.TransportError, ValueError, KeyError) as exc:
+            last_error = exc
+            continue
+        _KEY_COOLDOWN.pop(api_key, None)
+        _POOL_INDEX = (index + 1) % len(keys)
+        return result
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("no api key configured")
+
+
 def _public_view(config: dict) -> dict:
+    keys = _pool_keys(config)
     return {
         "base_url": config["base_url"],
         "model": config["model"],
         "api_key_set": bool(config["api_key"]),
+        "api_keys_count": len(keys),
+        "api_keys_tail": [k[-6:] for k in keys],
         "price_in": config.get("price_in", 0),
         "price_out": config.get("price_out", 0),
     }
