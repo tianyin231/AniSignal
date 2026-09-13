@@ -338,8 +338,11 @@ docker compose up -d --build
   接入步骤：AstrBot 加 aiocqhttp 平台（NapCat OneBot v11 ws 反向/正向）→ 群里发 /情报会话 拿 UMO
   （这次是纯群号）→ 面板照常建会话。NapCat 收全部群消息（无 @ 限制），唤醒词/关键词应答/内容感知插话
   才可行；QQ 官方平台（qq_official）群场景只收 @消息，群主动消息有平台配额。
-- **人格（2026-09-13 现行）**：AstrBot 全局默认人格 = 自建 `anmi`（「安弥」猫娘人设，用户自编 prompt：
-  喵口癖、括号动作描写、150 字内、对 AI 疑问模糊回答不谎称真人）。安装方式：直接写 astrbot 容器
+- **人格（2026-09-13 现行）**：AstrBot 全局默认人格 = 自建 `akashi`（「明石」碧蓝航线商人猫娘，用户自编
+  prompt：自称明石+商人腔、喵口癖、括号动作描写、150 字内、对 AI 疑问模糊回答不谎称真人）。
+  **教训**：agnes 模型在人格模糊时会泄漏训练自我认知（曾自报"Sapiens AI 出品"）——具体命名的人设 +
+  显式"身份锚定"块（禁提 Sapiens/AI/模型/公司名，被问就以人设口吻岔开）能有效压制；前一代 anmi 因
+  缺少显式锚定出现过一次自爆。安装方式：直接写 astrbot 容器
   data_v4.db 的 personas 表 + cmd_config.json 的 provider_settings.default_personality（文件带 BOM，
   utf-8-sig 读写），**必须 docker kill（SIGKILL）再 start**——优雅重启可能把内存旧配置写回覆盖修改。
   **坑（2026-09-13 实录）**：default_personality 会被 AstrBot 仪表盘保存/升级流程刷回 None——稳定做法是
