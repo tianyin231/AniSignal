@@ -307,14 +307,16 @@ docker compose up -d --build
   顶部 VERSION 常量**（register 与 claim payload 共用；曾因 claim 硬编码漏 bump）。
 - **去重键**：`daily:{target_id}:{北京时间日期}`、`updates:{target_id}:{sha256(event:{id}:{conclusion}|content:{id})}`
   （同一公告跨平台补证据不重复推送，履约结论变化才再推）、`reminder:{id}`、`manual:{hex}`。
-- **插件** `integrations/astrbot_plugin_anisignal`（v1.3.1，部署在 astrbot 容器 /AstrBot/data/plugins/，
+- **插件** `integrations/astrbot_plugin_anisignal`（v1.3.2，部署在 astrbot 容器 /AstrBot/data/plugins/，
   **改插件代码需手动同步进容器**：scp 到 /tmp → docker cp 三个文件 → docker restart astrbot_nnjs-astrbot_nNjs-1；
   AstrBot 面板显示的版本号来自 metadata.yaml，心跳版本来自 main.py VERSION——两处都要对齐）。
   每 30s 拉 `/api/bot/targets` 恢复 qq_official 群场景路由并刷新配置；命令 /帮助 /情报会话 /情报订阅 /我的提醒 /
   早报 /资讯 /商品 /聊点什么 /情报挑战；llm_tool anisignal_query/subscription/reminder 按会话
   tools/reminders_enabled/chat_controls 门禁；on_llm_request 注入北京时间与最近通知上下文（防把历史通知
   当新消息）。umo/actor_id 只取自真实消息事件。**/帮助（v1.3.1）** 按会话 tools/reminders/activities/chat_controls
-  动态列出可用命令与自动推送说明。
+  动态列出可用命令与自动推送说明。**指令人格（v1.3.2）**：/帮助 /早报 /资讯 /商品 不再 plain_result 裸出——
+  `persona_intro`+`present_with_persona` 用会话人格写短开场后原样附资料（失败回退原文）；与 `render_delivery`
+  共用 `_resolve_persona`。
 - **投递带图（2026-09-12，迁移 0032）**：bot_deliveries.media JSON 列存封面 URL；daily 取头条封面、
   updates 取对应条目封面（manual 试发不带图），claim payload 带 `images`，插件用
   `MessageChain().message(text).url_image(url)` 发送（qq_official 走富媒体上传 msg_type=7，已实测通过）。
