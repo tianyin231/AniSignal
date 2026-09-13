@@ -383,7 +383,8 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     payload = await query_target(session, target, now=due)
                     items = payload.get("items") or []
                     style = config.get("daily_style", "compact")
-                    covers = collect_images(items, max_images if style == "compact" else 1)
+                    # 早报封面只带 1 张：多图会被 QQ 官方拆成多条消息。
+                    covers = collect_images(items, 1)
                     if style == "split" and items:
                         head = payload["text"].split("\n", 2)[0]
                         await create_delivery(session, target, "daily", f"{head}\n共 {len(items)} 条重点，详情如下", key, media=covers[:1])

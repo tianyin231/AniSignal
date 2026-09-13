@@ -15,7 +15,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.3.4"
+VERSION = "1.3.5"
 
 # 固定人设开场（明石）：指令回复不走 LLM，用池子轮换，稳定且不暴露工具身份。
 _INTRO_POOLS = {
@@ -412,8 +412,6 @@ class AniSignalPlugin(Star):
         if items:
             lines = [f"今日速报 · {now_bj.strftime('%m/%d')}", f"共 {len(items)} 条，以下前 {min(5, len(items))} 条"]
             for i, item in enumerate(items[:5], 1):
-                label = item.get("community") or ""
-                # community 字段是代码，服务端已给中文时优先用 summary 前缀；此处用服务端 text 更稳
                 title = (item.get("title") or "未命名动态").replace("\n", " ")
                 if len(title) > 40:
                     title = title[:39] + "…"
@@ -422,16 +420,10 @@ class AniSignalPlugin(Star):
                 if url:
                     lines.append(url)
             body = "\n".join(lines)
-            images = []
-            for item in items:
-                image = item.get("image")
-                if image and image not in images:
-                    images.append(image)
-                if len(images) >= 3:
-                    break
+            cover = next((item.get("image") for item in items if item.get("image")), None)
         else:
             body = result.get("text", "当前范围内没有匹配的新资讯。")
-            images = []
+            cover = None
         text = f"{_pick_intro('digest')}\n\n{body}"
         try:
             manager = self.context.conversation_manager
@@ -444,17 +436,18 @@ class AniSignalPlugin(Star):
                 )
         except Exception:
             logger.warning("AniSignal digest reply was not recorded into conversation history")
-        if not images:
-            yield event.plain_result(text)
-            return
-        try:
-            chain = MessageChain().message(text)
-            for image in images:
-                chain = chain.url_image(image)
-            yield event.chain_result(chain)
-        except Exception:
-            logger.warning("AniSignal digest image attach failed, fallback to text")
-            yield event.plain_result(text)
+        # 命令回应用 chain_result 会被平台拆成多条且图序错乱；与推送同路径 send_message：
+        # 文本在前、最多 1 张封面，避免刷屏。
+        if cover:
+            try:
+                chain = MessageChain().message(text).url_image(cover)
+                await asyncio.wait_for(
+                    self.context.send_message(event.unified_msg_origin, chain), timeout=25,
+                )
+                return
+            except Exception:
+                logger.warning("AniSignal digest media send failed, fallback to text")
+        yield event.plain_result(text)
 
     @filter.command("资讯")
     async def news(self, event: AstrMessageEvent, keyword: str = ""):
