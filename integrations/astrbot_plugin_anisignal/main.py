@@ -15,7 +15,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 
 @register("astrbot_plugin_anisignal", "AniSignal", "情报工具、人格播报与会话提醒", VERSION)
@@ -109,9 +109,8 @@ class AniSignalPlugin(Star):
             if kind == "GroupMessage" and adapter and hasattr(adapter, "remember_session_scene"):
                 adapter.remember_session_scene(session_id, "group")
             chain = MessageChain().message(text)
-            for image in (row.get("images") or [])[:1]:
+            for image in (row.get("images") or [])[:9]:
                 chain = chain.url_image(image)
-                break
             sent = await asyncio.wait_for(self.context.send_message(row["umo"], chain), timeout=25)
             status = "accepted" if sent else "failed"
             if not sent:
@@ -121,7 +120,7 @@ class AniSignalPlugin(Star):
         if status == "accepted":
             # 播报写入 AstrBot 会话历史：否则正常聊天看不到之前发过什么
             try:
-                kind_label = {"daily": "每日早报", "updates": "重要动态", "reminder": "定时提醒", "manual": "资讯"}.get(row.get("kind"), "资讯")
+                kind_label = {"daily": "每日早报", "updates": "重要动态", "critical": "关键动态", "reminder": "定时提醒", "manual": "资讯"}.get(row.get("kind"), "资讯")
                 manager = self.context.conversation_manager
                 cid = await manager.get_curr_conversation_id(row["umo"])
                 if cid:

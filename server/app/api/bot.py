@@ -32,6 +32,11 @@ class TargetBody(BaseModel):
     updates_enabled: bool = False
     quiet_start: int = Field(default=23, ge=0, le=23)
     quiet_end: int = Field(default=8, ge=0, le=23)
+    quiet_critical: bool = True
+    merge_minutes: int = Field(default=5, ge=0, le=60)
+    hourly_limit: int = Field(default=6, ge=0, le=50)
+    daily_style: Literal["compact", "split"] = "compact"
+    max_images: int = Field(default=3, ge=1, le=9)
     tools: list[Literal["digest", "news", "products", "trending", "calendar", "codes"]] = Field(default_factory=lambda: list(bot.TOOLS))
     ai_prompt: str = Field(default="简洁、自然地回答，保留来源与时间。", max_length=2000)
     ai_provider_id: str = Field(default="", max_length=200)
