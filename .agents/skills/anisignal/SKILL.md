@@ -141,7 +141,12 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 - 公开内容流默认**隐藏闲聊与低价值推广类目**（chat/other/promotion：二创/同人/抽奖/签到/商城礼包…）；`include_chat=true` 仅用于管理与追溯查全量。
 - 首页信息分层：**近期聚合结论 + 社区观察 > 官方原始内容**；内容按 `published_at` 排序（缺失时才回退 `collected_at`），禁止新回填的旧内容抢占顶部。事件按最新有效证据时间排序。
 - 采集目标支持 `co_terms`（共现词：标题/简介须至少命中一个）与 `min_views`（热度门槛）——入口在管理看板采集目标表单。
-- YouTube RSS 同时支持官方与精选社区频道；只有官方 channel ID 白名单标记为 official，社区频道必须配置 `co_terms` 避免混入其他游戏。
+- **YouTube 采集（2026-09-12 起）**：默认改走 **YouTube Data API v3**（`YoutubeApiCollector`，
+  `ANISIGNAL_YOUTUBE_API_KEY` 配置后生效）：playlistItems.list 拉频道上传播放列表（UU+频道ID去UC），
+  每频道每轮 1 配额单位（日配额 10000，实际用量 <5%），彻底消除匿名 RSS 的间歇 404/500 IP 风控。
+  产出与 RSS 完全同构（fetch_kind 仍为 youtube_rss，解析器零改动）；**无 key 或 API 失败（配额耗尽/
+  key 失效）自动回落 RSS**，数据流不断。工厂按 key 是否配置即时选择采集器（collect.py _COLLECTORS）。
+- YouTube RSS 仍支持官方与精选社区频道（作为回退链路）；只有官方 channel ID 白名单标记为 official，社区频道必须配置 `co_terms` 避免混入其他游戏。
 - 内容与事件均带 `matched_keywords`（采集关键词溯源）；蓝色 chips 只在内容行展示，事件行 2026-08-30 起精简为 身份+来源账号+平台徽章+功能状态（类目/地区/证据数/可信度/关键词 chips 已移除，详情页仍可见）。
 
 ## 事件引擎（规则版）
