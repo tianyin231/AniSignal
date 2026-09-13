@@ -338,11 +338,13 @@ docker compose up -d --build
   接入步骤：AstrBot 加 aiocqhttp 平台（NapCat OneBot v11 ws 反向/正向）→ 群里发 /情报会话 拿 UMO
   （这次是纯群号）→ 面板照常建会话。NapCat 收全部群消息（无 @ 限制），唤醒词/关键词应答/内容感知插话
   才可行；QQ 官方平台（qq_official）群场景只收 @消息，群主动消息有平台配额。
-- **人格（2026-09-12）**：AstrBot 默认人格已从内置 default 改为自建 `qunyou`（群友「阿汐」人设：口语化短句、
-  不用 AI 自我描述、被问是不是机器人用玩笑岔开但不谎称真人）。安装方式：直接写 astrbot 容器
+- **人格（2026-09-13 现行）**：AstrBot 全局默认人格 = 自建 `anmi`（「安弥」猫娘人设，用户自编 prompt：
+  喵口癖、括号动作描写、150 字内、对 AI 疑问模糊回答不谎称真人）。安装方式：直接写 astrbot 容器
   data_v4.db 的 personas 表 + cmd_config.json 的 provider_settings.default_personality（文件带 BOM，
-  用 utf-8-sig 读写），**必须 docker kill（SIGKILL）再 start**——优雅重启可能把内存旧配置写回覆盖修改。
-  播报开场白 = 该人格 + 插件渲染指令；agnes 限流时开场白降级为原始资料。
+  utf-8-sig 读写），**必须 docker kill（SIGKILL）再 start**——优雅重启可能把内存旧配置写回覆盖修改。
+  **坑（2026-09-13 实录）**：default_personality 会被 AstrBot 仪表盘保存/升级流程刷回 None——稳定做法是
+  同时把 `conversations.persona_id` 直接固定为该人格（会话级不依赖全局配置，双层保险）。播报开场白 =
+  该人格 + 插件渲染指令；agnes 限流时开场白降级为原始资料。群会话 ai_prompt 已与猫娘人设对齐。
 - **运维实况**：agnes 免费模型在 08:00 北京高峰常 429——人格渲染失败自动降级"原始资料+原因注记"发送
   （上线首 48h 仅 4/18 条，消息零丢失）；重建 app 容器会让插件报瞬时 ClientConnectorError，15s 周期自愈；
   当前平台组合（qq_official + weixin_oc）**拿不到群名称/群资料**（平台 API 限制），会话辨认靠管理员命名
