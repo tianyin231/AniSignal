@@ -15,7 +15,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 
 @register("astrbot_plugin_anisignal", "AniSignal", "情报工具、人格播报与会话提醒", VERSION)
@@ -208,6 +208,58 @@ class AniSignalPlugin(Star):
         target = self.targets.get(event.unified_msg_origin)
         return target if target and target.get("enabled") else None
 
+    @filter.command("帮助")
+    async def help_cmd(self, event: AstrMessageEvent):
+        """列出本会话当前可用的 AniSignal 功能。"""
+        target = self.targets.get(event.unified_msg_origin)
+        if target and target.get("enabled"):
+            state = f"已启用 · {target.get('name', '')}"
+        elif target:
+            state = f"已暂停 · {target.get('name', '')}"
+        else:
+            state = "未注册（工具可能不可用）"
+        tools = list((target or {}).get("tools") or [])
+        tool_lines = {
+            "digest": "/早报 — 近 24 小时速报",
+            "news": "/资讯 关键词 — 近 7 日资讯检索",
+            "products": "/商品 关键词 — 商品与履约进展",
+            "trending": "热度飙升 — 可直接问我「最近什么火」",
+            "calendar": "活动日历 — 可问「最近有什么活动/维护」",
+            "codes": "兑换码 — 可问「有没有兑换码」",
+        }
+        lines = [
+            "AniSignal 助手 · 帮助",
+            f"会话状态：{state}",
+            "",
+            "【查询】",
+        ]
+        if tools:
+            for key in tools:
+                if key in tool_lines:
+                    lines.append(tool_lines[key])
+        else:
+            lines.append("（本会话未开放查询工具）")
+        lines.append("")
+        lines.append("【订阅与提醒】")
+        lines.append("/情报会话 — 注册状态与会话标识")
+        lines.append("/情报订阅 — 查看/口述修改订阅")
+        if (target or {}).get("reminders_enabled"):
+            lines.append("/我的提醒 — 查看定时提醒")
+            lines.append("也可直接说：明天上午 8 点提醒我…")
+        else:
+            lines.append("（本会话未开启定时提醒）")
+        if (target or {}).get("chat_controls"):
+            lines.append("可在聊天里改订阅（群内需管理授权）")
+        if (target or {}).get("activities_enabled"):
+            lines.append("")
+            lines.append("【互动】")
+            lines.append("/聊点什么 — 按今日资讯开话题")
+            lines.append("/情报挑战 — 三选一趣味题")
+        lines.append("")
+        lines.append("自动推送：每日早报 / 重要动态合并 / 关键动态即时")
+        lines.append("详细配置请联系管理员在 AniSignal 面板调整。")
+        yield event.plain_result("\n".join(lines))
+
     @filter.command("情报会话")
     async def session_info(self, event: AstrMessageEvent):
         umo = event.unified_msg_origin
@@ -217,7 +269,7 @@ class AniSignalPlugin(Star):
             status = f"此会话已在 AniSignal 注册为「{registered.get('name', '')}」（{state}）。"
         else:
             status = "此会话尚未注册，请把下面的会话标识交给管理员，在 AniSignal 机器人面板添加。"
-        yield event.plain_result(f"{status}\n本会话标识：\n{umo}\n你的管理标识：{event.get_sender_id()}\n可用命令：/早报、/资讯 关键词、/商品 关键词、/情报订阅、/我的提醒、/聊点什么、/情报挑战。")
+        yield event.plain_result(f"{status}\n本会话标识：\n{umo}\n你的管理标识：{event.get_sender_id()}\n发送 /帮助 查看当前可用功能。")
 
     @filter.command("情报订阅")
     async def subscriptions(self, event: AstrMessageEvent):
