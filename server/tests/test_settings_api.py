@@ -155,6 +155,26 @@ async def test_ai_settings_masked_and_test(client, admin_headers):
     assert resp.json()["ok"] is False
 
 
+async def test_ai_put_preserves_pool_and_prices(client, admin_headers):
+    resp = await client.put(
+        "/api/admin/settings/ai",
+        json={"base_url": "https://api.example.com/v1", "model": "m1", "api_key": "sk-secret-a",
+              "api_keys": ["sk-secret-a", "sk-secret-b"], "price_in": 2, "price_out": 5},
+        headers=admin_headers,
+    )
+    body = resp.json()
+    assert body["api_keys_count"] == 2 and "sk-secret" not in str(body)
+
+    # 旧调用方不带 api_keys / 定价：不得抹掉池与定价
+    resp = await client.put(
+        "/api/admin/settings/ai",
+        json={"base_url": "https://api.example.com/v1", "model": "m2", "api_key": "sk-secret-a"},
+        headers=admin_headers,
+    )
+    body = resp.json()
+    assert body["api_keys_count"] == 2 and body["price_in"] == 2 and body["price_out"] == 5
+
+
 async def test_ai_usage_recorded(client, session, admin_headers, monkeypatch):
     """AI 调用记账：usage 落库，费用按单价计算。"""
     from app.services import ai as ai_mod

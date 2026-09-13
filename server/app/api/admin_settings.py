@@ -35,15 +35,25 @@ async def get_all_settings(session: AsyncSession = Depends(get_session)):
 
 @router.put("/ai")
 async def put_ai(body: dict, session: AsyncSession = Depends(get_session)):
-    """保存 LLM 配置（OpenAI 兼容）；api_key 留空保留旧值。"""
+    """保存 LLM 配置（OpenAI 兼容）；api_key 与密钥池留空/缺省时保留旧值。"""
     stored = (await settings_service.get_setting(session, "ai")) or {}
     api_key = body.get("api_key")
     if api_key is None or api_key == "":
         api_key = stored.get("api_key") or ""
+    raw_keys = body.get("api_keys")
+    if raw_keys is None:
+        api_keys = stored.get("api_keys") or []
+    else:
+        if isinstance(raw_keys, str):
+            raw_keys = raw_keys.replace("，", ",").replace(",", "\n").split("\n")
+        api_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
     value = {
         "base_url": str(body.get("base_url") or "").strip().rstrip("/"),
         "api_key": api_key,
+        "api_keys": api_keys,
         "model": str(body.get("model") or "").strip(),
+        "price_in": float(body.get("price_in") if body.get("price_in") is not None else stored.get("price_in") or 0),
+        "price_out": float(body.get("price_out") if body.get("price_out") is not None else stored.get("price_out") or 0),
     }
     await settings_service.set_setting(session, "ai", value)
     from app.services.ai import _public_view, get_ai_config
