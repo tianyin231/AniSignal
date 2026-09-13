@@ -10,12 +10,12 @@ import aiohttp
 from astrbot.api import llm_tool, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
-from astrbot.api.message_components import Plain
+from astrbot.api.message_components import Plain, Image
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.3.3"
+VERSION = "1.3.4"
 
 # 固定人设开场（明石）：指令回复不走 LLM，用池子轮换，稳定且不暴露工具身份。
 _INTRO_POOLS = {
@@ -407,8 +407,54 @@ class AniSignalPlugin(Star):
     @filter.command("早报")
     async def digest(self, event: AstrMessageEvent):
         result = await self._query(event, "digest")
-        async for out in self.present_with_persona(event, result["text"], "digest", history_label="早报查询"):
-            yield out
+        items = result.get("items") or []
+        now_bj = datetime.now(timezone(timedelta(hours=8)))
+        if items:
+            lines = [f"今日速报 · {now_bj.strftime('%m/%d')}", f"共 {len(items)} 条，以下前 {min(5, len(items))} 条"]
+            for i, item in enumerate(items[:5], 1):
+                label = item.get("community") or ""
+                # community 字段是代码，服务端已给中文时优先用 summary 前缀；此处用服务端 text 更稳
+                title = (item.get("title") or "未命名动态").replace("\n", " ")
+                if len(title) > 40:
+                    title = title[:39] + "…"
+                lines.append(f"{i}. {title}")
+                url = (item.get("url") or "").strip()
+                if url:
+                    lines.append(url)
+            body = "\n".join(lines)
+            images = []
+            for item in items:
+                image = item.get("image")
+                if image and image not in images:
+                    images.append(image)
+                if len(images) >= 3:
+                    break
+        else:
+            body = result.get("text", "当前范围内没有匹配的新资讯。")
+            images = []
+        text = f"{_pick_intro('digest')}\n\n{body}"
+        try:
+            manager = self.context.conversation_manager
+            cid = await manager.get_curr_conversation_id(event.unified_msg_origin)
+            if cid:
+                await manager.add_message_pair(
+                    cid,
+                    {"role": "user", "content": "（处理了早报查询）"},
+                    {"role": "assistant", "content": text},
+                )
+        except Exception:
+            logger.warning("AniSignal digest reply was not recorded into conversation history")
+        if not images:
+            yield event.plain_result(text)
+            return
+        try:
+            chain = MessageChain().message(text)
+            for image in images:
+                chain = chain.url_image(image)
+            yield event.chain_result(chain)
+        except Exception:
+            logger.warning("AniSignal digest image attach failed, fallback to text")
+            yield event.plain_result(text)
 
     @filter.command("资讯")
     async def news(self, event: AstrMessageEvent, keyword: str = ""):

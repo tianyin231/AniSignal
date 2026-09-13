@@ -52,6 +52,24 @@ def format_short_update(item: dict) -> str:
     return "\n".join(lines)
 
 
+def format_daily_brief(items: list[dict], now: datetime, limit: int = 5) -> str:
+    """QQ 早报短列表：标题+链接，细节留给站内；配套 collect_images 多图。"""
+    lines = [f"今日速报 · {_fmt_bj(now, '%m/%d')}", f"共 {len(items)} 条，以下前 {min(limit, len(items))} 条"]
+    for i, item in enumerate(items[:limit], 1):
+        label = _community_label(item.get("community"))
+        title = (item.get("title") or "未命名动态").replace("\n", " ")
+        if len(title) > 40:
+            title = title[:39] + "…"
+        prefix = f"[{label}] " if label else ""
+        lines.append(f"{i}. {prefix}{title}")
+        url = (item.get("url") or "").strip()
+        if url:
+            lines.append(url)
+    if not items:
+        lines.append("当前范围内没有匹配的新资讯。")
+    return "\n".join(lines)
+
+
 def format_merged_updates(items: list[dict], now: datetime) -> str:
     """合并窗口内多条 updates 压成一条列表，避免连环刷屏。"""
     lines = [f"重要动态 ×{len(items)}", _fmt_bj(now, "%m/%d %H:%M 更新")]
@@ -377,7 +395,8 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                                 media=[item["image"]] if item.get("image") else None,
                             )
                     else:
-                        await create_delivery(session, target, "daily", payload["text"], key, media=covers)
+                        brief = format_daily_brief(items, due)
+                        await create_delivery(session, target, "daily", brief, key, media=covers)
         # 日历：默认静默跳过；quiet_critical 时穿透静默，避免临期事项丢失。
         if config.get("updates_enabled") and (not quiet or quiet_critical):
             target_community = config.get("community", "all")

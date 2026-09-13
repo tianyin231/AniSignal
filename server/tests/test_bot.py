@@ -233,4 +233,12 @@ async def test_format_helpers():
     assert bot.classify_item({'importance': False}) == 'normal'
     assert bot._is_quiet(1, {'quiet_start': 23, 'quiet_end': 8}) is True
     assert bot._is_quiet(12, {'quiet_start': 23, 'quiet_end': 8}) is False
+    brief = bot.format_daily_brief([
+        {'community': 'wuwa', 'title': '甲' * 50, 'url': 'https://a'},
+        {'community': 'blhx', 'title': '乙', 'url': 'https://b'},
+    ], datetime(2026, 9, 13, 4, 0))
+    assert '今日速报' in brief
+    assert 'https://a' in brief
+    assert '…' in brief
+    assert '完整正文' not in brief
 
