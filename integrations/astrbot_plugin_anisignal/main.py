@@ -15,7 +15,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.3.5"
+VERSION = "1.3.6"
 
 # 固定人设开场（明石）：指令回复不走 LLM，用池子轮换，稳定且不暴露工具身份。
 _INTRO_POOLS = {
@@ -436,18 +436,20 @@ class AniSignalPlugin(Star):
                 )
         except Exception:
             logger.warning("AniSignal digest reply was not recorded into conversation history")
-        # 命令回应用 chain_result 会被平台拆成多条且图序错乱；与推送同路径 send_message：
-        # 文本在前、最多 1 张封面，避免刷屏。
-        if cover:
-            try:
-                chain = MessageChain().message(text).url_image(cover)
-                await asyncio.wait_for(
-                    self.context.send_message(event.unified_msg_origin, chain), timeout=25,
-                )
-                return
-            except Exception:
-                logger.warning("AniSignal digest media send failed, fallback to text")
+        # 先回文字（命令通道稳定），再单独发一张封面：
+        # 整链 message+url_image 在 QQ 官方命令路径上偶发只出文字。
         yield event.plain_result(text)
+        if not cover:
+            return
+        try:
+            chain = MessageChain().url_image(cover)
+            sent = await asyncio.wait_for(
+                self.context.send_message(event.unified_msg_origin, chain), timeout=25,
+            )
+            if not sent:
+                logger.warning("AniSignal digest cover send returned empty")
+        except Exception as exc:
+            logger.warning("AniSignal digest cover send failed (%s)", type(exc).__name__)
 
     @filter.command("资讯")
     async def news(self, event: AstrMessageEvent, keyword: str = ""):
