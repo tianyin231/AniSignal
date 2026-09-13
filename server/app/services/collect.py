@@ -20,6 +20,7 @@ from app.collectors.base import CollectorError, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.kuro import KuroCollector
 from app.collectors.miyoushe import MiyousheCollector
+from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
 from app.config import get_settings
 from app.db import SessionLocal
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 _COLLECTORS = {
     "bilibili": lambda: BilibiliCollector(),
     "miyoushe": lambda: MiyousheCollector(),
-    "youtube": lambda: YoutubeRssCollector(),
+    "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
     "kuro_cn": lambda: KuroCollector(Platform.KURO_CN),
     "kuro_global": lambda: KuroCollector(Platform.KURO_GLOBAL),
 }
