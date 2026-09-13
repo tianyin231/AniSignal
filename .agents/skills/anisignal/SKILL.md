@@ -378,6 +378,13 @@ docker compose up -d --build
   "Duplicate column"；恢复=手工补齐剩余 DDL+stamp 0033。start-app.sh 已加 alembic 3 次重试。
   MySQL 注意 `delayed` 是保留字，手写 DDL 需反引号（SQLAlchemy 自动引用）。
 
+- **AI 账号池（2026-09-12 上线）**：`site_settings ai` 新增 `api_keys` 列表（密钥池），ai.py `chat`
+  轮询分摊（成功推进起点）+ 密钥级失败（429/401/402/403）自动换下一把并冷却 60s；全部失败抛最后异常
+  （curation 的 "429" in repr 退避仍兼容）。env 兜底 `ANISIGNAL_AI_API_KEYS` 逗号分隔。管理端 AI 页
+  有密钥池 textarea（每行一个，留空保留），公开视图只给数量+尾号。**坑**：`/api/admin/settings/ai`
+  与 `/api/admin/ai/config` 是同一配置的两个写入方，后者加字段时前者必须同步保留语义（曾有抹掉
+  api_keys/定价的地雷，已修）。
+
 ## 未完成 / 下一步选项
 
 - 跨语言公告 AI 语义合并；用户内容 LLM 相关性判定（替代关键词匹配）。
