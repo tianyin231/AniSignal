@@ -14,10 +14,12 @@ interface AiConfig {
   base_url: string
   model: string
   api_key_set: boolean
+  api_keys_count?: number
+  api_keys_tail?: string[]
   price_in: number
   price_out: number
 }
-const config = reactive({ base_url: '', model: '', api_key: '', price_in: 0, price_out: 0 })
+const config = reactive({ base_url: '', model: '', api_key: '', api_keys: '', price_in: 0, price_out: 0 })
 const configView = ref<AiConfig | null>(null)
 const testResult = ref('')
 
@@ -63,7 +65,10 @@ const TASK_LABELS: Record<string, string> = {
 async function saveConfig() {
   busy.value = true; busyWhat.value = 'save'
   try {
-    await api('/api/admin/ai/config', { method: 'PUT', body: config })
+    await api('/api/admin/ai/config', {
+      method: 'PUT',
+      body: { ...config, api_keys: config.api_keys.trim() ? config.api_keys : null },
+    })
     config.api_key = ''
     toast.ok('LLM 配置已保存')
     await loadConfig()
@@ -163,6 +168,13 @@ async function translateMissing() {
         <div>
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">API Key（留空保留）</label>
           <input v-model="config.api_key" type="password" placeholder="sk-…" class="input mt-1 w-full px-3 py-2 text-sm">
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">
+            密钥池（每行一个，留空保存 = 保留现有池）
+            <template v-if="configView?.api_keys_count"> · 当前 {{ configView.api_keys_count }} 把（尾号 {{ configView.api_keys_tail.join(' / ') }}）</template>
+          </label>
+          <textarea v-model="config.api_keys" rows="3" placeholder="sk-…（每行一个，请求时自动轮询分摊，命中限流自动换下一把）" class="input mono mt-1 w-full px-3 py-2 text-sm"></textarea>
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">输入单价（/百万 tokens）</label>
