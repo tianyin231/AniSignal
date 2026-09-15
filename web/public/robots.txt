@@ -1,0 +1,34 @@
+# AniSignal robots.txt
+# https://anisignal.nanamiyako.cn/robots.txt
+# 试运行站点：允许索引公开浏览页；禁止抓取管理、账号与原始 API。
+
+User-agent: *
+Allow: /
+Allow: /intro
+Allow: /about
+Allow: /legal
+Allow: /terms
+Allow: /privacy
+Allow: /copyright
+Allow: /bot-rules
+Allow: /official
+Allow: /contents
+Allow: /events
+Allow: /products
+Allow: /sources
+Allow: /stats
+Allow: /search
+Allow: /custom
+Allow: /rss.xml
+
+Disallow: /admin
+Disallow: /account
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /forgot
+
+# 建议礼貌抓取：同一主机间隔不小于 10 秒
+Crawl-delay: 10
+
+Sitemap: https://anisignal.nanamiyako.cn/rss.xml
