@@ -37,6 +37,8 @@ const docs = [
 
 <template>
   <div class="space-y-4">
+    <BackButton fallback="/" label="返回" />
+
     <section class="panel p-5 sm:p-6">
       <p class="mono text-xs text-blue-600 dark:text-blue-300">LEGAL</p>
       <h1 class="mt-1 text-lg font-semibold text-slate-900 dark:text-zinc-50">条款、隐私与合规</h1>

@@ -27,6 +27,8 @@ const steps = [
 
 <template>
   <div class="space-y-4">
+    <BackButton fallback="/legal" label="返回条款索引" />
+
     <section class="panel p-5 sm:p-6">
       <p class="mono text-xs text-blue-600 dark:text-blue-300">COPYRIGHT</p>
       <h1 class="mt-1 text-lg font-semibold text-slate-900 dark:text-zinc-50">版权与删除 / 下架流程</h1>
