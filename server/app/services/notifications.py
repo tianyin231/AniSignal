@@ -104,6 +104,20 @@ def _email_image_url(value: str | None) -> str | None:
     return safe
 
 
+def _bot_image_url(value: str | None) -> str | None:
+    """机器人/QQ 推送用原图：去掉 B 站 CDN 的 @宽x 缩略图后缀。"""
+    safe = _safe_url(value)
+    if not safe:
+        return None
+    parsed = urlparse(safe)
+    path = parsed.path
+    if parsed.hostname and parsed.hostname.endswith("hdslb.com") and "@" in path:
+        path = path.split("@", 1)[0]
+        parsed = parsed._replace(path=path)
+        return urlunparse(parsed)
+    return safe
+
+
 async def enabled_keywords(session: AsyncSession, user_id: int) -> list[str]:
     return [
         row
@@ -185,7 +199,7 @@ async def load_candidates(
             (
                 safe
                 for value in (media if isinstance(media, list) else [])
-                if isinstance(value, str) and (safe := _email_image_url(value))
+                if isinstance(value, str) and (safe := _bot_image_url(value))
             ),
             None,
         )
