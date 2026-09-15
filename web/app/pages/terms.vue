@@ -6,6 +6,8 @@ const updated = '2026-09-13'
 
 <template>
   <div class="space-y-4">
+    <BackButton fallback="/legal" label="返回条款索引" />
+
     <section class="panel p-5 sm:p-6">
       <p class="mono text-xs text-blue-600 dark:text-blue-300">TERMS · 更新于 {{ updated }}</p>
       <h1 class="mt-1 text-lg font-semibold text-slate-900 dark:text-zinc-50">用户协议</h1>
