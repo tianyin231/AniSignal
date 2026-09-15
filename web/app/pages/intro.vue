@@ -175,7 +175,7 @@ onBeforeUnmount(() => dispose?.())
 </section>
 <section class="as-final as-wrap" data-reveal><div class="as-final-orbits" aria-hidden="true"></div><span class="as-overline">LESS NOISE. MORE SIGNAL.</span><h2>把注意力，<br>留给真正关心的变化。</h2><p>从一个关键词开始，找到适合自己的信息路径。</p><div><a href="/" class="as-button">进入信息工作台 <svg class="as-icon " aria-hidden="true"><use href="#as-i-arrow" /></svg></a><a href="/account" class="as-button as-button-quiet">建立我的关注 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div></section>
 </main>
-<footer class="as-footer as-wrap"><div><a href="/intro" class="as-brand"><span class="as-brand-mark"><img src="/icon.png" alt=""></span>AniSignal</a><p>关键词驱动的信息采集、事件追踪与订阅工具。</p></div><nav aria-label="页脚导航"><a href="/about">关于与边界</a><a href="/sources">来源健康</a><a href="https://github.com/tianyin231/AniSignal" target="_blank" rel="noopener noreferrer">GitHub <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></nav><span class="as-footer-note">产品试运行 · 功能以当前部署为准</span></footer>
+<footer class="as-footer as-wrap"><div><a href="/intro" class="as-brand"><span class="as-brand-mark"><img src="/icon.png" alt=""></span>AniSignal</a><p>关键词驱动的信息采集、事件追踪与订阅工具。</p></div><nav aria-label="页脚导航"><a href="/about">关于与边界</a><a href="/sources">来源健康</a><a href="/legal">条款与隐私</a><a href="/bot-rules">机器人守则</a><a href="https://github.com/tianyin231/AniSignal" target="_blank" rel="noopener noreferrer">GitHub <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></nav><span class="as-footer-note">产品试运行 · 功能以当前部署为准</span></footer>
 </div>
 </template>
 
