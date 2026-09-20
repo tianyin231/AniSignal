@@ -1,4 +1,5 @@
 {
   "base_url": {"description": "AniSignal 服务地址", "type": "string", "default": "http://anisignal-app-1:3000"},
-  "tools_key": {"description": "AniSignal 专用插件密钥", "type": "string", "default": "", "hint": "由部署脚本写入；不要填写管理员 Token 或 AstrBot 发送密钥。"}
+  "tools_key": {"description": "AniSignal 专用插件密钥", "type": "string", "default": "", "hint": "由部署脚本写入；不要填写管理员 Token 或 AstrBot 发送密钥。"},
+  "card_font_path": {"description": "早报卡片中文字体路径", "type": "string", "default": "", "hint": "留空使用已部署的 Noto Sans CJK 字体；字体不可用时发送短文字。"}
 }

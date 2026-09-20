@@ -13,7 +13,8 @@ from app.api.bot import TargetBody, edit_target, require_tools
 from app.api.deps import require_admin
 from app.clock import utcnow
 from app.db import get_session
-from app.models import BotDelivery, BotReminder, BotTarget
+from app.models import BotDelivery, BotReminder, BotTarget, RawContent
+from app.services.bot_briefs import format_detail
 from app.services.settings import get_setting, set_setting
 
 router = APIRouter(prefix="/api/bot", dependencies=[Depends(require_tools)])
@@ -143,7 +144,37 @@ async def conversation_context(body: Actor, session: AsyncSession = Depends(get_
         BotDelivery.status == "accepted", BotDelivery.created_at >= utcnow() - timedelta(days=7))
         .order_by(BotDelivery.id.desc()).limit(3))
     return {"recent_notifications": [{"id": r.id, "kind": r.kind, "text": (r.rendered_body or r.body)[:4000],
+            "brief": {"items": [{k: item.get(k) for k in ("title", "summary", "community")}
+                                for item in r.brief["items"]]} if r.brief else None,
             "sent_at": (r.updated_at + timedelta(hours=8)).isoformat() + "+08:00"} for r in rows]}
+
+
+class DetailBody(Actor):
+    number: int = Field(default=1, ge=1, le=3)
+    delivery_id: int | None = None
+
+
+@router.post("/detail")
+async def brief_detail(body: DetailBody, session: AsyncSession = Depends(get_session)):
+    target = await actor_target(body, session)
+    if not set(target.config.get("tools", [])).intersection({"digest", "news"}):
+        raise HTTPException(403, "此会话未开放资讯查询")
+    stmt = select(BotDelivery).where(BotDelivery.target_id == target.id, BotDelivery.status == "accepted",
+                                    BotDelivery.created_at >= utcnow() - timedelta(days=7))
+    if body.delivery_id is not None:
+        stmt = stmt.where(BotDelivery.id == body.delivery_id)
+    rows = await session.scalars(stmt.order_by(BotDelivery.id.desc()).limit(20))
+    row = next((r for r in rows if r.brief and r.brief.get("items")), None)
+    if not row or body.number > len(row.brief["items"]):
+        raise HTTPException(404, "没找到这条编号，先发 /早报 看一下最新清单吧。")
+    item = row.brief["items"][body.number - 1]
+    ids = {i for s in item.get("sources", []) for i in s.get("content_ids", [])}
+    if ids:
+        visible = set(await session.scalars(select(RawContent.id).where(RawContent.id.in_(ids), RawContent.hidden.is_(False))))
+        if visible != ids:
+            raise HTTPException(404, "这条资料已更新或下架，请重新查询。")
+    return {"text": format_detail(item), "item": item, "delivery_id": row.id,
+            "grounding": "这是原播报的资料快照。时间以来源标注为准，不能当作刚刚发生的新消息。"}
 
 
 class ClaimBody(BaseModel):
@@ -196,7 +227,11 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session)):
             hour = (now + timedelta(hours=8)).hour
             if (start <= hour < end if start < end else (hour >= start or hour < end) if start != end else False):
                 continue
-        max_images = max(1, min(9, int(target.config.get("max_images", 3) or 3)))
+        elif row.kind in ("calendar", "critical") and not target.config.get("quiet_critical", True):
+            from app.services.bot import _is_quiet
+            if _is_quiet((now + timedelta(hours=8)).hour, target.config):
+                continue
+        max_images = 1
         receipt = secrets.token_hex(24)
         result = await session.execute(update(BotDelivery).where(BotDelivery.id == row.id,
             BotDelivery.status.in_(["pending", "failed"]), BotDelivery.attempts == row.attempts).values(
@@ -205,6 +240,7 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session)):
         if result.rowcount:
             return {"delivery": {"id": row.id, "receipt": receipt, "umo": target.umo, "body": row.body,
                     "kind": row.kind, "images": (row.media or [])[:max_images], "provider_id": target.config.get("ai_provider_id", ""),
+                    "brief": row.brief,
                     "instructions": target.config.get("ai_prompt", "")}}
     return {"delivery": None}
 

@@ -17,7 +17,7 @@ interface Delivery { id: number; target_id: number; name: string; kind: string; 
 interface Reminder { id: number; name: string; body: string; due_at: string; status: string }
 const companion = ref<{ runtime: { online: boolean; version?: string }; counts: Record<string, number>; reminders: Reminder[] }>({ runtime: { online: false }, counts: {}, reminders: [] })
 const activity = ref<Record<string, string>>({})
-const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, quiet_critical: true, merge_minutes: 5, hourly_limit: 6, daily_style: 'compact', max_images: 3, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。', ai_provider_id: '', delivery_mode: 'astrbot', chat_controls: false, reminders_enabled: false, activities_enabled: false, manager_ids: [] })
+const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, quiet_critical: true, merge_minutes: 30, hourly_limit: 2, daily_style: 'compact', max_images: 1, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。', ai_provider_id: '', delivery_mode: 'astrbot', chat_controls: false, reminders_enabled: false, activities_enabled: false, manager_ids: [] })
 const targets = ref<Target[]>([])
 const deliveries = ref<Delivery[]>([])
 const bridge = reactive({ endpoint: '', api_key: '', api_key_set: false })
@@ -217,7 +217,7 @@ function cancelReminder(row: Reminder) {
     <div class="grid gap-4 sm:grid-cols-2">
       <article v-for="target in targets" :key="target.id" class="panel rounded-xl p-5">
         <div class="flex items-start justify-between gap-3"><div><h2 class="font-semibold">{{ target.name }}</h2><p class="mt-1 text-sm text-slate-500">{{ target.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ ADMIN_COMMUNITY_LABELS[target.community] || '全站' }} · <span class="mono" :title="target.umo">{{ target.umo.split(':')[0] }} · 尾号 {{ umoTail(target.umo) }}</span></p></div><span class="rounded-full px-2 py-1 text-xs" :class="target.enabled ? 'bg-emerald-500/10 text-emerald-600' : 'bg-slate-500/10 text-slate-500'">{{ target.enabled ? '已启用' : '已暂停' }}</span></div>
-        <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? `重要动态推送（合并 ${target.merge_minutes ?? 5} 分钟）` : '即时推送关闭' }}</p>
+        <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? `重要动态推送（合并 ${target.merge_minutes ?? 30} 分钟）` : '即时推送关闭' }}</p>
         <p class="mt-2 text-sm" :class="activity[target.umo] ? 'text-slate-500' : 'text-amber-600'">{{ relTime(activity[target.umo]) }}</p>
         <p class="mt-2 text-sm text-slate-500">{{ target.keywords.length ? target.keywords.join(' / ') : '不限关键词' }}</p>
         <p class="mt-2 text-sm text-slate-500">查询工具：{{ target.tools.map(t => toolNames[t]).join('、') || '全部关闭' }}</p>
@@ -244,9 +244,9 @@ function cancelReminder(row: Reminder) {
         <label class="flex items-center gap-2 text-sm"><input v-model="form.daily_enabled" type="checkbox">每日早报<input v-model="form.daily_time" type="time" required class="rounded border bg-transparent px-2 py-1">北京时间</label>
         <div class="flex flex-wrap items-center gap-2 text-sm"><span>即时推送免打扰</span><label><span class="sr-only">开始小时</span><input v-model.number="form.quiet_start" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>至</span><label><span class="sr-only">结束小时</span><input v-model.number="form.quiet_end" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>时（相同则关闭）</span></div>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.quiet_critical" type="checkbox">静默时段仍推送关键动态（置顶事件、兑换码、日历临期）</label>
-        <label class="text-sm">普通动态合并窗口（分钟）<input v-model.number="form.merge_minutes" type="number" min="0" max="60" required :class="inputClass"><span class="mt-1 block text-xs text-slate-500">0 为逐条立即发送；默认 5 分钟合并成一条列表</span></label>
+        <label class="text-sm">普通动态合并窗口（分钟）<input v-model.number="form.merge_minutes" type="number" min="0" max="60" required :class="inputClass"><span class="mt-1 block text-xs text-slate-500">0 为逐条立即发送；默认 30 分钟合并，精选最多 3 个重点</span></label>
         <label class="text-sm">每小时动态上限<input v-model.number="form.hourly_limit" type="number" min="0" max="50" required :class="inputClass"><span class="mt-1 block text-xs text-slate-500">0 为不限；超出后普通动态顺延，关键动态不受限</span></label>
-        <label class="text-sm">早报形态<select v-model="form.daily_style" :class="inputClass"><option value="compact">合并一条（多图）</option><option value="split">总览 + 重点分条</option></select></label>
+        <label class="text-sm">早报形态<select v-model="form.daily_style" :class="inputClass"><option value="compact">单张情报卡（最多 3 条）</option><option value="split">总览 + 重点分条</option></select></label>
         <label class="text-sm">单次最多附图<input v-model.number="form.max_images" type="number" min="1" max="9" required :class="inputClass"></label>
         <fieldset class="sm:col-span-2"><legend class="text-sm font-medium">AI 可用的查询工具</legend><div class="mt-2 flex flex-wrap gap-4"><label v-for="(label, key) in toolNames" :key="key" class="flex items-center gap-2 text-sm"><input v-model="form.tools" type="checkbox" :value="key">{{ label }}</label></div></fieldset>
         <label class="text-sm sm:col-span-2">推送方式<select v-model="form.delivery_mode" :class="inputClass"><option value="astrbot">AstrBot 当前人格播报，可连续追问</option><option value="direct">直接发送原文</option></select></label>

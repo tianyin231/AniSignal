@@ -205,3 +205,24 @@ async def test_daily_digest_carries_cover_and_claim_returns_images(client, sessi
 
     claimed = (await client.post('/api/bot/outbox/claim', headers=HEADERS, json={})).json()['delivery']
     assert claimed['images'] == ['https://img/cover.jpg']
+
+
+async def test_brief_detail_is_bound_to_original_delivery_and_target(client, session):
+    row = await setup(session, tools=['news'])
+    raw = RawContent(platform='bilibili', content_type='notice', external_id='brief-original', community='wuwa')
+    session.add(raw)
+    await session.commit()
+    brief = {'items': [{'title': '原来的第二条', 'summary': '已发布', 'sources': [
+        {'content_ids': [raw.id], 'title': '原公告', 'url': 'https://example.com/original'}]}]}
+    delivery = await bot.create_delivery(session, row, 'updates', '简报', 'brief-snapshot', brief=brief)
+    delivery.status = 'accepted'
+    other = BotTarget(name='另一群', umo='qq:GroupMessage:another', enabled=True, config={'tools': ['news']})
+    session.add(other)
+    await session.commit()
+    body = {'umo': row.umo, 'actor_id': 'member', 'number': 1, 'delivery_id': delivery.id}
+    result = await client.post('/api/bot/detail', headers=HEADERS, json=body)
+    assert result.status_code == 200 and 'https://example.com/original' in result.json()['text']
+    assert (await client.post('/api/bot/detail', headers=HEADERS, json={**body, 'umo': other.umo})).status_code == 404
+    raw.hidden = True
+    await session.commit()
+    assert (await client.post('/api/bot/detail', headers=HEADERS, json=body)).status_code == 404

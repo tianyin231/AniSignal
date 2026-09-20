@@ -137,8 +137,9 @@ async def test_delay_notice_marks_maintenance_and_pushes(client, session, monkey
     )
     await session.commit()
 
+    delayed_start = (utcnow() + timedelta(hours=2)).isoformat() + "Z"
     payload = (
-        '{"schedules": [{"title": "版本更新停机维护（延期）", "start_at": "2026-09-13T20:00:00+08:00", '
+        '{"schedules": [{"title": "版本更新停机维护（延期）", "start_at": "' + delayed_start + '", '
         '"end_at": null, "kind": "delay"}], "codes": []}'
     )
     fake_chat, fake_usage = _mock_ai(payload)

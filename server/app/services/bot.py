@@ -12,6 +12,7 @@ from app.clock import utcnow
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Product, RawContent, RedeemCode
 from app.services.notifications import group_candidates, load_candidates
+from app.services.bot_briefs import build_brief, fallback_items, format_brief
 from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 
@@ -52,38 +53,14 @@ def format_short_update(item: dict) -> str:
     return "\n".join(lines)
 
 
-def format_daily_brief(items: list[dict], now: datetime, limit: int = 5) -> str:
-    """QQ 早报短列表：标题+链接，细节留给站内；配套 collect_images 多图。"""
-    lines = [f"今日速报 · {_fmt_bj(now, '%m/%d')}", f"共 {len(items)} 条，以下前 {min(limit, len(items))} 条"]
-    for i, item in enumerate(items[:limit], 1):
-        label = _community_label(item.get("community"))
-        title = (item.get("title") or "未命名动态").replace("\n", " ")
-        if len(title) > 40:
-            title = title[:39] + "…"
-        prefix = f"[{label}] " if label else ""
-        lines.append(f"{i}. {prefix}{title}")
-        url = (item.get("url") or "").strip()
-        if url:
-            lines.append(url)
-    if not items:
-        lines.append("当前范围内没有匹配的新资讯。")
-    return "\n".join(lines)
+def format_daily_brief(items: list[dict], now: datetime, limit: int = 3) -> str:
+    return format_brief({"title": "今日速报", "date": _fmt_bj(now, "%m/%d"),
+                         "items": fallback_items(items[:limit])})
 
 
 def format_merged_updates(items: list[dict], now: datetime) -> str:
     """合并窗口内多条 updates 压成一条列表，避免连环刷屏。"""
-    lines = [f"重要动态 ×{len(items)}", _fmt_bj(now, "%m/%d %H:%M 更新")]
-    for i, item in enumerate(items[:8], 1):
-        label = _community_label(item.get("community"))
-        title = item.get("title") or "未命名动态"
-        prefix = f"[{label}] " if label else ""
-        lines.append(f"{i}. {prefix}{title}")
-        url = (item.get("url") or "").strip()
-        if url:
-            lines.append(url)
-    if len(items) > 8:
-        lines.append(f"…共 {len(items)} 条")
-    return "\n".join(lines)
+    return format_brief({"title": "刚刚的重点", "date": _fmt_bj(now), "items": fallback_items(items)})
 
 
 def collect_images(items: list[dict], limit: int) -> list[str]:
@@ -141,6 +118,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
     community = config.get("community", "all")
     keywords = config.get("keywords", [])
     scope = COMMUNITY_LABELS.get(community, "全站")
+    brief = None
     if tool == "trending":
         from app.services.curation import select_trending
 
@@ -213,7 +191,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         lines = [f"{scope} · 可用兑换码", (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）")]
         found = 0
         for code, url in rows:
-            expiry = f"（{fmt(code.expires_at)} 前）" if code.expires_at else ""
+            expiry = f"（{_fmt_bj(code.expires_at)} 前）" if code.expires_at else ""
             lines.append(f"\n{code.code}{expiry}")
             if url:
                 lines.append(url)
@@ -260,7 +238,12 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
             lines.append(f"\n本次共 {len(items)} 条，以上为前 5 条精选。")
         if not items:
             lines.append("当前范围内没有匹配的新资讯。")
+        if not collected_after:
+            brief = await build_brief(session, items, now, mode="daily" if tool == "digest" else "updates")
+            items = brief["items"]
+            lines = [format_brief(brief)]
     return {"text": "\n".join(lines), "items": items, "instructions": config.get("ai_prompt", ""),
+            "brief": brief,
             "grounding": "仅根据查询结果回答，保留来源和时间；待核验消息不得表述为已证实。检索不到不能凭记忆补写。"}
 
 
@@ -286,11 +269,12 @@ async def send_message(bridge: dict, umo: str, content: str) -> tuple[str, str |
         return "unknown", "网关连接或响应异常；请核对收件端后再重发"
 
 
-async def create_delivery(session, target, kind, text, key, media=None):
+async def create_delivery(session, target, kind, text, key, media=None, brief=None):
     row = await session.scalar(select(BotDelivery).where(BotDelivery.dedupe_key == key))
     if row:
         return row
-    row = BotDelivery(target_id=target.id, kind=kind, body=text, media=list(media) if media else None, dedupe_key=key)
+    row = BotDelivery(target_id=target.id, kind=kind, body=text, media=list(media) if media else None,
+                      brief=brief, dedupe_key=key)
     session.add(row)
     try:
         await session.commit()
@@ -327,17 +311,19 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
     if now < flush_at:
         return
     can_send = True
-    if quiet and not quiet_critical:
+    if quiet:
         can_send = False
     elif hourly_limit and await _hourly_updates_count(session, target.id, now) >= hourly_limit:
         can_send = False
     if can_send:
-        images = collect_images(buffer["items"], max_images)
-        text = format_merged_updates(buffer["items"], now)
+        brief = await build_brief(session, buffer["items"], now)
+        images = collect_images(brief["items"], 1)
+        text = format_brief(brief)
         window_key = hashlib.sha256(
             (f"merge:{target.id}:{buffer['flush_at']}:" + "".join(i["dedupe"] for i in buffer["items"])).encode()
         ).hexdigest()[:32]
-        await create_delivery(session, target, "updates", text, f"updates:{target.id}:{window_key}", media=images)
+        if brief["items"]:
+            await create_delivery(session, target, "updates", text, f"updates:{target.id}:{window_key}", media=images, brief=brief)
         await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
     else:
         buffer["flush_at"] = (now + timedelta(minutes=5)).isoformat()
@@ -358,9 +344,9 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
         config = target.config
         quiet = _is_quiet(local.hour, config)
         quiet_critical = bool(config.get("quiet_critical", True))
-        merge_minutes = int(config.get("merge_minutes", 5) or 0)
-        hourly_limit = int(config.get("hourly_limit", 6) or 0)
-        max_images = max(1, min(9, int(config.get("max_images", 3) or 3)))
+        merge_minutes = int(config.get("merge_minutes", 30) or 0)
+        hourly_limit = int(config.get("hourly_limit", 2) or 0)
+        max_images = 1
         if config.get("reminders_enabled"):
             reminder_ids = list(await session.scalars(select(BotReminder.id).where(
                 BotReminder.target_id == target.id, BotReminder.status == "pending", BotReminder.due_at <= now,
@@ -396,8 +382,8 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                                 media=[item["image"]] if item.get("image") else None,
                             )
                     else:
-                        brief = format_daily_brief(items, due)
-                        await create_delivery(session, target, "daily", brief, key, media=covers)
+                        brief = payload.get("brief") or await build_brief(session, items, due, mode="daily")
+                        await create_delivery(session, target, "daily", format_brief(brief), key, media=covers, brief=brief)
         # 日历：默认静默跳过；quiet_critical 时穿透静默，避免临期事项丢失。
         if config.get("updates_enabled") and (not quiet or quiet_critical):
             target_community = config.get("community", "all")
@@ -424,7 +410,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     f"{due}（北京时间）"
                     f"{'结束' if stage_at == schedule.end_at else '开始'}"
                 )
-                await create_delivery(session, target, "calendar", text, f"calendar:{schedule.id}:{stage}")
+                await create_delivery(session, target, "calendar", text, f"calendar:{target.id}:{schedule.id}:{stage}")
         buffer = await load_merge_buffer(session, target.id)
         if config.get("updates_enabled"):
             payload = await query_target(session, target, now=now, collected_after=target.last_scan_at)
@@ -473,10 +459,15 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                         continue
                     published = item.get("published_at")
                     buffer.setdefault("items", []).append({
+                        "id": item.get("id"),
+                        "content_ids": item.get("content_ids", []),
                         "dedupe": digest,
                         "title": item.get("title"),
                         "community": item.get("community"),
-                        "summary": (item.get("summary") or item.get("text") or "")[:200],
+                        "summary": (item.get("summary") or item.get("text") or "")[:500],
+                        "text": (item.get("text") or "")[:1600],
+                        "source": item.get("source") or item.get("platform"),
+                        "identity": item.get("identity", "unknown"),
                         "url": item.get("url"),
                         "image": item.get("image"),
                         "published_at": published.isoformat() if isinstance(published, datetime) else None,
