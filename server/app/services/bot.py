@@ -141,36 +141,25 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if not items:
             lines.append("窗口内还没有明显的热度变化。")
     elif tool == "calendar":
+        from app.services.calendar import calendar_entries
+
         items = []
-        conditions = [] if community == "all" else [ContentSchedule.community == community]
-        conditions.append(RawContent.hidden.is_(False))
-        rows = await session.execute(
-            select(ContentSchedule, RawContent.url)
-            .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
-            .where(*conditions)
-            .order_by(ContentSchedule.start_at)
-            .limit(40)
-        )
-        kind_labels = {"activity": "活动", "maintenance": "维护", "pool": "卡池", "broadcast": "直播", "delay": "变更"}
-        fmt = lambda dt: (dt + timedelta(hours=8)).strftime("%m/%d %H:%M")  # noqa: E731
-        lines = [
-            f"{scope} · 活动日历",
-            (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）"),
-        ]
+        entries = await calendar_entries(session, community, now=now)
+        entries.sort(key=lambda e: e["end_at"] or e["start_at"])
+        lines = [f"{scope} · 活动日历", _fmt_bj(now, "更新于 %Y/%m/%d %H:%M（北京时间）")]
         count = 0
-        for schedule, url in rows:
-            end = schedule.end_at
-            if schedule.start_at <= now and (end is None or end >= now):
-                when = f"进行中 · {fmt(end) if end else '长期'} 结束"
-            elif schedule.start_at > now:
-                when = f"{fmt(schedule.start_at)} 开始"
+        for entry in entries:
+            start, end = entry["start_at"], entry["end_at"]
+            fmt = "%m/%d" if entry["all_day"] else "%m/%d %H:%M"
+            if start > now:
+                when = f"{_fmt_bj(start, fmt)} {'截止' if entry['kind'] == 'deadline' else '开始'}"
+            elif end and end > now:
+                when = f"进行中 · {_fmt_bj(end, fmt)} 结束"
             else:
                 continue
-            delayed = "（已延后）" if schedule.delayed else ""
-            kind = kind_labels.get(schedule.kind, schedule.kind)
-            lines.append(f"\n[{kind}]{delayed} {schedule.title}\n{when}")
-            if url:
-                lines.append(url)
+            lines.append(f"\n{entry['title']}\n{when}")
+            if entry["url"]:
+                lines.append(entry["url"])
             count += 1
             if count >= 8:
                 break
@@ -178,7 +167,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
             lines.append("暂无可展示的日程。")
     elif tool == "codes":
         items = []
-        conditions = [RedeemCode.status == "active", RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now)]
+        conditions = [RawContent.hidden.is_(False), RedeemCode.status == "active", RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now)]
         if community != "all":
             conditions.append(RedeemCode.community == community)
         rows = await session.execute(
@@ -387,30 +376,23 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
         # 日历：默认静默跳过；quiet_critical 时穿透静默，避免临期事项丢失。
         if config.get("updates_enabled") and (not quiet or quiet_critical):
             target_community = config.get("community", "all")
-            sched_conditions = [RawContent.hidden.is_(False)]
-            if target_community != "all":
-                sched_conditions.append(ContentSchedule.community == target_community)
-            schedule_rows = await session.execute(
-                select(ContentSchedule)
-                .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
-                .where(*sched_conditions, ContentSchedule.start_at <= now + timedelta(days=45))
-            )
-            for schedule in schedule_rows.scalars():
+            from app.services.calendar import calendar_entries
+
+            for schedule in await calendar_entries(session, target_community, now=now):
+                if schedule["all_day"]:
+                    continue  # 没有具体时刻的公告不发送精确到分钟的提醒。
                 stage_at: datetime | None = None
-                if schedule.kind in ("activity", "pool", "broadcast") and schedule.end_at and now < schedule.end_at <= now + timedelta(hours=2):
-                    stage_at = schedule.end_at
-                elif schedule.kind == "maintenance" and now < schedule.start_at <= now + timedelta(minutes=30):
-                    stage_at = schedule.start_at
+                start, end, kind = schedule["start_at"], schedule["end_at"], schedule["kind"]
+                if kind in ("activity", "pool", "broadcast") and end and now < end <= now + timedelta(hours=2):
+                    stage_at = end
+                elif kind == "maintenance" and now < start <= now + timedelta(minutes=30):
+                    stage_at = start
                 if stage_at is None:
                     continue
-                stage = schedule.kind if stage_at == schedule.end_at else "maintenance_start"
+                stage = kind if stage_at == end else "maintenance_start"
                 due = _fmt_bj(stage_at, "%Y/%m/%d %H:%M")
-                text = (
-                    f"⏰ 日历提醒\n{schedule.title}\n"
-                    f"{due}（北京时间）"
-                    f"{'结束' if stage_at == schedule.end_at else '开始'}"
-                )
-                await create_delivery(session, target, "calendar", text, f"calendar:{target.id}:{schedule.id}:{stage}")
+                text = f"⏰ 日历提醒\n{schedule['title']}\n{due}（北京时间）{'结束' if stage_at == end else '开始'}"
+                await create_delivery(session, target, "calendar", text, f"calendar:{target.id}:{schedule['id']}:{stage}")
         buffer = await load_merge_buffer(session, target.id)
         if config.get("updates_enabled"):
             payload = await query_target(session, target, now=now, collected_after=target.last_scan_at)

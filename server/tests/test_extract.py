@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import BotDelivery, BotTarget, ContentSchedule, RawContent, RedeemCode, Source
+from app.models import BotDelivery, BotTarget, ContentSchedule, ContentVersion, RawContent, RedeemCode, Source
 from app.services import extract as extract_module
 from app.services.extract import _parse_extraction, extract_entities, sweep_extractions
 from app.services.ingest import ingest_items
@@ -31,6 +31,7 @@ def test_parse_extraction_tolerates_fences_and_garbage():
             "kind": "activity",
             "start_at": datetime(2026, 9, 12, 3, 0),
             "end_at": None,
+            "all_day": False,
         }
     ]
     assert codes == [{"code": "WUWA2026", "expires_at": None}]
@@ -40,9 +41,13 @@ def test_parse_extraction_tolerates_fences_and_garbage():
 async def _seed_official(session):
     await ingest_items(session, "kuro_notices", [KURO_ITEM])
     await session.commit()
-    return (
+    content_id = (
         await session.execute(select(RawContent.id).where(RawContent.external_id == "50553"))
     ).scalar_one()
+    version = await session.scalar(select(ContentVersion).where(ContentVersion.raw_content_id == content_id))
+    version.text = "限时活动：2026年10月1日11:00至2026年10月15日18:00。兑换码 WUWA2026。"
+    await session.commit()
+    return content_id
 
 
 def _mock_ai(payload: str):
@@ -84,7 +89,7 @@ async def test_extract_entities_schedules_codes_and_push(client, session, monkey
 
     payload = (
         '{"schedules": [{"title": "限时活动「深海回响」", "start_at": "2026-10-01T11:00:00+08:00", '
-        '"end_at": "2026-10-15T18:00:00+08:00", "kind": "activity"}], '
+        '"end_at": "2026-10-15T18:00:00+08:00", "kind": "activity", "date_evidence": "2026年10月1日11:00至2026年10月15日18:00"}], '
         '"codes": [{"code": "WUWA2026", "expires_at": null}]}'
     )
     fake_chat, fake_usage = _mock_ai(payload)
@@ -138,9 +143,13 @@ async def test_delay_notice_marks_maintenance_and_pushes(client, session, monkey
     await session.commit()
 
     delayed_start = (utcnow() + timedelta(hours=2)).isoformat() + "Z"
+    version = await session.scalar(select(ContentVersion).where(ContentVersion.raw_content_id == content_id))
+    version.text = f"版本更新停机维护延迟到 {delayed_start}。具体内容请参考后续公告。"
+    session.add(ContentSchedule(raw_content_id=content_id, community="wuwa", title="另一个活动", kind="activity", start_at=utcnow(), end_at=utcnow() + timedelta(days=3)))
+    await session.commit()
     payload = (
         '{"schedules": [{"title": "版本更新停机维护（延期）", "start_at": "' + delayed_start + '", '
-        '"end_at": null, "kind": "delay"}], "codes": []}'
+        '"end_at": null, "kind": "delay", "date_evidence": "' + delayed_start + '"}], "codes": []}'
     )
     fake_chat, fake_usage = _mock_ai(payload)
     monkeypatch.setattr(extract_module, "chat", fake_chat)
@@ -150,6 +159,8 @@ async def test_delay_notice_marks_maintenance_and_pushes(client, session, monkey
     await extract_entities(session, content_id)
     maintenance = (await session.execute(select(ContentSchedule).where(ContentSchedule.kind == "maintenance"))).scalar_one()
     assert maintenance.delayed is True
+    unrelated = await session.scalar(select(ContentSchedule).where(ContentSchedule.title == "另一个活动"))
+    assert unrelated.delayed is False
     delivery = (await session.execute(select(BotDelivery).where(BotDelivery.kind == "critical"))).scalar_one()
     assert "日程变更" in delivery.body
 
@@ -219,3 +230,37 @@ async def test_calendar_groups_by_status_and_codes_hide_expired(client, session)
 
     codes = (await client.get("/api/codes", params={"community": "wuwa"})).json()
     assert [c["code"] for c in codes["items"]] == ["LIVE2026"]
+
+
+def test_schedule_dates_require_source_and_publication_anchor():
+    import json
+
+    def parse(start, evidence="今晚19:00", end=None):
+        return _parse_extraction(json.dumps({"schedules": [{"title": "前瞻直播", "kind": "broadcast", "start_at": start, "end_at": end, "date_evidence": evidence}]}), source_text="前瞻直播将于今晚19:00开始。", published_at=datetime(2026, 9, 19, 4))[0]
+
+    assert not parse("2026-01-01T19:00:00+08:00")
+    assert not parse("2026-09-19T19:00:00+08:00", "9月19日19:00")  # 不能伪造原文
+    assert not parse("2026-09-19T19:00:00+08:00", end="2026-09-18T20:00:00+08:00")
+    assert parse("2026-09-19T19:00:00+08:00")[0]["start_at"] == datetime(2026, 9, 19, 11)
+
+
+async def test_calendar_unknown_end_deduplication_and_hidden_source(client, session):
+    content_id = await _seed_official(session)
+    now = utcnow()
+    session.add_all([
+        ContentSchedule(raw_content_id=content_id, community="wuwa", title="几个月前的直播", kind="broadcast", start_at=now - timedelta(days=90)),
+        ContentSchedule(raw_content_id=content_id, community="wuwa", title="刚开播", kind="broadcast", start_at=now - timedelta(hours=1)),
+        ContentSchedule(raw_content_id=content_id, community="wuwa", title="刚结束", kind="activity", start_at=now - timedelta(days=2), end_at=now - timedelta(hours=1)),
+        ContentSchedule(raw_content_id=content_id, community="wuwa", title="3.7版本更新", kind="maintenance", start_at=now + timedelta(days=2)),
+        ContentSchedule(raw_content_id=content_id, community="wuwa", title="Version 3.7 Update", kind="maintenance", start_at=now + timedelta(days=2)),
+        ContentSchedule(raw_content_id=content_id, community="wuwa", title="3.7版本角色试用", kind="activity", start_at=now + timedelta(days=2)),
+    ])
+    await session.commit()
+    data = (await client.get("/api/calendar")).json()
+    assert data["ongoing"] == []
+    assert [e["title"] for e in data["recent"]] == ["刚开播"]
+    assert [e["title"] for e in data["ended"]] == ["刚结束"]
+    assert {e["title"] for e in data["upcoming"]} == {"3.7版本更新", "3.7版本角色试用"}
+    (await session.get(RawContent, content_id)).hidden = True
+    await session.commit()
+    assert all(not rows for rows in (await client.get("/api/calendar")).json().values())

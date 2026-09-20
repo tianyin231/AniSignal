@@ -9,8 +9,10 @@
 
 import json
 import logging
+import re
 import time
-from datetime import datetime, timedelta
+import unicodedata
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,27 +26,55 @@ logger = logging.getLogger(__name__)
 EXTRACT_WINDOW_DAYS = 30
 EXTRACT_BATCH_LIMIT = 10
 _TEXT_LIMIT = 6000
-_KINDS = {"activity", "maintenance", "pool", "broadcast", "delay"}
+_KINDS = {"activity", "maintenance", "pool", "broadcast", "delay", "deadline"}
 _CODE_PATTERN_MIN = 6
 _CODE_PATTERN_MAX = 20
 
 _SYSTEM = "你是游戏公告结构化助手。严格按用户要求的 JSON 格式输出，不编造任何不存在的信息。"
 
 _USER_TEMPLATE = """从以下官方内容中抽取「日程」与「兑换码」，输出 JSON：
-{{"schedules": [{{"title": "...", "start_at": "...", "end_at": "...", "kind": "..."}}], "codes": [{{"code": "...", "expires_at": "..."}}]}}
+{{"schedules": [{{"title": "...", "start_at": "...", "end_at": "...", "kind": "...", "all_day": false, "date_evidence": "含日期的原文片段"}}], "codes": [{{"code": "...", "expires_at": "..."}}]}}
 
 规则：
-1. schedules 只收有明确日期/时间点的日程。kind 只能取：activity（游戏内活动/任务/商城）、maintenance（停机维护/版本更新）、pool（卡池/祈愿/建造）、broadcast（直播/前瞻节目）、delay（延期公告：标题或正文含"延迟/延长/推迟"且给出新时间）。
-2. 时间一律输出 ISO 格式并带 +08:00 时区（例如 2026-09-12T11:00:00+08:00）。文中未注明年份按 {year} 年理解；"X月X日 11:00"这类只有开始时间的，end_at 填 null。
+1. schedules 只收有明确日期/时间点的日程。kind 只能取：activity（游戏内活动/任务/商城）、maintenance（停机维护/版本更新）、pool（卡池/祈愿/建造）、broadcast（直播/前瞻节目）、delay（明确延期并给出新时间）、deadline（只公布报名、兑换、抽奖等截止时间，不能当作开始时间）。
+2. 时间输出带时区的 ISO 格式；原文有时区必须遵守，否则使用北京时间 +08:00。公告发布时间为 {published_at}；“今晚/明天”等相对时间必须基于公告发布时间，不能基于当前时间。未注明年份按公告的 {year} 年理解；未给结束时间填 null。
 3. delay 条目的 title 写「原活动名（延期）」，start_at 填新的时间。
 4. codes 只在正文出现"兑换码/礼包码"字样时抽取，码为 6-20 位字母数字组合；expires_at 无明确时间填 null。
 5. 没有可抽取的内容就输出空列表。绝不编造正文里不存在的码或时间。
+6. 只有日期没有具体时刻时，all_day=true，start_at 使用该日期的 00:00，不得编造维护开服时刻。只有“某版本期间”而没有日期的，不抽取。date_evidence 必须逐字摘录支持开始和结束日期的原文，不能改写。
 
 标题：{title}
 正文：{text}"""
 
 
-def _parse_extraction(raw_out: str) -> tuple[list[dict], list[dict]]:
+def _date_supported(value: str, evidence: str, published_at: datetime) -> bool:
+    """校验数字/中英文日期，以及以公告发布时间为基准的相对日期。"""
+    try:
+        dt = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return False
+    if dt.tzinfo is None:
+        return False
+    evidence = unicodedata.normalize("NFKC", evidence).lower()
+    dates = [(int(y) if y else dt.year, int(m), int(d)) for y, m, d in re.findall(
+        r"(?:(\d{4})[-/.年])?(\d{1,2})[-/.月](\d{1,2})(?:日|号)?", evidence
+    )]
+    months = "january february march april may june july august september october november december".split()
+    for month, name in enumerate(months, 1):
+        for day in re.findall(rf"\b(?:{name}|{name[:3]}\.?)\s+(\d{{1,2}})\b", evidence):
+            dates.append((dt.year, month, int(day)))
+    for day in re.findall(r"(?:至|到|[-~–])\s*(\d{1,2})[日号]", evidence):
+        dates.extend((y, m, int(day)) for y, m, _ in list(dates))
+    if dates:
+        return (dt.year, dt.month, dt.day) in dates
+    published = published_at.replace(tzinfo=timezone.utc).astimezone(dt.tzinfo)
+    for pattern, offset in [(r"后天", 2), (r"明天|明晚|明日|tomorrow", 1), (r"今天|今晚|今日|本日|today|tonight", 0)]:
+        if re.search(pattern, evidence):
+            return dt.date() == (published + timedelta(days=offset)).date()
+    return False
+
+
+def _parse_extraction(raw_out: str, *, source_text: str | None = None, published_at: datetime | None = None) -> tuple[list[dict], list[dict]]:
     """健壮解析抽取结果（容忍 ```json 围栏与字段缺失）。"""
     text = (raw_out or "").strip()
     if text.startswith("```"):
@@ -55,6 +85,8 @@ def _parse_extraction(raw_out: str) -> tuple[list[dict], list[dict]]:
         payload = json.loads(text)
     except json.JSONDecodeError:
         return [], []
+    if not isinstance(payload, dict):
+        return [], []
     schedules: list[dict] = []
     for entry in payload.get("schedules") or []:
         if not isinstance(entry, dict):
@@ -64,12 +96,26 @@ def _parse_extraction(raw_out: str) -> tuple[list[dict], list[dict]]:
         start = _parse_dt(entry.get("start_at"))
         if not title or kind not in _KINDS or start is None:
             continue
+        end = _parse_dt(entry.get("end_at"))
+        if end is not None and end < start:
+            continue
+        if source_text is not None:
+            evidence = str(entry.get("date_evidence") or "").strip()
+            compact = lambda s: re.sub(r"\s+", "", unicodedata.normalize("NFKC", s)).lower()
+            if not evidence or compact(evidence) not in compact(source_text):
+                continue
+            anchor = published_at or utcnow()
+            if not _date_supported(entry.get("start_at"), evidence, anchor):
+                continue
+            if end is not None and not _date_supported(entry.get("end_at"), evidence, anchor):
+                continue
         schedules.append(
             {
                 "title": title,
                 "kind": kind,
                 "start_at": start,
-                "end_at": _parse_dt(entry.get("end_at")),
+                "end_at": end,
+                "all_day": entry.get("all_day") is True,
             }
         )
     codes: list[dict] = []
@@ -77,7 +123,9 @@ def _parse_extraction(raw_out: str) -> tuple[list[dict], list[dict]]:
         if not isinstance(entry, dict):
             continue
         code = str(entry.get("code") or "").strip()
-        if not (_CODE_PATTERN_MIN <= len(code) <= _CODE_PATTERN_MAX and code.isalnum()):
+        if not (_CODE_PATTERN_MIN <= len(code) <= _CODE_PATTERN_MAX and re.fullmatch(r"[A-Za-z0-9]+", code)):
+            continue
+        if source_text is not None and code.lower() not in source_text.lower():
             continue
         codes.append({"code": code, "expires_at": _parse_dt(entry.get("expires_at"))})
     return schedules, codes
@@ -119,7 +167,7 @@ async def _push_to_targets(
     return delivered
 
 
-async def extract_entities(session: AsyncSession, content_id: int) -> dict:
+async def extract_entities(session: AsyncSession, content_id: int, *, notify: bool = True) -> dict:
     """抽取单条官方内容的日程与兑换码；完成后置 extracted_at。"""
     row = await session.execute(
         select(RawContent, ContentVersion, Source.identity)
@@ -146,7 +194,9 @@ async def extract_entities(session: AsyncSession, content_id: int) -> dict:
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
 
-    user = _USER_TEMPLATE.format(year=utcnow().year, title=title, text=text)
+    published = raw.published_at or raw.collected_at
+    published_bj = published + timedelta(hours=8)
+    user = _USER_TEMPLATE.format(year=published_bj.year, published_at=f"{published_bj:%Y/%m/%d %H:%M}（北京时间）", title=title, text=text)
     started = time.monotonic()
     try:
         raw_out, usage = await chat(config, _SYSTEM, user, json_mode=True)
@@ -164,7 +214,7 @@ async def extract_entities(session: AsyncSession, content_id: int) -> dict:
         duration_ms=int((time.monotonic() - started) * 1000), ref_id=content_id,
     )
 
-    schedules, codes = _parse_extraction(raw_out)
+    schedules, codes = _parse_extraction(raw_out, source_text=f"{title}\n{text}", published_at=published)
     community = raw.community or "wuwa"
     now = utcnow()
     new_schedules = 0
@@ -185,6 +235,7 @@ async def extract_entities(session: AsyncSession, content_id: int) -> dict:
                 kind=entry["kind"],
                 start_at=entry["start_at"],
                 end_at=entry["end_at"],
+                all_day=entry["all_day"],
                 delayed=entry["kind"] == "delay",
                 created_at=now,
             )
@@ -217,10 +268,11 @@ async def extract_entities(session: AsyncSession, content_id: int) -> dict:
             "critical",
             f"🎫 新兑换码：{entry['code']}\n来自：{title}\n记得尽快兑换，过期作废。",
             f"code:{community}:{entry['code']}",
-        )
+        ) if notify else 0
         logger.info("new redeem code %s pushed to %s targets", entry["code"], pushed)
 
-    # 延期公告：把同社区进行中/临近的维护与活动标记 delayed 并即时推送
+    # 仅修改明确同主题的日程，不能把同游戏的所有活动一起标成延期。
+    from app.services.calendar import schedule_topic
     for entry in schedules:
         if entry["kind"] != "delay":
             continue
@@ -234,9 +286,15 @@ async def extract_entities(session: AsyncSession, content_id: int) -> dict:
         )
         marked = 0
         for schedule in ongoing:
+            if schedule_topic(schedule.title, schedule.kind) != schedule_topic(entry["title"], entry["kind"]):
+                continue
+            if schedule.end_at and schedule.end_at < published:
+                continue
             schedule.delayed = True
+            schedule.start_at = entry["start_at"]
+            schedule.end_at = entry["end_at"]
             marked += 1
-        if marked:
+        if marked and notify:
             pushed = await _push_to_targets(
                 session,
                 community,

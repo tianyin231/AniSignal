@@ -123,6 +123,7 @@ class ContentSchedule(Base):
     kind: Mapped[str] = mapped_column(String(20))
     start_at: Mapped[datetime] = mapped_column(DateTime)
     end_at: Mapped[datetime | None] = mapped_column(DateTime)
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     delayed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

@@ -97,52 +97,9 @@ async def content_calendar(
     community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
-    """活动日历：官方公告抽取的日程，按进行中/即将开始/已结束分组。"""
-    from app.models import ContentSchedule
+    from app.services.calendar import calendar_groups
 
-    now = utcnow()
-    conditions: list = [] if is_all_community(community) else [ContentSchedule.community == community]
-    conditions.append(RawContent.hidden.is_(False))
-    rows = await session.execute(
-        select(ContentSchedule, RawContent.url)
-        .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
-        .where(*conditions)
-        .order_by(ContentSchedule.start_at.desc())
-        .limit(200)
-    )
-
-    def _entry(schedule: "ContentSchedule", url: str | None) -> dict:
-        return {
-            "id": schedule.id,
-            "title": schedule.title,
-            "kind": schedule.kind,
-            "start_at": schedule.start_at,
-            "end_at": schedule.end_at,
-            "delayed": schedule.delayed,
-            "community": schedule.community,
-            "url": url,
-        }
-
-    ongoing: list[dict] = []
-    upcoming: list[dict] = []
-    ended: list[dict] = []
-    for schedule, url in rows:
-        entry = _entry(schedule, url)
-        end = schedule.end_at
-        if schedule.start_at <= now and (end is None or end >= now - timedelta(hours=48)):
-            ongoing.append(entry)
-        elif schedule.start_at > now:
-            upcoming.append(entry)
-        elif end and (now - end).days <= 14:
-            ended.append(entry)
-    ongoing.sort(key=lambda e: (e["end_at"] or e["start_at"]))
-    upcoming.sort(key=lambda e: e["start_at"])
-    ended.sort(key=lambda e: e["end_at"] or e["start_at"], reverse=True)
-    return {
-        "ongoing": ongoing[:10],
-        "upcoming": upcoming[:10],
-        "ended": ended[:5],
-    }
+    return await calendar_groups(session, community)
 
 
 @router.get("/codes")
@@ -154,7 +111,7 @@ async def list_redeem_codes(
     from app.models import RedeemCode
 
     now = utcnow()
-    conditions: list = [RedeemCode.status == "active"]
+    conditions: list = [RedeemCode.status == "active", RawContent.hidden.is_(False)]
     if not is_all_community(community):
         conditions.append(RedeemCode.community == community)
     conditions.append(RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now))
