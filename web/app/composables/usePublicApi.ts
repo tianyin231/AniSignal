@@ -32,10 +32,12 @@ export interface PublicContentList {
 
 export interface CalendarEntry {
   id: number
+  content_id: number
   title: string
   kind: string
   start_at: string | null
   end_at: string | null
+  all_day: boolean
   delayed: boolean
   community?: string
   url: string | null
@@ -44,6 +46,7 @@ export interface CalendarEntry {
 export interface CalendarDto {
   ongoing: CalendarEntry[]
   upcoming: CalendarEntry[]
+  recent: CalendarEntry[]
   ended: CalendarEntry[]
 }
 

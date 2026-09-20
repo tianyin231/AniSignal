@@ -110,22 +110,6 @@ const trendingList = computed(() => (trendingData.value?.items ?? []).map(toRawI
 const trendingDelta = computed(() =>
   new Map((trendingData.value?.items ?? []).map(item => [item.id, item.delta_view ?? 0])),
 )
-const calendarOngoing = computed(() => calendarData.value?.ongoing ?? [])
-const calendarUpcoming = computed(() => calendarData.value?.upcoming ?? [])
-
-function deltaLabel(n: number): string {
-  if (n >= 10_000) return `+${(n / 10_000).toFixed(1)}万`
-  return `+${n.toLocaleString('zh-CN')}`
-}
-
-// 活动日历：kind → 展示名 + chip 色系（站点无紫色系）
-const kindMeta: Record<string, { label: string; chip: string }> = {
-  activity: { label: '活动', chip: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
-  maintenance: { label: '维护', chip: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' },
-  pool: { label: '卡池', chip: 'bg-sky-500/10 text-sky-700 dark:text-sky-300' },
-  broadcast: { label: '直播', chip: 'bg-blue-500/10 text-blue-700 dark:text-blue-300' },
-  delay: { label: '变更', chip: 'bg-red-500/10 text-red-700 dark:text-red-300' },
-}
 const codesList = computed(() => codesData.value?.items ?? [])
 const copiedCode = ref('')
 async function copyCode(code: string) {
@@ -333,26 +317,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- 活动日历：官方公告抽取的日程，进行中/即将开始 -->
-      <section v-if="calendarOngoing.length || calendarUpcoming.length" aria-labelledby="calendar-title" class="mb-6">
-        <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <h2 id="calendar-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">活动日历</h2>
-        </header>
-        <div class="panel overflow-hidden">
-          <div v-for="e in calendarOngoing" :key="`on-${e.id}`" class="flex flex-wrap items-baseline gap-x-2 border-b border-slate-900/5 px-4 py-2.5 text-sm dark:border-white/5">
-            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium" :class="kindMeta[e.kind]?.chip">{{ kindMeta[e.kind]?.label || e.kind }}</span>
-            <span class="text-slate-800 dark:text-zinc-200">{{ e.title }}</span>
-            <span v-if="e.delayed" class="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">已延后</span>
-            <span v-if="e.end_at" class="mono ml-auto text-xs text-slate-400 dark:text-zinc-500">{{ fmtTime(e.end_at) }} 结束</span>
-          </div>
-          <div v-for="e in calendarUpcoming" :key="`up-${e.id}`" class="flex flex-wrap items-baseline gap-x-2 border-b border-slate-900/5 px-4 py-2.5 text-sm last:border-b-0 dark:border-white/5">
-            <span class="rounded px-1.5 py-0.5 text-[10px] font-medium" :class="kindMeta[e.kind]?.chip">{{ kindMeta[e.kind]?.label || e.kind }}</span>
-            <span class="text-slate-800 dark:text-zinc-200">{{ e.title }}</span>
-            <span v-if="e.delayed" class="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-red-600 dark:text-red-300">已延后</span>
-            <span class="mono ml-auto text-xs text-slate-400 dark:text-zinc-500">{{ fmtTime(e.start_at) }} 开始</span>
-          </div>
-        </div>
-      </section>
+      <ActivityCalendar :data="calendarData" :show-community="aggregate" />
 
       <!-- 兑换码：官方内容抽取，点击复制 -->
       <section v-if="codesList.length" aria-labelledby="codes-title" class="mb-6">
