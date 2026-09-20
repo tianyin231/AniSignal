@@ -1,54 +1,39 @@
 <script setup lang="ts">
-useSeoMeta({ title: '订阅中心' })
+import { Bell, Mail, Radar, Rss } from 'lucide-vue-next'
+import { GAME_COMMUNITIES } from '~/composables/useGameSection'
 
-const plans = [
-  {
-    name: '免费浏览',
-    price: '￥0',
-    now: true,
-    items: [
-      '全站事件、时间线与原始内容免费查看',
-      '每项结论附原始来源链接',
-      '来源健康状态公开可查',
-    ],
-  },
-  {
-    name: '基础订阅（规划中）',
-    price: '￥3 / 30 天',
-    items: [
-      '每天 08:00 官方早报（邮件）',
-      '一个个性化监控位：商品 / 账号 / 主题',
-      '重要状态变化即时邮件，附触发原因',
-    ],
-  },
+useSeoMeta({ title: '订阅中心' })
+const community = ref('all')
+const choices = [
+  { title: '关注关键词', description: '从本站资讯中筛出你关心的角色、商品和话题。', to: '/account#keyword-monitor', action: '设置关注', icon: Bell },
+  { title: '邮件通知', description: '接收每日早报，也可以根据关注词生成精炼通知。', to: '/account#email-notifications', action: '设置邮件通知', icon: Mail },
+  { title: '定制监控', description: '跟踪 B站账号或关键词。监控可以仅自己可见。', to: '/account#custom-monitors', action: '创建监控', icon: Radar },
 ]
 </script>
 
 <template>
   <div class="space-y-4">
-    <section class="panel p-4 sm:p-5">
-      <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">订阅中心</h1>
+    <h1 class="px-1 text-lg font-semibold text-slate-900 dark:text-zinc-50">订阅中心</h1>
+    <section v-for="choice in choices" :key="choice.title" class="panel flex flex-wrap items-center gap-4 p-4 sm:p-5">
+      <component :is="choice.icon" :size="22" class="shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />
+      <div class="min-w-0 flex-1 basis-48">
+        <h2 class="font-semibold text-slate-900 dark:text-zinc-100">{{ choice.title }}</h2>
+        <p class="mt-1 text-sm leading-relaxed text-slate-600 dark:text-zinc-400">{{ choice.description }}</p>
+      </div>
+      <NuxtLink :to="choice.to" class="btn-primary px-3 py-2 text-sm">{{ choice.action }}</NuxtLink>
     </section>
-
-    <div class="grid gap-4 sm:grid-cols-2">
-      <section
-        v-for="plan in plans"
-        :key="plan.name"
-        class="panel p-4 sm:p-5"
-        :class="{ 'ring-1 ring-blue-500/30': plan.now }"
-      >
-        <div class="flex items-baseline justify-between gap-2">
-          <h2 class="font-semibold text-slate-900 dark:text-zinc-50">{{ plan.name }}</h2>
-          <span v-if="plan.now" class="chip bg-blue-500/10 text-blue-700 dark:text-blue-300">当前可用</span>
-        </div>
-        <p class="mono mt-1 text-sm text-slate-500 dark:text-zinc-400">{{ plan.price }}</p>
-        <ul class="mt-3 space-y-1.5 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
-          <li v-for="item in plan.items" :key="item" class="flex gap-2">
-            <span class="mt-2 size-1 shrink-0 rounded-full bg-blue-400" />
-            {{ item }}
-          </li>
-        </ul>
-      </section>
-    </div>
+    <section class="panel p-4 sm:p-5">
+      <div class="flex items-center gap-3">
+        <Rss :size="22" class="text-blue-600 dark:text-blue-300" aria-hidden="true" />
+        <h2 class="font-semibold text-slate-900 dark:text-zinc-100">RSS 订阅</h2>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <select v-model="community" aria-label="RSS 游戏范围" class="select px-3 py-2 text-sm">
+          <option value="all">全部游戏</option>
+          <option v-for="c in GAME_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
+        </select>
+        <a :href="`/rss.xml?community=${community}`" class="btn-primary px-3 py-2 text-sm">打开订阅源</a>
+      </div>
+    </section>
   </div>
 </template>

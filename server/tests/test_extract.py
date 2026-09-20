@@ -234,6 +234,7 @@ async def test_calendar_groups_by_status_and_codes_hide_expired(client, session)
 
 def test_schedule_dates_require_source_and_publication_anchor():
     import json
+    from app.services.extract import _date_supported
 
     def parse(start, evidence="今晚19:00", end=None):
         return _parse_extraction(json.dumps({"schedules": [{"title": "前瞻直播", "kind": "broadcast", "start_at": start, "end_at": end, "date_evidence": evidence}]}), source_text="前瞻直播将于今晚19:00开始。", published_at=datetime(2026, 9, 19, 4))[0]
@@ -242,6 +243,14 @@ def test_schedule_dates_require_source_and_publication_anchor():
     assert not parse("2026-09-19T19:00:00+08:00", "9月19日19:00")  # 不能伪造原文
     assert not parse("2026-09-19T19:00:00+08:00", end="2026-09-18T20:00:00+08:00")
     assert parse("2026-09-19T19:00:00+08:00")[0]["start_at"] == datetime(2026, 9, 19, 11)
+    assert not _date_supported("2030-09-19T19:00:00+08:00", "9月19日19:00", datetime(2026, 9, 19))
+    assert not _date_supported("2026-03-07T00:00:00+08:00", "3.7版本开启", datetime(2026, 9, 19))
+    assert not _date_supported("2026-09-19T00:00:00+08:00", "September 19, 2025", datetime(2026, 9, 19))
+    assert _date_supported("2026-09-30T00:00:00+08:00", "September 30th (UTC+8)", datetime(2026, 9, 19))
+    days = _parse_extraction(json.dumps({"schedules": [{"title": "展会", "kind": "activity", "all_day": True,
+        "start_at": "2026-10-02T00:00:00+08:00", "end_at": "2026-10-05T00:00:00+08:00",
+        "date_evidence": "10月2日-10月5日"}]}), source_text="展会日期：10月2日-10月5日", published_at=datetime(2026, 9, 19))[0]
+    assert days[0]["end_at"] == datetime(2026, 10, 5, 15, 59, 59)
 
 
 async def test_calendar_unknown_end_deduplication_and_hidden_source(client, session):
@@ -264,3 +273,30 @@ async def test_calendar_unknown_end_deduplication_and_hidden_source(client, sess
     (await session.get(RawContent, content_id)).hidden = True
     await session.commit()
     assert all(not rows for rows in (await client.get("/api/calendar")).json().values())
+
+
+async def test_calendar_export_utc_all_day_and_visibility(client, session):
+    content_id = await _seed_official(session)
+    schedule = ContentSchedule(raw_content_id=content_id, community="wuwa", title="活动,报名;说明\n请看原文" * 8,
+                               kind="activity", start_at=datetime(2026, 10, 1, 3), end_at=datetime(2026, 10, 1, 8))
+    session.add(schedule)
+    await session.commit()
+    response = await client.get(f"/api/calendar/{schedule.id}.ics")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/calendar")
+    assert 'attachment;' in response.headers["content-disposition"]
+    assert b"DTSTART:20261001T030000Z\r\n" in response.content
+    assert b"DTEND:20261001T080000Z\r\n" in response.content
+    assert all(len(line) <= 75 for line in response.content.split(b"\r\n"))
+    unfolded = response.text.replace("\r\n ", "")
+    assert "活动\\,报名\\;说明\\n请看原文" in unfolded
+    schedule.all_day = True
+    schedule.start_at = datetime(2026, 9, 30, 16)
+    schedule.end_at = None
+    await session.commit()
+    response = await client.get(f"/api/calendar/{schedule.id}.ics")
+    assert "DTSTART;VALUE=DATE:20261001\r\n" in response.text
+    assert "DTEND" not in response.text
+    (await session.get(RawContent, content_id)).hidden = True
+    await session.commit()
+    assert (await client.get(f"/api/calendar/{schedule.id}.ics")).status_code == 404

@@ -12,6 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.services.feed_preferences import preference_conditions
 from app.models import (
     ContentTranslation,
     ContentVersion,
@@ -137,6 +138,7 @@ async def load_candidates(
     *,
     community: str = "all",
     collected_after: datetime | None = None,
+    preferences: dict | None = None,
 ) -> list[dict]:
     """None 表示全站早报；关键词通知只取明确命中内容，正文命中交给 AI 复核。"""
     if keywords == []:
@@ -164,6 +166,7 @@ async def load_candidates(
         .where(
             published >= start_at,
             published < end_at,
+            *preference_conditions(preferences),
             *([RawContent.community == community] if community != "all" else []),
             *([RawContent.collected_at > collected_after] if collected_after else []),
             or_(
@@ -314,7 +317,7 @@ async def ai_curate(
     system = (
         "你是游戏资讯早报编辑，只能根据输入候选生成 JSON："
         '{"items":[{"id":1,"summary":"80字以内事实摘要"}]}。'
-        "根据指定范围筛选：全站早报覆盖所有游戏分区，不要求命中个人关键词；关键词通知须以用户关键词为主题。"
+        "根据指定范围筛选：早报在传入候选的游戏范围内筛选，不要求命中个人关键词；关键词通知须以用户关键词为主题。"
         "只保留提供可核实新事实的内容，最多5条；没有合格内容就返回空数组，宁缺毋滥；"
         "抽奖、签到、泛闲聊、标题党、传闻预测、纯观看反应、攻略配队、伤害展示、开箱晒单、二创、情绪表达、无证据指控和仅顺带提及关键词的内容一律不要选；"
         "普通用户内容只有明确提供发售、预售、发货、延期或质量售后等新事实时才可入选；"
@@ -399,7 +402,7 @@ def _digest_intro(keywords: list[str], items: list[dict]) -> str:
         return f"过去 24 小时，暂未发现{scope}新信息。"
     official_count = sum(item.get("identity") == "official" for item in items)
     source_note = f"，其中官方信息 {official_count} 条" if official_count else ""
-    scope = f"围绕「{keyword_text}」" if keywords else "全站"
+    scope = f"围绕「{keyword_text}」" if keywords else "关注范围内"
     return (
         f"过去 24 小时，{scope}确认了 {len(items)} 条有效更新{source_note}。"
         f"最值得关注的是：{_item_summary(items[0])}"
@@ -415,7 +418,7 @@ def _render_digest_html(
     intro = _digest_intro(keywords, items)
     keyword_chips = "".join(
         f'<span style="display:inline-block;margin:0 6px 6px 0;padding:4px 9px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:12px;font-weight:650;">{escape(keyword)}</span>'
-        for keyword in (keywords or ["全站早报"])
+        for keyword in (keywords or ["每日早报"])
     )
     parts = [
         f'<p class="email-muted" style="margin:0 0 8px;color:#64748b;font-size:13px;">{day:%Y/%m/%d} · 过去 24 小时</p>',
@@ -478,7 +481,7 @@ def _render_digest_html(
         card.extend(["</div>", "</div>"])
         parts.extend(card)
     reason = ("你在 AniSignal 账号中心启用了邮件通知及以上关键词。" if keywords
-              else "你在 AniSignal 账号中心启用了全站每日早报。")
+              else "你在 AniSignal 账号中心启用了每日早报，内容已按个人偏好筛选。")
     parts.append(
         '<p class="email-muted" style="margin:22px 0 0;color:#64748b;font-size:12px;line-height:20px;">'
         f"收到原因：{reason}"
@@ -493,12 +496,12 @@ def render_email(
     keywords: list[str],
     items: list[dict],
 ) -> tuple[str, str, str]:
-    label = "AI 精炼通知" if kind == "ai" else "全站早报"
+    label = "AI 精炼通知" if kind == "ai" else "每日早报"
     subject = f"[AniSignal] {day:%Y/%m/%d} {label}"
     intro = _digest_intro(keywords, items)
     lines = [
         f"{day:%Y/%m/%d} {label}",
-        f"关注关键词：{'、'.join(keywords)}" if keywords else "内容范围：全站所有游戏分区",
+        f"关注关键词：{'、'.join(keywords)}" if keywords else "内容范围：按账号中心的个人偏好筛选，默认全部游戏",
         "",
         f"今日结论：{intro}",
         "",
@@ -528,7 +531,7 @@ def render_email(
             ]
         )
     lines.append("收到原因：你在 AniSignal 账号中心启用了邮件通知及以上关键词。" if keywords
-                 else "收到原因：你在 AniSignal 账号中心启用了全站每日早报。")
+                 else "收到原因：你在 AniSignal 账号中心启用了每日早报。")
     body = "\n".join(lines)
     return subject, body, _render_digest_html(label, day, keywords, items)
 
@@ -591,6 +594,8 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
                 NotificationDelivery.period_date == delivery.period_date,
                 NotificationDelivery.status == "sent",
                 NotificationDelivery.id != delivery.id,
+                *([NotificationDelivery.created_at >= datetime.fromisoformat(user.feed_preferences["updated_at"])]
+                  if user.feed_preferences and user.feed_preferences.get("updated_at") else []),
             )
             .order_by(NotificationDelivery.sent_at.desc())
         )
@@ -598,7 +603,7 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
             html_body = snapshot.html_body or notice_email(
                 snapshot.subject,
                 snapshot.body,
-                preheader="今日全站早报重发",
+                preheader="今日早报重发",
             )
             sent = await send_email(
                 user.email,
@@ -624,7 +629,8 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
         end_at = utcnow()
         start_at = end_at - timedelta(hours=24)
     candidates = await load_candidates(
-        session, None if delivery.kind == "morning" else keywords, start_at, end_at
+        session, None if delivery.kind == "morning" else keywords, start_at, end_at,
+        preferences=user.feed_preferences,
     )
 
     if delivery.kind == "ai":

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.clock import utcnow
-from app.communities import DEFAULT_COMMUNITY
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY
 from app.db import get_session
 from app.api.admin import get_queue
 from app.models import (
@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.schemas.api import PublicContentItem, PublicContentList
 from app.services.notifications import beijing_today, create_delivery, enabled_keywords
+from app.services.feed_preferences import preference_conditions
 from app.services.queue import BaseQueue
 
 logger = logging.getLogger(__name__)
@@ -33,23 +34,37 @@ MAX_KEYWORDS = 10
 
 
 def _title_condition(keyword: str):
-    return ContentVersion.title.like(f"%{keyword}%")
+    return func.lower(ContentVersion.title).contains(keyword.lower(), autoescape=True)
+
+
+def _latest_versions():
+    return (
+        select(ContentVersion.raw_content_id.label("rid"), func.max(ContentVersion.version).label("version"))
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
+
+
+def _join_latest(query, latest):
+    return query.select_from(RawContent).join(latest, latest.c.rid == RawContent.id).join(
+        ContentVersion,
+        (ContentVersion.raw_content_id == latest.c.rid) & (ContentVersion.version == latest.c.version),
+    )
 
 
 async def _keyword_counts(
-    session: AsyncSession, keywords: list[UserKeyword]
+    session: AsyncSession, keywords: list[UserKeyword], preferences: dict | None = None
 ) -> dict[str, int]:
     """每个关键词当前命中的内容条数（单次 union_all 查询）。"""
     if not keywords:
         return {}
+    latest = _latest_versions()
     queries = [
-        select(
+        _join_latest(select(
             literal(k.keyword).label("keyword"),
-            func.count(func.distinct(RawContent.id)).label("cnt"),
-        )
-        .select_from(RawContent)
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-        .where(_title_condition(k.keyword), RawContent.hidden.is_(False))
+            func.count(RawContent.id).label("cnt"),
+        ), latest)
+        .where(_title_condition(k.keyword), RawContent.hidden.is_(False), *preference_conditions(preferences))
         for k in keywords
     ]
     rows = await session.execute(union_all(*queries))
@@ -75,11 +90,11 @@ async def overview(
     if any(k.enabled for k in keywords):
         feed_total = (
             await session.scalar(
-                select(func.count(func.distinct(RawContent.id)))
-                .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+                _join_latest(select(func.count(RawContent.id)), _latest_versions())
                 .where(
                     or_(*[_title_condition(k.keyword) for k in keywords if k.enabled]),
                     RawContent.hidden.is_(False),
+                    *preference_conditions(user.feed_preferences),
                 )
             )
             or 0
@@ -96,6 +111,31 @@ async def overview(
         "keywords_enabled": sum(1 for k in keywords if k.enabled),
         "feed_total": feed_total,
     }
+
+
+@router.get("/feed-preferences")
+async def get_feed_preferences(user: User = Depends(get_current_user)):
+    preferences = user.feed_preferences or {}
+    return {"communities": preferences.get("communities", []), "exclude_keywords": preferences.get("exclude_keywords", [])}
+
+
+@router.put("/feed-preferences")
+async def update_feed_preferences(
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    communities = body.get("communities", [])
+    excluded = body.get("exclude_keywords", [])
+    if not isinstance(communities, list) or any(not isinstance(c, str) or c not in COMMUNITIES for c in communities):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择有效游戏分区")
+    if not isinstance(excluded, list) or len(excluded) > 20 or any(not isinstance(k, str) or not k.strip() or len(k.strip()) > 64 for k in excluded):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "最多 20 个排除词，每个 1–64 字")
+    preferences = {"communities": list(dict.fromkeys(communities)), "exclude_keywords": list(dict.fromkeys(k.strip() for k in excluded))}
+    # 偏好改变后，手动早报不能复用旧筛选条件生成的快照。
+    user.feed_preferences = {**preferences, "updated_at": utcnow().isoformat()}
+    await session.commit()
+    return preferences
 
 
 @router.get("/notifications")
@@ -205,7 +245,7 @@ async def list_keywords(
             )
         ).scalars()
     )
-    counts = await _keyword_counts(session, keywords)
+    counts = await _keyword_counts(session, keywords, user.feed_preferences)
     return [
         {
             "id": k.id,
@@ -306,12 +346,9 @@ async def my_feed(
     if not keywords:
         return PublicContentList(items=[], total=0, new_today=0)
 
-    conditions = [_title_condition(k.keyword) for k in keywords]
-    joined = (
-        select(func.count(func.distinct(RawContent.id)))
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-        .where(or_(*conditions), RawContent.hidden.is_(False))
-    )
+    conditions = [or_(*[_title_condition(k.keyword) for k in keywords]), RawContent.hidden.is_(False), *preference_conditions(user.feed_preferences)]
+    latest = _latest_versions()
+    joined = _join_latest(select(func.count(RawContent.id)), latest).where(*conditions)
     total = await session.scalar(joined) or 0
     new_today = (
         await session.scalar(
@@ -321,20 +358,15 @@ async def my_feed(
     )
 
     rows = await session.execute(
-        select(RawContent, Source, ContentVersion)
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+        _join_latest(select(RawContent, Source, ContentVersion), latest)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(or_(*conditions), RawContent.hidden.is_(False))
-        .order_by(RawContent.collected_at.desc(), RawContent.id.desc(), ContentVersion.version.desc())
-        .limit(limit * 3)
+        .where(*conditions)
+        .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
+        .limit(limit)
         .offset(offset)
     )
     items: list[PublicContentItem] = []
-    seen: set[int] = set()
     for raw, source, version in rows:
-        if raw.id in seen or len(items) >= limit:
-            continue
-        seen.add(raw.id)
         normalized = version.normalized_json or {}
         media = normalized.get("media") or []
         title = version.title or raw.external_id

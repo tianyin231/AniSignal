@@ -146,3 +146,42 @@ async def test_profile_update(client, session):
     # 非法头像被白名单拦截
     resp = await client.put("/api/auth/profile", json={"avatar": "hacker"})
     assert resp.status_code == 400
+
+
+async def test_feed_preferences_latest_version_and_pagination(client, session):
+    from app.models import ContentVersion
+    from tests.test_notifications import _content
+
+    await _register_and_login(client, session, email="preferences@t.com")
+    await client.post("/api/account/keywords", json={"keyword": "角色"})
+    kept = await _content(session, "角色技能介绍", community="hsr")
+    stale = await _content(session, "角色旧标题", community="hsr")
+    await _content(session, "角色二创", community="hsr")
+    await _content(session, "角色鸣潮公告")
+    other = await _content(session, "角色活动公告", community="hsr")
+    session.add_all([
+        ContentVersion(raw_content_id=kept.id, version=2, title="角色技能介绍更新", text="", normalized_json={}),
+        ContentVersion(raw_content_id=stale.id, version=2, title="已更正的其他公告", text="", normalized_json={}),
+    ])
+    await session.commit()
+
+    assert (await client.get("/api/account/feed")).json()["total"] == 4
+    preferences = {"communities": ["hsr"], "exclude_keywords": ["二创"]}
+    assert (await client.put("/api/account/feed-preferences", json=preferences)).json() == preferences
+    assert (await client.get("/api/account/feed-preferences")).json() == preferences
+    first = (await client.get("/api/account/feed", params={"limit": 1})).json()
+    second = (await client.get("/api/account/feed", params={"limit": 1, "offset": 1})).json()
+    assert first["total"] == second["total"] == 2
+    assert {first["items"][0]["id"], second["items"][0]["id"]} == {kept.id, other.id}
+    assert (await client.get("/api/account/overview")).json()["feed_total"] == 2
+    assert (await client.get("/api/account/keywords")).json()[0]["matches"] == 2
+    await client.put("/api/account/feed-preferences", json={"communities": [], "exclude_keywords": []})
+    assert (await client.get("/api/account/feed")).json()["total"] == 4
+
+    # 偏好属于个人账号，不能串到其他用户；非法分区不能写入。
+    await _register_and_login(client, session, email="preferences-other@t.com")
+    assert (await client.get("/api/account/feed-preferences")).json() == {"communities": [], "exclude_keywords": []}
+    assert (await client.put("/api/account/feed-preferences", json={"communities": ["missing"]})).status_code == 400
+    assert (await client.put("/api/account/feed-preferences", json={"exclude_keywords": ["x"] * 21})).status_code == 400
+    client.cookies.clear()
+    assert (await client.put("/api/account/feed-preferences", json={})).status_code == 401

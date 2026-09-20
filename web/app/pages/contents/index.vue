@@ -21,7 +21,7 @@ const pageSize = 30
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐行标注分区
 const { scope, isAll } = useCommunityScope()
-const { data, status } = await useAsyncData(
+const { data, status, error } = await useAsyncData(
   () => `contents-${scope.value}-${platform.value}-${q.value}-${page.value}-${tab.value}`,
   () =>
     tab.value === 'trending'
@@ -37,7 +37,7 @@ const { data, status } = await useAsyncData(
         }),
   { watch: [scope, platform, q, page, tab] },
 )
-const trendingData = await useAsyncData(
+const { data: trendingData, status: trendingStatus, error: trendingError } = await useAsyncData(
   () => `trending-${scope.value}`,
   () => api<PublicContentList>('/api/trending', { query: { community: scope.value, hours: 24, limit: 20 } }),
   { watch: [scope] },
@@ -49,7 +49,7 @@ const list = computed(() =>
     : (data.value?.items ?? []).map(toRawItem),
 )
 const trendingDelta = computed(() =>
-  new Map((trendingData.value?.items ?? []).map(item => [item.id, item.delta_view ?? 0])),
+  new Map((trendingData.value?.items ?? []).map(item => [String(item.id), item.delta_view ?? 0])),
 )
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 
@@ -72,7 +72,7 @@ function applyQuery(patch: Record<string, string | undefined>) {
   <div>
     <BackToChannelHome />
     <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <form class="flex items-center gap-2" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
+      <form v-if="tab !== 'trending'" class="flex items-center gap-2" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
         <div class="flex items-center gap-1.5 rounded-md border border-slate-900/10 bg-white/70 px-2.5 py-1.5 dark:border-white/15 dark:bg-white/5">
           <Search :size="13" class="text-slate-400" />
           <input v-model="searchInput" placeholder="标题关键词" class="w-36 bg-transparent text-xs outline-none placeholder:text-slate-400 sm:w-48" >
@@ -116,7 +116,8 @@ function applyQuery(patch: Record<string, string | undefined>) {
       </button>
     </div>
 
-    <section v-if="tab !== 'trending' && status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
+    <section v-if="(tab === 'trending' ? trendingStatus : status) === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
+    <section v-else-if="tab === 'trending' ? trendingError : error" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">内容暂时加载失败，请稍后刷新。</section>
     <section v-else class="panel overflow-hidden">
       <RawFeedRow
         v-for="item in list"

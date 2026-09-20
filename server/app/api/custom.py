@@ -94,6 +94,8 @@ async def feed_detail(
     is_owner = user is not None and user.id == feed.user_id
     if not feed.is_public and not is_owner:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
+    if feed.status != "active" and not is_owner:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
     owner_name = await session.scalar(
         select(User.display_name).where(User.id == feed.user_id)
     )

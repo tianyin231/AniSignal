@@ -3,10 +3,12 @@ import { Search } from 'lucide-vue-next'
 
 const q = ref('')
 const router = useRouter()
+const route = useRoute()
+const searchQuery = computed(() => ({ community: String(route.query.community || 'all') }))
 
 function go() {
   const s = q.value.trim()
-  if (s) router.push({ path: '/search', query: { q: s } })
+  if (s) router.push({ path: '/search', query: { ...searchQuery.value, q: s } })
 }
 </script>
 
@@ -23,7 +25,7 @@ function go() {
     />
   </form>
   <NuxtLink
-    to="/search"
+    :to="{ path: '/search', query: searchQuery }"
     aria-label="搜索"
     class="grid size-8 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-200/70 hover:text-slate-900 md:hidden dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
   >

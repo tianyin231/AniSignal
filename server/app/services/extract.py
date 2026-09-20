@@ -56,18 +56,22 @@ def _date_supported(value: str, evidence: str, published_at: datetime) -> bool:
     if dt.tzinfo is None:
         return False
     evidence = unicodedata.normalize("NFKC", evidence).lower()
-    dates = [(int(y) if y else dt.year, int(m), int(d)) for y, m, d in re.findall(
-        r"(?:(\d{4})[-/.年])?(\d{1,2})[-/.月](\d{1,2})(?:日|号)?", evidence
-    )]
+    published = published_at.replace(tzinfo=timezone.utc).astimezone(dt.tzinfo)
+    dates = []
+    for match in re.finditer(r"(?<![\d.])(?:(\d{4})[-/.年])?(\d{1,2})[-/.月](\d{1,2})(?:日|号)?(?![\d.])", evidence):
+        # 版本号（如 3.7 版本）不是 3 月 7 日。
+        if re.search(r"版本\s*$|version\s*$", evidence[:match.start()]) or re.match(r"\s*(?:版本|version)", evidence[match.end():]):
+            continue
+        y, m, d = match.groups()
+        dates.append((int(y) if y else published.year, int(m), int(d)))
     months = "january february march april may june july august september october november december".split()
     for month, name in enumerate(months, 1):
-        for day in re.findall(rf"\b(?:{name}|{name[:3]}\.?)\s+(\d{{1,2}})\b", evidence):
-            dates.append((dt.year, month, int(day)))
+        for day, year in re.findall(rf"\b(?:{name}|{name[:3]}\.?)\s+(\d{{1,2}})(?:st|nd|rd|th)?\b(?:,?\s+(\d{{4}}))?", evidence):
+            dates.append((int(year) if year else published.year, month, int(day)))
     for day in re.findall(r"(?:至|到|[-~–])\s*(\d{1,2})[日号]", evidence):
         dates.extend((y, m, int(day)) for y, m, _ in list(dates))
     if dates:
         return (dt.year, dt.month, dt.day) in dates
-    published = published_at.replace(tzinfo=timezone.utc).astimezone(dt.tzinfo)
     for pattern, offset in [(r"后天", 2), (r"明天|明晚|明日|tomorrow", 1), (r"今天|今晚|今日|本日|today|tonight", 0)]:
         if re.search(pattern, evidence):
             return dt.date() == (published + timedelta(days=offset)).date()
@@ -109,6 +113,17 @@ def _parse_extraction(raw_out: str, *, source_text: str | None = None, published
                 continue
             if end is not None and not _date_supported(entry.get("end_at"), evidence, anchor):
                 continue
+            if entry.get("all_day") is not True and not re.search(r"\d{1,2}\s*[:：]\s*\d{2}|\d{1,2}\s*[点时]", evidence):
+                continue
+        if entry.get("all_day") is True:
+            # 日期范围包含结束当天；内部边界不作为具体时刻展示或提醒。
+            start_day = (start + timedelta(hours=8)).replace(hour=0, minute=0, second=0, microsecond=0)
+            start = start_day - timedelta(hours=8)
+            if kind == "deadline":
+                start += timedelta(days=1, seconds=-1)
+            if end is not None:
+                end_day = (end + timedelta(hours=8)).replace(hour=0, minute=0, second=0, microsecond=0)
+                end = end_day + timedelta(hours=16, seconds=-1)
         schedules.append(
             {
                 "title": title,
@@ -293,6 +308,7 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
             schedule.delayed = True
             schedule.start_at = entry["start_at"]
             schedule.end_at = entry["end_at"]
+            schedule.all_day = entry["all_day"]
             marked += 1
         if marked and notify:
             pushed = await _push_to_targets(

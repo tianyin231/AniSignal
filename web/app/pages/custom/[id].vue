@@ -30,11 +30,12 @@ interface CustomFeedDetail {
 const route = useRoute()
 const feedId = computed(() => Number(route.params.id))
 const { api } = usePublicApi()
+const forwardedHeaders = useRequestHeaders(['cookie'])
 const { error, data } = await useAsyncData(
   () => `custom-feed-${feedId.value}`,
   async () => {
     try {
-      return await api<CustomFeedDetail>(`/api/custom/feeds/${feedId.value}`)
+      return await api<CustomFeedDetail>(`/api/custom/feeds/${feedId.value}`, { headers: forwardedHeaders })
     } catch (exc: any) {
       if (exc?.status === 404) return null
       throw exc
@@ -46,8 +47,9 @@ const { error, data } = await useAsyncData(
 
 <template>
   <div>
-    <section v-if="data === null" class="panel px-4 py-10 text-center text-sm text-slate-400">
-      监控不存在或未公开。
+    <section v-if="!data" class="panel px-4 py-10 text-center text-sm text-slate-500 dark:text-zinc-400">
+      <p>{{ error ? '监控暂时加载失败，请稍后刷新。' : '监控不存在，或需要登录所属账号后查看。' }}</p>
+      <NuxtLink to="/account#custom-monitors" class="link mt-3 inline-block">我的监控</NuxtLink>
     </section>
     <template v-else>
       <div class="mb-4 flex flex-wrap items-center justify-between gap-2">

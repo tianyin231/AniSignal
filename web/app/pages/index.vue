@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { RefreshCw } from 'lucide-vue-next'
 import type { ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto } from '~/composables/usePublicApi'
-import { toAppEvent, toRawItem } from '~/utils/public-utils'
+import { toRawItem, utcTimestamp } from '~/utils/public-utils'
 import { fmtTime } from '~/utils/admin-types'
 
 useSeoMeta({ title: '首页 · AniSignal' })
@@ -9,6 +9,7 @@ useSeoMeta({ title: '首页 · AniSignal' })
 const route = useRoute()
 const router = useRouter()
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
+const referenceTime = useState('home-reference-time', () => Date.now())
 // 官方内容在混合流中占约 1/3（官方:社区 = 15:30 每页），官方比重由此保证
 const OFFICIAL_PER_PAGE = 15
 const COMMUNITY_PER_PAGE = 30
@@ -29,13 +30,13 @@ const sectionLinks = [
 const sectionQuery = computed(() => (aggregate.value ? { community: 'all' } : communityQuery.value))
 const isActive = (to: string) => route.path.startsWith(to)
 // 首页频道语义：/ 无 community 参数 = 跨分区聚合（community=all）；带参数 = 该分区首页
-const aggregate = computed(() => !route.query.community)
+const aggregate = computed(() => !route.query.community || route.query.community === 'all')
 const homeCommunity = computed(() => (aggregate.value ? 'all' : community.value))
 
 const eventsRequest = useAsyncData(
   () => `home-events-${homeCommunity.value}`,
   () => api<ApiEventList>('/api/events', {
-    query: { community: homeCommunity.value, published_within_hours: 168, limit: 5 },
+    query: { community: homeCommunity.value, published_within_hours: 24, limit: 10 },
   }),
   { watch: [homeCommunity] },
 )
@@ -105,10 +106,9 @@ const [
 ])
 
 const featuredHighlights = computed(() => (highlightsData.value?.items ?? []).map(toRawItem))
-const eventList = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const trendingList = computed(() => (trendingData.value?.items ?? []).map(toRawItem))
 const trendingDelta = computed(() =>
-  new Map((trendingData.value?.items ?? []).map(item => [item.id, item.delta_view ?? 0])),
+  new Map((trendingData.value?.items ?? []).map(item => [String(item.id), item.delta_view ?? 0])),
 )
 const codesList = computed(() => codesData.value?.items ?? [])
 const copiedCode = ref('')
@@ -135,7 +135,7 @@ async function copyCode(code: string) {
 // 最新最热混合流：官方内容视作更新 36h、高播放内容视作更新 12h，
 // 页内按"有效时间"排序——同一屏里最新、最热、官方三者兼顾。
 function effectiveTs(item: PublicContentItem): number {
-  const base = new Date(item.published_at || item.collected_at).getTime()
+  const base = utcTimestamp(item.published_at || item.collected_at)
   let ts = base
   if (item.identity === 'official') ts += OFFICIAL_BOOST_HOURS * 3_600_000
   if ((item.metrics?.view ?? 0) >= 10_000) ts += HOT_BOOST_HOURS * 3_600_000
@@ -166,12 +166,16 @@ function goPage(p: number) {
 async function refreshHome() {
   if (refreshing.value) return
   refreshing.value = true
+  referenceTime.value = Date.now()
   try {
     await Promise.all([
       eventsRequest.refresh(),
       officialRequest.refresh(),
       communityRequest.refresh(),
       highlightsRequest.refresh(),
+      trendingRequest.refresh(),
+      calendarRequest.refresh(),
+      codesRequest.refresh(),
     ])
   }
   finally {
@@ -222,7 +226,10 @@ async function checkForUpdates() {
 }
 
 function onVisibilityChange() {
-  if (document.visibilityState === 'visible') void checkForUpdates()
+  if (document.visibilityState === 'visible') {
+    referenceTime.value = Date.now()
+    void checkForUpdates()
+  }
 }
 
 async function applyUpdates() {
@@ -289,31 +296,19 @@ onBeforeUnmount(() => {
     <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
 
     <template v-else>
+      <TodayBrief :events="eventsData?.items ?? []" :calendar="calendarData" :codes="codesData" :now="referenceTime" :show-community="aggregate" />
+
       <!-- 官方精选轮播：官方内容的第一呈现位 -->
       <section aria-labelledby="official-latest-title" class="mb-6">
         <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <h1 id="official-latest-title" class="text-lg font-semibold text-slate-900 dark:text-zinc-50">官方精选</h1>
-          <NuxtLink to="/official" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+          <h1 id="official-latest-title" class="text-lg font-semibold text-slate-900 dark:text-zinc-50">精选动态</h1>
+          <NuxtLink :to="{ path: '/official', query: sectionQuery }" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
             全部官方动态
           </NuxtLink>
         </header>
         <FeaturedCarousel v-if="featuredHighlights.length" :items="featuredHighlights" :show-community="aggregate" />
         <div v-else class="panel px-4 py-10 text-center text-sm text-slate-400">
           近 7 天暂无精选内容。
-        </div>
-      </section>
-
-      <!-- 聚合结论：多条线索归并出的结论，压缩为 5 条速览 -->
-      <section aria-labelledby="briefing-title" class="mb-6">
-        <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <h2 id="briefing-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">近期聚合结论</h2>
-          <NuxtLink to="/events" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">查看事件库</NuxtLink>
-        </header>
-        <div class="panel overflow-hidden">
-          <EventRow v-for="e in eventList" :key="e.id" :event="e" :show-community="aggregate" />
-          <p v-if="!eventList.length" class="px-4 py-8 text-center text-sm text-slate-400">
-            近 7 天暂无新事件。
-          </p>
         </div>
       </section>
 
@@ -364,7 +359,7 @@ onBeforeUnmount(() => {
       <section aria-labelledby="feed-title">
         <header class="mb-3 flex items-end justify-between gap-4 px-1">
           <h2 id="feed-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">最新 · 最热</h2>
-          <NuxtLink to="/contents" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+          <NuxtLink :to="{ path: '/contents', query: sectionQuery }" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
             查看内容库
           </NuxtLink>
         </header>

@@ -36,6 +36,7 @@ function when(item: CalendarEntry, group: string) {
             <p class="mono mt-1 text-xs text-slate-500 dark:text-zinc-400">{{ when(item, group.key) }}</p>
           </div>
           <a v-if="item.url" :href="item.url" target="_blank" rel="noopener noreferrer" class="link py-1 text-xs">原文</a>
+          <a :href="`/api/calendar/${item.id}.ics`" class="link py-1 text-xs" :aria-label="`将${item.title}加入日历`">加入日历</a>
         </div>
       </section>
     </div>
