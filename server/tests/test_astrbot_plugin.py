@@ -29,11 +29,15 @@ def plugin(monkeypatch):
             self.image_url = url
             return self
 
+        def file_image(self, path):
+            self.image_url = path
+            return self
+
     module('aiohttp', ClientError=ConnectionError)
     module('astrbot')
     module('astrbot.api', llm_tool=decorator, logger=SimpleNamespace(warning=lambda *a: None))
     module('astrbot.api.event', AstrMessageEvent=object,
-        filter=SimpleNamespace(command=decorator, on_llm_request=decorator, event_message_type=decorator,
+        filter=SimpleNamespace(command=decorator, regex=decorator, on_llm_request=decorator, event_message_type=decorator,
             on_decorating_result=decorator,
             EventMessageType=SimpleNamespace(ALL='all')))
     module('astrbot.api.star', Context=object, Star=object, register=decorator)
@@ -51,6 +55,8 @@ def plugin(monkeypatch):
     obj.api = AsyncMock(return_value={'ok':True})
     obj.render_delivery = AsyncMock(return_value='人格播报\n原始资料')
     obj.pending_ack = None
+    obj.config = {}
+    obj.last_briefs = {}
     obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True),
         conversation_manager=SimpleNamespace(
             get_curr_conversation_id=AsyncMock(return_value='cid-1'),
@@ -190,3 +196,32 @@ async def test_residual_emotion_markup_is_stripped_from_replies(plugin):
         get_plain_text=lambda: chain[0].text, chain=chain)
     await plugin.strip_residual_emotion_markup(ev)
     assert chain[0].text == '正常回复没有标记'
+
+
+async def test_persona_intro_rejects_sales_and_long_monologues(plugin):
+    plugin._resolve_persona = AsyncMock(return_value=('model', '明石'))
+    plugin.context.llm_generate = AsyncMock()
+    row = delivery()
+    for bad in ['现在下单打九折喵。', '（摇了摇尾巴）喵。', '这是一大段没有必要的开场白' * 4, '下个月9月28日上线喵']:
+        plugin.context.llm_generate.return_value = SimpleNamespace(completion_text=bad)
+        assert await type(plugin).render_delivery(plugin, row) == row['body']
+    plugin.context.llm_generate.return_value = SimpleNamespace(completion_text='钱包先装睡吧喵。')
+    assert await type(plugin).render_delivery(plugin, row) == '钱包先装睡吧喵。\n\n原始资料'
+
+
+async def test_expand_uses_sent_delivery_and_real_session_identity(plugin):
+    umo = 'qq:GroupMessage:real'
+    plugin.targets = {umo: {'enabled': True, 'tools': ['news']}}
+    plugin.last_briefs[umo] = {'delivery_id': 12, 'brief': {'items': []}}
+    plugin.api.return_value = {'text': '原来的第二条'}
+    result = await plugin.detail(event(umo), 2)
+    assert result['text'] == '原来的第二条'
+    assert plugin.api.call_args.args == ('/detail', {'umo': umo, 'actor_id': 'user', 'number': 2, 'delivery_id': 12})
+    plugin.targets[umo]['enabled'] = False
+    assert 'error' in await plugin.detail(event(umo), 2)
+
+
+async def test_delivery_uses_at_most_one_image(plugin):
+    row = {**delivery(), 'images': ['first', 'second', 'third']}
+    await plugin.send_delivery(row)
+    assert plugin.context.send_message.call_args.args[1].image_url == 'first'

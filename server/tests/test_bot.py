@@ -156,7 +156,7 @@ async def test_merge_window_batches_normal_updates(session, monkeypatch):
     await bot.run_bot_notifications(session, now + timedelta(minutes=6))
     rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.kind == 'updates')))
     assert len(rows) == 1
-    assert '重要动态 ×2' in rows[0].body
+    assert '刚刚的重点' in rows[0].body
     assert '合并消息0' in rows[0].body and '合并消息1' in rows[0].body
 
 
@@ -226,7 +226,7 @@ async def test_format_helpers():
         {'community': 'blhx', 'title': '甲', 'url': 'https://a'},
         {'community': 'wuwa', 'title': '乙', 'url': 'https://b'},
     ], datetime(2026, 9, 13, 4, 0))
-    assert '重要动态 ×2' in merged
+    assert '刚刚的重点' in merged
     assert '[碧蓝航线] 甲' in merged
     assert bot.collect_images([{'image': 'a'}, {'image': 'a'}, {'image': 'b'}], 3) == ['a', 'b']
     assert bot.classify_item({'importance': True}) == 'critical'
@@ -238,7 +238,7 @@ async def test_format_helpers():
         {'community': 'blhx', 'title': '乙', 'url': 'https://b'},
     ], datetime(2026, 9, 13, 4, 0))
     assert '今日速报' in brief
-    assert 'https://a' in brief
+    assert 'https://a' not in brief
+    assert '/展开' in brief
     assert '…' in brief
     assert '完整正文' not in brief
-

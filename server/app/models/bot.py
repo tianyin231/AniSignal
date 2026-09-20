@@ -30,6 +30,7 @@ class BotDelivery(Base):
     kind: Mapped[str] = mapped_column(String(20))
     body: Mapped[str] = mapped_column(Text)
     media: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    brief: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     rendered_body: Mapped[str | None] = mapped_column(Text)
     receipt: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(20), default="pending")
