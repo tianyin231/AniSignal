@@ -1,0 +1,10 @@
+--- a/core/llm_adapter.py
++++ b/core/llm_adapter.py
+@@ -811,4 +811,7 @@
+         # 仅在确实拿到 completion_text 时视为成功
+         if llm_response_obj and llm_response_obj.completion_text:
+             response_text = llm_response_obj.completion_text.strip()
++            # 静默决定不能变成发给群友的占位消息。
++            if response_text.strip('"“”()（） \n').upper() in {"", "NO_REPLY", "[NO_REPLY]", "空白", "空"}:
++                return None, final_user_simulation_prompt
+             if response_text == "[object Object]":
