@@ -167,8 +167,8 @@ async def test_manual_morning_covers_all_communities_without_keyword_filter(sess
     assert "明日方舟版本公告" in sent["body"]
     assert "已下架公告" not in sent["body"]
     assert "过期公告" not in sent["body"]
-    assert "全站早报" in sent["subject"]
-    assert "内容范围：全站所有游戏分区" in sent["body"]
+    assert "每日早报" in sent["subject"]
+    assert "内容范围：按账号中心的个人偏好筛选，默认全部游戏" in sent["body"]
     assert "关注关键词" not in sent["body"]
     assert "今日结论" in sent["body"]
     assert "https://i0.hdslb.com/example-cover.jpg@672w_1e_1c.jpg" in sent["html_body"]
@@ -188,6 +188,37 @@ async def test_personal_notification_candidates_still_require_keywords(session):
     assert [item["id"] for item in candidates] == [matching.id]
     assert candidates[0]["keywords"] == ["爱弥斯"]
     assert await notifications.load_candidates(session, [], start_at, end_at) == []
+
+
+async def test_personal_preferences_filter_mail_and_invalidate_old_snapshot(session, monkeypatch):
+    from app.clock import utcnow
+
+    user = await _user_with_keyword(session, keyword="角色")
+    keep = await _content(session, "角色技能公告", community="hsr")
+    await _content(session, "角色二创公告", community="hsr")
+    await _content(session, "角色其他游戏公告", community="wuwa")
+    day = notifications.beijing_today()
+    snapshot = NotificationDelivery(
+        user_id=user.id, kind="morning", source="schedule", period_date=day,
+        status="sent", subject="旧早报", body="包含已屏蔽的内容", content_ids=[999],
+        created_at=utcnow() - timedelta(minutes=1),
+    )
+    session.add(snapshot)
+    user.feed_preferences = {"communities": ["hsr"], "exclude_keywords": ["二创"], "updated_at": utcnow().isoformat()}
+    await session.commit()
+    start, end = notifications.morning_window(day)
+    candidates = await notifications.load_candidates(session, ["角色"], start, end, preferences=user.feed_preferences)
+    assert [c["id"] for c in candidates] == [keep.id]
+
+    async def fake_send(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(notifications, "send_email", fake_send)
+    delivery = await notifications.create_delivery(session, user.id, "morning", "manual", day=day)
+    result = await notifications.process_delivery(session, delivery.id)
+    assert result["status"] == "sent"
+    assert delivery.content_ids == [keep.id]
+    assert "二创" not in delivery.body and "其他游戏" not in delivery.body
 
 
 async def test_scheduled_morning_sends_official_content_without_keywords_or_ai(session, monkeypatch):

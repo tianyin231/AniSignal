@@ -4,6 +4,11 @@ import { fmtTime } from '~/utils/admin-types'
 import { type Identity, type Platform, type RawItem, type Region, type AppEvent, type SourceRef } from '~/utils/data'
 import type { ApiEvent, ApiProduct, PublicContentItem } from '~/composables/usePublicApi'
 
+export function utcTimestamp(value: string | null | undefined): number {
+  if (!value) return 0
+  return new Date(/Z$|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`).getTime()
+}
+
 export const regionOf = (platform: string): Region =>
   ['kuro_global', 'youtube'].includes(platform) ? 'global' : 'cn'
 

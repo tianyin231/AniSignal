@@ -63,7 +63,7 @@ const aiNotificationReady = computed(() => Boolean(
 const notificationBlockReason = computed(() => {
   // 登录用户必然已验证（login/register 流程保证），此处只提示通知链路自身的前置条件
   if (!notificationInfo.value?.enabled) return '请先开启邮件通知，之后才能手动发送。'
-  if (!(overview.value?.keywords_enabled ?? 0)) return '全站早报已开启。AI 精炼通知需先添加关键词。'
+  if (!(overview.value?.keywords_enabled ?? 0)) return '每日早报已开启。AI 精炼通知需先添加关键词。'
   return ''
 })
 
@@ -104,6 +104,7 @@ async function refreshCustomFeeds() {
 
 async function createCustomFeed() {
   if (customBusy.value) return
+  customBusy.value = true
   try {
     await $fetch('/api/account/custom-feeds', {
       method: 'POST',
@@ -116,28 +117,36 @@ async function createCustomFeed() {
     await refreshCustomFeeds()
   } catch (exc: any) {
     customError.value = exc?.data?.detail ?? '创建失败'
+  } finally {
+    customBusy.value = false
   }
 }
 
 async function patchCustomFeed(feed: CustomFeedRow, body: Record<string, unknown>, okText: string) {
   if (customBusy.value) return
+  customBusy.value = true
   try {
     await $fetch(`/api/account/custom-feeds/${feed.id}`, { method: 'PATCH', body })
     Object.assign(feed, body)
     customError.value = ''
   } catch (exc: any) {
     customError.value = exc?.data?.detail ?? '操作失败'
+  } finally {
+    customBusy.value = false
   }
 }
 
 async function removeCustomFeed(feed: CustomFeedRow) {
   if (customBusy.value || !confirm(`删除监控「${feed.name}」及其全部抓取记录？`)) return
+  customBusy.value = true
   try {
     await $fetch(`/api/account/custom-feeds/${feed.id}`, { method: 'DELETE' })
     customFeeds.value = customFeeds.value.filter(f => f.id !== feed.id)
     customError.value = ''
   } catch (exc: any) {
     customError.value = exc?.data?.detail ?? '删除失败'
+  } finally {
+    customBusy.value = false
   }
 }
 
@@ -154,7 +163,12 @@ const feedQuery = computed(() => ({
 }))
 
 async function fetchFeed() {
-  feed.value = await $fetch<PublicContentList>('/api/account/feed', { query: feedQuery.value })
+    feed.value = await $fetch<PublicContentList>('/api/account/feed', { query: feedQuery.value })
+}
+
+function refreshPersonalFeed() {
+  feedPage.value = 1
+  refresh()
 }
 
 function setKeywordFilter(k: Keyword) {
@@ -224,7 +238,7 @@ async function toggleNotifications() {
   try {
     const enabled = !notificationInfo.value?.enabled
     await $fetch('/api/account/notifications', { method: 'PUT', body: { enabled } })
-    notificationMessage.value = enabled ? '每日全站早报已启用。' : '邮件通知已关闭。'
+    notificationMessage.value = enabled ? '每日早报已启用，会按个人偏好筛选。' : '邮件通知已关闭。'
     await refresh()
   } catch (exc: any) {
     notificationError.value = exc?.data?.detail ?? '通知设置保存失败'
@@ -456,8 +470,10 @@ async function changePassword() {
           </div>
         </section>
 
+        <FeedPreferences @saved="refreshPersonalFeed" />
+
         <!-- 定制监控（UID/关键词，可公开可推送） -->
-        <section class="panel p-5">
+        <section id="custom-monitors" class="panel scroll-mt-20 p-5">
           <h2 class="text-sm font-semibold">定制监控</h2>
           <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">
             自建 UID / 关键词抓取源；公开后出现在"定制化"频道，不公开仅自己可见。
@@ -523,7 +539,7 @@ async function changePassword() {
                 class="text-xs text-slate-500 underline-offset-2 hover:underline dark:text-zinc-400"
                 @click="patchCustomFeed(f, { push_enabled: !f.push_enabled }, `推送已${!f.push_enabled ? '开启' : '关闭'}`)"
               >推送{{ f.push_enabled ? '开' : '关' }}</button>
-              <NuxtLink v-if="f.is_public" :to="`/custom/${f.id}`" class="link text-xs">查看</NuxtLink>
+              <NuxtLink :to="`/custom/${f.id}`" class="link text-xs">查看</NuxtLink>
               <button
                 class="ml-auto text-xs text-red-500 hover:underline disabled:opacity-40"
                 :disabled="customBusy"
@@ -578,7 +594,7 @@ async function changePassword() {
 
       <!-- 右栏：通知 + 安全 -->
       <div class="space-y-5">
-        <section class="panel p-5">
+        <section id="email-notifications" class="panel scroll-mt-20 p-5">
           <div class="flex items-center justify-between gap-3">
             <div>
               <h2 class="flex items-center gap-2 text-sm font-semibold"><BellRing :size="15" /> 邮件通知</h2>
@@ -621,7 +637,7 @@ async function changePassword() {
               :disabled="!!notificationBusy || !notificationReady"
               @click="sendNotification('morning')"
             >
-              <Mail :size="15" /> {{ notificationBusy === 'morning' ? '提交中…' : '发送今日全站早报' }}
+              <Mail :size="15" /> {{ notificationBusy === 'morning' ? '提交中…' : '发送今日早报' }}
             </button>
             <button
               type="button"
@@ -648,7 +664,7 @@ async function changePassword() {
             <div class="mt-2 space-y-2">
               <div v-for="record in notificationInfo.records.slice(0, 3)" :key="record.id" class="rounded-lg bg-slate-500/5 px-3 py-2 dark:bg-white/5">
                 <div class="flex items-center justify-between gap-2 text-xs">
-                  <span class="font-medium">{{ record.kind === 'ai' ? 'AI 精炼通知' : '全站早报' }}</span>
+                  <span class="font-medium">{{ record.kind === 'ai' ? 'AI 精炼通知' : '每日早报' }}</span>
                   <span
                     :class="record.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : record.status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-slate-400'"
                   >{{ notificationStatusLabel[record.status] }}</span>

@@ -21,6 +21,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     notification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    feed_preferences: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active/banned
     banned_reason: Mapped[str | None] = mapped_column(Text)
     banned_at: Mapped[datetime | None] = mapped_column(DateTime)

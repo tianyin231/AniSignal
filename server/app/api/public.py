@@ -102,6 +102,22 @@ async def content_calendar(
     return await calendar_groups(session, community)
 
 
+@router.get("/calendar/{schedule_id}.ics")
+async def export_calendar(schedule_id: int, session: AsyncSession = Depends(get_session)):
+    from app.models import ContentSchedule
+    from app.services.calendar import calendar_ics
+
+    row = (await session.execute(
+        select(ContentSchedule, RawContent.url)
+        .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
+        .where(ContentSchedule.id == schedule_id, RawContent.hidden.is_(False))
+    )).first()
+    if row is None:
+        raise HTTPException(404, "日程不存在")
+    return Response(calendar_ics(*row), media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="anisignal-{schedule_id}.ics"'})
+
+
 @router.get("/codes")
 async def list_redeem_codes(
     community: str = COMMUNITY_AGGREGATE_QUERY,

@@ -173,6 +173,13 @@ async def test_admin_custom_feed_management(client, session, fake_bili):
     )
     assert resp.json()["status"] == "disabled"
 
+    # 所有者仍可查看，但管理员停用的公开监控不能通过详情直链继续公开。
+    resp = await client.patch(f"/api/admin/custom-feeds/{feed_id}", json={"is_public": True}, headers=admin_headers)
+    assert resp.status_code == 200
+    assert (await client.get(f"/api/custom/feeds/{feed_id}")).status_code == 200
+    client.cookies.delete("anisignal_session")
+    assert (await client.get(f"/api/custom/feeds/{feed_id}")).status_code == 404
+
     # 删除
     resp = await client.delete(f"/api/admin/custom-feeds/{feed_id}", headers=admin_headers)
     assert resp.status_code == 204
