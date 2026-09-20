@@ -417,6 +417,12 @@ async def test_event_has_facts(client, session):
     assert events
     labels = {f["label"] for f in events[0]["facts"]}
     assert "类目" in labels and "证据数" in labels
+    from app.clock import format_beijing
+    from datetime import datetime
+
+    for event in events:
+        facts = {f["label"]: f["value"] for f in event["facts"]}
+        assert facts["首见时间"] == format_beijing(datetime.fromisoformat(event["first_seen_at"]))
 
 
 async def test_public_events_recent_window_uses_evidence_publish_time(client, session):

@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clock import to_naive_utc, utcnow
+from app.clock import format_beijing, to_naive_utc, utcnow
 from app.communities import DEFAULT_COMMUNITY, game_name_boilerplate
 from app.models import (
     ANNOUNCE_CATEGORIES,
@@ -105,7 +105,7 @@ def _build_facts(category: str, cluster: list, product=None) -> list:
     if product is not None:
         facts.append({"label": "商品", "value": product.name})
     facts.append({"label": "类目", "value": CATEGORY_LABELS.get(category, category)})
-    facts.append({"label": "首见时间", "value": (first.published_at or first.collected_at).strftime("%Y-%m-%d %H:%M")})
+    facts.append({"label": "首见时间", "value": format_beijing(first.published_at or first.collected_at)})
     facts.append({"label": "证据数", "value": f"{len(cluster)} 条"})
     facts.append({"label": "来源平台", "value": "、".join(sorted({r.platform for r in cluster}))})
     return facts
@@ -345,7 +345,7 @@ async def _backfill_facts(session: AsyncSession, stats: AggStats) -> None:
         facts.append({"label": "类目", "value": CATEGORY_LABELS.get(event.category, event.category)})
         first_time = min((r.published_at or r.collected_at for r in raws), default=None)
         if first_time:
-            facts.append({"label": "首见时间", "value": first_time.strftime("%Y-%m-%d %H:%M")})
+            facts.append({"label": "首见时间", "value": format_beijing(first_time)})
         facts.append({"label": "证据数", "value": f"{len(raws)} 条"})
         facts.append({"label": "来源平台", "value": "、".join(sorted({r.platform for r in raws}))})
         event.facts = facts

@@ -1,6 +1,6 @@
 """时间约定：数据库一律存 naive UTC，边界处自行转换时区。"""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 def utcnow() -> datetime:
@@ -13,3 +13,7 @@ def to_naive_utc(value: datetime) -> datetime:
     if value.tzinfo is not None:
         value = value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
+
+
+def format_beijing(value: datetime, fmt: str = "%Y/%m/%d %H:%M") -> str:
+    return (to_naive_utc(value) + timedelta(hours=8)).strftime(fmt)
