@@ -1,10 +1,18 @@
 <script setup lang="ts">
+import { GAME_COMMUNITIES } from '~/composables/useGameSection'
+
+const route = useRoute()
+const calendarTo = computed(() => ({
+  path: '/calendar',
+  query: { community: GAME_COMMUNITIES.some(c => c.key === route.query.community) ? String(route.query.community) : 'all' },
+}))
 // 顶栏承载内容主栏目；侧栏只放二级页面（商品入口在顶栏与右栏）
-const tools = [
+const tools = computed(() => [
+  { to: calendarTo.value, label: '活动日历' },
   { to: '/stats', label: '数据统计' },
   { to: '/sources', label: '来源健康' },
   { to: '/watch', label: '订阅中心' },
-]
+])
 
 </script>
 

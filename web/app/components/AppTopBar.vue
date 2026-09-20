@@ -4,7 +4,7 @@ import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection
 
 const route = useRoute()
 // 顶栏只有一层：品牌旁的"频道"组（首页/鸣潮/碧蓝航线…）+ 右侧工具；
-// 栏目导航（官方动态/商品/事件/内容库）放在首页内容区的操作行里，不单独占一层。
+// 栏目导航（官方动态/活动日历/商品/事件/内容库）放在首页内容区的操作行里，不单独占一层。
 const channels = [
   { key: 'home', label: '首页', color: 'blue' as const },
   ...GAME_COMMUNITIES.map(c => ({ key: c.key, label: c.label, color: c.color })),
@@ -23,6 +23,7 @@ const activeChannel = computed<string | null>(() => {
     return 'home'
   }
   // 栏目页处于聚合视角（community=all）时不高亮任何分区频道
+  if (route.path === '/calendar' && !GAME_COMMUNITIES.some(c => c.key === route.query.community)) return null
   if (String(route.query.community || '') === 'all') return null
   return community.value
 })
