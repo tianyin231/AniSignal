@@ -112,6 +112,7 @@ async def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     redis = await get_redis_pool()
     logger.info("scheduler started, poll=%.0fs", settings.scheduler_poll_seconds)
     try:

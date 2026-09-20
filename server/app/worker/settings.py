@@ -108,6 +108,7 @@ async def on_startup(ctx) -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 async def send_bot_notifications(ctx):
