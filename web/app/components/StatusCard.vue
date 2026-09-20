@@ -59,7 +59,7 @@ const axisMeta = [
         class="flex items-center justify-between gap-2 rounded-lg border border-slate-900/5 bg-white/45 px-2.5 py-2 dark:border-white/10 dark:bg-white/5"
       >
         <span class="flex shrink-0 items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-zinc-300">
-          <axis.icon :size="13" /> {{ product.fulfillment[axis.key].label }}
+          <component :is="axis.icon" :size="13" /> {{ product.fulfillment[axis.key].label }}
         </span>
         <span class="truncate text-xs font-medium text-slate-700 dark:text-zinc-200">{{ product.fulfillment[axis.key].state_label }}</span>
       </div>

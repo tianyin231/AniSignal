@@ -27,6 +27,7 @@ async def lifespan(app: FastAPI):
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # 完整请求 URL 可能含 API 密钥。
     settings = get_settings()
     app.state.redis = Redis.from_url(settings.redis_url, decode_responses=True)
     scheduler_task: asyncio.Task | None = None
