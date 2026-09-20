@@ -38,7 +38,6 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
         <IdentityBadge :identity="event.identity" />
         <span class="chip bg-slate-500/10 text-slate-600 dark:text-zinc-300">{{ event.category }}</span>
         <span v-if="event.important" class="chip bg-red-500/10 font-medium text-red-600 dark:text-red-400">重要</span>
-        <span v-if="event.corrections.length" class="chip bg-amber-500/10 text-amber-700 dark:text-amber-300">已更正</span>
       </div>
       <h1 class="mt-2.5 text-lg font-semibold leading-snug text-slate-900 dark:text-zinc-50">
         {{ event.title }}
@@ -136,7 +135,7 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
     </section>
 
     <section v-if="event.corrections.length" class="panel p-4 sm:p-5">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">修正历史</h2>
+      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">更新记录</h2>
       <ol class="mt-3 space-y-2 border-l border-slate-200 pl-4 dark:border-zinc-800">
         <li v-for="(c, i) in event.corrections" :key="i" class="relative text-sm">
           <span class="absolute -left-[21px] top-2 size-1.5 rounded-full bg-blue-400" />

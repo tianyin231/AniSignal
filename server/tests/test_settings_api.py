@@ -278,6 +278,8 @@ async def test_ai_summary_uses_latest_plain_evidence_and_rejects_unsupported_gam
 
     assert result["status"] == "ok"
     assert "2026年9月29日03:59" in captured["user"]
+    assert "已核实身份=official" in captured["user"]
+    assert "账号=Kuro Games" in captured["user"]
     assert "<p>" not in captured["user"]
     assert "战双帕弥什" not in event.summary
     assert event.summary_status == "fallback"
@@ -285,6 +287,14 @@ async def test_ai_summary_uses_latest_plain_evidence_and_rejects_unsupported_gam
     assert result["summary_status"] == "fallback"
     assert event.facts == deterministic_facts
     assert ai_mod._summary_supported("《鸣潮》活动《先约电台》现已开启", "[先约电台]活动说明")
+
+    async def wrong_identity(config, system, user, *, json_mode=False):
+        return '{"summary": "消息来自B站，非官方直接公告。"}', {}
+
+    monkeypatch.setattr(ai_mod, "chat", wrong_identity)
+    result = await ai_mod.summarize_event(session, event.id)
+    assert result["summary_status"] == "fallback"
+    assert "非官方" not in event.summary
 
 
 async def test_media_visibility_roundtrip_and_platform_exclusion(client, admin_headers, session):

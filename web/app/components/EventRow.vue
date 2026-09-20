@@ -83,7 +83,7 @@ const sourceNames = computed(() => {
       </template>
       <template v-if="event.corrections?.length">
         <span aria-hidden="true">·</span>
-        <span class="font-medium text-amber-600 dark:text-amber-400">已更正</span>
+        <span class="font-medium text-amber-600 dark:text-amber-400">有更新记录</span>
       </template>
     </div>
   </NuxtLink>
