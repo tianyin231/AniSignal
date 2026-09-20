@@ -16,18 +16,19 @@ const COMMUNITY_PER_PAGE = 30
 const OFFICIAL_BOOST_HOURS = 36
 const HOT_BOOST_HOURS = 12
 
-const { community, communityQuery } = useGameSection()
+const { community } = useGameSection()
 const { api } = usePublicApi()
 
 // 站点栏目导航：与刷新同处一行（顶栏只有频道一层）
 const sectionLinks = [
   { to: '/official', label: '官方动态' },
+  { to: '/calendar', label: '活动日历' },
   { to: '/products', label: '商品' },
   { to: '/events', label: '事件' },
   { to: '/contents', label: '内容库' },
 ]
 // 聚合首页进栏目保持"全部分区"视角；分区首页则锁定该分区
-const sectionQuery = computed(() => (aggregate.value ? { community: 'all' } : communityQuery.value))
+const sectionQuery = computed(() => ({ community: homeCommunity.value }))
 const isActive = (to: string) => route.path.startsWith(to)
 // 首页频道语义：/ 无 community 参数 = 跨分区聚合（community=all）；带参数 = 该分区首页
 const aggregate = computed(() => !route.query.community || route.query.community === 'all')
@@ -312,7 +313,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <ActivityCalendar :data="calendarData" :show-community="aggregate" />
+      <ActivityCalendar :data="calendarData" :show-community="aggregate" :calendar-scope="homeCommunity" />
 
       <!-- 兑换码：官方内容抽取，点击复制 -->
       <section v-if="codesList.length" aria-labelledby="codes-title" class="mb-6">

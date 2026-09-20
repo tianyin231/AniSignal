@@ -12,7 +12,7 @@ const items = computed<FocusItem[]>(() => {
   const result: FocusItem[] = []
   const usedContents = new Set<number>()
   for (const code of (props.codes?.items ?? []).filter(c => c.expires_at && utcTimestamp(c.expires_at) > props.now && utcTimestamp(c.expires_at) <= until).slice(0, 1)) {
-    result.push({ key: `code-${code.community}-${code.code}`, title: `兑换码 ${code.code} 即将到期`, text: `${fmtTime(code.expires_at)} 前兑换`, to: '#codes-title', label: '别错过', community: code.community, source: '官方公告', url: code.url })
+    result.push({ key: `code-${code.community}-${code.code}`, title: `兑换码 ${code.code}`, text: `${fmtTime(code.expires_at)} 到期`, to: '#codes-title', label: '即将到期', community: code.community, source: '官方公告', url: code.url })
   }
   const schedules = [...(props.calendar?.ongoing ?? []), ...(props.calendar?.upcoming ?? [])]
     .map(item => ({ item, ending: utcTimestamp(item.start_at) <= props.now && !!item.end_at, at: utcTimestamp(item.start_at) <= props.now && item.end_at ? item.end_at : item.start_at }))
@@ -37,20 +37,20 @@ const items = computed<FocusItem[]>(() => {
 <template>
   <section aria-labelledby="today-title" class="mb-6">
     <div class="mb-3 flex items-baseline justify-between px-1">
-      <h2 id="today-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">今日要紧的事</h2>
-      <span class="text-xs text-slate-500 dark:text-zinc-400">{{ items.length }} 条重点</span>
+      <h2 id="today-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">近期动态</h2>
+      <span class="text-xs text-slate-500 dark:text-zinc-400">{{ items.length }} 条动态</span>
     </div>
     <div class="panel divide-y divide-slate-900/5 overflow-hidden dark:divide-white/5">
       <article v-for="item in items" :key="item.key" class="px-4 py-3.5">
         <div class="mb-1.5 flex flex-wrap items-center gap-2 text-[11px]">
-          <span :class="item.label === '新动态' ? 'text-slate-500 dark:text-zinc-400' : 'font-medium text-amber-700 dark:text-amber-300'">{{ item.label }}</span>
+          <span class="text-slate-500 dark:text-zinc-400">{{ item.label }}</span>
           <span v-if="showCommunity && communityMeta(item.community)" class="rounded px-1.5 py-0.5" :class="communityClasses(communityMeta(item.community)!.color).chip">{{ communityMeta(item.community)!.label }}</span>
         </div>
         <NuxtLink :to="item.to" class="text-sm font-medium leading-relaxed text-slate-900 hover:text-blue-700 dark:text-zinc-100 dark:hover:text-blue-300">{{ item.title }}</NuxtLink>
         <p v-if="item.text" class="mt-1 line-clamp-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-400">{{ item.text }}</p>
         <a v-if="item.url" :href="item.url" target="_blank" rel="noopener noreferrer" class="link mt-1.5 inline-block text-xs">{{ item.source }} · 原文</a>
       </article>
-      <p v-if="!items.length" class="px-4 py-6 text-sm text-slate-500 dark:text-zinc-400">近 24 小时暂无新增重点。</p>
+      <p v-if="!items.length" class="px-4 py-6 text-sm text-slate-500 dark:text-zinc-400">暂无近期动态。</p>
     </div>
   </section>
 </template>
