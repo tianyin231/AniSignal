@@ -27,6 +27,10 @@ def render_brief_card(brief: dict, output: str, font_path: str = "") -> str:
     def wrapped(text, max_width, face, lines=2):
         output_lines, current = [], ""
         for char in text.replace("\n", " "):
+            # 中文句末标点可悬挂一格，避免最后一行只剩一个句号。
+            if char in "，。！？；：、）》】”’!?.,;:)" and current:
+                current += char
+                continue
             if draw.textlength(current + char, font=face) > max_width:
                 output_lines.append(current)
                 current = char
