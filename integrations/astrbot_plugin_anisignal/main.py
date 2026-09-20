@@ -32,19 +32,19 @@ _INTRO_POOLS = {
         "这几条有新进展。",
     ],
     "products": [
-        "（擦了擦放大镜）商品与履约证据摊开了，待核验的别当已到货喵。",
-        "（敲了敲柜台）进展和线索都在，官方结论以原文为准喵～",
-        "（眯眼翻单据）这边是官方进展，那边是用户到货，分开看喵。",
+        "进展在这，待核验的先别急着信。",
+        "查到了，看看有没有你等的那一项。",
+        "新线索有了，实锤还得看出处喵。",
     ],
     "help": [
-        "（把价目表翻到服务页）明石屋能帮你的都在这儿了喵～",
-        "（甩甩尾巴）想知道能叫什么服务？看这页就够喵。",
-        "（推出一张便签）可用功能都列好了，按需取用喵。",
+        "能用的都在这里。",
+        "想查什么，照着叫我就行喵。",
+        "这张小抄收好。",
     ],
     "default": [
-        "（把纸条推过来）情报在这儿，出处都留着喵～",
-        "（尾巴尖点了点桌面）查好了，自己过目喵。",
-        "（从账本里抽出一页）资料摆这儿，慢慢看喵。",
+        "查到了，出处也留着。",
+        "资料在这儿喵。",
+        "看看这几条。",
     ],
 }
 
@@ -183,7 +183,7 @@ class AniSignalPlugin(Star):
     async def send_delivery(self, row):
         text, note = row["body"], ""
         try:
-            # 新模型首 token 延迟较高（实测 agnes-3.0-flash 空载 ~7s），45s 会误杀正常渲染
+            # 短开场不能拖慢通知；超时后正文与卡片仍可照常发送。
             text = await asyncio.wait_for(self.render_delivery(row), timeout=30)
         except Exception as exc:
             logger.warning("AniSignal persona rendering failed (%s)", type(exc).__name__)

@@ -42,3 +42,19 @@ async def test_editor_failure_and_invented_facts_keep_compact_fallback(session, 
     mocked.side_effect = TimeoutError()
     result = await briefs.build_brief(session, [content(n) for n in range(9)], mode='daily')
     assert len(result['items']) == 3 and len(briefs.format_brief(result)) < 300
+
+
+def test_merging_keeps_official_and_community_claims_separate():
+    official = briefs._source(content(1))
+    community = briefs._source(content(2, identity='unknown'))
+    assert not briefs._compatible_sources([official, community])
+    assert briefs._compatible_sources([official, briefs._source(content(3))])
+
+
+def test_merging_requires_a_shared_version_and_bounded_sources():
+    version = briefs._source(content(1))
+    bus = briefs._source(content(2, title='巡游巴士武汉站', text='9月22日线下活动开启，预约开放。'))
+    other_version = briefs._source(content(3, text='4.7版本专题页已发布。'))
+    assert not briefs._compatible_sources([version, bus])
+    assert not briefs._compatible_sources([version, other_version])
+    assert not briefs._compatible_sources([version] * 4)
