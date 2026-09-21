@@ -1,15 +1,20 @@
 """AniSignal 情报、会话操作与人格播报接入 AstrBot。"""
 
 import asyncio
+import base64
 import copy
+import hashlib
+import io
 import json
 import re
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiohttp
 from emoji import replace_emoji
+from PIL import Image as PILImage
 from astrbot.api import llm_tool, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
@@ -18,7 +23,57 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.4.5"
+VERSION = "1.4.6"
+
+
+def _cat_image_preview(uri: str, cache: dict) -> str:
+    """模型只看动图的三帧预览，避免历史反复上传整段 GIF；原图文件不变。"""
+    if uri.startswith(("http://", "https://")):
+        return uri
+    try:
+        data = (base64.b64decode(uri.split(",", 1)[1]) if uri.startswith("data:image/")
+                else Path(uri.removeprefix("file://")).read_bytes())
+        key = hashlib.sha256(data).digest()
+        cached = cache.get(key)
+        if cached:
+            return cached
+        with PILImage.open(io.BytesIO(data)) as source:
+            if not getattr(source, "is_animated", False):
+                return uri
+            indices = sorted({0, (source.n_frames - 1) // 2, source.n_frames - 1})
+            sheet = PILImage.new("RGB", (384 * len(indices), 384), "white")
+            for column, index in enumerate(indices):
+                source.seek(index)
+                frame = source.convert("RGBA")
+                frame.thumbnail((384, 384))
+                sheet.paste(frame, (384 * column + (384 - frame.width) // 2,
+                                   (384 - frame.height) // 2), frame)
+            buffer = io.BytesIO()
+            sheet.save(buffer, format="JPEG", quality=80, optimize=True)
+        preview = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+        if len(cache) >= 32:
+            cache.pop(next(iter(cache)))
+        cache[key] = preview
+        return preview
+    except (OSError, ValueError):
+        return uri
+
+
+def _prepare_cat_vision(req, cache):
+    """保留最近十二轮文字和身份信息，替换请求中的动图，避免阻塞事件循环。"""
+    def prepare_parts(parts):
+        return [{**part, "image_url": {**part["image_url"],
+                    "url": _cat_image_preview(part["image_url"]["url"], cache)}}
+                if isinstance(part, dict) and part.get("type") == "image_url" else part
+                for part in parts]
+
+    req.contexts = [{**message, "content": prepare_parts(message["content"])}
+                    if isinstance(message.get("content"), list) else message
+                    for message in (getattr(req, "contexts", None) or [])[-24:]]
+    req.image_urls = [_cat_image_preview(uri, cache)
+                      for uri in (getattr(req, "image_urls", None) or [])]
+    if getattr(req, "extra_user_content_parts", None):
+        req.extra_user_content_parts = prepare_parts(req.extra_user_content_parts)
 
 
 def _strip_meme_control_blocks(text: str) -> str:
@@ -55,6 +110,7 @@ class AniSignalPlugin(Star):
         self.last_briefs = {}
         self.last_cat_reply = {}
         self.cat_interjection_pending = set()
+        self.cat_vision_cache = {}
 
     async def initialize(self):
         self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
@@ -551,6 +607,8 @@ class AniSignalPlugin(Star):
                 )
             else:
                 self.cat_interjection_pending.discard(umo)
+            await asyncio.to_thread(_prepare_cat_vision, req, self.cat_vision_cache)
+            event.set_extra("anisignal_model_started", time.perf_counter())
             return
         target = self.session_target(event)
         now = datetime.now(timezone(timedelta(hours=8))).isoformat()
@@ -597,6 +655,7 @@ class AniSignalPlugin(Star):
     @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
     async def select_conversation_provider(self, event: AstrMessageEvent):
         """选择会话模型，并在原生随机插话之前唤醒猫系话题。"""
+        event.set_extra("anisignal_received", time.perf_counter())
         self.last_activity[event.unified_msg_origin] = datetime.now(timezone.utc).isoformat()
         target = self.session_target(event)
         if target and target.get("tools") and target.get("provider_id"):
@@ -619,6 +678,7 @@ class AniSignalPlugin(Star):
     @filter.on_llm_response(priority=100000)
     async def suppress_cat_interjection(self, event, response):
         if event.get_extra("anisignal_cat_chat"):
+            event.set_extra("anisignal_model_finished", time.perf_counter())
             # 在选图之前修正残缺分类标记，仍由表情插件核对分类并选图。
             original = response.completion_text or ""
             response.completion_text = _normalize_meme_markup(original)
@@ -629,6 +689,17 @@ class AniSignalPlugin(Star):
                 and (response.completion_text or "").strip() == "[NO_REPLY]"):
             response.completion_text = ""
             event.stop_event()
+
+    @filter.after_message_sent()
+    async def log_cat_reply_time(self, event):
+        received = event.get_extra("anisignal_received")
+        started = event.get_extra("anisignal_model_started")
+        finished = event.get_extra("anisignal_model_finished")
+        if received and started and finished:
+            now = time.perf_counter()
+            # 只记录阶段耗时，不记录群友的消息、图片或密钥。
+            logger.info("AniSignal cat timing total=%.2fs prepare=%.2fs model=%.2fs send=%.2fs",
+                        now - received, started - received, finished - started, now - finished)
 
     @filter.on_decorating_result(priority=1)
     async def strip_residual_emotion_markup(self, event: AstrMessageEvent):
