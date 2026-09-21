@@ -26,9 +26,18 @@ test('按北京时间定位跨月活动，未知结束时间不铺满月历', ()
     entry(4, '2026-09-30T16:00:00', '2026-10-01T16:00:00', { all_day: true }),
     entry(5, '2026-09-30T16:00:00', '2026-10-03T16:00:00', { kind: 'deadline' }),
   ])
-  const ids = (date: string) => days.find(day => day.date === date)!.items.map(item => item.id)
+  const ids = (date: string) => days.find(day => day.date === date)!.items.map(item => item.id).sort()
   assert.deepEqual(ids('2026-09-30'), [1])
   assert.deepEqual(ids('2026-10-01'), [1, 2, 3, 4, 5])
   assert.deepEqual(ids('2026-10-02'), [1, 4])
   assert.deepEqual(ids('2026-10-03'), [])
+})
+
+test('当天开始和结束的安排先于贯穿整月的活动显示', () => {
+  const day = calendarDays('2026-09', [
+    entry(1, '2026-08-20T02:00:00', '2026-10-01T10:00:00'),
+    entry(2, '2026-09-01T02:00:00', '2026-09-21T10:00:00'),
+    entry(3, '2026-09-21T02:00:00', null),
+  ]).find(day => day.date === '2026-09-21')!
+  assert.deepEqual(day.items.map(item => item.id), [3, 2, 1])
 })
