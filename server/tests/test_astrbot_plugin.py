@@ -220,6 +220,41 @@ async def test_cat_chat_does_not_inject_news_instructions(plugin):
     plugin.api.assert_not_called()
 
 
+@pytest.mark.parametrize('text,expected', [
+    ('哈。嘶？||meme_start||，||meme_end||', '哈。嘶？'),
+    (r'咪～\|\|meme\_start\|\|angry\|\|meme\_end\|\|  喵？', '咪～  喵？'),
+    ('咪……\n||MEME_START||\nangry\n||MEME_END||\n喵！', '咪……\n\n喵！'),
+    ('咪？||meme_start||unfinished', '咪？'),
+    ('||meme_end||咪？', '咪？'),
+    ('||meme_start||，||meme_end||', ''),
+    ('咪～ (=^･ω･^=) &&happy&&', '咪～ (=^･ω･^=) &&happy&&'),
+])
+async def test_model_meme_control_blocks_are_removed_before_selection_and_history(plugin, text, expected):
+    ev = event('qq:GroupMessage:g')
+    ev.set_extra('anisignal_cat_chat', True)
+    response = SimpleNamespace(completion_text=text)
+    await plugin.suppress_cat_interjection(ev, response)
+    assert response.completion_text == expected
+    if not expected:
+        assert ev.get_extra('stopped')
+
+
+async def test_final_cleanup_removes_invalid_meme_block_and_keeps_image(plugin):
+    components = sys.modules['astrbot.api.message_components']
+    image = SimpleNamespace(type='Image', file='cat.gif')
+    result = SimpleNamespace(is_llm_result=lambda: True,
+        chain=[components.Plain('哈。嘶？||meme_start||，||meme_end||'), image])
+    ev = event('qq:GroupMessage:g')
+    ev.set_extra('anisignal_cat_chat', True)
+    ev.get_result = lambda: result
+    await plugin.strip_residual_emotion_markup(ev)
+    assert result.chain[0].text == '哈。嘶？' and result.chain[1] is image
+
+    result.chain = [components.Plain('||meme_start||，||meme_end||')]
+    await plugin.strip_residual_emotion_markup(ev)
+    assert not result.chain and ev.get_extra('stopped')
+
+
 async def test_cat_reply_removes_emoji_and_native_faces_but_keeps_cat_images(plugin):
     components = sys.modules['astrbot.api.message_components']
     image = SimpleNamespace(type='Image', file='cat.gif')
