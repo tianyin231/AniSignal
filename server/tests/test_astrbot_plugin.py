@@ -36,10 +36,11 @@ def plugin(monkeypatch):
 
     module('aiohttp', ClientError=ConnectionError)
     module('astrbot')
-    module('astrbot.api', llm_tool=decorator, logger=SimpleNamespace(warning=lambda *a: None))
+    module('astrbot.api', llm_tool=decorator,
+        logger=SimpleNamespace(warning=lambda *a: None, info=lambda *a: None))
     module('astrbot.api.event', AstrMessageEvent=object,
         filter=SimpleNamespace(command=decorator, regex=decorator, on_llm_request=decorator, on_llm_response=decorator, event_message_type=decorator,
-            on_decorating_result=decorator,
+            on_decorating_result=decorator, after_message_sent=decorator,
             EventMessageType=SimpleNamespace(ALL='all')))
     module('astrbot.api.star', Context=object, Star=object, register=decorator)
     module('astrbot.api.message_components', Face=type('Face', (), {}),
@@ -63,6 +64,7 @@ def plugin(monkeypatch):
     obj.last_briefs = {}
     obj.last_cat_reply = {}
     obj.cat_interjection_pending = set()
+    obj.cat_vision_cache = {}
     obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True),
         conversation_manager=SimpleNamespace(
             get_curr_conversation_id=AsyncMock(return_value='cid-1'),
@@ -351,6 +353,51 @@ async def test_cat_can_decline_to_interject(plugin):
     response = SimpleNamespace(completion_text='[NO_REPLY]')
     await plugin.suppress_cat_interjection(ev, response)
     assert ev.get_extra('stopped') and response.completion_text == ''
+
+
+async def test_cat_vision_previews_animation_and_preserves_speakers(plugin, tmp_path):
+    import base64
+    import io
+    from PIL import Image
+
+    frames = [Image.new('RGB', (80, 60), color) for color in ('red', 'green', 'blue')]
+    path = tmp_path / 'cat.gif'
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=100, loop=0)
+    original = path.read_bytes()
+    uri = 'data:image/gif;base64,' + base64.b64encode(original).decode()
+    history = [{'role': 'user', 'content': [
+        {'type': 'text', 'text': '[user_id=123] 这是甲发的动图'},
+        {'type': 'image_url', 'image_url': {'url': uri, 'detail': 'low'}},
+    ]}]
+    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'),
+        system_prompt='猫语', contexts=history, image_urls=[str(path)])
+    ev = event('qq:FriendMessage:self')
+    await plugin.add_instructions(ev, req)
+    preview = req.contexts[0]['content'][1]['image_url']
+    assert preview['url'].startswith('data:image/jpeg;base64,')
+    assert req.image_urls == [preview['url']]  # 当前附件与历史附件使用同一预览。
+    assert preview['detail'] == 'low'
+    assert req.contexts[0]['content'][0] == history[0]['content'][0]
+    assert history[0]['content'][1]['image_url']['url'] == uri
+    assert path.read_bytes() == original
+    with Image.open(io.BytesIO(base64.b64decode(preview['url'].split(',', 1)[1]))) as image:
+        assert image.getpixel((192, 192))[0] > 200
+        assert image.getpixel((576, 192))[1] > 100
+        assert image.getpixel((960, 192))[2] > 200
+
+
+async def test_cat_bounds_history_and_keeps_static_images(plugin, tmp_path):
+    from PIL import Image
+
+    path = tmp_path / 'static.png'
+    Image.new('RGB', (8, 8), 'white').save(path)
+    history = [{'role': 'user', 'content': f'[user_id={i}] 喵'} for i in range(30)]
+    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'),
+        system_prompt='猫语', contexts=history, image_urls=[str(path)])
+    await plugin.add_instructions(event('qq:FriendMessage:self'), req)
+    assert req.contexts == history[-24:]
+    assert len(history) == 30
+    assert req.image_urls == [str(path)]
 
 
 @pytest.mark.parametrize('text,expected', [
