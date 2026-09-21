@@ -17,7 +17,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.4.1"
+VERSION = "1.4.2"
 
 
 @register("astrbot_plugin_anisignal", "AniSignal", "情报工具、人格播报与会话提醒", VERSION)
@@ -575,11 +575,25 @@ class AniSignalPlugin(Star):
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
     async def select_conversation_provider(self, event: AstrMessageEvent):
-        """Apply an explicit provider only to configured AniSignal conversations."""
+        """选择会话模型，并在原生随机插话之前唤醒猫系话题。"""
         self.last_activity[event.unified_msg_origin] = datetime.now(timezone.utc).isoformat()
         target = self.session_target(event)
         if target and target.get("tools") and target.get("provider_id"):
             event.set_extra("selected_provider", target["provider_id"])
+        if not event.is_at_or_wake_command and ":GroupMessage:" in event.unified_msg_origin:
+            active = self.context.get_config(umo=event.unified_msg_origin).get(
+                "provider_ltm_settings", {}).get("active_reply", {})
+            whitelist = active.get("whitelist", [])
+            if not active.get("enable") or (whitelist
+                    and event.unified_msg_origin not in whitelist
+                    and event.get_group_id() not in whitelist):
+                return
+            text = event.get_message_str().casefold()
+            if any(word.strip() and word.strip().casefold() in text
+                    for word in self.config.get("cat_reply_keywords", [])):
+                # 走同一次普通聊天管线；原生随机插话会跳过已唤醒的消息。
+                event.is_at_or_wake_command = True
+                event.set_extra("anisignal_cat_topic", True)
 
     @filter.on_llm_response(priority=100000)
     async def suppress_cat_interjection(self, event, response):
