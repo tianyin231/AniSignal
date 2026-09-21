@@ -40,13 +40,17 @@ def schedule_entry(schedule: ContentSchedule, url: str | None) -> dict:
     }
 
 
-async def calendar_entries(session: AsyncSession, community: str, *, now: datetime | None = None) -> list[dict]:
+async def calendar_entries(
+    session: AsyncSession, community: str, *, now: datetime | None = None,
+    window_start: datetime | None = None, window_end: datetime | None = None,
+) -> list[dict]:
     now = now or utcnow()
+    window_start = window_start or now - timedelta(days=14)
+    window_end = window_end or now + timedelta(days=90)
     conditions = [
         RawContent.hidden.is_(False),
-        ContentSchedule.start_at <= now + timedelta(days=90),
-        or_(ContentSchedule.start_at >= now - timedelta(days=14),
-            ContentSchedule.end_at >= now - timedelta(days=14)),
+        ContentSchedule.start_at < window_end,
+        or_(ContentSchedule.start_at >= window_start, ContentSchedule.end_at >= window_start),
     ]
     if community != "all":
         conditions.append(ContentSchedule.community == community)
@@ -68,6 +72,16 @@ async def calendar_entries(session: AsyncSession, community: str, *, now: dateti
         if previous is None or rank(entry) > rank(previous):
             unique[key] = entry
     return list(unique.values())
+
+
+async def calendar_month(session: AsyncSession, community: str, month: str) -> dict:
+    first = datetime.strptime(month, "%Y-%m")
+    # 月历从周一开始，固定六周；北京时间的日期边界转换为库内 UTC。
+    grid_start = first - timedelta(days=first.weekday(), hours=8)
+    items = await calendar_entries(session, community, window_start=grid_start,
+                                   window_end=grid_start + timedelta(days=42))
+    items.sort(key=lambda item: (item["start_at"], item["id"]))
+    return {"month": month, "items": items}
 
 
 async def calendar_groups(session: AsyncSession, community: str) -> dict:

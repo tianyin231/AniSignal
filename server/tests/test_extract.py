@@ -300,3 +300,49 @@ async def test_calendar_export_utc_all_day_and_visibility(client, session):
     (await session.get(RawContent, content_id)).hidden = True
     await session.commit()
     assert (await client.get(f"/api/calendar/{schedule.id}.ics")).status_code == 404
+
+
+async def test_month_calendar_includes_full_grid_history_and_cross_month_events(client, session):
+    content_id = await _seed_official(session)
+    # 2024 年 2 月的六周月历为 1 月 29 日至 3 月 10 日（北京时间）。
+    rows = [
+        ("跨月活动", datetime(2024, 1, 1), datetime(2024, 2, 2)),
+        ("左边界", datetime(2024, 1, 28, 16), None),
+        ("左边界之前", datetime(2024, 1, 28, 15, 59), None),
+        ("右边界内", datetime(2024, 3, 10, 15, 59), None),
+        ("右边界之外", datetime(2024, 3, 10, 16), None),
+        ("无结束时间的旧活动", datetime(2024, 1, 20), None),
+        ("闰日直播", datetime(2024, 2, 29, 12), None),
+    ]
+    session.add_all([
+        ContentSchedule(raw_content_id=content_id, community="wuwa", title=title,
+                        kind="activity", start_at=start, end_at=end)
+        for title, start, end in rows
+    ])
+    # 不沿用首页每组 5 / 10 条的截断，否则月历会漏掉同日活动。
+    session.add_all([
+        ContentSchedule(raw_content_id=content_id, community="wuwa", title=f"活动 {i}",
+                        kind="activity", start_at=datetime(2024, 2, 10, 2))
+        for i in range(12)
+    ])
+    session.add(ContentSchedule(raw_content_id=content_id, community="hsr", title="其他游戏",
+                                kind="broadcast", start_at=datetime(2024, 2, 10, 3)))
+    await session.commit()
+
+    response = await client.get("/api/calendar/month", params={"month": "2024-02", "community": "wuwa"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["month"] == "2024-02"
+    assert {entry["title"] for entry in data["items"]} == {
+        "跨月活动", "左边界", "右边界内", "闰日直播", *(f"活动 {i}" for i in range(12)),
+    }
+    all_games = (await client.get("/api/calendar/month", params={"month": "2024-02", "community": "all"})).json()
+    assert len(all_games["items"]) == 17
+    (await session.get(RawContent, content_id)).hidden = True
+    await session.commit()
+    assert (await client.get("/api/calendar/month", params={"month": "2024-02"})).json()["items"] == []
+
+
+async def test_month_calendar_rejects_invalid_months(client):
+    for month in ("2026-00", "2026-13", "2026-2", "not-a-month", "9999-12"):
+        assert (await client.get("/api/calendar/month", params={"month": month})).status_code == 422

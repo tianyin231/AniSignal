@@ -102,6 +102,17 @@ async def content_calendar(
     return await calendar_groups(session, community)
 
 
+@router.get("/calendar/month")
+async def monthly_calendar(
+    month: str = Query(pattern=r"^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$"),
+    community: str = COMMUNITY_AGGREGATE_QUERY,
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.calendar import calendar_month
+
+    return await calendar_month(session, community, month)
+
+
 @router.get("/calendar/{schedule_id}.ics")
 async def export_calendar(schedule_id: int, session: AsyncSession = Depends(get_session)):
     from app.models import ContentSchedule
