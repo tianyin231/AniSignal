@@ -1,5 +1,11 @@
 {
   "base_url": {"description": "AniSignal 服务地址", "type": "string", "default": "http://anisignal-app-1:3000"},
   "tools_key": {"description": "AniSignal 专用插件密钥", "type": "string", "default": "", "hint": "由部署脚本写入；不要填写管理员 Token 或 AstrBot 发送密钥。"},
-  "card_font_path": {"description": "早报卡片中文字体路径", "type": "string", "default": "", "hint": "留空使用已部署的 Noto Sans CJK 字体；字体不可用时发送短文字。"}
+  "card_font_path": {"description": "早报卡片中文字体路径", "type": "string", "default": "", "hint": "留空使用已部署的 Noto Sans CJK 字体；字体不可用时发送短文字。"},
+  "cat_reply_keywords": {
+    "description": "猫系话题触发词",
+    "type": "list",
+    "default": ["猫", "貓", "喵", "咪咪", "咪呜", "咪嗷", "嗷呜", "哈基米", "哈气", "八条", "柴郡", "撸毛", "摸头", "挠下巴", "neko", "meow", "にゃ", "ニャ", "🐱", "🐈", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾"],
+    "hint": "开启群聊主动回复后，在其白名单群中匹配整句话的任意位置，英文不区分大小写；命中即正常接话，不受随机冒泡冷却限制。留空关闭。"
+  }
 }

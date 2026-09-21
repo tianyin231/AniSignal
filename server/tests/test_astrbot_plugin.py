@@ -1,5 +1,6 @@
 """验证发送结果不明时不重发，以及工具操作者始终取自真实事件。"""
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -56,6 +57,8 @@ def plugin(monkeypatch):
     obj.render_delivery = AsyncMock(return_value='人格播报\n原始资料')
     obj.pending_ack = None
     obj.config = {}
+    obj.targets = {}
+    obj.last_activity = {}
     obj.last_briefs = {}
     obj.last_cat_reply = {}
     obj.cat_interjection_pending = set()
@@ -260,6 +263,56 @@ async def test_cat_can_decline_to_interject(plugin):
     response = SimpleNamespace(completion_text='[NO_REPLY]')
     await plugin.suppress_cat_interjection(ev, response)
     assert ev.get_extra('stopped') and response.completion_text == ''
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('今天看到一只可爱的猫娘', True),
+    ('给你看看柴郡的新表情', True),
+    ('这只哈基米在做什么', True),
+    ('来给你挠下巴', True),
+    ('I like NEKO stickers', True),
+    ('路过放一只🐱', True),
+    ('今天更新了游戏', False),
+])
+async def test_cat_topic_wakes_once_without_losing_message(plugin, text, expected):
+    umo = 'qq:GroupMessage:g'
+    schema = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal/_conf_schema.json'
+    plugin.config['cat_reply_keywords'] = json.loads(schema.read_text(encoding='utf-8'))['cat_reply_keywords']['default']
+    plugin.context.get_config = lambda **kwargs: {
+        'provider_ltm_settings': {'active_reply': {'enable': True, 'whitelist': [umo]}}}
+    ev = event(umo)
+    ev.is_at_or_wake_command = False
+    ev.get_message_str = lambda: text
+    ev.get_group_id = lambda: 'g'
+    plugin.cat_interjection_pending.add(umo)
+    await plugin.select_conversation_provider(ev)
+    assert ev.is_at_or_wake_command is expected
+    assert ev.get_message_str() == text
+    plugin.context.send_message.assert_not_called()  # 只唤醒，由原有管线发送一次。
+    if expected:
+        req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'), system_prompt='猫语')
+        await plugin.add_instructions(ev, req)
+        assert not ev.get_extra('stopped') and umo not in plugin.cat_interjection_pending
+        assert not ev.get_extra('anisignal_cat_interject')
+
+
+@pytest.mark.parametrize('enabled,whitelist,keywords,expected', [
+    (True, ['other'], ['猫'], False),
+    (False, [], ['猫'], False),
+    (True, [], [], False),
+    (True, [], [' '], False),
+    (True, ['g'], ['猫'], True),
+])
+async def test_cat_topic_respects_group_settings(plugin, enabled, whitelist, keywords, expected):
+    plugin.config['cat_reply_keywords'] = keywords
+    plugin.context.get_config = lambda **kwargs: {
+        'provider_ltm_settings': {'active_reply': {'enable': enabled, 'whitelist': whitelist}}}
+    ev = event('qq:GroupMessage:g')
+    ev.is_at_or_wake_command = False
+    ev.get_message_str = lambda: '好可爱的猫'
+    ev.get_group_id = lambda: 'g'
+    await plugin.select_conversation_provider(ev)
+    assert ev.is_at_or_wake_command is expected
 
 
 async def test_persona_intro_rejects_sales_and_long_monologues(plugin):
