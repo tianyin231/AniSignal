@@ -42,7 +42,8 @@ def plugin(monkeypatch):
             on_decorating_result=decorator,
             EventMessageType=SimpleNamespace(ALL='all')))
     module('astrbot.api.star', Context=object, Star=object, register=decorator)
-    module('astrbot.api.message_components', Plain=type('Plain', (), {'__init__': lambda self, text=None: setattr(self, 'text', text or '')}))
+    module('astrbot.api.message_components', Face=type('Face', (), {}),
+        Plain=type('Plain', (), {'__init__': lambda self, text=None: setattr(self, 'text', text or '')}))
     module('astrbot.core')
     module('astrbot.core.provider')
     module('astrbot.core.provider.entities', ProviderRequest=object)
@@ -217,6 +218,31 @@ async def test_cat_chat_does_not_inject_news_instructions(plugin):
     await plugin.add_instructions(event('qq:GroupMessage:g'), req)
     assert req.system_prompt == '猫语'
     plugin.api.assert_not_called()
+
+
+async def test_cat_reply_removes_emoji_and_native_faces_but_keeps_cat_images(plugin):
+    components = sys.modules['astrbot.api.message_components']
+    image = SimpleNamespace(type='Image', file='cat.gif')
+    chain = [components.Plain('咪😺～  喵？！\n(=^･ω･^=) ~ ……❤️🐈‍⬛👍🏽1️⃣🇨🇳 &&happy&&'),
+        components.Face(), image]
+    result = SimpleNamespace(is_llm_result=lambda: True, chain=chain)
+    ev = event('qq:GroupMessage:g')
+    ev.set_extra('anisignal_cat_chat', True)
+    ev.get_result = lambda: result
+    await plugin.strip_residual_emotion_markup(ev)
+    assert len(result.chain) == 2 and result.chain[1] is image
+    assert result.chain[0].text == '咪～  喵？！\n(=^･ω･^=) ~ ……'
+
+
+async def test_emoji_only_reply_is_not_sent_as_an_empty_message(plugin):
+    components = sys.modules['astrbot.api.message_components']
+    result = SimpleNamespace(is_llm_result=lambda: True,
+        chain=[components.Plain('😺'), components.Face()])
+    ev = event('qq:GroupMessage:g')
+    ev.set_extra('anisignal_cat_chat', True)
+    ev.get_result = lambda: result
+    await plugin.strip_residual_emotion_markup(ev)
+    assert not result.chain and ev.get_extra('stopped')
 
 
 async def test_cat_broadcast_does_not_teach_human_speech(plugin):
