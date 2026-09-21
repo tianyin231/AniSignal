@@ -29,11 +29,13 @@ export function calendarDays(month: string, entries: CalendarEntry[]) {
   })
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(gridStart + index * DAY).toISOString().slice(0, 10)
+    // 日期格先展示当天的开始 / 结束节点，长周期活动不会挤占整个月的预览。
+    const dayOrder = (entry: typeof dated[number]) => entry.startDay === date ? 0 : entry.endDay === date ? 1 : 2
     return {
       date,
       number: Number(date.slice(-2)),
       inMonth: date.startsWith(month),
-      items: dated.filter(entry => entry.startDay <= date && entry.endDay >= date),
+      items: dated.filter(entry => entry.startDay <= date && entry.endDay >= date).sort((a, b) => dayOrder(a) - dayOrder(b)),
     }
   })
 }
