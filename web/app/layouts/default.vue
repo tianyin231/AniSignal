@@ -30,5 +30,5 @@
 
 <script setup lang="ts">
 const route = useRoute()
-const contentFocus = computed(() => route.path === '/stats' || /^\/contents\/[^/]+$/.test(route.path))
+const contentFocus = computed(() => ['/stats', '/calendar'].includes(route.path) || /^\/contents\/[^/]+$/.test(route.path))
 </script>
