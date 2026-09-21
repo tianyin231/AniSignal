@@ -37,7 +37,7 @@ def plugin(monkeypatch):
     module('astrbot')
     module('astrbot.api', llm_tool=decorator, logger=SimpleNamespace(warning=lambda *a: None))
     module('astrbot.api.event', AstrMessageEvent=object,
-        filter=SimpleNamespace(command=decorator, regex=decorator, on_llm_request=decorator, event_message_type=decorator,
+        filter=SimpleNamespace(command=decorator, regex=decorator, on_llm_request=decorator, on_llm_response=decorator, event_message_type=decorator,
             on_decorating_result=decorator,
             EventMessageType=SimpleNamespace(ALL='all')))
     module('astrbot.api.star', Context=object, Star=object, register=decorator)
@@ -57,9 +57,12 @@ def plugin(monkeypatch):
     obj.pending_ack = None
     obj.config = {}
     obj.last_briefs = {}
+    obj.last_cat_reply = {}
+    obj.cat_interjection_pending = set()
     obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True),
         conversation_manager=SimpleNamespace(
             get_curr_conversation_id=AsyncMock(return_value='cid-1'),
+            get_conversation=AsyncMock(return_value=SimpleNamespace(persona_id=None)),
             add_message_pair=AsyncMock()))
     return obj
 
@@ -116,8 +119,10 @@ async def test_quota_429_is_distinguished_from_rate_limit_without_leaking_detail
 
 
 def event(umo, targets=None):
+    extras = {}
     return SimpleNamespace(unified_msg_origin=umo, get_sender_id=lambda: 'user',
-        plain_result=lambda text: text, set_extra=lambda key, value: None)
+        plain_result=lambda text: text, set_extra=extras.__setitem__, get_extra=lambda key: extras.get(key),
+        is_at_or_wake_command=True, stop_event=lambda: extras.__setitem__('stopped', True))
 
 
 async def test_session_info_reports_registration_state(plugin):
@@ -189,13 +194,72 @@ async def test_residual_emotion_markup_is_stripped_from_replies(plugin):
     ev.get_result = lambda: SimpleNamespace(is_llm_result=lambda: True,
         get_plain_text=lambda: chain[0].text, chain=chain)
     await plugin.strip_residual_emotion_markup(ev)
-    assert chain[0].text == '你好 不错，'
+    assert chain[0].text == '你好  不错，'
 
     chain = [Plain('正常回复没有标记')]
     ev.get_result = lambda: SimpleNamespace(is_llm_result=lambda: True,
         get_plain_text=lambda: chain[0].text, chain=chain)
     await plugin.strip_residual_emotion_markup(ev)
     assert chain[0].text == '正常回复没有标记'
+
+    chain = [Plain('咪…  喵？\n呜—— &&confused&&')]
+    ev.get_result = lambda: SimpleNamespace(is_llm_result=lambda: True,
+        get_plain_text=lambda: chain[0].text, chain=chain)
+    await plugin.strip_residual_emotion_markup(ev)
+    assert chain[0].text == '咪…  喵？\n呜——'
+
+
+async def test_cat_chat_does_not_inject_news_instructions(plugin):
+    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'), system_prompt='猫语')
+    await plugin.add_instructions(event('qq:GroupMessage:g'), req)
+    assert req.system_prompt == '猫语'
+    plugin.api.assert_not_called()
+
+
+async def test_cat_broadcast_does_not_teach_human_speech(plugin):
+    manager = plugin.context.conversation_manager
+    manager.get_conversation.return_value = SimpleNamespace(persona_id='cat')
+    await plugin.send_delivery(delivery())
+    manager.add_message_pair.assert_not_called()
+
+
+async def test_cat_interjection_quiet_hours_cooldown_and_unanswered(plugin, monkeypatch):
+    from datetime import datetime, timezone, timedelta
+    umo = 'qq:GroupMessage:g'
+    clock = SimpleNamespace(now=lambda tz: datetime(2026, 9, 21, 15, tzinfo=tz))
+    monkeypatch.setitem(plugin.add_instructions.__func__.__globals__, 'datetime', clock)
+    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'), system_prompt='猫语')
+    ev = event(umo)
+    ev.is_at_or_wake_command = False
+    await plugin.add_instructions(ev, req)
+    assert ev.get_extra('anisignal_cat_interject') and not ev.get_extra('stopped')
+
+    plugin.last_cat_reply[umo] = clock.now(timezone(timedelta(hours=8))).timestamp() - 60
+    await plugin.add_instructions(ev, req)
+    assert ev.get_extra('stopped')
+    plugin.last_cat_reply.clear()
+    plugin.cat_interjection_pending.add(umo)
+    ev.set_extra('stopped', False)
+    await plugin.add_instructions(ev, req)
+    assert ev.get_extra('stopped')
+
+    plugin.cat_interjection_pending.clear()
+    clock.now = lambda tz: datetime(2026, 9, 21, 23, tzinfo=tz)
+    ev.set_extra('stopped', False)
+    await plugin.add_instructions(ev, req)
+    assert ev.get_extra('stopped')
+    ev.is_at_or_wake_command = True
+    ev.set_extra('stopped', False)
+    await plugin.add_instructions(ev, req)
+    assert not ev.get_extra('stopped')  # 夜间主动冒泡关闭，点名仍回复。
+
+
+async def test_cat_can_decline_to_interject(plugin):
+    ev = event('qq:GroupMessage:g')
+    ev.set_extra('anisignal_cat_interject', True)
+    response = SimpleNamespace(completion_text='[NO_REPLY]')
+    await plugin.suppress_cat_interjection(ev, response)
+    assert ev.get_extra('stopped') and response.completion_text == ''
 
 
 async def test_persona_intro_rejects_sales_and_long_monologues(plugin):

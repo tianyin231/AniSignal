@@ -19,7 +19,7 @@ def render_brief_card(brief: dict, output: str, font_path: str = "") -> str:
     ink, green, muted = "#203c35", "#387861", "#63766f"
     draw.rounded_rectangle((20, 20, width - 20, height - 20), radius=24, fill="#fffefa")
     draw.rounded_rectangle((48, 47, 55, 118), radius=3, fill=green)
-    draw.text((76, 42), "明石的情报笺", font=font(38), fill=ink)
+    draw.text((76, 42), "AniSignal 情报笺", font=font(38), fill=ink)
     draw.text((78, 101), f"{brief.get('title', '今日速报')}  /  {brief.get('date', '')}", font=font(23), fill=muted)
     colors = {"wuwa": "#bc922f", "blhx": "#368fba", "hsr": "#8671b8", "arknights": "#c7803c"}
     labels = {"wuwa": "鸣潮", "blhx": "碧蓝航线", "hsr": "星穹铁道", "arknights": "明日方舟"}
@@ -54,7 +54,7 @@ def render_brief_card(brief: dict, output: str, font_path: str = "") -> str:
         for n, line in enumerate(wrapped(item.get("summary") or "细节和出处，按编号展开就能看。", 760, font(25))):
             draw.text((127, y + 89 + n * 32), line, font=font(25), fill=muted)
     draw.text((54, height - 64), "想细看，发 /展开 2（数字可换）", font=font(23), fill=green)
-    draw.text((807, height - 62), "AKASHI", font=font(19), fill=muted)
+    draw.text((807, height - 62), "AniSignal", font=font(19), fill=muted)
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     image.save(output, "PNG", optimize=True)
     return output
