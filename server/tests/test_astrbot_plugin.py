@@ -228,8 +228,18 @@ async def test_cat_chat_does_not_inject_news_instructions(plugin):
     ('||meme_end||咪？', '咪？'),
     ('||meme_start||，||meme_end||', ''),
     ('咪～ (=^･ω･^=) &&happy&&', '咪～ (=^･ω･^=) &&happy&&'),
+    ('喵……，哈？&annoyed&', '喵……，哈？&&annoyed&&'),
+    ('咪？&& ANNOYED &', '咪？&&annoyed&&'),
+    (r'咪？\&annoyed\&', '咪？&&annoyed&&'),
+    ('咪？&amp;annoyed&amp;', '咪？&&annoyed&&'),
+    ('咪？＆annoyed＆', '咪？&&annoyed&&'),
+    ('咪？&annoyed', '咪？&&annoyed&&'),
+    ('咪？&annoyed\n喵！', '咪？&&annoyed&&\n喵！'),
+    ('咪？&&annoyed&&&&happy&&', '咪？&&annoyed&&&&happy&&'),
+    ('咪？&annoyed&&sad&', '咪？&&annoyed&&&&sad&&'),
+    ('咪～ (&&) (&ω&) (=^･ω･^=) &lt;3', '咪～ (&&) (&ω&) (=^･ω･^=) &lt;3'),
 ])
-async def test_model_meme_control_blocks_are_removed_before_selection_and_history(plugin, text, expected):
+async def test_meme_markup_is_cleaned_or_normalized_before_selection(plugin, text, expected):
     ev = event('qq:GroupMessage:g')
     ev.set_extra('anisignal_cat_chat', True)
     response = SimpleNamespace(completion_text=text)
@@ -237,6 +247,23 @@ async def test_model_meme_control_blocks_are_removed_before_selection_and_histor
     assert response.completion_text == expected
     if not expected:
         assert ev.get_extra('stopped')
+
+
+@pytest.mark.parametrize('marker', [
+    '&annoyed&', '&&annoyed&', '&annoyed&&', '&& annoyed &&',
+    r'\&annoyed\&', '&amp;annoyed&amp;', '＆annoyed＆', '&annoyed', '&unknown_tag&',
+    '&&annoyed&&&&happy&&', '&annoyed&&sad&', '&&&annoyed&&&',
+])
+async def test_final_cleanup_removes_malformed_emotion_markers_without_losing_cat_rhythm(plugin, marker):
+    components = sys.modules['astrbot.api.message_components']
+    image = SimpleNamespace(type='Image', file='cat.gif')
+    text = '喵……，哈？  (=^･ω･^=)\n咪～'
+    result = SimpleNamespace(is_llm_result=lambda: True, chain=[components.Plain(text + marker), image])
+    ev = event('qq:GroupMessage:g')
+    ev.set_extra('anisignal_cat_chat', True)
+    ev.get_result = lambda: result
+    await plugin.strip_residual_emotion_markup(ev)
+    assert result.chain[0].text == text and result.chain[1] is image
 
 
 async def test_final_cleanup_removes_invalid_meme_block_and_keeps_image(plugin):

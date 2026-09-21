@@ -1,6 +1,6 @@
 name: astrbot_plugin_anisignal
 display_name: AniSignal 情报助手
 desc: 按会话配置游戏资讯、每日速报与商品进展查询工具。
-version: v1.4.4
+version: v1.4.5
 author: AniSignal
 astrbot_version: ">=4.27.2"
