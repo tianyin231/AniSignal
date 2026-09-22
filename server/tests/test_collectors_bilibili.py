@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 import pytest
+import httpx
 
 from app.collectors import bilibili as bili_module
 from app.collectors.base import CollectorError
@@ -12,8 +13,12 @@ from app.collectors.bilibili import BiliRiskControlError, BilibiliCollector
 @pytest.fixture(autouse=True)
 def _clear_circuit_state():
     bili_module._CIRCUIT_STATE.clear()
+    bili_module._DRAW_DETAIL_CACHE.clear()
+    bili_module._DRAW_DETAIL_RETRY_AT.clear()
     yield
     bili_module._CIRCUIT_STATE.clear()
+    bili_module._DRAW_DETAIL_CACHE.clear()
+    bili_module._DRAW_DETAIL_RETRY_AT.clear()
 
 
 async def test_run_once_flags_risk_control_stderr(monkeypatch):
@@ -30,6 +35,98 @@ async def test_run_once_flags_risk_control_stderr(monkeypatch):
 
     with pytest.raises(BiliRiskControlError):
         await BilibiliCollector()._run_once("video", "BV1")
+
+
+@pytest.mark.parametrize("exit_code", [4, 6])
+async def test_cli_refusal_exit_codes_do_not_retry(monkeypatch, exit_code):
+    calls = []
+
+    class FakeProc:
+        returncode = exit_code
+
+        async def communicate(self):
+            return b"", b"Dynamics: refused: the first page of this feed carried nothing"
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        return FakeProc()
+
+    monkeypatch.setattr(bili_module.asyncio, "create_subprocess_exec", fake_exec)
+    with pytest.raises(BiliRiskControlError):
+        await BilibiliCollector()._run("dynamics", "123")
+    assert len(calls) == 1
+
+
+def _mock_detail_http(monkeypatch, handler):
+    client_class = httpx.AsyncClient
+    monkeypatch.setattr(
+        bili_module.httpx, "AsyncClient",
+        lambda **kwargs: client_class(transport=httpx.MockTransport(handler), **kwargs),
+    )
+
+
+@pytest.mark.parametrize("refusal", [-352, -412, -509, 412, 429])
+async def test_detail_refusals_are_cached_and_open_circuit(monkeypatch, refusal):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(
+            refusal if refusal > 0 else 200, json={"code": refusal}
+        )
+
+    _mock_detail_http(monkeypatch, handler)
+    collector = BilibiliCollector()
+    assert await collector._fetch_draw_detail("one") == {}
+    assert await collector._fetch_draw_detail("one") == {}
+    assert len(calls) == 1
+    assert await collector._fetch_draw_detail("two") == {}
+    assert await collector._fetch_draw_detail("three") == {}
+    assert len(calls) == 2
+    assert bili_module._circuit_open("dynamic-detail")
+    assert not bili_module._circuit_open("dynamics")
+
+
+async def test_invisible_dynamic_does_not_block_other_details(monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.params["id"])
+        if calls[-1] == "gone":
+            return httpx.Response(200, json={"code": 4101152})
+        return httpx.Response(200, json={
+            "code": 0, "data": {"item": {"modules": {"module_dynamic": {
+                "major": {"opus": {"summary": {"text": "完整正文"}, "pics": []}}
+            }}}}
+        })
+
+    _mock_detail_http(monkeypatch, handler)
+    collector = BilibiliCollector()
+    assert await collector._fetch_draw_detail("gone") == {}
+    assert await collector._fetch_draw_detail("gone") == {}
+    assert not bili_module._circuit_open("dynamic-detail")
+    assert (await collector._fetch_draw_detail("good"))["text"] == "完整正文"
+    assert (await BilibiliCollector()._fetch_draw_detail("good"))["text"] == "完整正文"
+    assert calls == ["gone", "good"]
+
+
+async def test_enriches_empty_articles_but_skips_live_and_image_only(monkeypatch):
+    collector = BilibiliCollector()
+    calls = []
+
+    async def detail(dynamic_id):
+        calls.append(dynamic_id)
+        return {"text": "专栏补全", "pics": ["https://example.com/a.jpg"]}
+
+    monkeypatch.setattr(collector, "_fetch_draw_detail", detail)
+    items = [
+        {"id": "article", "type": "DYNAMIC_TYPE_ARTICLE", "text": "", "pics": []},
+        {"id": "live", "type": "DYNAMIC_TYPE_LIVE_RCMD", "text": "", "pics": []},
+        {"id": "image", "type": "DYNAMIC_TYPE_DRAW", "pics": ["https://example.com/b.jpg"]},
+    ]
+    result = await collector._enrich_draw_dynamics(items)
+    assert calls == ["article"]
+    assert result[0]["text"] == "专栏补全"
 
 
 async def test_risk_control_refusal_fails_fast_without_retries(monkeypatch):

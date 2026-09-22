@@ -240,3 +240,24 @@ async def test_backfill_empty_draw_dynamics(session):
     assert "补全的动态正文" in versions[-1].text
     # 作者信息从 raw_json 保留，不会变成 unknown
     assert versions[-1].normalized_json["author"]["external_id"] == str(author_mid_before)
+
+
+async def test_backfill_only_missing_draw_and_article(session):
+    from app.services.collect import _backfill_empty_draw_dynamics
+    from app.services.ingest import ingest_items
+    from tests.test_parsers_bilibili import DYNAMIC_RAW
+
+    await ingest_items(session, "bilibili_dynamics", [
+        dict(DYNAMIC_RAW, id="article", type="DYNAMIC_TYPE_ARTICLE", text="", pics=[]),
+        dict(DYNAMIC_RAW, id="live", type="DYNAMIC_TYPE_LIVE_RCMD", text="", pics=[]),
+        dict(DYNAMIC_RAW, id="image", type="DYNAMIC_TYPE_DRAW", text="", pics=["https://example.com/a.jpg"]),
+    ])
+    calls = []
+
+    class StubCollector:
+        async def _fetch_draw_detail(self, dynamic_id):
+            calls.append(dynamic_id)
+            return {"text": "补回专栏", "pics": []}
+
+    assert await _backfill_empty_draw_dynamics(session, StubCollector(), limit=1) == 1
+    assert calls == ["article"]

@@ -108,7 +108,7 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
 async def _backfill_empty_draw_dynamics(
     session: AsyncSession, collector, limit: int = 5
 ) -> int:
-    """自愈回填：为匿名详情补全曾瞬时失败的空 DRAW 动态重试。
+    """回填缺失正文和图片的 DRAW/ARTICLE，跳过直播推荐和纯图片动态。
 
     成功的动态以新版本入库（保留原 author/统计），空卡片的琥珀提示随之消失。
     """
@@ -120,7 +120,9 @@ async def _backfill_empty_draw_dynamics(
         "FROM raw_contents rc JOIN content_versions cv ON cv.raw_content_id=rc.id "
         "AND cv.version=(SELECT MAX(version) FROM content_versions WHERE raw_content_id=rc.id) "
         "WHERE rc.content_type='dynamic' AND rc.platform='bilibili' "
+        "AND JSON_EXTRACT(rc.raw_json, '$.type') IN ('DYNAMIC_TYPE_DRAW','DYNAMIC_TYPE_ARTICLE') "
         "AND COALESCE(LENGTH(cv.text),0)=0 "
+        "AND COALESCE(JSON_EXTRACT(cv.normalized_json, '$.media'),'[]') IN ('[]','null') "
         "AND rc.collected_at > :cutoff "
         "ORDER BY rc.id DESC LIMIT :lim"
     ), {"cutoff": cutoff, "lim": limit})).fetchall()
