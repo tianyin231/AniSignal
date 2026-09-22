@@ -58,3 +58,16 @@ def test_merging_requires_a_shared_version_and_bounded_sources():
     assert not briefs._compatible_sources([version, bus])
     assert not briefs._compatible_sources([version, other_version])
     assert not briefs._compatible_sources([version] * 4)
+
+
+async def test_empty_dynamic_in_old_buffer_cannot_use_event_summary(session):
+    empty = content(1, platform='bilibili', content_type='dynamic', text='',
+                    title='活动公告', summary='旧事件摘要不能替代抓取正文', url='https://t.bilibili.com/1')
+    image_only = content(2, platform='bilibili', content_type='dynamic', text='',
+                         title='动态', image='https://img.example/2.jpg', url='https://t.bilibili.com/2')
+    video = content(3, platform='bilibili', content_type='video', text='', title='版本预告视频')
+    result = await briefs.select_brief_items(session, [empty, image_only, video], datetime(2026, 9, 22))
+    assert [item['id'] for item in result] == [2, 3]
+    snapshot = briefs.single_item_brief(empty)
+    source = snapshot['items'][0]['sources'][0]
+    assert source['text'] == '' and source['platform'] == 'bilibili' and source['content_type'] == 'dynamic'

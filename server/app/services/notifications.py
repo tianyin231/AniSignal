@@ -93,6 +93,24 @@ def _safe_url(value: str | None) -> str | None:
     return urlunparse(parsed)
 
 
+def is_empty_dynamic_item(item: dict) -> bool:
+    """动态的占位标题、事件摘要不算采集正文；纯图片动态仍可推送。"""
+    sources = item.get("sources")
+    if sources:
+        return all(is_empty_dynamic_item(source) for source in sources)
+    url = urlparse(_safe_url(item.get("url")) or "")
+    is_dynamic = (
+        item.get("platform") == "bilibili" and item.get("content_type") == "dynamic"
+    ) or url.hostname == "t.bilibili.com" or (
+        url.hostname in {"www.bilibili.com", "bilibili.com"}
+        and url.path.startswith("/opus/")
+    )
+    if not is_dynamic or _plain(item.get("text") or ""):
+        return False
+    media = [item.get("image"), *(item.get("media") or [])]
+    return not any(isinstance(value, str) and _safe_url(value) for value in media)
+
+
 def _email_image_url(value: str | None) -> str | None:
     """邮件只引用远程图片；B 站原图过大时使用同源缩放地址。"""
     safe = _safe_url(value)
@@ -206,23 +224,24 @@ async def load_candidates(
             ),
             None,
         )
-        candidates.append(
-            {
-                "id": raw.id,
-                "community": raw.community,
-                "title": title,
-                "text": (translated or text)[:800],
-                "url": _safe_url(raw.url),
-                "image": image,
-                "platform": raw.platform,
-                "source": source.name if source else None,
-                "identity": source.identity if source else "unknown",
-                "published_at": raw.published_at or raw.collected_at,
-                "keywords": strong or weak,
-                "strength": "strong" if keywords is None or strong else "weak",
-                "category": version.category,
-            }
-        )
+        candidate = {
+            "id": raw.id,
+            "community": raw.community,
+            "title": title,
+            "text": (translated or text)[:800],
+            "url": _safe_url(raw.url),
+            "image": image,
+            "platform": raw.platform,
+            "content_type": raw.content_type,
+            "source": source.name if source else None,
+            "identity": source.identity if source else "unknown",
+            "published_at": raw.published_at or raw.collected_at,
+            "keywords": strong or weak,
+            "strength": "strong" if keywords is None or strong else "weak",
+            "category": version.category,
+        }
+        if not is_empty_dynamic_item(candidate):
+            candidates.append(candidate)
     return candidates
 
 

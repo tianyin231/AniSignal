@@ -14,6 +14,7 @@ from app.api.deps import require_admin
 from app.clock import utcnow
 from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget, RawContent
+from app.services.bot import prepare_delivery
 from app.services.bot_briefs import format_detail
 from app.services.settings import get_setting, set_setting
 
@@ -231,6 +232,8 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session)):
             from app.services.bot import _is_quiet
             if _is_quiet((now + timedelta(hours=8)).hour, target.config):
                 continue
+        if not await prepare_delivery(session, row):
+            continue
         max_images = 1
         receipt = secrets.token_hex(24)
         result = await session.execute(update(BotDelivery).where(BotDelivery.id == row.id,

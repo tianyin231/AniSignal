@@ -226,3 +226,23 @@ async def test_brief_detail_is_bound_to_original_delivery_and_target(client, ses
     raw.hidden = True
     await session.commit()
     assert (await client.post('/api/bot/detail', headers=HEADERS, json=body)).status_code == 404
+
+
+async def test_claim_cancels_empty_dynamic_and_rebuilds_mixed_brief(client, session):
+    row = await setup(session, quiet_start=0, quiet_end=0)
+    empty = {'id': 1, 'title': '空动态不应出现', 'summary': '虚有摘要', 'text': '',
+             'platform': 'bilibili', 'content_type': 'dynamic', 'url': 'https://t.bilibili.com/1'}
+    cancelled = await bot.create_delivery(session, row, 'updates', '旧空动态正文', 'empty-claim',
+                                          brief=bot.single_item_brief(empty))
+    image_only = {'id': 2, 'title': '纯图片公告', 'text': '', 'image': 'https://img.example/2.jpg',
+                  'platform': 'bilibili', 'content_type': 'dynamic', 'url': 'https://t.bilibili.com/2'}
+    mixed = await bot.create_delivery(session, row, 'updates', '空动态不应出现\n纯图片公告', 'mixed-claim',
+                                      brief={'mode': 'updates', 'title': '刚刚的重点', 'date': '09/22',
+                                             'items': [empty, image_only]})
+    claimed = (await client.post('/api/bot/outbox/claim', headers=HEADERS, json={})).json()['delivery']
+    assert claimed['id'] == mixed.id
+    assert '空动态不应出现' not in claimed['body'] and '纯图片公告' in claimed['body']
+    assert claimed['images'] == ['https://img.example/2.jpg']
+    assert [item['id'] for item in claimed['brief']['items']] == [2]
+    await session.refresh(cancelled)
+    assert cancelled.status == 'cancelled' and cancelled.attempts == 0
