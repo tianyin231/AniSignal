@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.models import ContentVersion, NotificationDelivery, RawContent, Source, User, UserKeyword
@@ -131,6 +132,37 @@ async def _content(
     )
     await session.commit()
     return raw
+
+
+@pytest.mark.parametrize("url", ["https://t.bilibili.com/123", "https://www.bilibili.com/opus/123"])
+def test_empty_dynamic_gate_ignores_title_and_generated_summary(url):
+    item = {"url": url, "title": "图文动态", "text": " <p> </p> ",
+            "summary": "看起来像有内容的事件摘要", "image": None}
+    assert notifications.is_empty_dynamic_item(item)
+    assert notifications.is_empty_dynamic_item({"title": "AI 标题", "sources": [item]})
+    assert not notifications.is_empty_dynamic_item({**item, "image": "https://i0.hdslb.com/a.jpg"})
+    assert not notifications.is_empty_dynamic_item({**item, "text": "已经补回的正文"})
+    assert not notifications.is_empty_dynamic_item({**item, "url": "https://www.bilibili.com/video/BV1"})
+
+
+async def test_empty_dynamics_do_not_enter_notification_candidates(session):
+    empty = await _content(session, "图文动态")
+    image_only = await _content(session, "纯图动态", image="https://i0.hdslb.com/a.jpg")
+    video = await _content(session, "正常视频标题")
+    for raw in (empty, image_only):
+        raw.content_type = "dynamic"
+        raw.url = f"https://t.bilibili.com/{raw.id}"
+    await session.commit()
+    start, end = notifications.morning_window(notifications.beijing_today())
+    items = await notifications.load_candidates(session, None, start, end)
+    assert {item["id"] for item in items} == {image_only.id, video.id}
+
+    # 后续补全保留原记录，并可进入之后的早报/查询筛选。
+    session.add(ContentVersion(raw_content_id=empty.id, version=2, title="公告已补全",
+                               text="恢复的正文", normalized_json={"media": []}))
+    await session.commit()
+    items = await notifications.load_candidates(session, None, start, end)
+    assert empty.id in {item["id"] for item in items}
 
 
 async def test_manual_morning_covers_all_communities_without_keyword_filter(session, monkeypatch):

@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import utcnow
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Product, RawContent, RedeemCode
-from app.services.notifications import group_candidates, load_candidates
-from app.services.bot_briefs import build_brief, fallback_items, format_brief
+from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
+from app.services.bot_briefs import build_brief, fallback_items, format_brief, single_item_brief
 from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 
@@ -279,6 +279,8 @@ async def deliver(session, target, row, *, force=False):
     # 人格播报由 AstrBot 插件领取，使用它实际配置的人格与模型。
     if target.config.get("delivery_mode") == "astrbot":
         return row
+    if not await prepare_delivery(session, row):
+        return row
     result = await session.execute(update(BotDelivery).where(
         BotDelivery.id == row.id, BotDelivery.status.in_(["pending", "failed"]), BotDelivery.attempts < 3,
     ).values(status="sending", attempts=BotDelivery.attempts + 1, updated_at=utcnow()))
@@ -290,6 +292,35 @@ async def deliver(session, target, row, *, force=False):
     row.status, row.error, row.updated_at = status, error, utcnow()
     await session.commit()
     return row
+
+
+async def prepare_delivery(session: AsyncSession, row: BotDelivery) -> bool:
+    """领取和直发共用兜底，阻止旧简报快照中的空动态进入 QQ。"""
+    if row.kind not in {"daily", "updates", "critical"} or not row.brief:
+        return True
+    items = row.brief.get("items") or []
+    usable = [item for item in items if not is_empty_dynamic_item(item)]
+    if len(usable) == len(items):
+        return True
+    if usable:
+        brief = {**row.brief, "items": usable}
+        if brief.get("mode") == "single":
+            item = dict(usable[0])
+            if isinstance(item.get("published_at"), str):
+                item["published_at"] = datetime.fromisoformat(item["published_at"])
+            body = format_short_update(item)
+        else:
+            body = format_brief(brief)
+        values = {"brief": brief, "body": body, "media": collect_images(usable, 1) or None}
+    else:
+        values = {"status": "cancelled", "receipt": None, "updated_at": utcnow(),
+                  "error": "来源动态正文和图片均为空，已取消本次推送"}
+    result = await session.execute(update(BotDelivery).where(
+        BotDelivery.id == row.id, BotDelivery.status.in_(["pending", "failed"]),
+    ).values(**values))
+    await session.commit()
+    await session.refresh(row)
+    return bool(result.rowcount and usable)
 
 
 async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, quiet: bool, quiet_critical: bool,
@@ -369,6 +400,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                                 format_short_update(item),
                                 f"daily:{target.id}:{local.date()}:{idx}",
                                 media=[item["image"]] if item.get("image") else None,
+                                brief=single_item_brief(item),
                             )
                     else:
                         brief = payload.get("brief") or await build_brief(session, items, due, mode="daily")
@@ -414,6 +446,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     session, target, "critical", format_short_update(item),
                     f"critical:{target.id}:{digest}",
                     media=[item["image"]] if item.get("image") else None,
+                    brief=single_item_brief(item),
                 )
             if normal_items and merge_minutes <= 0:
                 for item in normal_items:
@@ -427,6 +460,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                         session, target, "updates", format_short_update(item),
                         f"updates:{target.id}:{digest}",
                         media=[item["image"]] if item.get("image") else None,
+                        brief=single_item_brief(item),
                     )
             elif normal_items:
                 known = {entry.get("dedupe") for entry in buffer.get("items", [])}
@@ -449,6 +483,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                         "summary": (item.get("summary") or item.get("text") or "")[:500],
                         "text": (item.get("text") or "")[:1600],
                         "source": item.get("source") or item.get("platform"),
+                        "platform": item.get("platform"), "content_type": item.get("content_type"),
                         "identity": item.get("identity", "unknown"),
                         "url": item.get("url"),
                         "image": item.get("image"),

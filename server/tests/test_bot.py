@@ -187,6 +187,21 @@ async def test_short_format_and_multi_image(session, monkeypatch):
     assert '短讯标题0' in bodies and '短讯标题1' in bodies
     media_lists = [r.media for r in rows]
     assert all(m and m[0].startswith('https://img.example/') for m in media_lists)
+    assert all(r.brief['mode'] == 'single' and r.brief['items'][0]['sources'][0]['content_ids'] for r in rows)
+
+
+async def test_direct_delivery_cancels_empty_dynamic_snapshot(session, monkeypatch):
+    row = await target(session, daily_enabled=False)
+    item = {'id': 1, 'platform': 'bilibili', 'content_type': 'dynamic', 'title': '活动公告',
+            'text': '', 'summary': '有事件摘要也不能推送', 'url': 'https://t.bilibili.com/1'}
+    delivery = await bot.create_delivery(session, row, 'updates', '旧占位消息', 'empty-direct',
+                                         brief=bot.single_item_brief(item))
+    async def reject_send(*args):
+        raise AssertionError('空动态不得调用发送接口')
+    monkeypatch.setattr(bot, 'send_message', reject_send)
+    await bot.deliver(session, row, delivery)
+    assert delivery.status == 'cancelled' and delivery.attempts == 0
+    assert '正文和图片均为空' in delivery.error
 
 
 async def test_quiet_blocks_normal_but_allows_critical(session):

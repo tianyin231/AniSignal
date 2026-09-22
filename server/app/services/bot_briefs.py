@@ -11,7 +11,7 @@ from app.clock import utcnow
 from app.communities import COMMUNITIES
 from app.models.enums import COMMUNITY_LABELS
 from app.services.ai import _summary_supported, ai_available, chat, get_ai_config, record_usage
-from app.services.notifications import _is_low_signal_notification, _plain, _summary_respects_identity
+from app.services.notifications import _is_low_signal_notification, _plain, _summary_respects_identity, is_empty_dynamic_item
 
 logger = logging.getLogger(__name__)
 MAX_ITEMS = 3
@@ -58,12 +58,19 @@ def _source(item: dict) -> dict:
     return {
         "id": item.get("id"), "content_ids": item.get("content_ids") or ([item["id"]] if item.get("id") else []),
         "title": dated_text(item.get("title", ""), published),
-        "text": dated_text(item.get("text") or item.get("summary") or "", published)[:1600],
+        # 显式空正文不能拿事件摘要补上，否则会把采集失败伪装成有内容。
+        "text": dated_text(item.get("text", item.get("summary")) or "", published)[:1600],
         "source": item.get("source") or item.get("platform") or "原始来源",
+        "platform": item.get("platform"), "content_type": item.get("content_type"),
         "identity": item.get("identity", "unknown"), "community": item.get("community", ""),
         "url": item.get("url") or "", "image": item.get("image"),
         "published_at": published.isoformat() if published else None,
     }
+
+
+def single_item_brief(item: dict) -> dict:
+    source = _source(item)
+    return {"mode": "single", "items": [{**source, "summary": item.get("summary") or "", "sources": [source]}]}
 
 
 def fallback_items(items: list[dict]) -> list[dict]:
@@ -94,7 +101,8 @@ def _compatible_sources(refs: list[dict]) -> bool:
 
 
 async def select_brief_items(session, items: list[dict], now: datetime) -> list[dict]:
-    candidates = [i for i in items if (i.get("title") or "").strip() not in ("动态", "未命名动态")
+    candidates = [i for i in items if not is_empty_dynamic_item(i)
+                  and ((i.get("title") or "").strip() not in ("动态", "未命名动态") or i.get("image"))
                   and not _is_low_signal_notification(i)][:30]
     fallback = fallback_items(candidates)
     config = await get_ai_config(session)
