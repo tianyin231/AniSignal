@@ -1,5 +1,8 @@
 """ingest 幂等性单测：同内容重复采集不产生重复记录，变化才产生新版本。"""
 
+from datetime import datetime
+
+import pytest
 from sqlalchemy import func, select
 
 from app.models import ContentDailyStat, ContentVersion, MetricSnapshot, RawContent, Source
@@ -103,6 +106,116 @@ async def test_ingest_dynamic_official_source(session):
     source = await session.scalar(select(Source))
     assert source.external_id == "1955897084"
     assert source.identity == "official"
+
+
+@pytest.mark.parametrize(
+    "complete_fields",
+    [
+        {"type": "DYNAMIC_TYPE_DRAW", "text": "活动详情", "pics": ["https://example.com/a.jpg"]},
+        {"type": "DYNAMIC_TYPE_ARTICLE", "text": "专栏正文", "pics": []},
+        {"type": "DYNAMIC_TYPE_DRAW", "text": "", "pics": ["https://example.com/a.jpg"]},
+    ],
+)
+@pytest.mark.parametrize("empty_text", ["", " \n\t "])
+async def test_ingest_empty_dynamic_keeps_complete_version_and_updates_observations(
+    session, complete_fields, empty_text
+):
+    complete = dict(DYNAMIC_RAW, **complete_fields, _matched_keywords=["鸣潮"])
+    await ingest_items(session, "bilibili_dynamics", [complete])
+    content = await session.scalar(select(RawContent))
+    original_hash = content.content_hash
+    previous_seen = datetime(2020, 1, 1)
+    content.last_seen_at = previous_seen
+    await session.commit()
+
+    empty = dict(
+        complete, text=empty_text, pics=[], stat_like=99999,
+        _matched_keywords=["版本预告"], author_name="更新的账号名",
+    )
+    stats = await ingest_items(session, "bilibili_dynamics", [empty])
+
+    assert stats.errors == []
+    assert stats.items_updated == 0
+    assert stats.touched_content_ids == []
+    assert content.content_hash == original_hash
+    assert content.raw_json == complete
+    assert content.last_seen_at > previous_seen
+    assert set(content.matched_keywords) == {"鸣潮", "版本预告"}
+    assert (await session.scalar(select(Source))).name == "更新的账号名"
+    assert await session.scalar(select(func.count(ContentVersion.id))) == 1
+    latest = await session.scalar(select(ContentVersion))
+    assert latest.normalized_json["media"] == complete_fields["pics"]
+    assert latest.text == (complete_fields["text"] or None)
+    snapshots = list(await session.scalars(select(MetricSnapshot).order_by(MetricSnapshot.id)))
+    assert len(snapshots) == 2
+    assert snapshots[-1].metrics["like"] == 99999
+    keyword_stat = await session.scalar(
+        select(ContentDailyStat).where(ContentDailyStat.keyword == "版本预告")
+    )
+    assert keyword_stat.contents_new == 1
+
+    # 后续拿到同一份完整内容时，也不应出现空/完整交替新增版本。
+    recovered = await ingest_items(session, "bilibili_dynamics", [complete])
+    assert recovered.items_updated == 0
+    assert await session.scalar(select(func.count(ContentVersion.id))) == 1
+
+
+@pytest.mark.parametrize(
+    "changed_fields",
+    [
+        {"text": "修改后的正文", "pics": []},
+        {"text": "", "pics": ["https://example.com/b.jpg"]},
+    ],
+)
+async def test_ingest_dynamic_real_edits_still_create_unmerged_versions(session, changed_fields):
+    complete = dict(DYNAMIC_RAW, text="原正文", pics=["https://example.com/a.jpg"])
+    await ingest_items(session, "bilibili_dynamics", [complete])
+    content = await session.scalar(select(RawContent))
+    original_hash = content.content_hash
+
+    stats = await ingest_items(session, "bilibili_dynamics", [dict(complete, **changed_fields)])
+
+    assert stats.errors == []
+    assert stats.items_updated == 1
+    assert content.content_hash != original_hash
+    assert content.raw_json == complete
+    versions = list(await session.scalars(select(ContentVersion).order_by(ContentVersion.version)))
+    assert [version.version for version in versions] == [1, 2]
+    assert versions[-1].text == (changed_fields["text"] or None)
+    assert versions[-1].normalized_json["media"] == changed_fields["pics"]
+
+
+async def test_ingest_empty_video_edit_is_not_blocked_by_dynamic_guard(session):
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+
+    stats = await ingest_items(
+        session, "bilibili_search", [dict(VIDEO_RAW, description="", cover_url="")]
+    )
+
+    assert stats.items_updated == 1
+    latest = await session.scalar(select(ContentVersion).order_by(ContentVersion.version.desc()))
+    assert latest.text is None
+    assert latest.normalized_json["media"] == []
+
+
+async def test_reparse_empty_original_dynamic_preserves_later_enrichment(session):
+    from app.services.ingest import reparse_contents
+
+    await ingest_items(session, "bilibili_dynamics", [DYNAMIC_RAW])
+    await ingest_items(
+        session, "bilibili_dynamics", [dict(DYNAMIC_RAW, text="后来补全的正文")]
+    )
+    content = await session.scalar(select(RawContent))
+    complete_hash = content.content_hash
+
+    result = await reparse_contents(session, "bilibili", "dynamic")
+
+    assert result == {"checked": 1, "updated": 0, "failed": 0}
+    assert content.content_hash == complete_hash
+    assert content.raw_json == DYNAMIC_RAW
+    versions = list(await session.scalars(select(ContentVersion).order_by(ContentVersion.version)))
+    assert len(versions) == 2
+    assert versions[-1].text == "后来补全的正文"
 
 
 async def test_ingest_parse_failure_counted_not_fatal(session):

@@ -8,7 +8,7 @@
 import asyncio
 import json
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -29,6 +29,8 @@ _DYNAMIC_DETAIL_PARAMS = {
 }
 _DRAW_DETAIL_CACHE: dict[str, dict] = {}
 _DRAW_DETAIL_CACHE_LIMIT = 256
+_DRAW_DETAIL_RETRY_AT: dict[str, datetime] = {}
+_RICH_DYNAMIC_TYPES = {"DYNAMIC_TYPE_DRAW", "DYNAMIC_TYPE_ARTICLE"}
 
 # 进程级熔断：同一 bili 命令连续被风控拒绝时暂停一段时间，避免对已门禁端点
 # 持续硬打（collector 每个采集任务新建实例，状态必须放模块级才能跨任务生效）。
@@ -115,7 +117,8 @@ class BilibiliCollector:
             raise CollectorError(f"bili command timed out after {self._timeout}s: {args}") from None
         if proc.returncode != 0:
             stderr_text = stderr.decode(errors="replace")
-            if "risk control" in stderr_text.casefold():
+            # bili 0.3: 4=匿名首屏静默拒绝，6=限频；不再只靠英文 risk control。
+            if proc.returncode in (4, 6) or "risk control" in stderr_text.casefold():
                 raise BiliRiskControlError(
                     f"bili exited {proc.returncode}: {stderr_text[:500]}"
                 ) from None
@@ -186,11 +189,11 @@ class BilibiliCollector:
         return (await self._enrich_draw_dynamics(items))[:limit]
 
     async def _enrich_draw_dynamics(self, items: list[dict], cap: int = 20) -> list[dict]:
-        """匿名补全 DRAW 的正文与图片；结果在 worker 进程内缓存，避免重复请求。"""
+        """补全 CLI 未展开的 DRAW/ARTICLE（OPUS）；共用详情缓存与冷却。"""
         enriched = 0
         attempted = 0
         for item in items:
-            if item.get("type") != "DYNAMIC_TYPE_DRAW":
+            if item.get("type") not in _RICH_DYNAMIC_TYPES:
                 continue
             if (item.get("text") or "").strip() or item.get("pics"):
                 continue
@@ -207,10 +210,6 @@ class BilibiliCollector:
                 except (httpx.HTTPError, ValueError) as exc:
                     logger.warning("anonymous DRAW detail failed for %s: %s", dynamic_id, exc)
                     continue
-                if rich:
-                    _DRAW_DETAIL_CACHE[dynamic_id] = rich
-                    if len(_DRAW_DETAIL_CACHE) > _DRAW_DETAIL_CACHE_LIMIT:
-                        _DRAW_DETAIL_CACHE.pop(next(iter(_DRAW_DETAIL_CACHE)))
             if (rich.get("text") or "").strip() or rich.get("pics"):
                 item["text"] = rich.get("text") or item.get("text")
                 item["pics"] = list(rich.get("pics") or item.get("pics") or [])
@@ -220,7 +219,12 @@ class BilibiliCollector:
         return items
 
     async def _fetch_draw_detail(self, dynamic_id: str) -> dict:
-        """读取无需登录的公开详情；平台拒绝时返回空，绝不切换 Cookie 链路。"""
+        """列表补全与历史回填共用缓存；风控冷却，失效动态延后重查。"""
+        if dynamic_id in _DRAW_DETAIL_CACHE:
+            return _DRAW_DETAIL_CACHE[dynamic_id]
+        retry_at = _DRAW_DETAIL_RETRY_AT.get(dynamic_id)
+        if (retry_at and retry_at > utcnow()) or _circuit_open("dynamic-detail"):
+            return {}
         headers = {
             "User-Agent": "Mozilla/5.0",
             "Referer": f"https://t.bilibili.com/{dynamic_id}",
@@ -230,9 +234,20 @@ class BilibiliCollector:
                 _DYNAMIC_DETAIL_URL,
                 params={"id": dynamic_id, **_DYNAMIC_DETAIL_PARAMS},
             )
+            if response.status_code in (412, 429):
+                _circuit_record_failure("dynamic-detail")
+                _defer_dynamic_detail(dynamic_id)
+                logger.warning("anonymous dynamic detail refused: HTTP %s", response.status_code)
+                return {}
             response.raise_for_status()
         payload = response.json()
         if payload.get("code") != 0:
+            if payload.get("code") in (-352, -412, -509):
+                _circuit_record_failure("dynamic-detail")
+            _defer_dynamic_detail(
+                dynamic_id,
+                timedelta(hours=6) if payload.get("code") == 4101152 else _CIRCUIT_COOLDOWN,
+            )
             logger.warning(
                 "anonymous DRAW detail refused for %s: code=%s message=%s",
                 dynamic_id,
@@ -240,7 +255,22 @@ class BilibiliCollector:
                 payload.get("message"),
             )
             return {}
-        return _extract_dynamic_detail(payload)
+        _circuit_reset("dynamic-detail")
+        rich = _extract_dynamic_detail(payload)
+        if (rich.get("text") or "").strip() or rich.get("pics"):
+            _DRAW_DETAIL_RETRY_AT.pop(dynamic_id, None)
+            _DRAW_DETAIL_CACHE[dynamic_id] = rich
+            if len(_DRAW_DETAIL_CACHE) > _DRAW_DETAIL_CACHE_LIMIT:
+                _DRAW_DETAIL_CACHE.pop(next(iter(_DRAW_DETAIL_CACHE)))
+        else:
+            _defer_dynamic_detail(dynamic_id)
+        return rich
+
+
+def _defer_dynamic_detail(dynamic_id: str, delay: timedelta = _CIRCUIT_COOLDOWN) -> None:
+    _DRAW_DETAIL_RETRY_AT[dynamic_id] = utcnow() + delay
+    if len(_DRAW_DETAIL_RETRY_AT) > _DRAW_DETAIL_CACHE_LIMIT:
+        _DRAW_DETAIL_RETRY_AT.pop(next(iter(_DRAW_DETAIL_RETRY_AT)))
 
 
 def _loads(text: str) -> object:

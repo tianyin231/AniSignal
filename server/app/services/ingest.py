@@ -170,15 +170,36 @@ async def _ingest_one(
     changed = existing.content_hash != fingerprint
     if changed:
         latest = await session.scalar(
-            select(ContentVersion.version)
+            select(ContentVersion)
             .where(ContentVersion.raw_content_id == existing.id)
             .order_by(ContentVersion.version.desc())
             .limit(1)
         )
-        _add_version(session, existing, (latest or 0) + 1, normalized, parser_version, rules)
-        existing.content_hash = fingerprint
+        if _would_drop_dynamic_content(normalized, latest):
+            changed = False
+        else:
+            _add_version(
+                session, existing, (latest.version if latest else 0) + 1,
+                normalized, parser_version, rules,
+            )
+            existing.content_hash = fingerprint
     _add_snapshot(session, existing, normalized)
     return False, changed, existing.id, str(identity)
+
+
+def _would_drop_dynamic_content(
+    normalized: NormalizedContent, latest: ContentVersion | None
+) -> bool:
+    # B 站列表仍能返回动态 ID，但详情受限时正文和图片会同时缺失。
+    # 保留已经补全的版本；只拦截全空结果，不将历史字段拼进真实的新内容。
+    return bool(
+        normalized.platform == "bilibili"
+        and normalized.content_type == "dynamic"
+        and not (normalized.text or "").strip()
+        and not normalized.media
+        and latest is not None
+        and ((latest.text or "").strip() or (latest.normalized_json or {}).get("media"))
+    )
 
 
 async def _upsert_source(
@@ -306,6 +327,8 @@ async def reparse_contents(
             .order_by(ContentVersion.version.desc())
             .limit(1)
         )
+        if _would_drop_dynamic_content(normalized, latest):
+            continue
         category = classify_content(normalized, rules, content.community)
         fingerprint = content_fingerprint(normalized)
         if (
