@@ -6,6 +6,7 @@ import copy
 import hashlib
 import io
 import json
+import random
 import re
 import tempfile
 import time
@@ -23,7 +24,7 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 
-VERSION = "1.4.6"
+VERSION = "1.4.7"
 
 
 def _cat_image_preview(uri: str, cache: dict) -> str:
@@ -109,6 +110,7 @@ class AniSignalPlugin(Star):
         self.last_activity = {}
         self.last_briefs = {}
         self.last_cat_reply = {}
+        self.last_cat_topic_trigger = {}
         self.cat_interjection_pending = set()
         self.cat_vision_cache = {}
 
@@ -593,6 +595,10 @@ class AniSignalPlugin(Star):
             event.set_extra("anisignal_cat_chat", True)
             umo = event.unified_msg_origin
             if ":GroupMessage:" in umo and not event.is_at_or_wake_command:
+                # 猫话题未获接话资格时，不能再被原生随机回复捞回来。
+                if event.get_extra("anisignal_cat_topic_skipped"):
+                    event.stop_event()
+                    return
                 now = datetime.now(timezone(timedelta(hours=8)))
                 if (not 8 <= now.hour < 23 or umo in self.cat_interjection_pending
                         or now.timestamp() - self.last_cat_reply.get(umo, 0) < 1800):
@@ -671,6 +677,16 @@ class AniSignalPlugin(Star):
             text = event.get_message_str().casefold()
             if any(word.strip() and word.strip().casefold() in text
                     for word in self.config.get("cat_reply_keywords", [])):
+                now = time.time()
+                cooldown = max(0, float(self.config.get("cat_topic_cooldown_seconds", 90)))
+                last = max(self.last_cat_reply.get(event.unified_msg_origin, 0),
+                           self.last_cat_topic_trigger.get(event.unified_msg_origin, 0))
+                probability = min(1, max(0, float(self.config.get("cat_topic_reply_probability", 0.3))))
+                if now - last < cooldown or random.random() >= probability:
+                    event.set_extra("anisignal_cat_topic_skipped", True)
+                    return
+                # 在模型请求前占住冷却窗口，防止同一群连续几条消息同时唤醒。
+                self.last_cat_topic_trigger[event.unified_msg_origin] = now
                 # 走同一次普通聊天管线；原生随机插话会跳过已唤醒的消息。
                 event.is_at_or_wake_command = True
                 event.set_extra("anisignal_cat_topic", True)
@@ -698,8 +714,10 @@ class AniSignalPlugin(Star):
         if received and started and finished:
             now = time.perf_counter()
             # 只记录阶段耗时，不记录群友的消息、图片或密钥。
-            logger.info("AniSignal cat timing total=%.2fs prepare=%.2fs model=%.2fs send=%.2fs",
-                        now - received, started - received, finished - started, now - finished)
+            trigger = ("topic" if event.get_extra("anisignal_cat_topic") else
+                       "random" if event.get_extra("anisignal_cat_interject") else "direct")
+            logger.info("AniSignal cat timing total=%.2fs prepare=%.2fs model=%.2fs send=%.2fs trigger=%s",
+                        now - received, started - received, finished - started, now - finished, trigger)
 
     @filter.on_decorating_result(priority=1)
     async def strip_residual_emotion_markup(self, event: AstrMessageEvent):

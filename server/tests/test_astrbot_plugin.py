@@ -54,6 +54,7 @@ def plugin(monkeypatch):
     spec = importlib.util.spec_from_file_location('plugin_under_test', path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod.random, 'random', lambda: 0.0)
     obj = mod.AniSignalPlugin.__new__(mod.AniSignalPlugin)
     obj.api = AsyncMock(return_value={'ok':True})
     obj.render_delivery = AsyncMock(return_value='人格播报\n原始资料')
@@ -63,6 +64,7 @@ def plugin(monkeypatch):
     obj.last_activity = {}
     obj.last_briefs = {}
     obj.last_cat_reply = {}
+    obj.last_cat_topic_trigger = {}
     obj.cat_interjection_pending = set()
     obj.cat_vision_cache = {}
     obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True),
@@ -448,6 +450,54 @@ async def test_cat_topic_respects_group_settings(plugin, enabled, whitelist, key
     ev.get_group_id = lambda: 'g'
     await plugin.select_conversation_provider(ev)
     assert ev.is_at_or_wake_command is expected
+
+
+@pytest.mark.parametrize('draw,expected', [(0.29, True), (0.30, False), (0.99, False)])
+async def test_cat_topic_probability_and_no_random_fallback(plugin, monkeypatch, draw, expected):
+    plugin.config.update(cat_reply_keywords=['猫'], cat_topic_reply_probability=0.3)
+    plugin.context.get_config = lambda **kwargs: {
+        'provider_ltm_settings': {'active_reply': {'enable': True, 'whitelist': []}}}
+    monkeypatch.setattr(plugin.select_conversation_provider.__func__.__globals__['random'], 'random', lambda: draw)
+    ev = event('qq:GroupMessage:g')
+    ev.is_at_or_wake_command = False
+    ev.get_message_str = lambda: '这只猫好可爱'
+    ev.get_group_id = lambda: 'g'
+    await plugin.select_conversation_provider(ev)
+    assert ev.is_at_or_wake_command is expected
+    if not expected:
+        req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'), system_prompt='猫语')
+        await plugin.add_instructions(ev, req)
+        assert ev.get_extra('stopped')  # 不能被另一条随机回复链路重新触发。
+
+
+async def test_cat_topic_cooldown_reserves_slot_per_group_and_keeps_direct_calls(plugin, monkeypatch):
+    plugin.config.update(cat_reply_keywords=['猫'], cat_topic_reply_probability=1.0,
+                         cat_topic_cooldown_seconds=90)
+    plugin.context.get_config = lambda **kwargs: {
+        'provider_ltm_settings': {'active_reply': {'enable': True, 'whitelist': []}}}
+    clock = [10000.0]
+    monkeypatch.setattr(plugin.select_conversation_provider.__func__.__globals__['time'], 'time', lambda: clock[0])
+
+    async def trigger(group, direct=False):
+        ev = event(f'qq:GroupMessage:{group}')
+        ev.is_at_or_wake_command = direct
+        ev.get_message_str = lambda: '这只猫'
+        ev.get_group_id = lambda: group
+        await plugin.select_conversation_provider(ev)
+        return ev
+
+    assert (await trigger('one')).is_at_or_wake_command
+    assert not (await trigger('one')).is_at_or_wake_command  # 第一条还在生成也不能连着触发。
+    assert (await trigger('two')).is_at_or_wake_command
+    direct = await trigger('one', direct=True)
+    assert direct.is_at_or_wake_command and not direct.get_extra('anisignal_cat_topic_skipped')
+    clock[0] += 89
+    assert not (await trigger('one')).is_at_or_wake_command
+    clock[0] += 1
+    assert (await trigger('one')).is_at_or_wake_command
+    clock[0] += 100
+    plugin.last_cat_reply['qq:GroupMessage:one'] = clock[0] - 20
+    assert not (await trigger('one')).is_at_or_wake_command  # 点名回复之后也留出安静间隔。
 
 
 async def test_persona_intro_rejects_sales_and_long_monologues(plugin):
