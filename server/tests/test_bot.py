@@ -192,7 +192,7 @@ async def test_short_format_and_multi_image(session, monkeypatch):
     assert '发布：09/13 11:00' in bodies and '11:58' not in bodies and '12:00' not in bodies
     media_lists = [r.media for r in rows]
     assert all(m and m[0].startswith('https://img.example/') for m in media_lists)
-    assert all(r.brief['mode'] == 'single' and r.brief['items'][0]['sources'][0]['content_ids'] for r in rows)
+    assert all(r.brief['mode'] == 'updates' and r.brief['items'][0]['sources'][0]['content_ids'] for r in rows)
 
 
 async def test_direct_delivery_cancels_empty_dynamic_snapshot(session, monkeypatch):
@@ -304,3 +304,21 @@ async def test_late_official_news_is_a_dated_daily_supplement_and_never_an_insta
     next_digest = await bot.query_target(session, row, now=now)
     assert '晚采到的活动公告' not in next_digest['text']
     assert len([i for i in next_digest['items'] if i.get('is_supplement')]) <= 1
+
+
+async def test_query_retains_useful_facts_after_long_announcement_intro(session):
+    now = datetime(2026, 10, 10, 4)
+    row = await target(session, daily_enabled=False, community='blhx')
+    source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
+    session.add(source)
+    await session.flush()
+    raw = RawContent(platform='bilibili', content_type='dynamic', external_id='long-intro', source_id=source.id,
+                     community='blhx', published_at=now - timedelta(hours=1), collected_at=now - timedelta(minutes=5))
+    session.add(raw)
+    await session.flush()
+    text = '这段开场描述了美丽的活动场景。' * 100 + '完成七日任务，可获得限定换装。'
+    session.add(ContentVersion(raw_content_id=raw.id, title='限时任务活动', text=text, category='announcement'))
+    await session.commit()
+    result = await bot.query_target(session, row, now=now)
+    assert '完成七日任务，可获得限定换装' in result['text']
+    assert '完成七日任务，可获得限定换装' in result['items'][0]['sources'][0]['text']

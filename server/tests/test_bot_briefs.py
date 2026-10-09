@@ -298,7 +298,8 @@ async def test_rejected_editor_copy_is_recorded_and_fallback_stays_short(session
     assert '99999' not in body and '…' not in body
     usage = await session.scalar(select(AiUsage).where(AiUsage.task == 'bot_brief'))
     assert usage.status == 'fallback' and 'status=fallback' in caplog.text
-    assert ('unsupported_fact' if '99999' in summary else 'empty_or_foreign_summary') in caplog.text
+    reason = 'unsupported_fact' if '99999' in summary else 'summary_too_long' if len(summary) > 60 else 'empty_or_foreign_summary'
+    assert reason in caplog.text
 
 
 async def test_editor_partial_validation_preserves_valid_rows_and_records_status(session, monkeypatch):
@@ -338,3 +339,82 @@ def test_real_announcement_fallback_prefers_time_over_character_greeting_and_alb
     assert '向你报到' not in body and '褒奖' not in body and '…' not in body
     assert '2026年10月26日03:59（服务器时间）' in body
     assert '正式上架各音乐平台' in body
+
+
+async def test_editor_sees_tail_facts_before_prompt_budget_and_keeps_reward_condition(session, monkeypatch):
+    intro = '这段是没有具体事实的宣传说明。' * 100
+    reward = '完成七日任务，可获得阿尔及利亚限定换装。'
+    timing = '活动时间：10月15日维护后至11月5日维护。'
+    item = content(1, community='blhx', title='限时活动【严厉女仆不严厉】', text=intro + reward + timing)
+    share = '碧蓝航线女仆换装做七日任务就能拿，活动10月15日维护后开。'
+    async def edit(config, system, prompt, **kwargs):
+        payload = json.loads(prompt.split('资料：', 1)[1])[0]
+        assert payload['key_points'][:2] == [reward, timing]
+        assert intro not in prompt
+        return json.dumps({'items': [{'indices': [1], 'title': '女仆换装活动', 'summary': share}]}), {}
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    monkeypatch.setattr(briefs, 'chat', edit)
+    brief = await briefs.build_brief(session, [item])
+    assert brief['items'][0]['share_text'] == share
+    assert reward in brief['items'][0]['sources'][0]['text']
+    assert '完成七日任务' in briefs.fallback_items([item])[0]['summary']
+
+
+async def test_followup_payload_and_fallback_only_include_new_facts(session, monkeypatch):
+    old = content(1, title='天工寻物活动', text='活动10月12日18:00截止。奖励包含500星声。')
+    new = content(2, title=old['title'], text='活动截止时间改为10月15日18:00。奖励包含500星声。')
+    new = {**new, 'is_followup': True, 'previous_points': briefs.news_points(old),
+           'new_points': briefs.changed_points(new, old)}
+    async def edit(config, system, prompt, **kwargs):
+        payload = json.loads(prompt.split('资料：', 1)[1])[0]
+        assert payload['is_followup'] and '500' not in str(payload['key_points'])
+        assert '500' in str(payload['previous_points'])
+        return json.dumps({'items': [{'indices': [1], 'title': '天工寻物时间调整',
+                                     'summary': '天工寻物改到10月15日18:00截止啦。'}]}), {}
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    monkeypatch.setattr(briefs, 'chat', edit)
+    brief = await briefs.build_brief(session, [new])
+    assert brief['items'][0]['share_text'] == '天工寻物改到10月15日18:00截止啦。'
+    assert '补充' in briefs.format_brief(brief) and '500' not in briefs.format_brief(brief)
+    assert '500' in brief['items'][0]['sources'][0]['text']
+    # 若模型重播旧奖励，数字校验应回退为新截止时间，不能恢复整篇旧公告。
+    monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(json.dumps({'items': [
+        {'indices': [1], 'title': '天工寻物时间调整', 'summary': '天工寻物仍送500星声。'}]}), {})))
+    brief = await briefs.build_brief(session, [new])
+    assert '500' not in briefs.format_brief(brief) and '10月15日18:00' in briefs.format_brief(brief)
+
+
+async def test_followup_without_confirmed_changes_stays_quiet_when_editor_is_unavailable(session, monkeypatch):
+    old = content(1, title='新区域预告', text='预告影像现已上线。')
+    new = content(2, title='新区域预告', text='预告视频已经发布。')
+    new = {**new, 'is_followup': True, 'previous_points': briefs.news_points(old), 'new_points': briefs.changed_points(new, old)}
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={}))
+    assert (await briefs.build_brief(session, [new]))['items'] == []
+    assert briefs.changed_points(old, {**old, 'text': ' 预告影像现已上线！'}) == []
+
+
+def test_new_video_in_same_event_is_not_hidden_by_generic_release_copy():
+    old = content(1, title='3.7版本新区域预告其一', text='预告影像已发布。')
+    new = content(2, title='3.7版本新区域预告其二', text=old['text'])
+    assert briefs.changed_points(new, old) == ['3.7版本新区域预告其二：预告影像已发布。']
+
+
+def test_gameplay_score_is_not_ranked_as_an_activity_reward():
+    item = content(1, title='天工寻物', text='每波次敌人清理完成后获得加时，倒计时结束后玩家以当前获得的款项结束挑战。'
+                   '✦活动时间✦ 10月8日04:00至10月26日03:59。✦奖励内容✦ 星声*500、养成材料。')
+    assert briefs.news_points(item)[:2] == ['活动时间：10月8日04:00至10月26日03:59。', '奖励内容：星声*500。']
+
+
+def test_followup_compares_independent_clauses_without_losing_reward_conditions():
+    old = content(1, title='测试活动', text='活动10月12日18:00截止，奖励包含500星声。')
+    new = {**old, 'text': '活动10月15日18:00截止，奖励包含500星声。'}
+    assert briefs.changed_points(new, old) == ['活动10月15日18:00截止。']
+    conditional = content(2, title='任务奖励', text='完成七日任务，奖励包含500星声。')
+    assert briefs.news_points(conditional) == ['完成七日任务，奖励包含500星声。']
+
+
+def test_activity_eligibility_cannot_become_a_reward_claim():
+    evidence = '奖励内容：星声*500。开放条件：联觉等级达到14级，并激活四鸣井。'
+    assert briefs._grounded_copy('天工寻物活动', '做四鸣井任务就能拿500星声。', evidence) is None
+    assert briefs._grounded_copy('天工寻物活动', '活动奖励含500星声，参与需14级并激活四鸣井。', evidence)
+    assert briefs._grounded_copy('七日任务', '完成七日任务就能拿限定换装。', '完成七日任务，可获得限定换装。')

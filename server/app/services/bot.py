@@ -12,7 +12,8 @@ from app.clock import utcnow
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Evidence, Product, RawContent, RedeemCode
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
-from app.services.bot_briefs import build_brief, fallback_items, format_brief, is_recent_item, publication_label, single_item_brief
+from app.services.bot_briefs import (_source, build_brief, changed_points, fallback_items, format_brief,
+                                    is_recent_item, news_points, point_key, publication_label, single_item_brief)
 from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 from app.services.bot_calendar import calendar_brief, upcoming_entries, refresh_calendar, scheduled_at, normalized_title
@@ -200,13 +201,13 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
     else:
         candidates = await load_candidates(
             session, keywords or None, now - timedelta(hours=24 if tool == "digest" else 168), now,
-            community=community, collected_after=collected_after,
+            community=community, collected_after=collected_after, text_limit=None,
         )
         if tool == "digest" and not collected_after:
             # 晚采到的官方资料最多补一条，发布时间仍取原文，不回灌即时推送。
             supplements = await load_candidates(session, keywords or None, now - timedelta(days=7),
                                                 now - timedelta(hours=24), community=community,
-                                                collected_after=now - timedelta(hours=24))
+                                                collected_after=now - timedelta(hours=24), text_limit=None)
             candidates = [c for c in candidates if is_recent_item(c, now)]
             candidates.extend({**c, "is_supplement": True} for c in supplements
                               if c.get("published_at") and c["collected_at"] < now and c["identity"] == "official")
@@ -321,14 +322,15 @@ async def known_notification_keys(session, target_id: int, now=None) -> set[str]
 
 
 async def identify_item(session, item: dict) -> dict:
-    event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
-    identity = f"event:{event.id}:{event.conclusion}" if event is not None else f"content:{item['id']}"
+    facts = point_key(item.get("source_title") or item.get("title") or "") + "\n" + "\n".join(sorted(point_key(point) for point in news_points(item)))
+    # 事件结论常是固定模板；用实际来源事实辨认修订，改写摘要本身不触发续报。
+    identity = f"event:{item['event_id']}:{facts}" if item.get("event_id") else f"content:{item['id']}"
     return {**item, "dedupe": hashlib.sha256(identity.encode()).hexdigest()[:32], "topic_key": notification_topic(item)}
 
 
 def notification_topic(item: dict) -> str | None:
     """官方同标题转发的主题键；使用方只保留 72 小时，短泛化标题不用。"""
-    title = normalized_title(item.get("title") or "")
+    title = normalized_title(item.get("source_title") or item.get("title") or "")
     if item.get("identity") != "official" or len(title) < 12:
         return None
     identity = f"topic:{item.get('community')}:{title}"
@@ -336,8 +338,49 @@ def notification_topic(item: dict) -> str | None:
 
 
 def item_was_notified(item: dict, known: set[str]) -> bool:
-    return (item.get("dedupe") in known or (item.get("topic_key") or notification_topic(item)) in known
-            or (item.get("event_id") and f"legacy-event:{item['event_id']}" in known))
+    return (item.get("dedupe") in known or (not item.get("is_followup") and (
+            (item.get("topic_key") or notification_topic(item)) in known
+            or (item.get("event_id") and f"legacy-event:{item['event_id']}" in known))))
+
+
+def update_topic(item: dict) -> str:
+    if item.get("event_id"):
+        return f"{item.get('community', '')}:event:{item['event_id']}"
+    return notification_topic(item) or f"{item.get('community', '')}:content:{item.get('id')}"
+
+
+async def prepare_update_items(session, target_id: int, items: list[dict], now: datetime, known: set[str]) -> list[dict]:
+    """按本群已送达的来源快照对比；其他群、失败消息和人工查询不充当已知信息。"""
+    if not items:
+        return []
+    briefs = await session.scalars(select(BotDelivery.brief).where(
+        BotDelivery.target_id == target_id, BotDelivery.status == "accepted",
+        BotDelivery.kind.in_(["daily", "updates", "critical"]),
+        BotDelivery.updated_at >= now - timedelta(days=7),
+    ).order_by(BotDelivery.updated_at.desc(), BotDelivery.id.desc()).limit(200))
+    previous, history_points = {}, {}
+    for brief in briefs:
+        for item in (brief or {}).get("items", []):
+            for source in item.get("sources") or [item]:
+                for topic in filter(None, (update_topic(source), notification_topic(source))):
+                    previous.setdefault(topic, source)
+                    points = history_points.setdefault(topic, {})
+                    for point in [source.get("title") or "", *news_points(source)]:
+                        points.setdefault(point_key(point), point)
+    prepared = []
+    for item in items:
+        item = await identify_item(session, item)
+        topic = update_topic(item) if update_topic(item) in previous else notification_topic(item)
+        old = previous.get(topic)
+        if old:
+            changes = changed_points(item, old)
+            if not changes:
+                continue
+            item = {**item, "is_followup": True, "key_points": news_points(item),
+                    "new_points": changes, "previous_points": list(history_points[topic].values())[:18]}
+        if not item_was_notified(item, known):
+            prepared.append(item)
+    return prepared
 
 
 def notification_brief(brief: dict, items: list[dict]) -> dict:
@@ -446,14 +489,16 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
 async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, quiet: bool, quiet_critical: bool,
                               hourly_limit: int, max_images: int) -> None:
     known = await known_notification_keys(session, target.id, now)
+    previously_known = set(known)
     usable = []
     for item in buffer.get("items", []):
         buffered_at = datetime.fromisoformat(item.get("buffered_at") or item.get("published_at") or now.isoformat())
-        if item_was_notified(item, known) or buffered_at <= now - timedelta(hours=12) or not is_recent_item(item, now):
+        if item.get("dedupe") in known or buffered_at <= now - timedelta(hours=12) or not is_recent_item(item, now):
             continue
         usable.append(item)
-        known.update(key for key in (item.get("dedupe"), item.get("topic_key") or notification_topic(item)) if key)
+        known.update(key for key in (item.get("dedupe"),) if key)
     buffer["items"] = usable
+    buffer["items"] = await prepare_update_items(session, target.id, usable, now, previously_known)
     if not buffer["items"]:
         await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
         return
@@ -557,58 +602,34 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             critical_items = []
             normal_items = []
             already = await known_notification_keys(session, target.id, now)
-            for item in payload["items"]:
-                if not is_recent_item(item, now):
-                    continue
-                item = await identify_item(session, item)
-                if item_was_notified(item, already):
-                    continue
+            candidates = [item for item in payload["items"] if is_recent_item(item, now)]
+            for item in await prepare_update_items(session, target.id, candidates, now, already):
                 if classify_item(item) == "critical":
                     critical_items.append(item)
                 else:
                     normal_items.append(item)
-            for item in critical_items:
-                digest = item["dedupe"]
-                await create_delivery(
-                    session, target, "critical", format_short_update(item),
-                    f"critical:{target.id}:{digest}",
-                    media=[item["image"]] if item.get("image") else None,
-                    brief=notification_brief(single_item_brief(item), [item]),
-                )
-            if normal_items and merge_minutes <= 0:
-                for item in normal_items:
-                    digest = item["dedupe"]
-                    await create_delivery(
-                        session, target, "updates", format_short_update(item),
-                        f"updates:{target.id}:{digest}",
-                        media=[item["image"]] if item.get("image") else None,
-                        brief=notification_brief(single_item_brief(item), [item]),
-                    )
-            elif normal_items:
+            for kind, immediate in (("critical", critical_items), ("updates", normal_items if merge_minutes <= 0 else [])):
+                for item in immediate:
+                    brief = notification_brief(await build_brief(session, [item], now), [item])
+                    if brief["items"]:
+                        await create_delivery(session, target, kind, format_brief(brief),
+                                              f"{kind}:{target.id}:{item['dedupe']}",
+                                              media=collect_images(brief["items"], 1), brief=brief)
+            if normal_items and merge_minutes > 0:
                 known = {key for entry in buffer.get("items", []) for key in (entry.get("dedupe"), entry.get("topic_key") or notification_topic(entry)) if key}
                 for item in normal_items:
                     digest = item["dedupe"]
+                    older = next((entry for entry in buffer.get("items", []) if update_topic(entry) == update_topic(item)), None)
+                    if older:
+                        if not changed_points(item, older) or _source(item)["published_at"] < older["published_at"]:
+                            continue
+                        buffer["items"].remove(older)
+                        known = {key for entry in buffer["items"] for key in (entry.get("dedupe"), entry.get("topic_key")) if key}
                     if item_was_notified(item, known):
                         continue
                     known.update(key for key in (digest, item.get("topic_key")) if key)
-                    published = item.get("published_at")
-                    buffer.setdefault("items", []).append({
-                        "id": item.get("id"),
-                        "content_ids": item.get("content_ids", []),
-                        "dedupe": digest,
-                        "topic_key": item.get("topic_key"),
-                        "event_id": item.get("event_id"), "buffered_at": now.isoformat(),
-                        "title": item.get("title"),
-                        "community": item.get("community"),
-                        "summary": (item.get("summary") or item.get("text") or "")[:500],
-                        "text": (item.get("text") or "")[:1600],
-                        "source": item.get("source") or item.get("platform"),
-                        "platform": item.get("platform"), "content_type": item.get("content_type"),
-                        "identity": item.get("identity", "unknown"),
-                        "url": item.get("url"),
-                        "image": item.get("image"),
-                        "published_at": published.isoformat() if isinstance(published, datetime) else None,
-                    })
+                    buffer.setdefault("items", []).append({**_source(item), "topic_key": item.get("topic_key"),
+                        "buffered_at": older["buffered_at"] if older else now.isoformat()})
                 if buffer["items"] and not buffer.get("flush_at"):
                     buffer["flush_at"] = (now + timedelta(minutes=merge_minutes)).isoformat()
                 # 新条目进缓冲后立刻落库，进程重启也不丢。
