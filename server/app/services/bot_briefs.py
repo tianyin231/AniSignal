@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
@@ -19,6 +20,7 @@ MAX_ITEMS = 3
 UPDATE_ITEMS = 2
 SUMMARY_LIMIT = 60
 UPDATE_MAX_AGE = timedelta(hours=24)
+_REWARD_CONDITION = re.compile(r"(?:完成|参与|达到|购买|付费|消耗|登录).*(?:可获得|可领取|领取奖励|获得.*换装)")
 # 先匹配作品名，避免把“明日方舟”里的“明日”当成相对日期。
 _GAME_NAMES = sorted({name for meta in COMMUNITIES.values() for name in meta.game_names}, key=len, reverse=True)
 _RELATIVE_DATE = re.compile("|".join(map(re.escape, _GAME_NAMES)) + r"|(?P<relative>今天|今日|今晚|明天|明日|明晚|昨天|昨日|昨晚)")
@@ -102,6 +104,11 @@ def _date_evidence(value: str) -> str:
 def _grounded_copy(title: str, summary: str, evidence: str) -> tuple[str, str] | None:
     """拦住已观察到的关系升级，并保守区分直播预热和版本前瞻。"""
     output = title + " " + summary
+    if ("开放条件：" in evidence and "奖励内容：" in evidence
+        and re.search(r"(?:做|完成|激活|达到|解锁).{0,45}(?:就能|即可|可)(?:获得|领取|拿|领)", output)
+        and not _REWARD_CONDITION.search(evidence)):
+        # 参加门槛不等于领奖动作，例如激活四鸣井只是开放条件。
+        return None
     if "片尾" in output and "片尾" not in evidence:
         return None
     counted_departments = re.search(r"[一二三四五六七八九十\d]+(?:地|个|家)文旅(?:部门|局)", output)
@@ -132,8 +139,86 @@ def _summary_copy(value: str, title: str, published_at=None, *, limit: int | Non
     return _complete_text(value, limit) if limit is not None else value
 
 
+def point_key(value: str) -> str:
+    return re.sub(r"[^\w]", "", unicodedata.normalize("NFKC", value).casefold())
+
+
+def news_points(item: dict) -> list[str]:
+    """先在整篇来源里找事实，再限制输入长度；奖励与条件保留在同一句。"""
+    if item.get("key_points"):
+        return item["key_points"]
+    value = _clean_copy(item.get("text", item.get("summary")) or "", item.get("published_at"))
+    title = _clean_copy(item.get("source_title") or item.get("title", ""), item.get("published_at"))
+    value = _summary_copy(value, title, limit=None)
+    value = re.split(r"【(?:专辑|剧情)介绍】", value, maxsplit=1)[0]
+    # 官网装饰标题、动态里的行内标题都还原为段落，时间段不与后面的奖励清单粘连。
+    value = re.sub(r"\s*✦([^✦]+)✦\s*", r"\n\1：", value)
+    value = re.sub(r"\s*(?=(?:活动时间|开放时间|参与条件|开放条件|活动奖励|奖励内容)[：:])", "\n", value)
+    value = re.sub(r"\s+(?=活动期间[，,])", "\n", value)
+    sentences = re.split(r"(?<=[。！？!?；;])\s*|\n+", value)
+    facts = []
+    for sentence in sentences:
+        # 日期与独立奖励可分别比较；带任务、付费等条件时保持整句，不能变成无条件领取。
+        parts = [sentence] if re.search(r"完成|参与|达到|购买|付费|消耗|登录", sentence) else re.split(r"[，,](?=奖励(?:包含|含|为))", sentence)
+        if len(parts) > 1:
+            facts.extend(part.rstrip("。") + "。" for part in parts)
+        else:
+            facts.extend(parts)
+    ranked = []
+    for index, sentence in enumerate(facts):
+        sentence = sentence.strip(" ·-※")
+        if not sentence or re.search(r"欢迎回来|向你报到|敬请期待|实装效果以|具体.*后续.*为准", sentence):
+            continue
+        # 奖励列表只取一项即可，不把整串养成材料塞进短讯。
+        if sentence.startswith(("奖励内容：", "活动奖励：")):
+            sentence = re.split(r"[、，；;]", sentence, maxsplit=1)[0].rstrip("。") + "。"
+        if len(sentence) > 200:
+            continue
+        conditional_reward = bool(_REWARD_CONDITION.search(sentence))
+        reward = bool(re.search(r"奖励(?:内容：|包含|含|为)|活动奖励：|兑换码|可获得|可领取", sentence))
+        when = bool(re.search(r"\d.*(?:月|日|点|[：:]\d)|维护[前后]|活动时间：|开放时间：", sentence))
+        action = bool(re.search(r"上线|上架|发布|开启|加入|新增|调整|延期|改为|取消|鸣谢|条件|达到", sentence))
+        score = 4 if conditional_reward else 3 if when else 2 if reward else 1 if action else 0
+        ranked.append((score, index, sentence))
+    ranked.sort(key=lambda entry: (-entry[0], entry[1]))
+    points, seen = [], set()
+    for score, _, sentence in ranked:
+        if ranked[0][0] and not score:
+            continue
+        key = point_key(sentence)
+        if key not in seen:
+            seen.add(key)
+            points.append(sentence)
+        if len(points) == 6:
+            break
+    return points
+
+
+def changed_points(item: dict, previous: dict) -> list[str]:
+    known = {point_key(point) for point in news_points(previous)}
+    changes = [point for point in news_points(item) if point_key(point) not in known]
+    title = item.get("source_title") or item.get("title") or ""
+    old_title = previous.get("source_title") or previous.get("title") or ""
+    if not changes and point_key(title) != point_key(old_title):
+        # 同一版本下的新 PV 可能沿用“预告已发布”正文，仍需把具体作品交给模型比较。
+        changes = [title + "：" + " ".join(news_points(item))]
+    return changes
+
+
+def _fallback_points(item: dict) -> list[str]:
+    if not item.get("is_followup"):
+        return news_points(item)
+    # 模型失效时只直摘可确认的数字变化或明确变更，不把同义改写再推一次。
+    previous = " ".join(item.get("previous_points") or [])
+    numbers = set(re.findall(r"\d+(?:[.:]\d+)*", previous))
+    known = {point_key(point) for point in item.get("previous_points") or []}
+    return [point for point in item.get("new_points", [])
+            if (point_key(point) not in known and set(re.findall(r"\d+(?:[.:]\d+)*", point)) - numbers)
+            or re.search(r"新增|追加|调整|变更|延期|延后|提前|取消|改为|改至", point)]
+
+
 def _short_title(item: dict) -> str:
-    title = _clean_copy(item.get("title", ""), item.get("published_at"))
+    title = _clean_copy(item.get("source_title") or item.get("title", ""), item.get("published_at"))
     meta = COMMUNITIES.get(item.get("community"))
     if meta:
         for name in sorted(meta.game_names, key=len, reverse=True):
@@ -141,7 +226,7 @@ def _short_title(item: dict) -> str:
     if len(title) > 50:
         # 动态可能拿整段角色台词作标题；从后续正文取完整句，不截成“欢迎回来”。
         body = _clean_copy(item.get("text") or "", item.get("published_at"))
-        body = body.removeprefix(_clean_copy(item.get("title", ""), item.get("published_at"))).strip()
+        body = body.removeprefix(_clean_copy(item.get("source_title") or item.get("title", ""), item.get("published_at"))).strip()
         title = _complete_text(body, 50)
     return title or "新动态"
 
@@ -152,9 +237,12 @@ def _source(item: dict) -> dict:
         "id": item.get("id"), "content_ids": item.get("content_ids") or ([item["id"]] if item.get("id") else []),
         "event_id": item.get("event_id"), "dedupe": item.get("dedupe"),
         "notification_keys": item.get("notification_keys") or [],
-        "title": dated_text(item.get("title", ""), published),
+        "title": dated_text(item.get("source_title") or item.get("title", ""), published),
         # 显式空正文不能拿事件摘要补上，否则会把采集失败伪装成有内容。
-        "text": dated_text(item.get("text", item.get("summary")) or "", published)[:1600],
+        "text": dated_text(item.get("text", item.get("summary")) or "", published)[:6000],
+        "key_points": news_points(item),
+        "is_followup": bool(item.get("is_followup")),
+        "new_points": item.get("new_points") or [], "previous_points": item.get("previous_points") or [],
         "source": item.get("source") or item.get("platform") or "原始来源",
         "platform": item.get("platform"), "content_type": item.get("content_type"),
         "identity": item.get("identity", "unknown"), "community": item.get("community", ""),
@@ -174,23 +262,17 @@ def fallback_items(items: list[dict], limit: int = MAX_ITEMS) -> list[dict]:
     for item in items:
         source = _source(item)
         title = _short_title(item)
-        # 模型不可用时只摘来源事实，避免沿用旧事件摘要中的推断。
-        raw_summary = item.get("text") or item.get("summary") or ""
-        # 官网常把角色问候放在首句，活动时间另列一节；直接取该节的原始事实。
-        sections = re.split(r"\s*✦([^✦]+)✦\s*", raw_summary)
-        sections = dict(zip(sections[1::2], sections[2::2]))
-        if sections.get("活动时间"):
-            raw_summary = "活动时间：" + sections["活动时间"].strip().rstrip("。") + "。"
-        raw_summary = re.split(r"【(?:专辑|剧情)介绍】", raw_summary, maxsplit=1)[0]
-        raw_summary = re.sub(r"\s+(?=活动期间[，,])", "。", raw_summary)
-        # 先去掉原始长标题和整理后的短标题，再限长，避免整份摘要只剩重复标题。
-        summary = _summary_copy(raw_summary, _clean_copy(item.get("title", ""), item.get("published_at")), item.get("published_at"), limit=None)
-        summary = _summary_copy(summary, title)
-        if not summary and item.get("text") != raw_summary:
-            summary = _summary_copy(item.get("text") or "", title, item.get("published_at"))
-        evidence = source["title"] + " " + source["text"]
-        if _grounded_copy(title, summary, evidence) is None:
-            summary = _summary_copy(item.get("text") or "", title, item.get("published_at"))
+        points = _fallback_points(item)
+        summaries = [_summary_copy(point, title) for point in points]
+        summaries = [s for s in summaries if s]
+        summary = summaries[0] if summaries else ""
+        if len(summaries) > 1:
+            combined = summary + (" " if summary.endswith(tuple("。！？!?；;")) else "。") + summaries[1]
+            if len(combined) <= SUMMARY_LIMIT:
+                summary = combined
+        if item.get("is_followup") and not summary:
+            continue
+        evidence = source["title"] + " " + " ".join(source["key_points"])
         grounded = _grounded_copy(title, summary, evidence)
         if grounded is None:
             continue
@@ -228,6 +310,8 @@ def _compatible_sources(refs: list[dict]) -> bool:
         return False
     if len({s.get("is_supplement", False) for s in refs}) != 1:
         return False
+    if any(s.get("is_followup") for s in refs) and len(refs) > 1:
+        return False
     if len(refs) == 1:
         return True
     versions = []
@@ -251,7 +335,10 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
     if not candidates or not ai_available(config):
         return fallback
     sources = {i + 1: _source(item) for i, item in enumerate(candidates)}
-    payload = [{"index": i, **s, "text": s["text"][:700]} for i, s in sources.items()]
+    payload = [{"index": i, **{key: s[key] for key in ("title", "community", "identity", "published_at", "is_supplement", "is_followup")},
+                "key_points": s["new_points"] if s["is_followup"] else s["key_points"],
+                "previous_points": s["previous_points"], "text": "" if s["key_points"] else s["text"][:700]}
+               for i, s in sources.items()]
     system = (
         '你是群聊资讯编辑，只输出 JSON：{"items":[{"indices":[1,2],"title":"短标题","summary":"可直接发到群里的分享"}]}。'
         f"最多{limit}个重点，每条只讲一件事，不凑数；确实没有可写内容时返回items空列表。官方PV、合作影像、角色预告都可正常分享，不要求必须有奖励或能做任务。"
@@ -266,6 +353,12 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
         "不同游戏、不同版本、线下活动、联动或商品事项不能误合并。indices 只能取输入编号且不能重复。"
         "全部使用自然的简体中文，外文资料也用中文概括，作品名可保留原名。summary写完整的1到2句，通常20到50字、最多60字；信息少就短，不为凑长度添内容。"
         "活动优先说清怎么拿到什么、何时开始或截止；影视音乐优先具体作品和发布变化，别把文艺宣传语当新闻。未来才开放的事不能写成已经开放。"
+        "资料已先提炼key_points：先选对读者最有用的一项变化，再配必要的条件或时间，最后成句；不能按原公告顺序摘前几句。"
+        "开放条件只表示参加资格，奖励内容只说明奖励有哪些；两者不能拼成领奖步骤。只有原文明确完成X可获得Y，才能写成做X就能拿Y。"
+        "篇幅不够就少写一个次要点，保留‘完成七日任务’等条件、截止时分和维护前后；不要写到一半截断。"
+        "is_followup=true表示本群已经收到过同一主题：previous_points按从新到旧列出本群历史事实，key_points仅列本次待比较的事实。"
+        "续报只能写新增信息或事实改动，不能复述旧奖励、旧活动介绍；原文仅换说法或重复宣传时不选该条。"
+        "续报summary保留能识别主题的简短名称，直接说改动，不要另加开场或重播旧公告。程序会加‘补充’标记。"
         "只选最有用的一两个细节，不罗列全部奖励或角色。若写截止时间，保留具体时分或维护前后，不能把‘11月5日维护’改成‘11月5日维护结束’。未写清奖励发放方式时只说奖励含什么，不猜领取条件。"
         "例如原文确认10月15日维护后活动开启、完成七日任务获得换装，可以写‘碧蓝航线这套女仆换装做七日任务就能拿，活动10月15日维护后开。’具体名称与细节只能取自本次资料。"
         "标题只用于早报卡片和索引，建议6到16字，不超过30字；卡片已有游戏标签，标题不重复游戏名；不要照搬角色台词或长英文副标题，保留具体主题即可。"
@@ -308,8 +401,11 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
                 rejected["incompatible_sources"] += 1
                 continue
             title = _clean_copy(str(row.get("title") or ""))
-            summary = _complete_text(_clean_copy(str(row.get("summary") or "")), SUMMARY_LIMIT)
-            evidence = " ".join(s["title"] + " " + s["text"] for s in refs)
+            summary = _clean_copy(str(row.get("summary") or ""))
+            if len(summary) > SUMMARY_LIMIT:
+                rejected["summary_too_long"] += 1
+                continue
+            evidence = " ".join(s["title"] + " " + " ".join(s["new_points"] if s["is_followup"] else s["key_points"] or [s["text"][:700]]) for s in refs)
             grounded = _grounded_copy(title, summary, evidence)
             if grounded is None:
                 rejected["unsupported_relation"] += 1
@@ -357,6 +453,8 @@ def format_brief(brief: dict) -> str:
         for index, item in enumerate(items, 1):
             # 新文案直接成句；旧快照和模型不可用时仍能按原有事实发送。
             text = item.get("share_text") or _fallback_share(item)
+            if item.get("is_followup"):
+                text = "补充：" + text
             meta = COMMUNITIES.get(item.get("community"))
             if meta and not any(name in text for name in meta.game_names):
                 text = f"{meta.label}｜{text}"

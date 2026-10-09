@@ -157,6 +157,7 @@ async def load_candidates(
     community: str = "all",
     collected_after: datetime | None = None,
     preferences: dict | None = None,
+    text_limit: int | None = 800,
 ) -> list[dict]:
     """None 表示全站早报；关键词通知只取明确命中内容，正文命中交给 AI 复核。"""
     if keywords == []:
@@ -228,7 +229,7 @@ async def load_candidates(
             "id": raw.id,
             "community": raw.community,
             "title": title,
-            "text": (translated or text)[:800],
+            "text": (translated or text)[:text_limit],
             "url": _safe_url(raw.url),
             "image": image,
             "platform": raw.platform,
@@ -284,6 +285,7 @@ async def group_candidates(session: AsyncSession, candidates: list[dict]) -> lis
             continue
         grouped[key] = {
             **item,
+            "source_title": item["title"],
             "title": event.title if event else item["title"],
             "summary": (event.summary or event.conclusion) if event else item["text"],
             "event_id": event.id if event else None,

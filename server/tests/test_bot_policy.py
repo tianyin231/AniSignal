@@ -148,19 +148,20 @@ async def test_pending_disabled_and_expired_messages_are_cancelled_on_claim(clie
     assert pending.status == "cancelled"
 
 
-async def test_cross_window_suppresses_same_event_new_source_but_allows_changed_conclusion(session, monkeypatch):
+async def test_cross_window_only_source_changes_create_a_followup(session, monkeypatch):
     now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
     row = await target(session, now, merge_minutes=1)
     event = Event(title="官方合作影像", category="announcement", conclusion="合作影像已发布")
     session.add(event)
     await session.commit()
     count = 0
+    source_text = "新的合作影像已发布。"
 
     async def query(*args, **kwargs):
         nonlocal count
         count += 1
         return {"items": [{"id": count, "content_ids": [count], "event_id": event.id,
-                           "title": "官方合作影像", "text": "新的合作影像已发布。", "identity": "official",
+                           "title": "官方合作影像", "text": source_text, "identity": "official",
                            "community": "wuwa", "published_at": now, "url": "https://example.com/new"}]}
 
     monkeypatch.setattr(bot, "query_target", query)
@@ -169,11 +170,19 @@ async def test_cross_window_suppresses_same_event_new_source_but_allows_changed_
     rows = list(await session.scalars(select(BotDelivery)))
     assert len(rows) == 1
     assert rows[0].brief["notification_keys"] and rows[0].brief["items"][0]["event_id"] == event.id
+    rows[0].status, rows[0].updated_at = 'accepted', now + timedelta(minutes=7)
     event.conclusion = "合作影像增加了正式上线日期"
     await session.commit()
     for minute in (10, 12):
         await bot.run_bot_notifications(session, now + timedelta(minutes=minute))
-    assert len(list(await session.scalars(select(BotDelivery)))) == 2
+    assert len(list(await session.scalars(select(BotDelivery)))) == 1
+    source_text += '视频追加10月10日上线时间。'
+    for minute in (15, 17):
+        await bot.run_bot_notifications(session, now + timedelta(minutes=minute))
+    rows = list(await session.scalars(select(BotDelivery).order_by(BotDelivery.id)))
+    assert len(rows) == 2 and rows[-1].brief['items'][0]['is_followup']
+    assert '补充' in rows[-1].body and '10月10日' in rows[-1].body
+    assert '新的合作影像已发布' not in rows[-1].body
 
 
 async def test_empty_and_late_daily_never_backfill(session):
@@ -312,3 +321,67 @@ async def test_source_age_is_checked_when_flushing_and_claiming_without_resettin
                'expires_at': (now + timedelta(hours=2)).isoformat()})
     assert await reserve_delivery(session, row, daily_part, now=now)
     assert daily_part.status == 'sending'
+
+
+async def test_followup_history_is_scoped_to_delivered_messages_in_the_same_group(session):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    first = await target(session, now)
+    second = BotTarget(name='另一群', umo='qq:GroupMessage:second', enabled=True, config=first.config)
+    session.add(second)
+    await session.commit()
+    original = {'id': 10, 'event_id': 77, 'community': 'wuwa', 'identity': 'official', 'title': '限时活动',
+                'text': '活动10月12日18:00截止。奖励包含500星声。', 'published_at': now}
+    new = {**original, 'id': 11, 'text': '活动10月15日18:00截止。奖励包含500星声。'}
+    failed = await bot.create_delivery(session, first, 'updates', '旧消息', 'old-failed', brief=bot.single_item_brief(original))
+    failed.status = 'failed'
+    await session.commit()
+    prepared = await bot.prepare_update_items(session, first.id, [new], now, set())
+    assert not prepared[0].get('is_followup')
+    failed.status, failed.updated_at = 'accepted', now
+    await session.commit()
+    prepared = await bot.prepare_update_items(session, first.id, [new], now, set())
+    assert prepared[0]['is_followup'] and prepared[0]['new_points'] == ['活动10月15日18:00截止。']
+    assert not (await bot.prepare_update_items(session, second.id, [new], now, set()))[0].get('is_followup')
+    other_game = {**new, 'community': 'blhx'}
+    assert not (await bot.prepare_update_items(session, first.id, [other_game], now, set()))[0].get('is_followup')
+    assert await bot.prepare_update_items(session, first.id, [original], now, set()) == []
+
+
+async def test_unsent_merge_buffer_keeps_latest_facts_once(session, monkeypatch):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now, merge_minutes=5)
+    event = Event(title='测试活动', category='announcement', conclusion='官方活动公告')
+    session.add(event)
+    await session.commit()
+    current = {'id': 10, 'event_id': event.id, 'community': 'wuwa', 'identity': 'official', 'title': '测试活动',
+               'text': '活动10月12日截止。', 'published_at': now}
+    async def query(*args, **kwargs):
+        return {'items': [current]}
+    monkeypatch.setattr(bot, 'query_target', query)
+    await bot.run_bot_notifications(session, now)
+    current = {**current, 'id': 11, 'text': '活动10月15日截止。', 'published_at': now + timedelta(minutes=1)}
+    await bot.run_bot_notifications(session, now + timedelta(minutes=1))
+    buffer = await bot.load_merge_buffer(session, row.id)
+    assert len(buffer['items']) == 1 and '10月15日' in buffer['items'][0]['text']
+    await bot.run_bot_notifications(session, now + timedelta(minutes=6))
+    rows = list(await session.scalars(select(BotDelivery)))
+    assert len(rows) == 1 and '10月12日' not in rows[0].body and '10月15日' in rows[0].body
+    assert not rows[0].brief['items'][0]['is_followup']
+
+
+async def test_followup_remembers_earlier_reward_after_a_date_only_notice(session):
+    from app.services.bot_briefs import fallback_items
+
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    first = {'id': 1, 'event_id': 42, 'community': 'wuwa', 'title': '测试活动',
+             'text': '活动10月12日截止。奖励包含500星声。', 'published_at': now - timedelta(hours=2)}
+    second = {**first, 'id': 2, 'text': '活动10月15日截止。', 'published_at': now - timedelta(hours=1)}
+    for item in [first, second]:
+        delivery = await bot.create_delivery(session, row, 'updates', '历史消息', f'history-{item["id"]}', brief=bot.single_item_brief(item))
+        delivery.status, delivery.updated_at = 'accepted', item['published_at']
+    await session.commit()
+    new = {**first, 'id': 3, 'text': '活动10月15日截止。奖励包含500星声。', 'published_at': now}
+    prepared = await bot.prepare_update_items(session, row.id, [new], now, set())
+    assert '奖励包含500星声。' in prepared[0]['previous_points']
+    assert fallback_items(prepared) == []
