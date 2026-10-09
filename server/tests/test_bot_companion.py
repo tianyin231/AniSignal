@@ -1,4 +1,4 @@
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -56,6 +56,24 @@ async def test_plugin_queue_claim_receipt_and_context_isolation(client, session,
     context = await client.post('/api/bot/context', headers=HEADERS, json={'umo':row.umo,'actor_id':'member'})
     assert context.json()['recent_notifications'][0]['text'] == '人格播报'
     assert (await client.post('/api/bot/context', headers=HEADERS, json={'umo':'qq:GroupMessage:other','actor_id':'member'})).status_code == 403
+
+
+async def test_notification_context_keeps_publish_time_separate_from_sent_time(client, session):
+    row = await setup(session)
+    delivery = await bot.create_delivery(session, row, 'updates', '消息正文', 'publication-context', brief={'items': [
+        {'title': '早些发布的动态', 'community': 'wuwa', 'published_at': '2026-10-09T06:00:00',
+         'sources': [{'published_at': '2026-10-09T06:00:00'}]},
+        {'title': '未知发布时间', 'community': 'wuwa', 'published_at': None},
+    ]})
+    delivery.status = 'accepted'
+    await session.commit()
+    response = await client.post('/api/bot/context', headers=HEADERS, json={'umo': row.umo, 'actor_id': 'member'})
+    notification = response.json()['recent_notifications'][0]
+    items = notification['brief']['items']
+    assert notification['sent_at'] != items[0]['published_at']
+    assert items[0]['published_at'] == '2026-10-09T06:00:00'
+    assert items[0]['published_label'] == '发布：10/09 14:00'
+    assert items[1]['published_at'] is None and items[1]['published_label'] == ''
 
 
 async def test_reminder_idempotency_owner_cancel_and_time(client, session):
@@ -147,7 +165,10 @@ async def test_activity_report_keeps_latest_and_ignores_unknown(client, session,
     assert overview['activity'][row.umo] == '2026-09-12T05:30:00'
 
 
-async def test_calendar_reminders_and_query_tools(client, session):
+async def test_calendar_reminders_and_query_tools(client, session, monkeypatch):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr('app.api.bot_companion.utcnow', lambda: now)
+    monkeypatch.setattr(bot, 'utcnow', lambda: now)
     await set_setting(session, 'bot_bridge', {'tools_key': 'plugin-key'})
     body = TargetBody(name='日历群', umo='qq:GroupMessage:cal', enabled=True, daily_enabled=False,
         updates_enabled=True, delivery_mode='astrbot', community='wuwa')
@@ -160,20 +181,21 @@ async def test_calendar_reminders_and_query_tools(client, session):
     await session.commit()
     session.add(ContentSchedule(raw_content_id=content.id, community='wuwa', title='限时活动「回响」',
         kind='activity', start_at=utcnow() - timedelta(days=3),
-        end_at=utcnow() + timedelta(hours=1, minutes=30), created_at=utcnow()))
+        end_at=now + timedelta(hours=1, minutes=30), created_at=now))
     session.add(RedeemCode(raw_content_id=content.id, community='wuwa', code='CAL2026',
         status='active', created_at=utcnow()))
     await session.commit()
 
-    await bot.run_bot_notifications(session)
+    await bot.run_bot_notifications(session, now)
     deliveries = list(await session.scalars(select(BotDelivery)))
     assert len(deliveries) == 1 and deliveries[0].kind == 'calendar'
-    assert '限时活动「回响」' in deliveries[0].body
+    assert '回响' in deliveries[0].body
+    assert deliveries[0].brief['items'][0]['calendar_entries'][0]['title'] == '限时活动「回响」'
     dedupe_key = deliveries[0].dedupe_key
-    assert dedupe_key.startswith('calendar:')
+    assert dedupe_key.startswith('calendar-digest:')
 
     # 同一时刻重复扫描去重
-    await bot.run_bot_notifications(session)
+    await bot.run_bot_notifications(session, now)
     assert len(list(await session.scalars(select(BotDelivery)))) == 1
 
     calendar = (await client.post('/api/bot/query', headers=HEADERS,
@@ -185,6 +207,8 @@ async def test_calendar_reminders_and_query_tools(client, session):
 
 
 async def test_daily_digest_carries_cover_and_claim_returns_images(client, session, monkeypatch):
+    now = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr('app.api.bot_companion.utcnow', lambda: now)
     await set_setting(session, 'bot_bridge', {'tools_key': 'plugin-key'})
     body = TargetBody(name='图群', umo='qq:GroupMessage:media', enabled=True,
         daily_enabled=True, daily_time='08:00', delivery_mode='astrbot')
@@ -195,11 +219,11 @@ async def test_daily_digest_carries_cover_and_claim_returns_images(client, sessi
     await session.commit()
 
     async def fake_query(session, target, tool='digest', query='', now=None, collected_after=None):
-        return {'text': '今日速报', 'items': [{'id': 7, 'image': 'https://img/cover.jpg', 'url': 'https://x', 'identity': 'official'}],
+        return {'text': '今日速报', 'items': [{'id': 7, 'title': '官方新动态', 'image': 'https://img/cover.jpg', 'url': 'https://x', 'identity': 'official'}],
                 'instructions': '', 'grounding': ''}
 
     monkeypatch.setattr(bot, 'query_target', fake_query)
-    await bot.run_bot_notifications(session, utcnow().replace(hour=10))
+    await bot.run_bot_notifications(session, now)
     delivery = (await session.execute(select(bot.BotDelivery))).scalar_one()
     assert delivery.media == ['https://img/cover.jpg']
 
@@ -229,13 +253,14 @@ async def test_brief_detail_is_bound_to_original_delivery_and_target(client, ses
 
 
 async def test_claim_cancels_empty_dynamic_and_rebuilds_mixed_brief(client, session):
-    row = await setup(session, quiet_start=0, quiet_end=0)
+    row = await setup(session, updates_enabled=True, quiet_start=0, quiet_end=0)
     empty = {'id': 1, 'title': '空动态不应出现', 'summary': '虚有摘要', 'text': '',
              'platform': 'bilibili', 'content_type': 'dynamic', 'url': 'https://t.bilibili.com/1'}
     cancelled = await bot.create_delivery(session, row, 'updates', '旧空动态正文', 'empty-claim',
                                           brief=bot.single_item_brief(empty))
     image_only = {'id': 2, 'title': '纯图片公告', 'text': '', 'image': 'https://img.example/2.jpg',
-                  'platform': 'bilibili', 'content_type': 'dynamic', 'url': 'https://t.bilibili.com/2'}
+                  'platform': 'bilibili', 'content_type': 'dynamic', 'url': 'https://t.bilibili.com/2',
+                  'published_at': utcnow().isoformat()}
     mixed = await bot.create_delivery(session, row, 'updates', '空动态不应出现\n纯图片公告', 'mixed-claim',
                                       brief={'mode': 'updates', 'title': '刚刚的重点', 'date': '09/22',
                                              'items': [empty, image_only]})

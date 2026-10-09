@@ -1,7 +1,11 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
+import pytest
+from sqlalchemy import select
+
+from app.models import AiUsage
 from app.services import bot_briefs as briefs
 
 
@@ -21,14 +25,57 @@ def test_relative_dates_are_anchored_to_source_and_brief_is_bounded():
     assert 'https://example.com/0' in briefs.format_detail(items[0])
 
 
+def test_relative_dates_preserve_game_names_and_use_beijing_day():
+    assert briefs.dated_text('《明日方舟》今日更新，明日晚播出。', datetime(2026, 10, 8, 18)) == '《明日方舟》10月9日更新，10月10日晚播出。'
+    assert briefs.dated_text('明日方舟新EP', datetime(2026, 10, 9)) == '明日方舟新EP'
+
+
+def test_publication_labels_use_source_time_and_preserve_multiple_publishers():
+    assert briefs.publication_label({'published_at': datetime(2026, 10, 9, 6),
+                                     'collected_at': datetime(2026, 10, 9, 7, 9)}) == '发布：10/09 14:00'
+    assert briefs.publication_label({'published_at': None, 'collected_at': datetime(2026, 10, 9, 7, 9)}) == ''
+    assert briefs.publication_label({'sources': [
+        {'published_at': '2026-10-09T14:00:00+08:00'},
+        {'published_at': datetime(2026, 10, 9, 4, tzinfo=timezone.utc)},
+        {'published_at': '2026-10-09T06:00:00'},
+        {'published_at': None},
+    ]}) == '发布：10/09 12:00 / 10/09 14:00'
+
+
+async def test_brief_dates_do_not_present_generation_time_as_publication(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={}))
+    sources = [content(1, published_at=datetime(2026, 10, 9, 6)),
+               content(2, published_at=None, collected_at=datetime(2026, 10, 9, 7, 9))]
+    for mode in ('daily', 'updates'):
+        brief = await briefs.build_brief(session, sources, datetime(2026, 10, 9, 7, 40), mode=mode)
+        text = briefs.format_brief(brief)
+        assert '发布：10/09 14:00' in text
+        assert '15:40' not in text and '15:09' not in text
+        assert brief['items'][0]['published_label'] == '发布：10/09 14:00'
+        assert brief['items'][1]['published_label'] == ''
+        assert '发布：10/09 14:00' in briefs.format_detail(brief['items'][0])
+        assert '发布：' not in briefs.format_detail(brief['items'][1])
+
+
+def test_fallback_uses_activity_fact_instead_of_cutting_character_dialogue():
+    quote = '“欢迎回来，我的主人。如果您还没从繁忙的工作中回过神来，我不介意用这根皮鞭帮您清醒一下哦……咦？您当真了？”'
+    item = content(1, community='blhx', title=quote,
+                   text='#碧蓝航线#\n' + quote + '\n限时活动【严厉女仆不严厉】即将开启！\n活动期间完成七日任务，可获得限定换装。')
+    result = briefs.fallback_items([item])[0]
+    assert '严厉女仆不严厉' in result['title']
+    assert '欢迎回来' not in result['title']
+
+
 async def test_editor_groups_only_verified_sources_and_preserves_expansion(session, monkeypatch):
     monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
     monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(json.dumps({'items': [
         {'indices': [1, 2], 'title': '4.6版本上线时间', 'summary': '9月28日上线，专题页已发布。'},
         {'indices': [99], 'title': '假的', 'summary': '送10000钻石'},
     ]}), {})))
-    items = await briefs.select_brief_items(session, [content(1), content(2)], datetime(2026, 9, 20))
+    items = await briefs.select_brief_items(session, [content(1, event_id=11, dedupe='first'),
+                                                    content(2, event_id=22, dedupe='second')], datetime(2026, 9, 20))
     assert len(items) == 1 and [s['id'] for s in items[0]['sources']] == [1, 2]
+    assert [(s['event_id'], s['dedupe']) for s in items[0]['sources']] == [(11, 'first'), (22, 'second')]
     assert 'https://example.com/2' in briefs.format_detail(items[0])
 
 
@@ -71,3 +118,223 @@ async def test_empty_dynamic_in_old_buffer_cannot_use_event_summary(session):
     snapshot = briefs.single_item_brief(empty)
     source = snapshot['items'][0]['sources'][0]
     assert source['text'] == '' and source['platform'] == 'bilibili' and source['content_type'] == 'dynamic'
+
+
+def test_fallback_removes_boilerplate_and_keeps_whole_chinese_sentences():
+    item = content(1, title='标题：#鸣潮# 云游中国合作影像',
+                   text='正文：#鸣潮# 云游中国合作影像。多个地方政府部门提供鸣谢支持。'
+                        + '这段很长的说明' * 30 + '。\n官方网站：https://example.com/download')
+    result = briefs.fallback_items([item])[0]
+    assert result['title'] == '云游中国合作影像'
+    assert result['summary'] == '多个地方政府部门提供鸣谢支持。'
+    assert '#' not in result['summary'] and '…' not in result['summary']
+    assert '官方网站' in result['sources'][0]['text']
+
+
+def test_generic_event_summary_falls_back_to_specific_source_fact():
+    item = content(1, title='云游中国合作影像', summary='官方版本/活动信息。',
+                   text='#鸣潮# 多个地方政府部门提供鸣谢支持。')
+    result = briefs.fallback_items([item])[0]
+    assert result['summary'] == '多个地方政府部门提供鸣谢支持。'
+    repeated = briefs.fallback_items([content(2, title='新区域预告其二', text='新区域预告其二已发布。')])[0]
+    assert repeated['summary'] == ''
+
+
+async def test_explicit_empty_editor_selection_is_not_filled(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(' {"items": []} ', {})))
+    assert await briefs.select_brief_items(session, [content(1)], datetime(2026, 9, 20)) == []
+
+
+async def test_updates_keep_two_topics_daily_three_and_daily_expansion_number_is_valid(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={}))
+    items = [content(n, title=f'官方合作影像{n}', text=f'合作影像{n}已上线。') for n in range(4)]
+    updates = await briefs.build_brief(session, items)
+    daily = await briefs.build_brief(session, items, mode='daily')
+    assert len(updates['items']) == 2
+    assert len(daily['items']) == 3
+    single = await briefs.build_brief(session, items[:1], mode='daily')
+    assert '/展开 1' in briefs.format_brief(single)
+    assert '/展开 2' not in briefs.format_brief(single)
+    assert '/展开 2' in briefs.format_brief(daily)
+    assert '/展开' not in briefs.format_brief(updates)
+
+
+async def test_updates_are_complete_shares_and_arknights_is_not_rejected_as_a_date(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    title = '明日方舟新EP《大地之盐》'
+    share = title + '上线啦，10月9日起各音乐平台都能听，伴奏版也一起上架。'
+    monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(json.dumps({'items': [
+        {'indices': [1], 'title': title, 'summary': share}]}), {})))
+    source = content(1, community='arknights', title='《明日方舟》EP - 大地之盐',
+                     text='10月9日大地之盐正式上架各音乐平台，包含伴奏版。', published_at=datetime(2026, 10, 9, 3))
+    brief = await briefs.build_brief(session, [source], datetime(2026, 10, 9, 4))
+    assert briefs.format_brief(brief) == share + '\n发布：10/09 11:00'
+    assert brief['items'][0]['share_text'] == share
+    assert brief['items'][0]['sources'][0]['title'] == source['title']
+    assert source['url'] in briefs.format_detail(brief['items'][0])
+    brief['items'].append({**brief['items'][0], 'share_text': '鸣潮先约电台深夜频道更新啦。', 'community': 'wuwa'})
+    assert briefs.format_brief(brief) == f'1. {share}\n发布：10/09 11:00\n\n2. 鸣潮先约电台深夜频道更新啦。\n发布：10/09 11:00'
+
+
+async def test_share_text_cannot_bypass_date_or_fact_checks(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    mocked = AsyncMock()
+    monkeypatch.setattr(briefs, 'chat', mocked)
+    source = content(1)
+    for summary in ('明天上线啦。', '昨日上线啦。', '免费送99999星琼啦。'):
+        mocked.return_value = (json.dumps({'items': [{'indices': [1], 'title': '版本上线', 'summary': summary}]}), {})
+        result = await briefs.build_brief(session, [source])
+        assert summary not in briefs.format_brief(result)
+        assert 'share_text' not in result['items'][0]
+
+
+async def test_editor_keeps_complete_summary_over_old_42_character_limit(session, monkeypatch):
+    title = '新区域预告其二上线'
+    summary = '这次分享的是新区域预告的第二部分，视频已经上线，可以接着前一支预告看。共鸣者心PV也在同一批资料中。'
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(json.dumps({'items': [
+        {'indices': [1], 'title': title, 'summary': summary}]}), {})))
+    result = await briefs.select_brief_items(session, [content(1, title=title, text=summary)], datetime(2026, 9, 20))
+    assert len(summary) > 42 and result[0]['summary'] == summary
+    assert '…' not in briefs.format_brief({'title': '刚刚的重点', 'date': '09/20', 'items': result})
+
+
+def test_same_version_english_chinese_sources_do_not_mix_independent_topics():
+    chinese = briefs._source(content(1, title='3.7版本预告', text='3.7版本预告上线。'))
+    english = briefs._source(content(2, title='Version 3.7 Trailer', text='The Version 3.7 trailer is out.'))
+    merchandise = briefs._source(content(3, title='3.7版本纪念盲盒预售', text='3.7版本主题商品开放预售。'))
+    assert briefs._compatible_sources([chinese, english])
+    assert not briefs._compatible_sources([chinese, merchandise])
+
+
+async def test_foreign_source_is_translated_by_editor_and_not_cut_in_fallback(session, monkeypatch):
+    item = content(1, title='[PRE-LIVE] Countdown to the finale', text='The countdown begins for the finale.')
+    assert briefs.fallback_items([item]) == []
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(json.dumps({'items': [
+        {'indices': [1], 'title': '终场直播倒计时', 'summary': '终场直播进入倒计时。'}]}), {})))
+    result = await briefs.select_brief_items(session, [item], datetime(2026, 9, 20))
+    assert result[0]['title'] == '终场直播倒计时'
+    assert '[PRE-LIVE]' in result[0]['sources'][0]['title']
+
+
+async def test_english_month_translation_keeps_supported_chinese_date(session, monkeypatch):
+    item = content(1, title='Version 3.7 arrives on September 30th', text='Version 3.7 arrives on September 30th (UTC+8).')
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    response = {'items': [{'indices': [1], 'title': '3.7版本上线时间', 'summary': '9月30日上线。'}]}
+    mocked = AsyncMock(return_value=(json.dumps(response), {}))
+    monkeypatch.setattr(briefs, 'chat', mocked)
+    result = await briefs.select_brief_items(session, [item], datetime(2026, 9, 29))
+    assert result[0]['summary'] == '9月30日上线。'
+    response['items'][0]['summary'] = '9月29日上线。'
+    mocked.return_value = (json.dumps(response), {})
+    assert await briefs.select_brief_items(session, [item], datetime(2026, 9, 29)) == []
+
+
+def test_source_keeps_deduplication_metadata_and_calendar_expands_full_list():
+    source = briefs._source(content(1, event_id=42, dedupe='event-42', content_ids=[1, 2], notification_keys=['event-42']))
+    assert (source['event_id'], source['dedupe'], source['content_ids']) == (42, 'event-42', [1, 2])
+    assert source['notification_keys'] == ['event-42']
+    item = {'title': '明日前的收尾提醒', 'summary': '几个活动将截止。', 'calendar_entries': [
+        {'title': f'活动{index}', 'kind': 'activity', 'stage_at': '2026-09-30T02:00:00',
+         'url': f'https://example.com/{index}'} for index in range(12)]}
+    detail = briefs.format_detail(item)
+    assert '12. 活动11' in detail and '09/30 10:00 截止（北京时间）' in detail
+    assert 'https://example.com/11' in detail
+
+
+def test_summary_fits_card_without_truncating_the_last_sentence():
+    first = '新区域预告的第二部分已经上线，可以与前一支预告接着看。'
+    following = '另一支影像也已公布，更多的完整介绍会在后续视频中继续放出，请以原始资料中的说明为准。'
+    item = content(1, title='新区域预告', text=first + following)
+    summary = briefs.fallback_items([item])[0]['summary']
+    assert summary == first and len(summary) <= 60
+    assert not summary.endswith('…')
+    long_intro = '包含英文副标题的很长开场介绍' * 8 + '。'
+    assert briefs.fallback_items([content(2, title='版本预告', text=long_intro + first)])[0]['summary'] == first
+
+
+async def test_pre_live_is_not_promoted_to_a_version_preview_program(session, monkeypatch):
+    item = content(1, title='[PRE-LIVE] Countdown to the Finale', text='Version 3.7 arrives on September 30th.')
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(json.dumps({'items': [
+        {'indices': [1], 'title': '3.7版本前瞻预告', 'summary': '前瞻节目已经发布，版本于9月30日上线。'}]}), {})))
+    result = await briefs.select_brief_items(session, [item], datetime(2026, 9, 29))
+    assert result[0]['title'] == '3.7版本直播预热'
+    assert '前瞻' not in result[0]['summary']
+    assert '9月30日' in result[0]['summary']
+
+
+async def test_acknowledgements_cannot_become_collaboration_or_joint_production(session, monkeypatch):
+    item = content(1, title='云游中国特别合作影像', text='特别鸣谢济南、扬州等地文旅部门。')
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    mocked = AsyncMock()
+    monkeypatch.setattr(briefs, 'chat', mocked)
+    for unsupported in ('联动济南、扬州文旅部门推出影像。', '与济南、扬州文旅部门联合制作影像。'):
+        mocked.return_value = (json.dumps({'items': [{'indices': [1], 'title': '云游中国新影像', 'summary': unsupported}]}), {})
+        result = await briefs.select_brief_items(session, [item], datetime(2026, 9, 29))
+        assert result[0]['title'] == '云游中国特别合作影像'
+        assert result[0]['summary'] == '特别鸣谢济南、扬州等地文旅部门。'
+
+
+def test_acknowledgements_do_not_invent_video_placement_or_department_counts():
+    evidence = '特别鸣谢济南市文化和旅游局、襄阳市人民政府。'
+    assert briefs._grounded_copy('合作影像', '片尾特别鸣谢相关单位。', evidence) is None
+    assert briefs._grounded_copy('合作影像', '特别鸣谢六地文旅部门。', evidence) is None
+    assert briefs._grounded_copy('合作影像', '公告还列出了济南、襄阳相关单位的鸣谢。', evidence)
+
+
+@pytest.mark.parametrize('summary', ['', '这是一段没有句号的冗长公告' * 12, '免费送99999星琼。'])
+async def test_rejected_editor_copy_is_recorded_and_fallback_stays_short(session, monkeypatch, caplog, summary):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(json.dumps({'items': [
+        {'indices': [1], 'title': '限时任务开启', 'summary': summary}]}), {})))
+    item = content(1, title='限时任务开启', text='完成七日任务，可获得限定换装。' + '后续宣传说明' * 50,
+                   summary='这个旧事件摘要声称免费送99999星琼。')
+    brief = await briefs.build_brief(session, [item])
+    body = briefs.format_brief(brief)
+    assert body.splitlines()[0] == '崩坏星穹铁道｜限时任务开启，完成七日任务，可获得限定换装。'
+    assert '99999' not in body and '…' not in body
+    usage = await session.scalar(select(AiUsage).where(AiUsage.task == 'bot_brief'))
+    assert usage.status == 'fallback' and 'status=fallback' in caplog.text
+    assert ('unsupported_fact' if '99999' in summary else 'empty_or_foreign_summary') in caplog.text
+
+
+async def test_editor_partial_validation_preserves_valid_rows_and_records_status(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    monkeypatch.setattr(briefs, 'chat', AsyncMock(return_value=(json.dumps({'items': [
+        None, {'indices': [1], 'title': '版本情报', 'summary': '4.6版本将在9月28日上线。'}]}), {})))
+    items = await briefs.select_brief_items(session, [content(1)], datetime(2026, 9, 20), limit=1)
+    assert items[0]['share_text'] == '4.6版本将在9月28日上线。'
+    usage = await session.scalar(select(AiUsage).where(AiUsage.task == 'bot_brief'))
+    assert usage.status == 'partial'
+
+
+def test_fallback_share_does_not_repeat_title_or_cut_a_sentence():
+    item = content(1, title='新EP上架', text='新EP上架啦，伴奏版也能听。')
+    line = briefs.format_brief({'mode': 'updates', 'items': briefs.fallback_items([item])}).splitlines()[0]
+    assert line.count('新EP上架') == 1
+    item = content(2, title='作品标题' * 10, text='这是一条完整的事实说明。' + '细节描述' * 10 + '。')
+    line = briefs.format_brief({'mode': 'updates', 'items': briefs.fallback_items([item])}).splitlines()[0]
+    assert len(line) < 90 and line.endswith('。') and '…' not in line
+
+
+def test_recency_uses_all_source_publication_times_and_normalizes_timezone():
+    now = datetime(2026, 10, 9, 8)
+    assert briefs.is_recent_item({'published_at': '2026-10-09T14:00:00+08:00'}, now)
+    assert not briefs.is_recent_item({'published_at': None, 'collected_at': now}, now)
+    assert not briefs.is_recent_item({'published_at': now + timedelta(minutes=1)}, now)
+    assert not briefs.is_recent_item({'sources': [{'published_at': now}, {'published_at': now - timedelta(days=2)}]}, now)
+
+
+def test_real_announcement_fallback_prefers_time_over_character_greeting_and_album_lore():
+    activity = content(1, community='wuwa', title='[天工寻物]限时战斗活动',
+        text='天工匠见习生离纱，向你报到！ ✦活动时间✦ 2026年10月8日04:00 ~ 2026年10月26日03:59（服务器时间） '
+             '✦奖励内容✦ 星声*500，以及其他养成材料等。')
+    album = content(2, community='arknights', title='《明日方舟》EP - 大地之盐',
+        text='10 月 9 日 大地之盐 正式上架各音乐平台 【专辑介绍】 褒奖、诋毁、信任、怀疑、怜悯、迁怒，一滴远离大海的水。')
+    body = briefs.format_brief({'mode': 'updates', 'items': briefs.fallback_items([activity, album])})
+    assert '向你报到' not in body and '褒奖' not in body and '…' not in body
+    assert '2026年10月26日03:59（服务器时间）' in body
+    assert '正式上架各音乐平台' in body

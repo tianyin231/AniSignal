@@ -32,9 +32,12 @@ class TargetBody(BaseModel):
     updates_enabled: bool = False
     quiet_start: int = Field(default=23, ge=0, le=23)
     quiet_end: int = Field(default=8, ge=0, le=23)
-    quiet_critical: bool = True
+    quiet_critical: bool = False
     merge_minutes: int = Field(default=30, ge=0, le=60)
     hourly_limit: int = Field(default=2, ge=0, le=50)
+    min_push_interval_minutes: int = Field(default=20, ge=0, le=120)
+    calendar_enabled: bool = True
+    calendar_time: str = Field(default="20:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     daily_style: Literal["compact", "split"] = "compact"
     max_images: int = Field(default=1, ge=1, le=9)
     tools: list[Literal["digest", "news", "products", "trending", "calendar", "codes"]] = Field(default_factory=lambda: list(bot.TOOLS))

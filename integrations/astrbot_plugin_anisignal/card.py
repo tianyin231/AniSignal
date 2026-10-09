@@ -20,7 +20,8 @@ def render_brief_card(brief: dict, output: str, font_path: str = "") -> str:
     draw.rounded_rectangle((20, 20, width - 20, height - 20), radius=24, fill="#fffefa")
     draw.rounded_rectangle((48, 47, 55, 118), radius=3, fill=green)
     draw.text((76, 42), "AniSignal 情报笺", font=font(38), fill=ink)
-    draw.text((78, 101), f"{brief.get('title', '今日速报')}  /  {brief.get('date', '')}", font=font(23), fill=muted)
+    date = brief.get("date", "").split(" ", 1)[0]
+    draw.text((78, 101), f"{brief.get('title', '今日速报')}  /  {date} · 北京时间", font=font(23), fill=muted)
     colors = {"wuwa": "#bc922f", "blhx": "#368fba", "hsr": "#8671b8", "arknights": "#c7803c"}
     labels = {"wuwa": "鸣潮", "blhx": "碧蓝航线", "hsr": "星穹铁道", "arknights": "明日方舟"}
 
@@ -49,11 +50,15 @@ def render_brief_card(brief: dict, output: str, font_path: str = "") -> str:
         draw.line((52, y - 8, 908, y - 8), fill="#e7ebe3", width=2)
         draw.text((52, y + 14), f"0{index}", font=font(34), fill=color)
         draw.text((127, y + 7), labels.get(item.get("community"), "情报"), font=font(20), fill=color)
+        if item.get("published_label"):
+            draw.text((907, y + 7), item["published_label"], font=font(18), fill=muted, anchor="ra")
         for n, line in enumerate(wrapped(item.get("title", "新动态"), 760, font(30), 1)):
             draw.text((126, y + 42 + n * 36), line, font=font(30), fill=ink)
-        for n, line in enumerate(wrapped(item.get("summary") or "细节和出处，按编号展开就能看。", 760, font(25))):
+        for n, line in enumerate(wrapped(item.get("summary") or "", 760, font(25))):
             draw.text((127, y + 89 + n * 32), line, font=font(25), fill=muted)
-    draw.text((54, height - 64), "想细看，发 /展开 2（数字可换）", font=font(23), fill=green)
+    number = min(2, len(items)) or 1
+    hint = f"想细看，发 /展开 {number}" + ("（数字可换）" if len(items) > 1 else "")
+    draw.text((54, height - 64), hint, font=font(23), fill=green)
     draw.text((807, height - 62), "AniSignal", font=font(19), fill=muted)
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     image.save(output, "PNG", optimize=True)

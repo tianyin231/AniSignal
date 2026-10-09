@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow
@@ -75,8 +76,12 @@ async def test_extract_entities_skips_non_official(client, session, monkeypatch)
     fake_chat.assert_not_called()
 
 
-async def test_extract_entities_schedules_codes_and_push(client, session, monkeypatch):
+@pytest.mark.parametrize('published_missing', [False, True])
+async def test_extract_entities_schedules_codes_and_push(client, session, monkeypatch, published_missing):
     content_id = await _seed_official(session)
+    raw = await session.get(RawContent, content_id)
+    if published_missing:
+        raw.published_at = None
     session.add(
         BotTarget(
             name="推群",
@@ -109,8 +114,9 @@ async def test_extract_entities_schedules_codes_and_push(client, session, monkey
     assert code.code == "WUWA2026" and code.status == "active"
 
     delivery = (await session.execute(select(BotDelivery))).scalar_one()
-    assert delivery.dedupe_key == "code:wuwa:WUWA2026"
+    assert delivery.dedupe_key == f"code:wuwa:WUWA2026:target:{delivery.target_id}"
     assert "WUWA2026" in delivery.body
+    assert delivery.brief['items'][0]['sources'][0]['published_at'] == (raw.published_at.isoformat() if raw.published_at else None)
 
     # 重复抽取不新增（extracted_at 已置位 + 业务唯一键兜底）
     raw = await session.get(RawContent, content_id)
@@ -119,8 +125,12 @@ async def test_extract_entities_schedules_codes_and_push(client, session, monkey
     assert result["schedules"] == 0 and result["codes"] == 0
 
 
-async def test_delay_notice_marks_maintenance_and_pushes(client, session, monkeypatch):
+@pytest.mark.parametrize('published_missing', [False, True])
+async def test_delay_notice_marks_maintenance_and_pushes(client, session, monkeypatch, published_missing):
     content_id = await _seed_official(session)
+    raw = await session.get(RawContent, content_id)
+    if published_missing:
+        raw.published_at = None
     session.add(
         BotTarget(
             name="推群",
@@ -163,6 +173,7 @@ async def test_delay_notice_marks_maintenance_and_pushes(client, session, monkey
     assert unrelated.delayed is False
     delivery = (await session.execute(select(BotDelivery).where(BotDelivery.kind == "critical"))).scalar_one()
     assert "日程变更" in delivery.body
+    assert delivery.brief['items'][0]['sources'][0]['published_at'] == (raw.published_at.isoformat() if raw.published_at else None)
 
 
 async def test_sweep_extracts_pending_official_only(client, session, monkeypatch):

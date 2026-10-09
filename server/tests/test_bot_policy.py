@@ -1,0 +1,314 @@
+"""通知以仍可行动为前提，共享预算，不在恢复服务后补刷旧消息。"""
+
+import asyncio
+from datetime import timedelta
+
+from sqlalchemy import select
+
+from app.clock import utcnow
+from app.models import BotDelivery, BotTarget, ContentSchedule, Event, Evidence, RawContent, RedeemCode
+from app.services import bot
+from app.services.bot_calendar import calendar_brief, upcoming_entries
+from app.services.bot_policy import reserve_delivery
+from app.services.extract import _push_to_targets
+from app.services.settings import set_setting
+
+
+async def target(session, now, **config):
+    row = BotTarget(name="测试", umo="qq:GroupMessage:test", enabled=True, created_at=now - timedelta(days=1),
+                    last_scan_at=now, config={"updates_enabled": True, "daily_enabled": False,
+                    "delivery_mode": "astrbot", "community": "wuwa", "quiet_start": 23, "quiet_end": 8,
+                    "hourly_limit": 2, "min_push_interval_minutes": 20, **config})
+    session.add(row)
+    await session.commit()
+    return row
+
+
+async def schedule(session, now, *, title="活动", kind="activity", end=None):
+    raw = RawContent(platform="kuro_cn", content_type="notice", external_id=title, community="wuwa", url="https://example.com/source")
+    session.add(raw)
+    await session.flush()
+    row = ContentSchedule(raw_content_id=raw.id, community="wuwa", title=title, kind=kind,
+                          start_at=now + timedelta(hours=5) if kind in {"maintenance", "deadline"} else now - timedelta(days=1),
+                          end_at=end or now + timedelta(hours=8))
+    session.add(row)
+    await session.commit()
+    return row
+
+
+async def test_calendar_one_short_digest_deduplicates_actual_titles_and_has_full_detail(session):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    titles = ["若梦仍有回声", "[若梦仍有回声]限时联机战斗活动", "雾隐阁特别勘察",
+              "雾隐阁特别勘察限时探索活动", "声骸材料限时双倍活动", "[声弦涤荡]声骸材料限时双倍活动"]
+    for title in titles:
+        await schedule(session, now, title=title)
+    await schedule(session, now, title="已经结束", end=now - timedelta(minutes=1))
+    await schedule(session, now, title="直播结束", kind="broadcast")
+    await schedule(session, now, title="更新维护", kind="maintenance")
+    await schedule(session, now, title="报名截止", kind="deadline")
+    await bot.run_bot_notifications(session, now)
+    await bot.run_bot_notifications(session, now + timedelta(minutes=1))
+    deliveries = list(await session.scalars(select(BotDelivery)))
+    assert len(deliveries) == 1 and deliveries[0].kind == "calendar"
+    delivery = deliveries[0]
+    entries = delivery.brief["items"][0]["calendar_entries"]
+    assert len(entries) == 5
+    assert {entry["title"] for entry in entries} == {titles[0], titles[2], titles[4], "更新维护", "报名截止"}
+    assert sum(len(entry["schedule_ids"]) for entry in entries) == 8
+    assert len(delivery.body) <= 190 and "/展开 1" in delivery.body
+    assert "未领取" not in delivery.body and "已经结束" not in delivery.body
+    assert all(entry["url"] and entry["expires_at"] for entry in entries)
+
+
+async def test_calendar_never_pierces_quiet_and_expired_legacy_is_cancelled(session):
+    now = utcnow().replace(hour=17, minute=0, second=0, microsecond=0)  # 北京次日 01:00
+    row = await target(session, now, quiet_critical=True, calendar_time="01:00")
+    entry = await schedule(session, now)
+    await bot.run_bot_notifications(session, now)
+    assert not list(await session.scalars(select(BotDelivery)))
+    legacy = await bot.create_delivery(session, row, "calendar", "旧提醒", f"calendar:{row.id}:{entry.id}:activity")
+    assert not await reserve_delivery(session, row, legacy, now=now)
+    assert legacy.status == "pending" and legacy.attempts == 0
+    entry.end_at = now - timedelta(seconds=1)
+    await session.commit()
+    assert not await reserve_delivery(session, row, legacy, now=now)
+    assert legacy.status == "cancelled"
+
+
+async def test_calendar_refresh_removes_expired_and_changed_items(session):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    expired = await schedule(session, now, title="先结束", end=now + timedelta(minutes=1))
+    changed = await schedule(session, now, title="时间调整")
+    await schedule(session, now, title="仍可参加")
+    text, brief = calendar_brief(await upcoming_entries(session, "wuwa", now), now)
+    delivery = await bot.create_delivery(session, row, "calendar", text, "calendar-digest:test", brief=brief)
+    changed.end_at += timedelta(days=1)
+    await session.commit()
+    assert await reserve_delivery(session, row, delivery, now=now + timedelta(minutes=2))
+    assert [e["title"] for e in delivery.brief["items"][0]["calendar_entries"]] == ["仍可参加"]
+    assert "先结束" not in delivery.body and "时间调整" not in delivery.body
+
+
+async def test_actual_send_time_budget_and_gap_apply_to_critical_but_not_manual(session):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    previous = await bot.create_delivery(session, row, "updates", "之前已发", "previous")
+    previous.status = "accepted"
+    previous.created_at = now - timedelta(days=2)
+    previous.updated_at = now - timedelta(minutes=3)
+    await session.commit()
+    critical = await bot.create_delivery(session, row, "critical", "重要", "important")
+    assert not await reserve_delivery(session, row, critical, now=now)
+    manual = await bot.create_delivery(session, row, "manual", "手工", "manual")
+    assert await reserve_delivery(session, row, manual, now=now)
+    row.config = {**row.config, "min_push_interval_minutes": 0, "hourly_limit": 1}
+    await session.commit()
+    assert not await reserve_delivery(session, row, critical, now=now)
+    previous.status = "failed"  # 失败未送达，不消耗自动消息预算。
+    await session.commit()
+    assert await reserve_delivery(session, row, critical, now=now)
+
+
+async def test_concurrent_claims_reserve_only_one_auto_message(session, session_factory):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    first = await bot.create_delivery(session, row, "updates", "第一条", "concurrent1")
+    second = await bot.create_delivery(session, row, "critical", "第二条", "concurrent2")
+
+    async def reserve(delivery):
+        async with session_factory() as other:
+            return await reserve_delivery(other, row, delivery, now=now, receipt=str(delivery.id))
+
+    assert sorted(await asyncio.gather(reserve(first), reserve(second))) == [False, True]
+    rows = list(await session.scalars(select(BotDelivery).execution_options(populate_existing=True)))
+    assert sorted(r.status for r in rows) == ["pending", "sending"]
+
+
+async def test_pending_disabled_and_expired_messages_are_cancelled_on_claim(client, session, monkeypatch):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr("app.api.bot_companion.utcnow", lambda: now)
+    await set_setting(session, "bot_bridge", {"tools_key": "test"})
+    row = await target(session, now)
+    old = await bot.create_delivery(session, row, "critical", "过期积压", "old")
+    old.created_at = now - timedelta(hours=13)
+    daily = await bot.create_delivery(session, row, "daily", "晚到的早报", "old-daily",
+        brief={"scheduled_at": (now - timedelta(hours=4)).isoformat(), "items": [{"title": "早报"}]})
+    row.config = {**row.config, "daily_enabled": True}
+    await session.commit()
+    assert (await client.post("/api/bot/outbox/claim", headers={"X-Bot-Key": "test"}, json={})).json()["delivery"] is None
+    await session.refresh(old)
+    await session.refresh(daily)
+    assert old.status == daily.status == "cancelled"
+    pending = await bot.create_delivery(session, row, "updates", "关闭后不补", "disabled")
+    row.config = {**row.config, "updates_enabled": False}
+    await session.commit()
+    assert not await reserve_delivery(session, row, pending, now=now)
+    assert pending.status == "cancelled"
+
+
+async def test_cross_window_suppresses_same_event_new_source_but_allows_changed_conclusion(session, monkeypatch):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now, merge_minutes=1)
+    event = Event(title="官方合作影像", category="announcement", conclusion="合作影像已发布")
+    session.add(event)
+    await session.commit()
+    count = 0
+
+    async def query(*args, **kwargs):
+        nonlocal count
+        count += 1
+        return {"items": [{"id": count, "content_ids": [count], "event_id": event.id,
+                           "title": "官方合作影像", "text": "新的合作影像已发布。", "identity": "official",
+                           "community": "wuwa", "published_at": now, "url": "https://example.com/new"}]}
+
+    monkeypatch.setattr(bot, "query_target", query)
+    for minute in (0, 2, 5, 7):
+        await bot.run_bot_notifications(session, now + timedelta(minutes=minute))
+    rows = list(await session.scalars(select(BotDelivery)))
+    assert len(rows) == 1
+    assert rows[0].brief["notification_keys"] and rows[0].brief["items"][0]["event_id"] == event.id
+    event.conclusion = "合作影像增加了正式上线日期"
+    await session.commit()
+    for minute in (10, 12):
+        await bot.run_bot_notifications(session, now + timedelta(minutes=minute))
+    assert len(list(await session.scalars(select(BotDelivery)))) == 2
+
+
+async def test_empty_and_late_daily_never_backfill(session):
+    now = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    await target(session, now, daily_enabled=True, updates_enabled=False)
+    await bot.run_bot_notifications(session, now)
+    await bot.run_bot_notifications(session, now + timedelta(hours=5))
+    assert not list(await session.scalars(select(BotDelivery)))
+
+
+async def test_legacy_brief_dedupe_sources_and_content_event_mapping(session):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    event = Event(title="合作影像", category="announcement", conclusion="合作影像发布")
+    raw = RawContent(platform="kuro_cn", content_type="notice", external_id="legacy", community="wuwa")
+    session.add_all([event, raw])
+    await session.flush()
+    session.add(Evidence(event_id=event.id, raw_content_id=raw.id, role="supporting"))
+    await session.commit()
+    old = await bot.create_delivery(session, row, "updates", "旧短讯", "updates:legacy-window",
+        brief={"items": [{"title": "旧短讯", "sources": [{"content_ids": [raw.id]}, {"dedupe": "exact-fingerprint"}]}]})
+    old.status = "accepted"
+    await session.commit()
+    known = await bot.known_notification_keys(session, row.id)
+    assert "exact-fingerprint" in known
+    assert bot.item_was_notified(await bot.identify_item(session, {"id": raw.id + 1, "event_id": event.id}), known)
+
+
+async def test_extract_target_dedupe_and_expiry_guard(session):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    first = await target(session, now)
+    second = BotTarget(name="另一目标", umo="qq:FriendMessage:other", enabled=True, config=first.config)
+    session.add(second)
+    await session.commit()
+    for _ in range(2):
+        await _push_to_targets(session, "wuwa", "critical", "新码 TESTCODE", "code:wuwa:TESTCODE",
+            brief={"mode": "notice", "code": "TESTCODE", "expires_at": (now + timedelta(hours=1)).isoformat(), "items": []})
+    rows = list(await session.scalars(select(BotDelivery)))
+    assert len(rows) == 2 and {r.target_id for r in rows} == {first.id, second.id}
+    raw = RawContent(platform="kuro_cn", content_type="notice", external_id="code", community="wuwa")
+    session.add(raw)
+    await session.flush()
+    session.add(RedeemCode(raw_content_id=raw.id, community="wuwa", code="TESTCODE", status="active", expires_at=now - timedelta(minutes=1)))
+    await session.commit()
+    assert not await reserve_delivery(session, first, rows[0], now=now)
+    assert rows[0].status == "cancelled"
+
+
+async def test_real_video_dynamic_repost_dedupes_legacy_raw_title_for_72_hours(session):
+    now = utcnow()
+    row = await target(session, now)
+    title = "鸣潮云游中国特别合作影像  | 观潮览胜，入梦山河"
+    old = await bot.create_delivery(session, row, "updates", "云游中国", "old-window",
+        brief={"items": [{"title": "AI 短标题", "sources": [{"id": 6716, "content_ids": [6716],
+            "identity": "official", "community": "wuwa", "title": title, "published_at": now.isoformat()}]}]})
+    old.status = "accepted"
+    await session.commit()
+    new = await bot.identify_item(session, {"id": 6758, "title": title.replace("  |", "|"), "identity": "official", "community": "wuwa"})
+    assert bot.item_was_notified(new, await bot.known_notification_keys(session, row.id, now))
+    assert not bot.item_was_notified(new, await bot.known_notification_keys(session, row.id, now + timedelta(hours=73)))
+    assert not bot.notification_topic({"identity": "official", "title": "◆活动时间注意◆", "community": "wuwa"})
+    assert not bot.notification_topic({**new, "identity": "community"})
+
+
+def test_history_keys_only_record_actual_selected_sources():
+    items = [{"id": 1, "dedupe": "selected", "identity": "official", "title": "这个标题属于真的入选消息", "community": "wuwa"},
+             {"id": 2, "dedupe": "not-selected", "identity": "official", "title": "这个标题是未入选候选消息", "community": "wuwa"}]
+    brief = {"items": [{"title": "AI 改写标题", "sources": [{**items[0], "content_ids": [1]}]}]}
+    keys = bot.notification_brief(brief, items)["notification_keys"]
+    assert "selected" in keys and "not-selected" not in keys
+    assert bot.notification_topic(items[0]) in keys and bot.notification_topic(items[1]) not in keys
+
+
+async def test_calendar_skips_date_only_and_maintenance_copy_is_relevant(session):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    await target(session, now)
+    date_only = await schedule(session, now, title="只写了日期的活动")
+    date_only.all_day = True
+    await session.commit()
+    await schedule(session, now, title="3.7版本更新维护", kind="maintenance")
+    entries = await upcoming_entries(session, "wuwa", now)
+    text, _ = calendar_brief(entries, now)
+    assert len(entries) == 1 and entries[0]["kind"] == "maintenance"
+    assert "想参与" not in text and "提前安排好游戏时间" in text
+
+
+async def test_same_window_video_dynamic_repost_enters_buffer_once(session, monkeypatch):
+    now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
+    row = await target(session, now, merge_minutes=1)
+    title = "鸣潮云游中国特别合作影像 | 观潮览胜，入梦山河"
+
+    async def query(*args, **kwargs):
+        return {"items": [{"id": cid, "content_ids": [cid], "title": title, "text": "特别合作影像已发布。",
+                           "identity": "official", "community": "wuwa", "published_at": now} for cid in (6716, 6758)]}
+
+    monkeypatch.setattr(bot, "query_target", query)
+    await bot.run_bot_notifications(session, now)
+    assert len((await bot.load_merge_buffer(session, row.id))["items"]) == 1
+    await bot.run_bot_notifications(session, now + timedelta(minutes=2))
+    rows = list(await session.scalars(select(BotDelivery)))
+    assert len(rows) == 1 and len(rows[0].brief["items"]) == 1
+
+
+async def test_source_age_is_checked_when_flushing_and_claiming_without_resetting_it(session):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now, quiet_start=0, quiet_end=0, hourly_limit=0, min_push_interval_minutes=0)
+    old = {'id': 1, 'title': '旧版预告', 'text': '预告已经发布。', 'dedupe': 'old-source',
+           'community': 'wuwa', 'published_at': (now - timedelta(hours=25)).isoformat(), 'buffered_at': now.isoformat()}
+    fresh = {**old, 'id': 2, 'title': '新版预告', 'dedupe': 'fresh-source', 'published_at': now.isoformat()}
+    unknown = {**old, 'id': 3, 'title': '未知时间', 'dedupe': 'unknown-source', 'published_at': None}
+    buffer = {'items': [old, unknown, fresh], 'flush_at': now.isoformat()}
+    await bot._flush_merge_buffer(session, row, buffer, now, quiet=False, quiet_critical=False, hourly_limit=0, max_images=1)
+    merged = await session.scalar(select(BotDelivery))
+    assert [i['id'] for i in merged.brief['items']] == [2]
+    assert '旧版' not in merged.body and '未知时间' not in merged.body
+    stale = await bot.create_delivery(session, row, 'critical', '旧预告', 'stale', brief=bot.single_item_brief(old))
+    missing = await bot.create_delivery(session, row, 'updates', '未知时间', 'missing', brief=bot.single_item_brief(unknown))
+    for delivery in (stale, missing):
+        assert not await reserve_delivery(session, row, delivery, now=now)
+        assert delivery.status == 'cancelled' and delivery.attempts == 0
+    # 排队仍在 12 小时内，也不能把超过发布时间窗口的内容继续推送。
+    almost_old = {**old, 'published_at': (now - timedelta(hours=23)).isoformat()}
+    queued = await bot.create_delivery(session, row, 'updates', '排队中的预告', 'queued', brief=bot.single_item_brief(almost_old))
+    queued.created_at = now
+    await session.commit()
+    assert not await reserve_delivery(session, row, queued, now=now + timedelta(hours=2))
+    assert queued.status == 'cancelled'
+    # 删掉合并快照里的旧条目，图片、正文、去重键都必须跟着刷新。
+    mixed = await bot.create_delivery(session, row, 'updates', '旧版预告和新版预告', 'mixed',
+        brief={'mode': 'updates', 'items': [old, fresh], 'notification_keys': ['old-source', 'fresh-source']})
+    assert await reserve_delivery(session, row, mixed, now=now)
+    assert '旧版' not in mixed.body and mixed.brief['notification_keys'] == ['fresh-source']
+    # 带明确早报刊期和有效期的补充项可以在早报窗口内发送。
+    daily_part = await bot.create_delivery(session, row, 'updates', '补充 · 旧版预告', 'daily:part',
+        brief={**bot.single_item_brief(old), 'scheduled_at': now.isoformat(),
+               'expires_at': (now + timedelta(hours=2)).isoformat()})
+    assert await reserve_delivery(session, row, daily_part, now=now)
+    assert daily_part.status == 'sending'
