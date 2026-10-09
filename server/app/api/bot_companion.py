@@ -14,8 +14,8 @@ from app.api.deps import require_admin
 from app.clock import utcnow
 from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget, RawContent
-from app.services.bot import prepare_delivery
-from app.services.bot_briefs import format_detail
+from app.services.bot_policy import reserve_delivery
+from app.services.bot_briefs import format_detail, publication_label
 from app.services.settings import get_setting, set_setting
 
 router = APIRouter(prefix="/api/bot", dependencies=[Depends(require_tools)])
@@ -145,7 +145,8 @@ async def conversation_context(body: Actor, session: AsyncSession = Depends(get_
         BotDelivery.status == "accepted", BotDelivery.created_at >= utcnow() - timedelta(days=7))
         .order_by(BotDelivery.id.desc()).limit(3))
     return {"recent_notifications": [{"id": r.id, "kind": r.kind, "text": (r.rendered_body or r.body)[:4000],
-            "brief": {"items": [{k: item.get(k) for k in ("title", "summary", "community")}
+            "brief": {"items": [{**{k: item.get(k) for k in ("title", "summary", "community", "published_at")},
+                                 "published_label": publication_label(item)}
                                 for item in r.brief["items"]]} if r.brief else None,
             "sent_at": (r.updated_at + timedelta(hours=8)).isoformat() + "+08:00"} for r in rows]}
 
@@ -221,26 +222,9 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session)):
             continue
         if row.status == "failed" and row.updated_at > now - timedelta(minutes=5):
             continue
-        if row.kind == "reminder" and not target.config.get("reminders_enabled"):
-            continue
-        if row.kind == "updates":
-            start, end = target.config.get("quiet_start", 23), target.config.get("quiet_end", 8)
-            hour = (now + timedelta(hours=8)).hour
-            if (start <= hour < end if start < end else (hour >= start or hour < end) if start != end else False):
-                continue
-        elif row.kind in ("calendar", "critical") and not target.config.get("quiet_critical", True):
-            from app.services.bot import _is_quiet
-            if _is_quiet((now + timedelta(hours=8)).hour, target.config):
-                continue
-        if not await prepare_delivery(session, row):
-            continue
         max_images = 1
         receipt = secrets.token_hex(24)
-        result = await session.execute(update(BotDelivery).where(BotDelivery.id == row.id,
-            BotDelivery.status.in_(["pending", "failed"]), BotDelivery.attempts == row.attempts).values(
-                status="sending", receipt=receipt, attempts=BotDelivery.attempts + 1, updated_at=now))
-        await session.commit()
-        if result.rowcount:
+        if await reserve_delivery(session, target, row, now=now, receipt=receipt):
             return {"delivery": {"id": row.id, "receipt": receipt, "umo": target.umo, "body": row.body,
                     "kind": row.kind, "images": (row.media or [])[:max_images], "provider_id": target.config.get("ai_provider_id", ""),
                     "brief": row.brief,

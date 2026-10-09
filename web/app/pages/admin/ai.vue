@@ -274,7 +274,7 @@ async function translateMissing() {
             <td class="mono px-3 py-2.5">{{ c.cost.toFixed(6) }}</td>
             <td class="mono px-3 py-2.5">{{ (c.duration_ms / 1000).toFixed(1) }}s</td>
             <td class="px-4 py-2.5">
-              <span class="chip" :class="c.status === 'ok' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-red-500/10 text-red-600 dark:text-red-400'">{{ c.status === 'ok' ? '成功' : '失败' }}</span>
+              <span class="chip" :class="c.status === 'ok' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : ['fallback', 'partial'].includes(c.status) ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-red-500/10 text-red-600 dark:text-red-400'">{{ c.status === 'ok' ? '成功' : c.status === 'fallback' ? '校验回退' : c.status === 'partial' ? '部分通过' : '失败' }}</span>
             </td>
           </tr>
         </tbody>

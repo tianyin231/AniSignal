@@ -235,7 +235,9 @@ async def load_candidates(
             "content_type": raw.content_type,
             "source": source.name if source else None,
             "identity": source.identity if source else "unknown",
-            "published_at": raw.published_at or raw.collected_at,
+            # 采集时间只供窗口筛选和排序，不能冒充原始发布时间。
+            "published_at": raw.published_at,
+            "collected_at": raw.collected_at,
             "keywords": strong or weak,
             "strength": "strong" if keywords is None or strong else "weak",
             "category": version.category,
@@ -293,7 +295,7 @@ async def group_candidates(session: AsyncSession, candidates: list[dict]) -> lis
         key=lambda item: (
             item["identity"] == "official",
             item["importance"],
-            item["published_at"],
+            item.get("published_at") or item.get("collected_at") or datetime.min,
         ),
         reverse=True,
     )
@@ -328,7 +330,7 @@ async def ai_curate(
             "identity": item["identity"],
             "source": item["source"],
             "category": item["category"],
-            "published_at": item["published_at"].isoformat(),
+            "published_at": item["published_at"].isoformat() if item.get("published_at") else None,
             "literal_keywords": item["keywords"],
         }
         for item in eligible[:30]
@@ -399,8 +401,10 @@ async def ai_curate(
     return selected, None
 
 
-def _format_time(value: datetime) -> str:
-    return value.replace(tzinfo=timezone.utc).astimezone(SHANGHAI).strftime("%Y/%m/%d %H:%M")
+def _format_time(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(SHANGHAI).strftime("%Y/%m/%d %H:%M")
 
 
 def _item_summary(item: dict) -> str:
@@ -465,6 +469,8 @@ def _render_digest_html(
         item_title = _plain(str(item.get("title") or "未命名更新"))[:180]
         summary = _item_summary(item)
         source = _plain(str(item.get("source") or item.get("platform") or "未知来源"))[:80]
+        when = _format_time(item.get("published_at"))
+        source_line = source + (f" · 发布：{when}" if when else "")
         url = _safe_url(item.get("url"))
         image = _email_image_url(item.get("image"))
         show_image = bool(image and (item.get("identity") == "official" or item.get("importance")))
@@ -486,7 +492,7 @@ def _render_digest_html(
                 f'<div style="margin:0 0 10px;"><span style="display:inline-block;padding:3px 8px;border-radius:999px;background:{label_bg};color:{label_color};font-size:11px;font-weight:700;">{escape(label)}</span></div>',
                 f'<h2 class="email-text" style="margin:0 0 9px;color:#0f172a;font-size:18px;line-height:27px;font-weight:750;">{escape(item_title)}</h2>',
                 f'<p class="email-text" style="margin:0 0 13px;color:#334155;font-size:15px;line-height:25px;">{escape(summary)}</p>',
-                f'<p class="email-muted" style="margin:0;color:#64748b;font-size:12px;line-height:20px;">{escape(source)} · {_format_time(item["published_at"])}</p>',
+                f'<p class="email-muted" style="margin:0;color:#64748b;font-size:12px;line-height:20px;">{escape(source_line)}</p>',
             ]
         )
         if url:
@@ -539,12 +545,13 @@ def render_email(
     }
     for index, item in enumerate(items[:MAX_ITEMS], 1):
         summary = _item_summary(item)
+        when = _format_time(item.get("published_at"))
         lines.extend(
             [
                 f"{index}. [{identity_labels.get(item['identity'], '社区观察')}] {item['title']}",
                 *([f"匹配关键词：{'、'.join(item['keywords'])}"] if item['keywords'] else []),
                 f"摘要：{summary}",
-                f"来源：{item.get('source') or item['platform']} · {_format_time(item['published_at'])}",
+                f"来源：{item.get('source') or item['platform']}" + (f" · 发布：{when}" if when else ""),
                 f"原文：{item.get('url') or '暂无可访问链接'}",
                 "",
             ]

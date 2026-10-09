@@ -2,6 +2,24 @@
   "base_url": {"description": "AniSignal 服务地址", "type": "string", "default": "http://anisignal-app-1:3000"},
   "tools_key": {"description": "AniSignal 专用插件密钥", "type": "string", "default": "", "hint": "由部署脚本写入；不要填写管理员 Token 或 AstrBot 发送密钥。"},
   "card_font_path": {"description": "早报卡片中文字体路径", "type": "string", "default": "", "hint": "留空使用已部署的 Noto Sans CJK 字体；字体不可用时发送短文字。"},
+  "cat_followup_platforms": {
+    "description": "猫娘自然续聊平台 ID",
+    "type": "list",
+    "default": ["napcat_nNjs"],
+    "hint": "仅对这些平台的主动回复白名单群和 catgirl 人格生效；留空关闭。成功回复点名后，允许同一人短时不再 @ 续聊。"
+  },
+  "cat_followup_seconds": {
+    "description": "猫娘自然续聊窗口（秒）",
+    "type": "int",
+    "default": 90,
+    "hint": "从成功回复 @ 或引用开始计时，续聊不会延长窗口。"
+  },
+  "cat_followup_max_replies": {
+    "description": "猫娘单次窗口最多续聊次数",
+    "type": "int",
+    "default": 3,
+    "hint": "同一位群友最多触发的自然续聊次数；模型判断不适合接话时提前结束。"
+  },
   "cat_reply_keywords": {
     "description": "猫系话题触发词",
     "type": "list",

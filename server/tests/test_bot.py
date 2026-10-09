@@ -48,6 +48,9 @@ async def test_admin_crud_and_tool_auth(client, session, admin_headers):
 
 async def test_daily_dedupe_retry_and_disabled(session, monkeypatch):
     row = await target(session)
+    async def daily(*args, **kwargs):
+        return {"text": "今日速报", "items": [{"id": 1, "title": "新版本公告", "text": "维护时间已公布。", "identity": "official"}]}
+    monkeypatch.setattr(bot, "query_target", daily)
     calls = []
     async def send(*args):
         calls.append(args)
@@ -156,7 +159,8 @@ async def test_merge_window_batches_normal_updates(session, monkeypatch):
     await bot.run_bot_notifications(session, now + timedelta(minutes=6))
     rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.kind == 'updates')))
     assert len(rows) == 1
-    assert '刚刚的重点' in rows[0].body
+    assert '刚刚的重点' not in rows[0].body and '/展开' not in rows[0].body
+    assert rows[0].body.startswith('1. ') and '\n\n2. ' in rows[0].body
     assert '合并消息0' in rows[0].body and '合并消息1' in rows[0].body
 
 
@@ -185,13 +189,14 @@ async def test_short_format_and_multi_image(session, monkeypatch):
     assert len(rows) == 2
     bodies = "\n".join(r.body for r in rows)
     assert '短讯标题0' in bodies and '短讯标题1' in bodies
+    assert '发布：09/13 11:00' in bodies and '11:58' not in bodies and '12:00' not in bodies
     media_lists = [r.media for r in rows]
     assert all(m and m[0].startswith('https://img.example/') for m in media_lists)
     assert all(r.brief['mode'] == 'single' and r.brief['items'][0]['sources'][0]['content_ids'] for r in rows)
 
 
 async def test_direct_delivery_cancels_empty_dynamic_snapshot(session, monkeypatch):
-    row = await target(session, daily_enabled=False)
+    row = await target(session, daily_enabled=False, updates_enabled=True)
     item = {'id': 1, 'platform': 'bilibili', 'content_type': 'dynamic', 'title': '活动公告',
             'text': '', 'summary': '有事件摘要也不能推送', 'url': 'https://t.bilibili.com/1'}
     delivery = await bot.create_delivery(session, row, 'updates', '旧占位消息', 'empty-direct',
@@ -234,15 +239,19 @@ async def test_format_helpers():
         'community': 'wuwa', 'title': '测试标题', 'text': '这是一句说明\n第二行',
         'published_at': datetime(2026, 9, 13, 4, 0), 'url': 'https://example.com/a',
     })
-    assert '[鸣潮] 测试标题' in text
-    assert 'https://example.com/a' in text
+    assert '鸣潮｜测试标题，这是一句说明 第二行' in text
+    assert 'https://example.com/a' not in text
     assert '这是一句说明 第二行' in text
+    assert '发布：09/13 12:00' in text
+    unknown = bot.format_short_update({'title': '未标时间的动态', 'published_at': None,
+                                      'collected_at': datetime(2026, 9, 13, 4, 0)})
+    assert unknown == '未标时间的动态'
     merged = bot.format_merged_updates([
         {'community': 'blhx', 'title': '甲', 'url': 'https://a'},
         {'community': 'wuwa', 'title': '乙', 'url': 'https://b'},
     ], datetime(2026, 9, 13, 4, 0))
-    assert '刚刚的重点' in merged
-    assert '[碧蓝航线] 甲' in merged
+    assert '刚刚的重点' not in merged and '12:00' not in merged
+    assert '碧蓝航线｜甲' in merged
     assert bot.collect_images([{'image': 'a'}, {'image': 'a'}, {'image': 'b'}], 3) == ['a', 'b']
     assert bot.classify_item({'importance': True}) == 'critical'
     assert bot.classify_item({'importance': False}) == 'normal'
@@ -255,5 +264,43 @@ async def test_format_helpers():
     assert '今日速报' in brief
     assert 'https://a' not in brief
     assert '/展开' in brief
-    assert '…' in brief
+    assert '…' not in brief
     assert '完整正文' not in brief
+
+
+async def test_late_official_news_is_a_dated_daily_supplement_and_never_an_instant_update(session):
+    now = datetime(2026, 10, 9, 4)
+    row = await target(session, daily_enabled=False, updates_enabled=True, delivery_mode='astrbot',
+                       merge_minutes=0, quiet_start=0, quiet_end=0)
+    row.last_scan_at = now - timedelta(minutes=10)
+    source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
+    session.add(source)
+    await session.flush()
+    for n, (title, age, collected_age) in enumerate([
+        ('新版本预告', 1, 1), ('晚采到的活动公告', 48, 1), ('另一条旧公告', 72, 1),
+        ('未标时间的预告', None, 1), ('超过一周的公告', 192, 1), ('此前已采集的公告', 96, 2880),
+    ]):
+        raw = RawContent(platform='bilibili', content_type='video', external_id=f'late-{n}', source_id=source.id,
+                         community='wuwa', published_at=now - timedelta(hours=age) if age else None,
+                         collected_at=now - timedelta(minutes=collected_age))
+        session.add(raw)
+        await session.flush()
+        session.add(ContentVersion(raw_content_id=raw.id, title=title, text='预告影像已发布。', category='announcement'))
+    await session.commit()
+    digest = await bot.query_target(session, row, now=now)
+    assert [i['title'] for i in digest['items']] == ['新版本预告', '补充 · 晚采到的活动公告']
+    supplement = digest['items'][1]
+    assert supplement['published_label'] == '发布：10/07 12:00'
+    assert '补充 · 晚采到的活动公告' in digest['text']
+    unknown = await bot.query_target(session, row, tool='news', query='未标时间', now=now)
+    assert unknown['items'][0]['published_at'] is None and '发布：' not in unknown['text']
+    await bot.run_bot_notifications(session, now)
+    deliveries = list(await session.scalars(select(BotDelivery)))
+    assert len(deliveries) == 1 and '新版本预告' in deliveries[0].body
+    assert not (await bot.load_merge_buffer(session, row.id))['items']
+    already = await bot.create_delivery(session, row, 'daily', digest['text'], 'already-daily', brief=digest['brief'])
+    already.status = 'accepted'
+    await session.commit()
+    next_digest = await bot.query_target(session, row, now=now)
+    assert '晚采到的活动公告' not in next_digest['text']
+    assert len([i for i in next_digest['items'] if i.get('is_supplement')]) <= 1

@@ -171,13 +171,13 @@ async def _targets_for_community(session: AsyncSession, community: str) -> list[
 
 
 async def _push_to_targets(
-    session: AsyncSession, community: str, kind: str, text: str, dedupe_key: str
+    session: AsyncSession, community: str, kind: str, text: str, dedupe_key: str, *, brief: dict | None = None
 ) -> int:
     from app.services.bot import create_delivery
 
     delivered = 0
     for target in await _targets_for_community(session, community):
-        await create_delivery(session, target, kind, text, dedupe_key)
+        await create_delivery(session, target, kind, text, f"{dedupe_key}:target:{target.id}", brief=brief)
         delivered += 1
     return delivered
 
@@ -210,6 +210,8 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
         return {"status": "skipped", "reason": "ai_not_configured"}
 
     published = raw.published_at or raw.collected_at
+    # 日期解析的内部锚点不能当作消息对外展示的发布时间。
+    source_published = raw.published_at.isoformat() if raw.published_at else None
     published_bj = published + timedelta(hours=8)
     user = _USER_TEMPLATE.format(year=published_bj.year, published_at=f"{published_bj:%Y/%m/%d %H:%M}（北京时间）", title=title, text=text)
     started = time.monotonic()
@@ -277,13 +279,18 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
             )
         )
         new_codes += 1
+        expiry = entry["expires_at"]
+        source = {"id": content_id, "content_ids": [content_id], "title": title, "text": text,
+                  "url": raw.url, "community": community, "identity": "official", "published_at": source_published}
         pushed = await _push_to_targets(
             session,
             community,
             "critical",
             f"🎫 新兑换码：{entry['code']}\n来自：{title}\n记得尽快兑换，过期作废。",
             f"code:{community}:{entry['code']}",
-        ) if notify else 0
+            brief={"mode": "notice", "code": entry["code"], "expires_at": min(expiry or now + timedelta(hours=12), now + timedelta(hours=12)).isoformat(),
+                   "items": [{**source, "sources": [source]}]},
+        ) if notify and (not expiry or expiry > now) else 0
         logger.info("new redeem code %s pushed to %s targets", entry["code"], pushed)
 
     # 仅修改明确同主题的日程，不能把同游戏的所有活动一起标成延期。
@@ -317,6 +324,10 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
                 "critical",
                 f"⚠️ 日程变更：{entry['title']}\n新时间：{(entry['start_at'] + timedelta(hours=8)).strftime('%Y/%m/%d %H:%M')}（北京时间）",
                 f"delay:{community}:{content_id}:{int(entry['start_at'].timestamp())}",
+                brief={"mode": "notice", "expires_at": min(entry["start_at"], now + timedelta(hours=12)).isoformat(),
+                       "items": [{"title": entry["title"], "community": community, "content_ids": [content_id],
+                                  "sources": [{"title": title, "text": text, "content_ids": [content_id],
+                                               "url": raw.url, "community": community, "identity": "official", "published_at": source_published}]}]},
             )
             logger.info("delay notice pushed for %s schedules (%s targets)", marked, pushed)
 

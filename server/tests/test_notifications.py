@@ -1,6 +1,7 @@
 """关键词通知：主动启用、精确匹配、异步入口与每日去重。"""
 
 from datetime import date, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -163,6 +164,30 @@ async def test_empty_dynamics_do_not_enter_notification_candidates(session):
     await session.commit()
     items = await notifications.load_candidates(session, None, start, end)
     assert empty.id in {item["id"] for item in items}
+
+
+async def test_missing_publish_time_stays_unknown_through_selection_and_rendering(session, monkeypatch):
+    start, end = notifications.morning_window(notifications.beijing_today())
+    known = await _content(session, '有发布时间的动态', text='官方活动已开放。')
+    unknown = await _content(session, '没有发布时间的视频', text='新视频已发布。')
+    known.collected_at = unknown.collected_at = start + timedelta(hours=5)
+    unknown.published_at = None
+    await session.commit()
+    items = await notifications.load_candidates(session, None, start, end)
+    grouped = await notifications.group_candidates(session, items)
+    by_id = {item['id']: item for item in grouped}
+    assert by_id[known.id]['published_at'] == known.published_at
+    assert by_id[unknown.id]['published_at'] is None
+    assert by_id[unknown.id]['collected_at'] == unknown.collected_at
+    monkeypatch.setattr('app.services.ai.get_ai_config', AsyncMock(return_value={
+        'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    mocked = AsyncMock(return_value=(' {"items": []} ', {}))
+    monkeypatch.setattr('app.services.ai.chat', mocked)
+    assert await notifications.ai_curate(session, 1, [], grouped) == ([], None)
+    assert '"published_at": null' in mocked.await_args.args[2]
+    _, body, html = notifications.render_email('morning', notifications.beijing_today(), [], [by_id[unknown.id]])
+    assert '发布：' not in body and '发布：' not in html
+    assert notifications._format_time(unknown.collected_at) not in body + html
 
 
 async def test_manual_morning_covers_all_communities_without_keyword_filter(session, monkeypatch):
