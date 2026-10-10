@@ -61,7 +61,14 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
 
 <template>
   <div class="space-y-4">
-    <BackButton fallback="/contents" label="返回内容库" />
+    <BackButton :fallback="d.community === 'ai' ? '/ai' : '/contents'" :label="d.community === 'ai' ? '返回 AI 快讯' : '返回内容库'" />
+
+    <section v-if="d.community === 'ai'" class="panel p-4 sm:p-5">
+      <p class="text-xs font-medium text-amber-700 dark:text-amber-300">{{ d.news?.kind === 'rumor' ? '传闻线索' : '二手报道' }} · 待核实</p>
+      <h2 v-if="d.news" class="mt-2 text-lg font-semibold">{{ d.news.headline }}</h2>
+      <p v-if="d.news" class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">{{ d.news.summary }}</p>
+      <p class="mt-3 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">摘要仅依据来源标题与简介整理，未核对完整视频及一手消息。下方保留原始标题和简介；视频发布时间不代表事件发生时间。</p>
+    </section>
 
     <!-- 头部 -->
     <section class="panel p-4 sm:p-5">
@@ -83,7 +90,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         <span v-for="k in d.matched_keywords" :key="k" class="rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">{{ k }}</span>
       </div>
       <p class="mono mt-2 text-xs text-slate-400 dark:text-zinc-500">
-        {{ d.source_name ?? '—' }} · 发布 {{ fmtTime(d.published_at) }} · 采集 {{ fmtTime(d.collected_at) }}<template v-if="d.last_seen_at"> · 最近发现 {{ fmtTime(d.last_seen_at) }}</template>
+        {{ d.source_name ?? '—' }} · {{ d.content_type === 'video' ? '视频发布' : '发布' }} {{ d.published_at ? fmtTime(d.published_at) : '时间未知' }}<template v-if="d.community !== 'ai'"> · 采集 {{ fmtTime(d.collected_at) }}</template>
       </p>
     </section>
 

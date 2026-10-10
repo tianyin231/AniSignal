@@ -13,6 +13,7 @@ export const regionOf = (platform: string): Region =>
   ['kuro_global', 'youtube'].includes(platform) ? 'global' : 'cn'
 
 export const categoryMeta: Record<string, { label: string }> = {
+  ai_news: { label: 'AI 快讯' },
   official_announce: { label: '公告' },
   version_update: { label: '版本' },
   presale: { label: '预售' },
@@ -77,7 +78,7 @@ export function toRawItem(item: PublicContentItem): RawItem {
     account: item.source_name ?? '—',
     region: regionOf(item.platform),
     title: item.title || item.external_id,
-    publishedAt: fmtTime(item.published_at || item.collected_at),
+    publishedAt: item.published_at ? fmtTime(item.published_at) : '发布时间未知',
     identity: item.identity as Identity,
     category: item.category ? (categoryMeta[item.category]?.label ?? item.category) : undefined,
     keywords: item.matched_keywords ?? [],

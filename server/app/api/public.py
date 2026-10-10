@@ -520,8 +520,16 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
             "confidence": event_model.confidence,
         }
 
+    review = await session.get(ContentReview, raw.id) if raw.community == "ai" else None
+    news = review.news if (
+        review and review.news and version
+        and review.news.get("content_hash") == raw.content_hash
+        and review.news.get("content_version") == version.version
+    ) else None
     return ContentDetailOut(
         id=raw.id,
+        community=raw.community,
+        news={k: v for k, v in news.items() if k not in {"content_hash", "content_version"}} if news else None,
         platform=raw.platform,
         content_type=raw.content_type,
         external_id=raw.external_id,

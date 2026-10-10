@@ -26,6 +26,7 @@ class CommunityMeta:
     bili_mid_setting: str | None  # config 中官方 B 站 UID 属性名
     official_bili_mid_default: str | None  # 配置缺失时的兜底 UID
     extra_names: tuple[str, ...] = ()  # 游戏名的常见变体（如"崩坏：星穹铁道"带冒号/繁体）
+    domain: str = "game"  # news 分区采用资讯筛选，不沿用游戏词典与审核规则
 
     @property
     def game_names(self) -> tuple[str, ...]:
@@ -79,6 +80,12 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         bili_mid_setting="arknights_bili_mid",
         official_bili_mid_default="161775300",
     ),
+    "ai": CommunityMeta(
+        key="ai", label="AI", game_name="人工智能", bare_name="AI",
+        game_note="区分已发布、测试中与传闻；不把转述当作事实确认；",
+        other_games_examples="", color="teal", bili_mid_setting=None,
+        official_bili_mid_default=None, domain="news",
+    ),
 }
 
 DEFAULT_COMMUNITY = "wuwa"
@@ -128,7 +135,7 @@ def crosstalk_names(community_key: str) -> tuple[str, ...]:
     """
     names: list[str] = list(_CROSSTALK_EXTRAS)
     for meta in COMMUNITIES.values():
-        if meta.key != community_key:
+        if meta.key != community_key and meta.domain == "game":
             names.extend(meta.game_names)
     return tuple(names)
 
@@ -137,5 +144,6 @@ def game_name_boilerplate() -> tuple[str, ...]:
     """全部分区游戏名的书写形式（含变体），供标题去噪等"清洗游戏名"场景使用。"""
     names: list[str] = []
     for meta in COMMUNITIES.values():
-        names.extend(meta.game_names)
+        if meta.domain == "game":
+            names.extend(meta.game_names)
     return tuple(names)

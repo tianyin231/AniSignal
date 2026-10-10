@@ -42,10 +42,14 @@ def test_community_pattern_derived_from_registry():
 def test_review_prompt_templated_per_community():
     for key, meta in COMMUNITIES.items():
         prompt = _review_system_prompt(key)
+        if meta.domain == "news":
+            assert "newsworthy" in prompt and "不是视频字幕" in prompt
+            assert "不做没有证据的真实性背书" in prompt
+            continue
         assert f"《{meta.bare_name}》" in prompt
         # 其他分区的游戏名（任意变体）应出现在"其他游戏"示例中
         for other_key, other in COMMUNITIES.items():
-            if other_key != key:
+            if other_key != key and other.domain == "game":
                 assert any(name in prompt for name in other.game_names)
 
 

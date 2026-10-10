@@ -233,5 +233,7 @@ class ContentReview(Base):
     links: Mapped[list | None] = mapped_column(JSON, default=None)
     # AI 商品履约预判：{kind, confidence, reason}（kind: self_purchase/pr_sample/forward/none）
     fulfillment: Mapped[dict | None] = mapped_column(JSON, default=None)
+    # 资讯摘要及候选类型，绑定内容指纹；编辑筛选不代表事实核实。
+    news: Mapped[dict | None] = mapped_column(JSON, default=None)
     model: Mapped[str] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

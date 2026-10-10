@@ -12,10 +12,10 @@
  */
 
 export interface GameCommunity {
-  key: 'wuwa' | 'blhx' | 'hsr' | 'arknights'
+  key: 'wuwa' | 'blhx' | 'hsr' | 'arknights' | 'ai'
   label: string
   /** 分区语义色键，映射 COMMUNITY_CLASSES 的 Tailwind 类组（不用动态拼接，避免被 purge） */
-  color: 'yellow' | 'sky' | 'violet' | 'orange'
+  color: 'yellow' | 'sky' | 'violet' | 'orange' | 'teal'
 }
 
 // 分区主题色对齐各游戏品牌色：鸣潮金 / 碧蓝天蓝 / 星穹铁道紫 / 明日方舟橙
@@ -24,6 +24,7 @@ export const GAME_COMMUNITIES: GameCommunity[] = [
   { key: 'blhx', label: '碧蓝航线', color: 'sky' },
   { key: 'hsr', label: '崩坏星穹铁道', color: 'violet' },
   { key: 'arknights', label: '明日方舟', color: 'orange' },
+  { key: 'ai', label: 'AI', color: 'teal' },
 ]
 
 export type GameCommunityKey = GameCommunity['key']
@@ -60,6 +61,10 @@ const COMMUNITY_CLASSES: Record<
     chip: 'bg-orange-500/10 text-orange-700 dark:bg-orange-400/15 dark:text-orange-300',
     nav: 'border-orange-500 text-orange-700 dark:text-orange-300',
   },
+  teal: {
+    chip: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
+    nav: 'border-teal-500 text-teal-700 dark:text-teal-300',
+  },
 }
 
 export function communityClasses(color: string) {
@@ -72,6 +77,7 @@ export const PLATFORMS_BY_COMMUNITY: Record<GameCommunityKey, string[]> = {
   blhx: ['bilibili'],
   hsr: ['bilibili', 'youtube'],
   arknights: ['bilibili', 'youtube'],
+  ai: ['bilibili'],
 }
 
 export function platformsForCommunity(community: string): string[] {
@@ -103,6 +109,7 @@ export function useGameSection() {
   const hydrated = useState('game-section-hydrated', () => false)
 
   const community = computed<GameCommunityKey>(() => {
+    if (route.path === '/ai') return 'ai'
     const query = String(route.query.community || '')
     if (VALID_KEYS.has(query)) return query as GameCommunityKey
     return hydrated.value ? stored.value : DEFAULT_COMMUNITY
@@ -152,7 +159,7 @@ export function useGameSection() {
     hydrated.value = true
     try { localStorage.setItem(STORAGE_KEY, key) }
     catch { /* 存不进就只在当前会话生效 */ }
-    await router.push({ path: '/', query: { community: key } })
+    await router.push(key === 'ai' ? { path: '/ai' } : { path: '/', query: { community: key } })
   }
 
   if (import.meta.client) onMounted(hydrate)

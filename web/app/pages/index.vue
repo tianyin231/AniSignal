@@ -5,6 +5,7 @@ import { toRawItem, utcTimestamp } from '~/utils/public-utils'
 import { fmtTime } from '~/utils/admin-types'
 
 useSeoMeta({ title: '首页 · AniSignal' })
+definePageMeta({ middleware: [(to) => { if (to.query.community === 'ai') return navigateTo('/ai') }] })
 
 const route = useRoute()
 const router = useRouter()

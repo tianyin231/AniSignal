@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
-from app.communities import DEFAULT_COMMUNITY
+from app.communities import DEFAULT_COMMUNITY, get_community
 from app.models import ContentVersion, MetricSnapshot, RawContent, Source
 from app.models.enums import Identity
 from app.parsers.bilibili import PARSER_VERSION as BILIBILI_PARSER_VERSION
@@ -254,6 +254,9 @@ def _add_version(
     rules: list,
     community: str | None = None,
 ) -> None:
+    if get_community(community or content.community).domain == "news":
+        # 新内容或正文变化先进入候选池，避免未筛选的搜索结果直接公开。
+        content.hidden = True
     session.add(
         ContentVersion(
             raw_content_id=content.id,
