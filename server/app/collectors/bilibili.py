@@ -74,6 +74,7 @@ class BilibiliCollector:
         self._bin = settings.bili_bin
         self._timeout = settings.bili_timeout_seconds
         self._max_retries = settings.bili_max_retries
+        self.newest_first = False
 
     async def _run(self, *args: str) -> object:
         """执行 bili 命令并解析 stdout JSON，带指数退避重试。
@@ -151,8 +152,12 @@ class BilibiliCollector:
 
     async def search_videos(self, keyword: str, limit: int) -> list[dict]:
         results = await self._run_nonempty(
-            "search", keyword, "--type", "video", "-n", str(limit), "-o", "json", "--no-cache"
+            "search", keyword, "--type", "video", "-n", str(limit), "-o", "json", "--no-cache",
+            *(["--order", "pubdate"] if self.newest_first else []),
         )
+        if self.newest_first:
+            # 快讯首屏已含发布时间和简介；不逐条请求易受限的详情接口。
+            return results[:limit]
         details: list[dict] = []
         for item in results[:limit]:
             bvid = item.get("bvid")

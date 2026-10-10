@@ -82,6 +82,7 @@ const deltaLabel = computed(() => {
           <span aria-hidden="true">·</span>
           <span :class="identityMeta[item.identity].text">{{ identityMeta[item.identity].label }}</span>
         </template>
+        <span v-if="item.community === 'ai'" class="text-amber-700 dark:text-amber-300">二手消息 · 待核实</span>
         <template v-if="item.translated">
           <span aria-hidden="true">·</span>
           <span class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>

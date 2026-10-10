@@ -7,7 +7,7 @@ const route = useRoute()
 // 栏目导航（官方动态/活动日历/商品/事件/内容库）放在首页内容区的操作行里，不单独占一层。
 const channels = [
   { key: 'home', label: '首页', color: 'blue' as const },
-  ...GAME_COMMUNITIES.map(c => ({ key: c.key, label: c.label, color: c.color })),
+  ...GAME_COMMUNITIES.map(c => ({ key: c.key, label: c.label, color: c.color, to: c.key === 'ai' ? '/ai' : undefined })),
   // 定制化频道固定最后：用户自建监控（UID/关键词）的公开目录
   { key: 'custom', label: '定制化', color: 'blue' as const, to: '/custom' },
 ]
@@ -16,6 +16,7 @@ const { community } = useGameSection()
 
 // 选中频道：聚合首页 → 首页；分区首页 → 该分区；栏目页 → 当前分区
 const activeChannel = computed<string | null>(() => {
+  if (route.path === '/ai') return 'ai'
   if (route.path.startsWith('/custom')) return 'custom'
   if (route.path === '/') {
     const q = String(route.query.community || '')
@@ -27,6 +28,18 @@ const activeChannel = computed<string | null>(() => {
   if (String(route.query.community || '') === 'all') return null
   return community.value
 })
+const channelNav = ref<HTMLElement | null>(null)
+let navObserver: ResizeObserver | undefined
+function revealActiveChannel() {
+  channelNav.value?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' })
+}
+watch(activeChannel, () => nextTick(revealActiveChannel))
+onMounted(() => {
+  revealActiveChannel()
+  navObserver = new ResizeObserver(revealActiveChannel)
+  if (channelNav.value) navObserver.observe(channelNav.value)
+})
+onBeforeUnmount(() => navObserver?.disconnect())
 
 const { user, logout } = useAuth()
 const menuOpen = ref(false)
@@ -52,7 +65,7 @@ async function handleLogout() {
         <img src="/icon.png" alt="" class="size-7 shrink-0">
         <span class="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-zinc-50">AniSignal</span>
       </NuxtLink>
-      <nav class="flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto text-sm [scrollbar-width:none]">
+      <nav ref="channelNav" class="flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto text-sm [scrollbar-width:none]">
         <NuxtLink
           v-for="ch in channels"
           :key="ch.key"

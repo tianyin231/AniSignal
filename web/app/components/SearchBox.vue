@@ -4,11 +4,13 @@ import { Search } from 'lucide-vue-next'
 const q = ref('')
 const router = useRouter()
 const route = useRoute()
-const searchQuery = computed(() => ({ community: String(route.query.community || 'all') }))
+const isAi = computed(() => route.path === '/ai' || route.query.community === 'ai')
+const searchPath = computed(() => isAi.value ? '/ai' : '/search')
+const searchQuery = computed(() => isAi.value ? {} : { community: String(route.query.community || 'all') })
 
 function go() {
   const s = q.value.trim()
-  if (s) router.push({ path: '/search', query: { ...searchQuery.value, q: s } })
+  if (s) router.push({ path: searchPath.value, query: { ...searchQuery.value, q: s } })
 }
 </script>
 
@@ -19,13 +21,13 @@ function go() {
       v-model="q"
       type="search"
       aria-label="站内搜索"
-      placeholder="搜索事件 / 主题"
+      :placeholder="isAi ? '搜索 AI 快讯' : '搜索事件 / 主题'"
       class="input w-40 py-1.5 pl-8 pr-2 text-xs transition-all focus:w-56 dark:text-zinc-200"
       @keydown.enter.prevent="go"
     />
   </form>
   <NuxtLink
-    :to="{ path: '/search', query: searchQuery }"
+    :to="{ path: searchPath, query: searchQuery }"
     aria-label="搜索"
     class="grid size-8 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-200/70 hover:text-slate-900 md:hidden dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
   >

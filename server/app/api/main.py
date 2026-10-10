@@ -16,6 +16,7 @@ from app.api.admin_custom import router as admin_custom_router
 from app.api.admin_settings import router as admin_settings_router
 from app.api.auth import router as auth_router
 from app.api.public import router as public_router
+from app.api.ai_news import router as ai_news_router
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ app.add_middleware(
 
 app.include_router(admin_router)
 app.include_router(public_router)
+app.include_router(ai_news_router)
 app.include_router(auth_router)
 app.include_router(account_router)
 app.include_router(admin_settings_router)

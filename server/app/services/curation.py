@@ -30,8 +30,21 @@ from app.models import (
 from app.models.enums import Category
 from app.services.ai import ai_available, chat, get_ai_config, record_usage
 from app.services.classify import HIDDEN_CATEGORIES
+from app.services.ai_news import constrain_news, parse_news
 
-REVIEW_CONCURRENCY = 4
+REVIEW_CONCURRENCY = 2
+# 多个采集目标会同时投递审核；并发上限按 worker 进程共享，避免每批各开一组。
+_review_loop = None
+_review_semaphore = None
+
+
+def _shared_review_semaphore():
+    global _review_loop, _review_semaphore
+    loop = asyncio.get_running_loop()
+    if _review_loop is not loop:
+        _review_loop, _review_semaphore = loop, asyncio.Semaphore(REVIEW_CONCURRENCY)
+    return _review_semaphore
+
 # AI 限流（429）退避：免费模型批量重审时常见，等待比换并发更稳
 REVIEW_429_BACKOFF_SECONDS = 20
 REVIEW_429_RETRIES = 4
@@ -83,19 +96,34 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
     tracked_products = await _load_tracked_products(session)
     candidates = await _review_candidates(session, ids, tracked_products)
     stats.candidates = len(candidates)
-    semaphore = asyncio.Semaphore(REVIEW_CONCURRENCY)
+    semaphore = _shared_review_semaphore()
 
     async def run_one(candidate: dict):
         async with semaphore:
-            return await _review_one(config, candidate)
-
-    outcomes = list(await asyncio.gather(*(run_one(candidate) for candidate in candidates)))
+            return candidate, await _review_one(config, candidate)
 
     hidden_ids: list[int] = []
-    for candidate, (decision, usage, failed, duration_ms) in zip(candidates, outcomes):
-        content_id = candidate["id"]
-        if failed or decision is None:
-            stats.failed_batches += 1
+    async with asyncio.TaskGroup() as group:
+        tasks = [group.create_task(run_one(candidate)) for candidate in candidates]
+        for outcome in asyncio.as_completed(tasks):
+            candidate, (decision, usage, failed, duration_ms) = await outcome
+            content_id = candidate["id"]
+            is_news = get_community(candidate.get("community")).domain == "news"
+            if failed or decision is None:
+                stats.failed_batches += 1
+                await record_usage(
+                    session,
+                    task="review_content",
+                    config=config,
+                    usage=usage,
+                    duration_ms=duration_ms,
+                    ref_id=content_id,
+                    status="failed",
+                )
+                if is_news:
+                    await session.commit()
+                continue
+            stats.reviewed += 1
             await record_usage(
                 session,
                 task="review_content",
@@ -103,43 +131,52 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
                 usage=usage,
                 duration_ms=duration_ms,
                 ref_id=content_id,
-                status="failed",
             )
-            continue
-        stats.reviewed += 1
-        await record_usage(
-            session,
-            task="review_content",
-            config=config,
-            usage=usage,
-            duration_ms=duration_ms,
-            ref_id=content_id,
-        )
-        row = await session.get(ContentReview, content_id)
-        if row is None:
-            row = ContentReview(raw_content_id=content_id, model=config["model"])
-            session.add(row)
-        row.relevant = decision["relevant"]
-        row.promotional = decision["promotional"]
-        row.violation = decision["violation"]
-        row.quality_score = decision["quality_score"]
-        row.category_hint = decision["category_hint"]
-        row.reason = decision["reason"]
-        row.links = decision["links"]
-        row.fulfillment = decision.get("fulfillment")
-        row.model = config["model"]
-        row.updated_at = utcnow()
-        raw = await session.get(RawContent, content_id)
-        if raw is not None:
-            # 官方账号来自预先审核的采集目标，不因相关性误判下架（新角色/新活动
-            # 常超出模型知识库，见 _REVIEW_SYSTEM_PROMPT 的词表规则）
-            should_hide = bool(
-                decision["violation"]
-                or (not decision["relevant"] and candidate.get("identity") != "official")
-            )
-            if should_hide and not raw.hidden:
-                hidden_ids.append(content_id)
-            raw.hidden = should_hide
+            raw = await session.get(RawContent, content_id, populate_existing=is_news, with_for_update=is_news)
+            if is_news and raw and raw.content_hash != candidate["content_hash"]:
+                # 审核期间正文已更新，旧摘要不能解锁新正文；下次采集补审。
+                continue
+            if is_news:
+                current_version = await session.scalar(select(ContentVersion.version).where(
+                    ContentVersion.raw_content_id == content_id,
+                ).order_by(ContentVersion.version.desc()).limit(1).with_for_update())
+                if current_version != candidate["content_version"]:
+                    continue
+            row = await session.get(ContentReview, content_id)
+            if row is None:
+                row = ContentReview(raw_content_id=content_id, model=config["model"])
+                session.add(row)
+            row.relevant = decision["relevant"]
+            row.promotional = decision["promotional"]
+            row.violation = decision["violation"]
+            row.quality_score = decision["quality_score"]
+            row.category_hint = decision["category_hint"]
+            row.reason = decision["reason"]
+            row.links = decision["links"]
+            row.fulfillment = decision.get("fulfillment")
+            if is_news:
+                news = constrain_news(decision.get("news"), candidate)
+                row.news = {**news, "content_hash": candidate["content_hash"], "content_version": candidate["content_version"]} if news else None
+            row.model = config["model"]
+            row.updated_at = utcnow()
+            if raw is not None:
+                # 官方账号来自预先审核的采集目标，不因相关性误判下架（新角色/新活动
+                # 常超出模型知识库，见 _REVIEW_SYSTEM_PROMPT 的词表规则）
+                should_hide = bool(
+                    decision["violation"]
+                    or (not decision["relevant"] and candidate.get("identity") != "official")
+                )
+                if is_news:
+                    should_hide = bool(
+                        should_hide or not decision["relevant"] or decision["promotional"]
+                        or not row.news or not row.news["newsworthy"]
+                    )
+                if should_hide and not raw.hidden:
+                    hidden_ids.append(content_id)
+                raw.hidden = should_hide
+            if is_news:
+                # 快讯逐条落库，一条慢请求不应拖住已完成的整批消息。
+                await session.commit()
     await session.commit()
     # 审核带出了 AI 提取的外链中文名，外链聚合面板需要重建
     from app.api.public import invalidate_official_links_cache
@@ -215,6 +252,8 @@ async def _review_one(
                 raise ValueError("model returned no valid review")
             return decision, usage
         except Exception as cover_exc:  # noqa: BLE001 - 带图失败降级纯文本重试
+            if "429" in repr(cover_exc):
+                raise  # 限流直接走退避，不追加一次同样会被拒绝的纯文本请求。
             logger.info(
                 "content review with cover failed for %s (%r), retrying text-only",
                 candidate.get("id"), cover_exc,
@@ -559,12 +598,14 @@ async def _review_candidates(
                 "id": raw.id,
                 "platform": raw.platform,
                 "community": community,
+                "content_hash": raw.content_hash,
+                "content_version": version.version,
                 "identity": source.identity if source else "unknown",
                 "title": (version.title or raw.external_id)[:240],
-                "text": text_plain[:1200],
+                "text": text_plain[:3000] if get_community(community).domain == "news" else text_plain[:1200],
                 "rule_category": version.category,
                 "metrics": metrics.get(raw.id),
-                "cover": cover,
+                "cover": None if get_community(community).domain == "news" else cover,
                 "matched_keywords": (raw.matched_keywords or [])[:12],
                 "known_terms": terms_by_community[community],
                 "product_context": _match_product_context(
@@ -675,10 +716,12 @@ def _parse_review(
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.I)
     data = json.loads(cleaned)
+    if not isinstance(data, dict):
+        return None
     item = data.get("review")
     if item is None and isinstance(data.get("reviews"), list):
         for candidate in data["reviews"]:
-            if int(candidate.get("id") or 0) == content_id:
+            if isinstance(candidate, dict) and int(candidate.get("id") or 0) == content_id:
                 item = candidate
                 break
     if not isinstance(item, dict):
@@ -694,6 +737,10 @@ def _parse_review(
         category = None
     links: list[dict] = []
     for link in (item.get("links") or [])[:12]:
+        if isinstance(link, str):
+            link = {"url": link}
+        if not isinstance(link, dict):
+            continue
         # 模型可能照抄正文里的 HTML 实体（&amp;），还原为真实 URL
         url = unescape(str(link.get("url") or "").strip())
         label = unescape(str(link.get("label") or "").strip()[:40])
@@ -741,6 +788,7 @@ def _parse_review(
         "reason": str(item.get("reason") or "")[:500],
         "links": links,
         "fulfillment": parsed_fulfillment,
+        "news": parse_news(item.get("news")),
     }
 
 
@@ -770,6 +818,10 @@ def _excerpt(value: str) -> str | None:
 def _review_system_prompt(community: str = DEFAULT_COMMUNITY) -> str:
     """审核提示词按分区模板化：游戏名与"其他游戏"示例取自 communities 注册表。"""
     meta = get_community(community)
+    if meta.domain == "news":
+        from app.services.ai_news import NEWS_REVIEW_PROMPT
+
+        return NEWS_REVIEW_PROMPT
     game, other_games = f"《{meta.bare_name}》", meta.other_games_examples
     return f"""你是{game}主题情报站的编辑兼内容安全审核员。本站对{game}及其周边生态做定向采集，你的知识库可能不包含最新的角色、版本与活动——判断相关性必须以下面两条为准，不得依赖你自己认识与否：
 

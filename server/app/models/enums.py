@@ -24,6 +24,7 @@ class Community(StrEnum):
     BLHX = "blhx"  # 碧蓝航线
     HSR = "hsr"  # 崩坏星穹铁道
     ARKNIGHTS = "arknights"  # 明日方舟
+    AI = "ai"
 
 
 # 分区展示名（唯一权威是 communities 注册表，此处派生保持兼容）
@@ -68,6 +69,7 @@ class Category(StrEnum):
     """内容/事件类目（履约词典，设计文档 §8.1）；official_announce 为官方公告兜底类。"""
 
     OFFICIAL_ANNOUNCE = "official_announce"
+    AI_NEWS = "ai_news"
     VERSION_UPDATE = "version_update"
     PRESALE = "presale"
     BALANCE = "balance"

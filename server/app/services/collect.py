@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import DEFAULT_COMMUNITY
+from app.communities import DEFAULT_COMMUNITY, get_community
 from app.collectors.base import CollectorError, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.kuro import KuroCollector
@@ -51,6 +51,17 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
     """
     if target.target_type == "notices":
         return items, 0
+    is_news = get_community(target.community).domain == "news"
+    if is_news:
+        from app.services.ai_news import is_news_candidate
+
+        kept = []
+        for item in items:
+            if not is_news_candidate(str(item.get("title") or "")):
+                continue
+            item["_matched_keywords"] = [target.target_value]
+            kept.append(item)
+        return kept, len(items) - len(kept)
     if getattr(target, "tier", "general") == "core":
         # 核心关键词目标（商品/联名等特定内容）：豁免共现词；
         # min_views > 0 时仍作为兜底门槛（管理员可为核心词设下限）
@@ -186,10 +197,14 @@ async def run_collection(redis, target_id: int) -> dict:
             collector_factory = _COLLECTORS.get(target.platform)
             if collector_factory is None:
                 raise CollectError(f"no collector for platform {target.platform}")
+            collector = collector_factory()
+            is_news = get_community(target.community).domain == "news"
+            if is_news and isinstance(collector, BilibiliCollector):
+                collector.newest_first = True
             async with platform_slot(
                 redis, target.platform, settings.platform_min_interval_seconds
             ):
-                fetch_result = await collector_factory().fetch(
+                fetch_result = await collector.fetch(
                     target.target_type, target.target_value, settings.collect_limit
                 )
             items_fetched = len(fetch_result.items)
@@ -211,6 +226,14 @@ async def run_collection(redis, target_id: int) -> dict:
             stats = await ingest_items(
                 session, fetch_result.fetch_kind, fetch_result.items, community=target.community
             )
+            if is_news and hasattr(redis, "enqueue_job"):
+                from app.services.ai_news import pending_news_ids
+
+                # 审核服务临时失败后，下轮仍能补审未完成的候选。
+                external_ids = [str(item.get("bvid") or item.get("id") or "") for item in fetch_result.items]
+                pending_ids = await pending_news_ids(session, external_ids=external_ids)
+                if pending_ids:
+                    await redis.enqueue_job("review_contents", pending_ids)
             if fetch_result.fetch_kind == "bilibili_dynamics":
                 try:
                     await _backfill_empty_draw_dynamics(session, collector_factory())
@@ -249,7 +272,7 @@ async def run_collection(redis, target_id: int) -> dict:
                 if target.platform in ("youtube", "kuro_global") and hasattr(redis, "enqueue_job"):
                     for content_id in stats.touched_content_ids:
                         await redis.enqueue_job("translate_content", content_id)
-                if stats.touched_content_ids and hasattr(redis, "enqueue_job"):
+                if not is_news and stats.touched_content_ids and hasattr(redis, "enqueue_job"):
                     await redis.enqueue_job("review_contents", stats.touched_content_ids)
         except Exception as exc:  # noqa: BLE001 - 任何失败都落到健康状态里
             error_text = f"{type(exc).__name__}: {exc}"

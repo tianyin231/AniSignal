@@ -306,6 +306,8 @@ export interface ContentMetricPoint {
 
 export interface ContentDetail {
   id: number
+  community: string
+  news: { headline: string; summary: string; kind: 'report' | 'rumor' } | null
   platform: string
   content_type: string
   external_id: string

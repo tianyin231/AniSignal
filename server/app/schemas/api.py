@@ -138,6 +138,8 @@ class ContentMetricPoint(BaseModel):
 
 class ContentDetailOut(BaseModel):
     id: int
+    community: str = _DEFAULT_COMMUNITY
+    news: dict | None = None
     platform: Platform
     content_type: str
     external_id: str

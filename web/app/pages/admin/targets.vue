@@ -39,13 +39,14 @@ const communityLabels: Record<string, string> = Object.fromEntries(
   ADMIN_COMMUNITIES.map(c => [c.key, c.label]),
 )
 // 分区筛选：全部 | 鸣潮 | 碧蓝航线
-const communityFilter = ref<'' | 'wuwa' | 'blhx'>('')
+const communityFilter = ref('')
 const filteredTargets = computed(() =>
   communityFilter.value ? targets.value.filter(t => t.community === communityFilter.value) : targets.value,
 )
 
 const availableTypes = computed(() => combos[form.platform] ?? [])
 watch(() => form.platform, () => { form.target_type = availableTypes.value[0] ?? 'keyword_search' })
+watch(() => form.community, (key) => { form.min_views = key === 'ai' ? 0 : 10000 })
 
 async function refresh() {
   try {
@@ -78,7 +79,7 @@ async function create() {
     form.target_value = ''
     form.display_name = ''
     form.co_terms = ''
-    form.min_views = 10000
+    form.min_views = form.community === 'ai' ? 0 : 10000
     form.tier = 'general'
     await refresh()
   } catch (exc: any) {
