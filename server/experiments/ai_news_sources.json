@@ -1,0 +1,25 @@
+{
+  "request_delay_seconds": 3,
+  "detail_limit_per_cycle": 2,
+  "bili_command": ["docker", "exec", "anisignal-app-1", "bili"],
+  "keywords": {
+    "OpenAI": ["\\bopenai\\b", "\\bchatgpt\\b", "\\bcodex\\b", "\\bgpt[- ]?\\d", "\\bdots?\\b"],
+    "Claude": ["\\banthropic\\b", "\\bclaude\\b", "\\bhaiku\\b", "\\bsonnet\\b", "\\bopus\\b"],
+    "Gemini": ["\\bgemini\\b", "\\bdeepmind\\b", "\\bantigravity\\b", "\\bgoogle\\b"],
+    "中国模型": ["\\bdeepseek\\b", "\\bqwen\\b", "\\bkimi\\b", "\\bglm[- ]?\\d", "深度求索", "通义千问", "智谱", "豆包", "混元"],
+    "AI产品": ["\\bopencode\\b", "\\bcursor\\b", "\\bllm\\b", "\\bagi\\b", "人工智能", "AI快讯", "AI 快讯", "大模型"]
+  },
+  "targets": [
+    {"key": "x:OpenAI", "kind": "x_account", "value": "OpenAI", "role": "official", "interval": 300},
+    {"key": "x:deepseek_ai", "kind": "x_account", "value": "deepseek_ai", "role": "official", "interval": 300},
+    {"key": "x:thsottiaux", "kind": "x_account", "value": "thsottiaux", "role": "team_member", "label": "Tibo", "interval": 300},
+    {"key": "x:bcherny", "kind": "x_account", "value": "bcherny", "role": "team_member", "label": "Boris Cherny", "interval": 300},
+    {"key": "x:testingcatalog", "kind": "x_account", "value": "testingcatalog", "role": "community_reporter", "interval": 300},
+    {"key": "x:apples_jimmy", "kind": "x_account", "value": "apples_jimmy", "role": "community_tipster", "interval": 300},
+    {"key": "x-search:Codex", "kind": "x_search", "value": "Codex", "interval": 86400},
+    {"key": "bili:1802759954", "kind": "bili_account", "value": "1802759954", "role": "community_reporter", "label": "渐近自由JJZY", "interval": 900},
+    {"key": "bili-search:AI", "kind": "bili_search", "value": "AI 快讯", "interval": 1800},
+    {"key": "bili-search:Codex", "kind": "bili_search", "value": "Codex", "interval": 1800},
+    {"key": "bili-search:Gemini", "kind": "bili_search", "value": "Gemini", "interval": 1800}
+  ]
+}
