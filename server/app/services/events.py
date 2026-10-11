@@ -22,11 +22,12 @@ from sqlalchemy.orm import defer
 
 from app.clock import format_beijing, to_naive_utc, utcnow
 from app.communities import DEFAULT_COMMUNITY, game_name_boilerplate
-from app.services.product_matching import detect_product_signal_types, matches_product_text
+from app.services.product_matching import matches_product_text
 from app.models import (
     ANNOUNCE_CATEGORIES,
     Category,
     ContentMatch,
+    ContentReview,
     ContentVersion,
     Event,
     EventRevision,
@@ -68,6 +69,7 @@ class ContentRow:
     source_name: str | None
     source_external_id: str | None
     community: str = DEFAULT_COMMUNITY
+    content_version: int = 1
 
 
 @dataclass
@@ -158,6 +160,7 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
                 source_name=(source.name if source else None),
                 source_external_id=(source.external_id if source else None),
                 community=(raw.community or DEFAULT_COMMUNITY),
+                content_version=version.version,
             )
         )
     return result
@@ -580,7 +583,7 @@ async def _aggregate_product(
     session: AsyncSession, product: Product, contents: list[ContentRow], stats: AggStats,
     *, before: dict | None = None,
 ) -> None:
-    from app.services.fulfillment import build_fulfillment_snapshot, sync_product_signals
+    from app.services.fulfillment import build_fulfillment_snapshot, product_signal_types, sync_product_signals
 
     if before is None:
         before = await build_fulfillment_snapshot(session, product.id)
@@ -596,8 +599,17 @@ async def _aggregate_product(
         "quality_issue": "quality", "aftersales_notice": "quality",
     }
     by_category: dict[str, list[ContentRow]] = {}
+    reviews = {review.raw_content_id: review for review in await session.scalars(select(ContentReview).where(
+        ContentReview.raw_content_id.in_([row.raw_id for row in matched]),
+    ))} if matched else {}
     for row in matched:
-        categories = {signal_categories[kind] for kind in detect_product_signal_types(row.title, row.text, row.category)}
+        review = reviews.get(row.raw_id)
+        kinds = product_signal_types(
+            title=row.title, text=row.text, category=row.category, product_id=product.id,
+            actor_type=row.identity, content_version=row.content_version,
+            review_fulfillment=review.fulfillment if review and review.relevant and not review.violation and not review.promotional else None,
+        )
+        categories = {signal_categories[kind] for kind in kinds}
         if row.category == "unboxing" and "arrived" in categories:
             categories.remove("arrived")
             categories.add("unboxing")
@@ -608,6 +620,9 @@ async def _aggregate_product(
     existing_events = list(await session.scalars(select(Event).where(
         Event.product_id == product.id, or_(Event.is_active.is_(True), Event.manual_locked.is_(True)),
     ).execution_options(populate_existing=True)))
+    def signal_group(category: str) -> str:
+        return "consumer" if category in {"arrived", "unboxing"} else category
+
     locked_ids: dict[str, set[int]] = {}
     for event in existing_events:
         manually_disabled = event.manual_locked and not event.is_active
@@ -615,6 +630,12 @@ async def _aggregate_product(
         links = list(await session.scalars(select(Evidence).where(
             Evidence.event_id == event.id, Evidence.role != "excluded",
         )))
+        if manually_disabled:
+            # 停用也是持久的纠错记录。原文暂时隐藏或分类漂移不能抹掉它再复活同轴事件。
+            locked_ids.setdefault(signal_group(event.category), set()).update(link.raw_content_id for link in links)
+            continue
+        if event.manual_locked and signal_group(event.category) == "consumer" and event.community == product.community:
+            expected = {row.raw_id for category in ("arrived", "unboxing") for row in by_category.get(category, [])}
         removed = [link for link in links if link.raw_content_id not in expected]
         remaining = [link for link in links if link.raw_content_id in expected]
         for link in removed:
@@ -637,10 +658,10 @@ async def _aggregate_product(
             _add_revision(session, event, stats, f"商品证据对账：移除 {len(removed)} 条失效证据")
             stats.touched_event_ids.append(event.id)
         if event.manual_locked:
-            locked_ids.setdefault(event.category, set()).update(link.raw_content_id for link in remaining)
+            locked_ids.setdefault(signal_group(event.category), set()).update(link.raw_content_id for link in remaining)
 
     for category, items in by_category.items():
-        items = [row for row in items if row.raw_id not in locked_ids.get(category, set())]
+        items = [row for row in items if row.raw_id not in locked_ids.get(signal_group(category), set())]
         if not items:
             continue
         identity = "official" if all(r.identity == "official" for r in items) else "user"
@@ -670,7 +691,7 @@ def _matches_product(row: ContentRow, product: Product) -> bool:
 
 def _product_confidence(category: str, items: list[ContentRow]) -> tuple[str, str]:
     if category in ("unboxing", "arrived"):
-        return "low", "到货内容仅作为候选信号，需逐条核验账号、获取方式与真实到货"
+        return "low", "来源自动分析中；商品页按原文依据区分自购到货、实物展示与送测"
     if len(items) >= 2:
         return "medium", f"{len(items)} 条相关内容"
     return "low", "单一来源，待更多证据"
@@ -678,7 +699,7 @@ def _product_confidence(category: str, items: list[ContentRow]) -> tuple[str, st
 
 def _product_conclusion(category: str, items: list[ContentRow], product: Product) -> str:
     if category in ("unboxing", "arrived"):
-        return f"{product.name}：发现 {len(items)} 条到货/开箱候选内容，尚未形成履约结论"
+        return f"{product.name}：收录 {len(items)} 条到货/开箱来源，最新自动判断见商品履约状态"
     return _CATEGORY_CONCLUSION.get(category, "")
 
 

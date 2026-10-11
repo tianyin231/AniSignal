@@ -12,6 +12,7 @@ const { community } = useGameSection()
 const scope = computed(() =>
   route.query.community === 'all' || (route.path === '/' && !route.query.community) ? 'all' : community.value,
 )
+const overviewTo = computed(() => ({ path: '/products', query: { community: scope.value } }))
 const fetchedAt = useState<Record<string, number>>('status-products-fetched-at', () => ({}))
 const { data, error, status, refresh } = await useLazyAsyncData(
   () => `status-product-${scope.value}`,
@@ -41,7 +42,7 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () =>
   status.value !== 'pending' && window.matchMedia('(min-width: 1280px)').matches !== Boolean(props.mobile),
 )
 
-// 右栏只做粗略速览：三轴状态行 + 待核验数，细节进详情页
+// 右栏只做粗略速览：三轴状态行 + 跟踪数，细节进详情页
 const axisMeta = [
   { key: 'official', icon: Building2 },
   { key: 'consumer', icon: Users },
@@ -50,20 +51,21 @@ const axisMeta = [
 </script>
 
 <template>
-  <section v-if="product || error" class="panel-glass p-4">
+  <section class="panel-solid min-w-0 p-4">
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约信号</h2>
-      <NuxtLink v-if="product" :to="{ path: `/products/${product.slug}`, query: { community: scope } }" class="link text-xs">详情</NuxtLink>
+      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100"><NuxtLink :to="overviewTo" class="inline-flex min-h-11 items-center hover:text-blue-600 dark:hover:text-blue-300">履约信号</NuxtLink></h2>
+      <NuxtLink :to="overviewTo" class="link inline-flex min-h-11 shrink-0 items-center text-xs">商品总览</NuxtLink>
     </div>
     <p v-if="error" role="alert" class="mt-2 text-xs text-amber-700 dark:text-amber-300">履约信号暂时更新失败。<button class="ml-1 underline" type="button" @click="refresh()">重试</button></p>
     <template v-if="product">
-    <!-- 多商品切换：更多商品上架后在这里选择 -->
+    <!-- 多商品按最近信号更新排序，切换只影响当前预览。 -->
     <div v-if="products.length > 1" class="mt-2 flex flex-wrap gap-1">
       <button
         v-for="p in products"
         :key="p.slug"
         type="button"
-        class="max-w-full truncate rounded-md px-2 py-1 text-[11px] transition-colors"
+        class="min-h-9 max-w-full truncate rounded-md px-2 py-1 text-xs transition-colors"
+        :aria-pressed="p.slug === product.slug"
         :class="p.slug === product.slug
           ? 'bg-blue-500/10 font-medium text-blue-700 dark:bg-blue-400/15 dark:text-blue-300'
           : 'text-slate-500 hover:bg-slate-200/70 dark:text-zinc-400 dark:hover:bg-zinc-800/70'"
@@ -72,23 +74,27 @@ const axisMeta = [
         {{ p.name }}
       </button>
     </div>
-    <p class="mt-1 truncate text-xs text-slate-400 dark:text-zinc-500">{{ product.name }}</p>
+    <NuxtLink :to="{ path: `/products/${product.slug}`, query: { community: scope } }" class="mt-1 block py-1 text-sm font-medium text-slate-800 hover:text-blue-600 dark:text-zinc-100 dark:hover:text-blue-300 [overflow-wrap:anywhere]">{{ product.name }}</NuxtLink>
     <div class="mt-3 space-y-1.5">
       <div
         v-for="axis in axisMeta"
         :key="axis.key"
-        class="flex items-center justify-between gap-2 rounded-lg border border-slate-900/5 bg-white/45 px-2.5 py-2 dark:border-white/10 dark:bg-white/5"
+        class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-zinc-700 dark:bg-zinc-800"
       >
         <span class="flex shrink-0 items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-zinc-300">
           <component :is="axis.icon" :size="13" /> {{ product.fulfillment[axis.key].label }}
         </span>
-        <span class="truncate text-xs font-medium text-slate-700 dark:text-zinc-200">{{ product.fulfillment[axis.key].state_label }}</span>
+        <span class="min-w-0 text-xs font-medium text-slate-700 dark:text-zinc-200 [overflow-wrap:anywhere]">{{ product.fulfillment[axis.key].state_label }}</span>
       </div>
     </div>
     <div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2.5 dark:border-zinc-800">
-      <span class="chip bg-amber-500/10 text-amber-700 dark:text-amber-300">{{ product.fulfillment.candidate_total }} 条待核验</span>
-      <span v-if="product.fulfillment.updated_at" class="mono text-[11px] text-slate-400">信号更新 {{ fmtTime(product.fulfillment.updated_at) }}</span>
+      <span v-if="product.fulfillment.candidate_total" class="chip bg-amber-500/10 text-amber-800 dark:text-amber-300">{{ product.fulfillment.candidate_total }} 条自动跟踪</span>
+      <span v-if="product.fulfillment.automated_count" class="chip bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{{ product.fulfillment.automated_count }} 条自动采纳</span>
+      <span v-if="product.fulfillment.updated_at" class="mono text-[11px] text-slate-500 dark:text-zinc-400">信号更新 {{ fmtTime(product.fulfillment.updated_at) }}</span>
     </div>
+    <NuxtLink :to="{ path: `/products/${product.slug}`, query: { community: scope } }" class="link mt-1 inline-flex min-h-11 items-center text-xs">查看商品详情 →</NuxtLink>
     </template>
+    <p v-else-if="status === 'pending'" class="mt-2 text-xs text-slate-600 dark:text-zinc-400">正在加载商品…</p>
+    <p v-else-if="!error" class="mt-2 text-xs leading-relaxed text-slate-600 dark:text-zinc-400">当前分区暂无追踪中的商品。</p>
   </section>
 </template>

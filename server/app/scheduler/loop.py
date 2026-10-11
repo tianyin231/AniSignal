@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _SHANGHAI = timezone(timedelta(hours=8))
 _local_morning_date = None
 _local_custom_sweep_at = None
+_local_fulfillment_sweep_at = None
 _CUSTOM_SWEEP_INTERVAL = timedelta(minutes=5)
 
 
@@ -60,6 +61,13 @@ async def local_loop(queue) -> None:
                 if _local_custom_sweep_at is None or now >= _local_custom_sweep_at:
                     await queue.enqueue_custom_sweep()
                     _local_custom_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
+                global _local_fulfillment_sweep_at
+                if _local_fulfillment_sweep_at is None or now >= _local_fulfillment_sweep_at:
+                    from app.services.fulfillment_review_sweep import enqueue_pending_fulfillment_reviews
+
+                    result = await enqueue_pending_fulfillment_reviews(session, queue.redis, queue.enqueue_review)
+                    _local_fulfillment_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
+                    logger.info("local fulfillment review sweep -> %s", result)
         except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
             logger.exception("local scheduler tick failed")
         await asyncio.sleep(settings.scheduler_poll_seconds)
@@ -146,6 +154,8 @@ async def main() -> None:
                     bucket = int(now.timestamp() // 300)
                     await redis.enqueue_job(
                         "review_pending_news", _job_id=f"review-pending-news:{bucket}")
+                    await redis.enqueue_job(
+                        "review_pending_fulfillment", _job_id=f"review-pending-fulfillment:{bucket}")
                     if not await redis.get(f"anisignal:custom-sweep-enqueued:{bucket}"):
                         job = await redis.enqueue_job(
                             "collect_custom_feeds", _job_id=f"custom-sweep:{bucket}")

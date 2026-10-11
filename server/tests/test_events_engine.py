@@ -103,7 +103,7 @@ async def test_product_contents_become_candidates_instead_of_stage(session):
     )
     await session.commit()
 
-    # 来源身份只是规则线索，不能替代“自购 + 真实到货”的逐条审核。
+    # 来源身份本身不等于自购到货，仍需明确的逐轴证据判断。
     seeded = dict(VIDEO_RAW, bvid="BVseed", title="爱弥斯键盘开箱：官方送测样品", owner_mid=500, owner_name="送测UP")
     users = [
         await _video("BVu1", "爱弥斯键盘开箱第一天", owner_mid=601, owner="用户甲"),
@@ -133,7 +133,7 @@ async def test_product_contents_become_candidates_instead_of_stage(session):
     assert event.product_id == product.id
     assert event.status_label is None
     assert event.confidence == "low"
-    assert "候选内容" in event.conclusion
+    assert "最新自动判断见商品履约状态" in event.conclusion
     signals = list(
         await session.scalars(
             select(ProductSignal).where(ProductSignal.product_id == product.id)

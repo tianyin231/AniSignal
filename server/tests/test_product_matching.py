@@ -69,9 +69,9 @@ async def test_new_quality_rules_and_transactional_seed(session):
 def test_ai_product_context_uses_same_text_match_and_not_search_keywords():
     from app.services.curation import _match_product_context
 
-    products = [{"name": "爱弥斯键盘", "terms": ["爱弥斯键盘"], "community": "wuwa"}]
+    products = [{"id": 1, "name": "爱弥斯键盘", "terms": ["爱弥斯键盘"], "community": "wuwa"}]
     assert _match_product_context(products, "wuwa", "爱弥斯－键盘开箱", "", []) == {
-        "name": "爱弥斯键盘", "matched_terms": ["爱弥斯键盘"],
+        "products": [{"id": 1, "name": "爱弥斯键盘", "matched_terms": ["爱弥斯键盘"]}],
     }
     assert _match_product_context(products, "wuwa", "爱弥斯人物传记", "", ["爱弥斯键盘"]) is None
     assert _match_product_context(products, "wuwa", "爱弥斯", "键盘", []) is None

@@ -79,6 +79,18 @@
       inset 0 1px 0 rgb(255 255 255 / 0.1),
       0 12px 32px -8px rgb(0 0 0 / 0.45);
   }
+  /* 商品结论与证据使用实底，避免壁纸图案透过正文。 */
+  .panel-solid {
+    border-radius: 14px;
+    background: var(--color-white);
+    border: 1px solid var(--color-slate-200);
+    box-shadow: 0 2px 8px rgb(15 23 42 / 0.04);
+  }
+  .dark .panel-solid {
+    background: var(--color-zinc-900);
+    border-color: var(--color-zinc-700);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+  }
   /* 悬浮菜单专用：比面板玻璃更实的底，保证文字可读 */
   .popover {
     border-radius: 14px;

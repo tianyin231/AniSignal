@@ -97,6 +97,21 @@ async def review_pending_news(ctx) -> dict:
     return {"candidates": len(ids)}
 
 
+async def review_pending_fulfillment(ctx) -> dict:
+    """补偿旧版、漏审和失败的履约判断；完整结果不重复计费。"""
+    from app.db import SessionLocal
+    from app.services.fulfillment_review_sweep import enqueue_pending_fulfillment_reviews
+    from app.services.queue import enqueue_review_jobs
+
+    async def enqueue(ids):
+        return await enqueue_review_jobs(ctx["redis"], ids)
+
+    async with SessionLocal() as session:
+        result = await enqueue_pending_fulfillment_reviews(session, ctx["redis"], enqueue)
+    logger.info("review_pending_fulfillment -> %s", result)
+    return result
+
+
 async def collect_custom_feeds(ctx) -> dict:
     """定制监控轮询：抓取到期用户监控源（每轮限量，内部自行限速）。"""
     from app.db import SessionLocal
@@ -192,6 +207,7 @@ class WorkerSettings:
         func(send_instant_notifications, keep_result=0),
         func(review_contents, keep_result=0, max_tries=3),
         review_pending_news,
+        review_pending_fulfillment,
         send_user_notification,
         send_morning_notifications,
         send_admin_emails,

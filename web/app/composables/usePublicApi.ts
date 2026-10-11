@@ -205,6 +205,8 @@ export interface FulfillmentAxis {
   state_label: string
   summary: string
   verified_count: number
+  automated_count?: number
+  manual_count?: number
   candidate_count: number
   updated_at: string | null
   signal_ids: number[]
@@ -217,6 +219,10 @@ export interface FulfillmentSnapshot {
   quality: FulfillmentAxis
   sample_count: number
   candidate_total: number
+  automated_count?: number
+  manual_count?: number
+  observation_count?: number
+  automation_mode?: 'automatic'
   last_verified_at: string | null
   updated_at?: string | null
 }
@@ -229,6 +235,8 @@ export interface ApiProductSignal {
   signal_label: string
   actor_type: string
   review_status: 'candidate' | 'verified' | 'rejected' | 'conflict'
+  review_method?: 'ai' | 'rule' | 'manual' | 'pending'
+  review_reason?: string
   ai_hint?: { kind: string; confidence: number; reason: string } | null
   occurred_at: string | null
   summary: string

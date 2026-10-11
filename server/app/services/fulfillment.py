@@ -1,4 +1,4 @@
-"""结构化商品履约信号：规则同步、人工审核与三轴状态投影。"""
+"""结构化商品履约信号：自动判断、人工纠错与三轴状态投影。"""
 
 import re
 
@@ -66,6 +66,32 @@ def _source_key(raw: RawContent, source: Source | None) -> str:
     return f"{raw.platform}:content:{raw.external_id}"
 
 
+def _review_method(signal: ProductSignal) -> str:
+    if signal.locked:
+        return "manual"
+    automation = (signal.details or {}).get("automation") or {}
+    if automation.get("method") == "ai":
+        return "ai"
+    return "rule" if signal.review_status == "verified" else "pending"
+
+
+def product_signal_types(*, title, text, category, product_id, actor_type, content_version, review_fulfillment) -> set[str]:
+    """规则提供候选，已追溯到原文的 AI 识别可补充规则未覆盖的表述。"""
+    from app.services.fulfillment_automation import SIGNAL_TYPES, decide_signal_automation
+
+    kinds = detect_product_signal_types(title, text, category)
+    if isinstance(review_fulfillment, dict) and review_fulfillment.get("schema_version") == 2:
+        for kind in SIGNAL_TYPES - kinds:
+            decision = decide_signal_automation(
+                signal_type=kind, product_id=product_id, actor_type=actor_type,
+                title=title, text=text, content_version=content_version,
+                review_fulfillment=review_fulfillment,
+            )
+            if decision["review_status"] == "verified":
+                kinds.add(kind)
+    return kinds
+
+
 async def sync_product_signals(
     session: AsyncSession, product_id: int, *, before: dict | None = None,
 ) -> int:
@@ -123,6 +149,10 @@ async def sync_product_signals(
         (evidence.raw_content_id, signal.signal_type): (signal, evidence)
         for signal, evidence in existing_rows
     }
+    raw_ids = {raw.id for _, raw, _, _ in rows}
+    reviews = {review.raw_content_id: review for review in await session.scalars(
+        select(ContentReview).where(ContentReview.raw_content_id.in_(raw_ids))
+    )} if raw_ids else {}
     expected = {}
     event_signal_types = {
         category: {kind} for category, kind in CATEGORY_TO_SIGNAL.items()
@@ -131,7 +161,14 @@ async def sync_product_signals(
     for event, raw, source, version in rows:
         if not matches_product_text(version.title, version.text, product.watch_terms or []):
             continue
-        for kind in detect_product_signal_types(version.title, version.text, version.category) & event_signal_types.get(event.category, set()):
+        review = reviews.get(raw.id)
+        kinds = product_signal_types(
+            title=version.title, text=version.text, category=version.category,
+            product_id=product_id, actor_type=source.identity if source else "unknown",
+            content_version=version.version,
+            review_fulfillment=review.fulfillment if review and review.relevant and not review.violation and not review.promotional else None,
+        )
+        for kind in kinds & event_signal_types.get(event.category, set()):
             expected[(raw.id, kind)] = (event, raw, source, version)
     changed = False
     for signal, evidence in existing_rows:
@@ -151,47 +188,59 @@ async def sync_product_signals(
         current = existing.get(key)
         if current:
             signal, evidence = current
-            # 不把其他分区历史信号换标签复活。
+            # 不把其他分区历史信号换标签复活，也不覆盖人工纠错。
             if signal.community != product_community:
                 continue
             signal.active = True
-            if not signal.locked:
-                signal.actor_type = actor
-                signal.occurred_at = raw.published_at or raw.collected_at
-                signal.summary = title
-                signal.confidence = 1.0 if is_official else 0.5
-                signal.review_status = "verified" if is_official else "candidate"
-                evidence.claim_quote = quote
-                evidence.independent_source_key = _source_key(raw, source)
-                evidence.acquisition_type = "seeded" if actor == "seeded" else "unknown"
-            changed = changed or session.is_modified(signal, include_collections=False) or session.is_modified(evidence, include_collections=False)
-            continue
+        else:
+            signal = ProductSignal(
+                product_id=product_id, community=product_community,
+                signal_type=signal_type, actor_type=actor, summary=title,
+                review_status="candidate", confidence=0.5,
+                details={"legacy_event_id": event.id, "legacy_category": event.category},
+                source_method="rule", active=True,
+            )
+            session.add(signal)
+            await session.flush()
+            evidence = ProductSignalEvidence(
+                signal_id=signal.id, raw_content_id=raw.id, claim_quote=quote,
+                acquisition_type="unknown", independent_source_key=_source_key(raw, source),
+            )
+            session.add(evidence)
+            existing[key] = (signal, evidence)
+            created += 1
+        if not signal.locked:
+            from app.services.fulfillment_automation import decide_signal_automation
 
-        signal = ProductSignal(
-            product_id=product_id,
-            community=product_community,
-            signal_type=signal_type,
-            actor_type=actor,
-            review_status="verified" if is_official else "candidate",
-            occurred_at=raw.published_at or raw.collected_at,
-            summary=title,
-            confidence=1.0 if is_official else 0.5,
-            details={"legacy_event_id": event.id, "legacy_category": event.category},
-            source_method="rule",
-            active=True,
-        )
-        session.add(signal)
-        await session.flush()
-        evidence = ProductSignalEvidence(
-            signal_id=signal.id,
-            raw_content_id=raw.id,
-            claim_quote=quote,
-            acquisition_type="seeded" if actor == "seeded" else "unknown",
-            independent_source_key=_source_key(raw, source),
-        )
-        session.add(evidence)
-        existing[key] = (signal, evidence)
-        created += 1
+            review = reviews.get(raw.id)
+            decision = decide_signal_automation(
+                signal_type=signal_type, product_id=product_id, actor_type=actor,
+                title=version.title, text=version.text, content_version=version.version,
+                review_fulfillment=review.fulfillment if review and review.relevant and not review.violation and not review.promotional else None,
+            )
+            # 已确认官方身份的明确公告仍可由规则采纳；AI 明确反证时可自动纠正。
+            if is_official and decision["review_status"] == "candidate":
+                decision = {"review_status": "verified", "actor_type": actor,
+                            "acquisition_type": "unknown", "confidence": 1.0,
+                            "reason": "已确认的官方账号发布履约公告", "method": "rule",
+                            "quote": quote, "signature": f"official:{version.version}:{signal_type}"}
+            previous = signal.review_status
+            previous_decision = (signal.details or {}).get("automation")
+            signal.actor_type = decision["actor_type"]
+            signal.review_status = decision["review_status"]
+            signal.confidence = decision["confidence"]
+            signal.occurred_at = raw.published_at or raw.collected_at
+            signal.summary = title
+            signal.details = {**(signal.details or {}), "automation": decision}
+            evidence.claim_quote = decision.get("quote") or quote
+            evidence.independent_source_key = _source_key(raw, source)
+            evidence.acquisition_type = decision["acquisition_type"]
+            if (previous_decision != decision or previous != signal.review_status) and (decision["method"] == "ai" or previous != signal.review_status):
+                session.add(ProductSignalRevision(
+                    signal_id=signal.id, actor="automation", previous_status=previous,
+                    next_status=signal.review_status, note=decision["reason"],
+                ))
+        changed = changed or session.is_modified(signal, include_collections=False) or session.is_modified(evidence, include_collections=False)
     if changed or created:
         product.fulfillment_updated_at = utcnow()
     await session.flush()
@@ -320,8 +369,8 @@ async def build_fulfillment_snapshot(
     else:
         latest_official = None
         official_state = "no_verified_signal"
-        official_label = "暂无已核验官方履约"
-        official_summary = "未发现已核验的官方履约信息"
+        official_label = "暂无官方履约公告"
+        official_summary = "持续监测官方来源，发现明确公告后自动更新"
         official_updated = None
 
     receipt_by_source = {}
@@ -337,15 +386,15 @@ async def build_fulfillment_snapshot(
     if len(receipt_sources) >= 3:
         consumer_state = "multiple_receipts"
         consumer_label = "多名独立用户到货"
-        consumer_summary = f"已核验 {len(receipt_sources)} 个独立自购账号的到货证据"
+        consumer_summary = f"已采纳 {len(receipt_sources)} 个独立自购账号的到货证据"
     elif receipt_sources:
         consumer_state = "first_receipt" if len(receipt_sources) == 1 else "growing_receipts"
         consumer_label = "首位普通用户到货" if len(receipt_sources) == 1 else "已有消费者到货"
-        consumer_summary = f"已核验 {len(receipt_sources)} 个独立自购账号的到货证据"
+        consumer_summary = f"已采纳 {len(receipt_sources)} 个独立自购账号的到货证据"
     else:
         consumer_state = "no_verified_receipt"
-        consumer_label = "暂无已核验消费者到货"
-        consumer_summary = "候选内容需确认是否为自购订单及真实到货"
+        consumer_label = "暂无明确自购到货证据"
+        consumer_summary = "自动识别自购、送测与转发；证据不足时继续跟踪"
     receipt_times = [
         s.occurred_at or s.updated_at
         for s, e in verified
@@ -357,6 +406,21 @@ async def build_fulfillment_snapshot(
         for signal, evidence in verified
         if signal.signal_type == "consumer_received" and evidence.acquisition_type == "seeded"
     }
+    observation_by_source = {
+        evidence.independent_source_key: signal
+        for signal, evidence in verified
+        if signal.signal_type == "consumer_received" and evidence.acquisition_type == "unknown"
+        and evidence.independent_source_key not in receipt_sources | sample_sources
+    }
+    if not receipt_sources and observation_by_source:
+        consumer_state = "observed_receipts"
+        consumer_label = "出现实物开箱"
+        consumer_summary = f"已采纳 {len(observation_by_source)} 个独立来源的实物展示，购买方式未注明"
+        receipt_times = [s.occurred_at or s.updated_at for s in observation_by_source.values()]
+    elif not receipt_sources and sample_sources:
+        consumer_state = "seeded_samples"
+        consumer_label = "出现送测样品"
+        consumer_summary = f"已采纳 {len(sample_sources)} 个送测来源，尚无明确自购到货证据"
 
     quality_by_source = {}
     for signal, evidence in verified:
@@ -367,12 +431,12 @@ async def build_fulfillment_snapshot(
     quality_candidates = {s.id for s, _ in candidates if s.signal_type == "quality_issue"}
     if len(quality_sources) >= 2:
         quality_state = "repeated_issue"
-        quality_label = "发现重复质量问题"
-        quality_summary = f"已核验 {len(quality_sources)} 个独立来源的质量反馈"
+        quality_label = "多来源反馈质量问题"
+        quality_summary = f"已采纳 {len(quality_sources)} 个独立来源的质量反馈，不代表整体故障率"
     elif quality_sources:
         quality_state = "isolated_issue"
         quality_label = "发现单例质量反馈"
-        quality_summary = "当前只有一个已核验来源，暂不能推断为普遍问题"
+        quality_summary = "当前只有一个可追溯来源，暂不能推断为普遍问题"
     else:
         quality_candidate_sources = {
             evidence.independent_source_key
@@ -383,19 +447,19 @@ async def build_fulfillment_snapshot(
             quality_state = "candidate_attention"
             quality_label = "多账号反馈质量问题"
             quality_summary = (
-                f"已有 {len(quality_candidate_sources)} 个独立来源的质量候选，尚未核验"
+                f"正在自动跟踪 {len(quality_candidate_sources)} 个独立来源，证据尚不充分"
             )
         else:
             quality_state = "no_verified_issue"
-            quality_label = "暂无已核验质量风险"
-            quality_summary = "候选质量反馈尚未形成可公开结论"
+            quality_label = "暂无明确质量风险"
+            quality_summary = "持续识别质量反馈，证据充分后自动更新"
     quality_times = [
         s.occurred_at or s.updated_at for s, _ in verified if s.id in quality_ids
     ]
 
     verified_times = [s.updated_at for s, _ in verified]
     product = await session.get(Product, product_id)
-    return {
+    snapshot = {
         "official": _axis(
             "official",
             "官方履约",
@@ -432,10 +496,21 @@ async def build_fulfillment_snapshot(
             _ai_preview(candidates, ai_hints, "quality_issue"),
         ),
         "sample_count": len(sample_sources),
+        "observation_count": len(observation_by_source),
+        "automated_count": len({s.id for s, _ in verified if _review_method(s) != "manual"}),
+        "manual_count": len({s.id for s, _ in verified if _review_method(s) == "manual"}),
+        "automation_mode": "automatic",
         "candidate_total": len({s.id for s, _ in candidates}),
         "last_verified_at": max(verified_times, default=None),
         "updated_at": (product.fulfillment_updated_at if product else None) or max((s.updated_at for s, _, _, _ in rows), default=None),
     }
+    for axis in (snapshot["official"], snapshot["consumer"], snapshot["quality"]):
+        accepted = set(axis["signal_ids"])
+        if axis["key"] == "consumer":
+            accepted.update(s.id for s, _ in verified if s.signal_type == "consumer_received")
+        axis["automated_count"] = len({s.id for s, _ in verified if s.id in accepted and _review_method(s) != "manual"})
+        axis["manual_count"] = len({s.id for s, _ in verified if s.id in accepted and _review_method(s) == "manual"})
+    return snapshot
 
 
 async def list_product_signals(
@@ -469,6 +544,8 @@ async def list_product_signals(
                 "signal_label": SIGNAL_LABELS.get(signal.signal_type, signal.signal_type),
                 "actor_type": signal.actor_type,
                 "review_status": signal.review_status,
+                "review_method": _review_method(signal),
+                "review_reason": ((signal.details or {}).get("automation") or {}).get("reason", "") if not signal.locked else "管理员已确认或纠正此信号",
                 "occurred_at": signal.occurred_at,
                 "summary": signal.summary,
                 "confidence": signal.confidence,

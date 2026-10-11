@@ -32,6 +32,7 @@ from app.models.enums import Category
 from app.services.ai import AiPoolCoolingDown, ai_available, chat, get_ai_config, record_usage
 from app.services.classify import HIDDEN_CATEGORIES
 from app.services.ai_news import constrain_news, parse_news
+from app.services.fulfillment_automation import has_current_fulfillment_review, is_grounded_quote, parse_fulfillment_review
 
 REVIEW_CONCURRENCY = 2
 # 多个采集目标会同时投递审核；并发上限按 worker 进程共享，避免每批各开一组。
@@ -121,8 +122,7 @@ async def review_contents(
                     ref_id=content_id,
                     status="failed",
                 )
-                if is_news:
-                    await session.commit()
+                await session.commit()
                 continue
             await record_usage(
                 session,
@@ -136,13 +136,18 @@ async def review_contents(
             if raw and raw.content_hash != candidate["content_hash"]:
                 # 新版入队可能被当前任务去重，必须让当前任务延迟重试。
                 stats.failed_batches += 1
+                await session.commit()
                 continue
             current_version = await session.scalar(select(ContentVersion.version).where(
                 ContentVersion.raw_content_id == content_id,
             ).order_by(ContentVersion.version.desc()).limit(1).with_for_update())
             if current_version != candidate["content_version"]:
                 stats.failed_batches += 1
+                await session.commit()
                 continue
+            from app.services.fulfillment import capture_content_fulfillment, refresh_content_fulfillment
+
+            snapshots = await capture_content_fulfillment(session, content_id)
             stats.reviewed += 1
             row = await session.get(ContentReview, content_id)
             if row is None:
@@ -155,7 +160,8 @@ async def review_contents(
             row.category_hint = decision["category_hint"]
             row.reason = decision["reason"]
             row.links = decision["links"]
-            row.fulfillment = decision.get("fulfillment")
+            fulfillment = decision.get("fulfillment")
+            row.fulfillment = {**fulfillment, "content_version": candidate["content_version"]} if fulfillment else None
             if is_news:
                 news = constrain_news(decision.get("news"), candidate)
                 row.news = {**news, "content_hash": candidate["content_hash"], "content_version": candidate["content_version"]} if news else None
@@ -175,17 +181,11 @@ async def review_contents(
                     )
                 if should_hide and not raw.hidden:
                     hidden_ids.append(content_id)
-                snapshots = {}
-                if raw.hidden != should_hide:
-                    from app.services.fulfillment import capture_content_fulfillment, refresh_content_fulfillment
-
-                    snapshots = await capture_content_fulfillment(session, content_id)
                 raw.hidden = should_hide
                 if snapshots:
                     await refresh_content_fulfillment(session, snapshots, reaggregate=not should_hide)
-            if is_news:
-                # 快讯逐条落库，一条慢请求不应拖住已完成的整批消息。
-                await session.commit()
+            # 每条审核与商品刷新完成就释放锁，不让慢模型占着整批商品锁。
+            await session.commit()
     await session.commit()
     # 审核带出了 AI 提取的外链中文名，外链聚合面板需要重建
     from app.api.public import invalidate_official_links_cache
@@ -255,7 +255,8 @@ async def _review_one(
         try:
             raw_response, usage = await attempt(with_image=True)
             decision = _parse_review(
-                raw_response, candidate["id"], bool(candidate.get("product_context"))
+                raw_response, candidate["id"], candidate.get("product_context"),
+                source_title=candidate.get("title") or "", source_text=candidate.get("text") or "",
             )
             if decision is None:
                 raise ValueError("model returned no valid review")
@@ -276,7 +277,8 @@ async def _review_one(
             json_mode=True,
         )
         decision = _parse_review(
-            raw_response, candidate["id"], bool(candidate.get("product_context"))
+            raw_response, candidate["id"], candidate.get("product_context"),
+            source_title=candidate.get("title") or "", source_text=candidate.get("text") or "",
         )
         if decision is None:
             raise ValueError("model returned no valid review")
@@ -597,6 +599,11 @@ async def _review_candidates(
         select(ContentReview).where(ContentReview.raw_content_id.in_(ids))
     )}
     for raw, version, source in rows:
+        text_plain = _plain(version.text or "")
+        community = getattr(raw, "community", None) or DEFAULT_COMMUNITY
+        product_context = _match_product_context(
+            tracked_products, community, version.title or "", text_plain, raw.matched_keywords or [],
+        )
         review = reviews.get(raw.id)
         if review is not None and not force:
             if get_community(raw.community).domain == "news":
@@ -604,12 +611,14 @@ async def _review_candidates(
                 if news.get("content_hash") == raw.content_hash and news.get("content_version") == version.version:
                     continue
             elif review.updated_at >= version.parsed_at:
-                continue
+                if not product_context or has_current_fulfillment_review(
+                    review.fulfillment, content_version=version.version,
+                    product_ids=[product["id"] for product in product_context["products"]],
+                ):
+                    continue
         normalized = version.normalized_json or {}
         media = normalized.get("media") or []
         cover = next((item for item in media if isinstance(item, str) and item), None)
-        text_plain = _plain(version.text or "")
-        community = getattr(raw, "community", None) or DEFAULT_COMMUNITY
         candidates.append(
             {
                 "id": raw.id,
@@ -625,13 +634,7 @@ async def _review_candidates(
                 "cover": None if get_community(community).domain == "news" else cover,
                 "matched_keywords": (raw.matched_keywords or [])[:12],
                 "known_terms": terms_by_community[community],
-                "product_context": _match_product_context(
-                    tracked_products,
-                    community,
-                    version.title or "",
-                    text_plain,
-                    raw.matched_keywords or [],
-                ),
+                "product_context": product_context,
             }
         )
     return candidates
@@ -643,14 +646,15 @@ def _match_product_context(
     """内容命中所属分区在售商品的匹配词时，附带商品上下文供 AI 做履约预判。"""
     from app.services.product_matching import matches_product_text
 
+    matches = []
     for product in tracked_products:
         if (product.get("community") or DEFAULT_COMMUNITY) != community:
             continue
         # 搜索溯源词只说明“由哪个任务抓到”，不能代替正文中的商品命中。
         hits = [term for term in product["terms"] if matches_product_text(title, text, [term])]
         if hits:
-            return {"name": product["name"], "matched_terms": hits[:6]}
-    return None
+            matches.append({"id": product["id"], "name": product["name"], "matched_terms": hits[:6]})
+    return {"products": matches} if matches else None
 
 
 async def _load_tracked_products(session: AsyncSession) -> list[dict]:
@@ -728,7 +732,8 @@ async def _event_groups(session: AsyncSession, ids: list[int]) -> dict[int, int]
 
 
 def _parse_review(
-    response: str, content_id: int, product_context_present: bool = False
+    response: str, content_id: int, product_context: dict | None = None,
+    *, source_title: str = "", source_text: str = "",
 ) -> dict | None:
     """解析单条审核判定；接受 {"review": {...}} 或 {"reviews": [{...}]} 两种形状。"""
     cleaned = response.strip()
@@ -767,37 +772,18 @@ def _parse_review(
             links.append({"url": url, "label": label})
     parsed_fulfillment = None
     fulfillment = item.get("fulfillment")
-    if isinstance(fulfillment, dict):
-        # 模型常用类目词（unboxing/arrived 等）描述履约类型，映射回标准 kind
-        kind_alias = {
-            "unboxing": "self_purchase", "arrived": "self_purchase",
-            "received": "self_purchase", "order": "self_purchase", "self": "self_purchase",
-            "sample": "pr_sample", "seeded": "pr_sample",
-            "repost": "forward", "video": "forward",
-            "normal": "none", "other": "none", "unknown": "none",
-        }
-        kind = str(fulfillment.get("kind") or "").strip().lower()
-        kind = kind_alias.get(kind, kind)
-        if kind in {"self_purchase", "pr_sample", "forward", "none"}:
-            parsed_fulfillment = {
-                "kind": kind,
-                "confidence": max(0, min(100, int(fulfillment.get("confidence") or 0))),
-                "reason": str(fulfillment.get("reason") or "")[:80],
-            }
-    if parsed_fulfillment is None and product_context_present:
-        # 小模型常丢尾部字段：从它自己的类目与理由做确定性推导（宁低置信不下架判断）
-        reason_text = str(item.get("reason") or "")
-        if category in {"unboxing", "arrived"}:
-            # 先看自购正向词（理由里"非官方送测"这类否定语境不作为送测依据）
-            if any(term in reason_text for term in ("自购", "订单", "入手", "自己买")):
-                kind = "self_purchase"
-            elif any(term in reason_text for term in ("送测", "样品", "寄送", "官方提供")):
-                kind = "pr_sample"
-            else:
-                kind = "self_purchase"  # 开箱/到货类目默认自购概率更高
-            parsed_fulfillment = {"kind": kind, "confidence": 60, "reason": reason_text[:80] or "开箱/到货类目候选"}
-        elif category == "quality":
-            parsed_fulfillment = {"kind": "none", "confidence": 30, "reason": "质量反馈，履约方式未知"}
+    if product_context:
+        parsed_fulfillment = parse_fulfillment_review(
+            fulfillment, product_ids=[product["id"] for product in product_context["products"]],
+        )
+        if parsed_fulfillment is None:
+            # 不把漏掉的履约字段猜成自购或完成；后台会继续补偿该内容。
+            return None
+        if any(signal["verdict"] != "uncertain" and not is_grounded_quote(
+            signal["quote"], title=source_title, text=source_text,
+        ) for signal in parsed_fulfillment["signals"]):
+            # 结构齐全但编造引文也没有完成审核，仍须后台重试。
+            return None
     return {
         "relevant": relevant,
         "promotional": promotional,
@@ -848,7 +834,7 @@ def _review_system_prompt(community: str = DEFAULT_COMMUNITY) -> str:
 2. 输入里的 known_terms 是管理员维护的"已确认相关词表"（含最新角色/系统/活动名）。标题、正文或封面命中词表中任一词，即视为相关（relevant=true）。
 
 输出 JSON 的每个字段都必须包含（product_context 存在时 fulfillment 不可省略）：
-{{"review":{{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据","fulfillment":{{"kind":"none","confidence":30,"reason":"不涉及商品履约"}}}}}}。
+{{"review":{{"relevant":true,"promotional":false,"violation":false,"quality_score":80,"category_hint":"version_update","reason":"简短依据","links":[],"fulfillment":null}}}}。有 product_context 时须将 fulfillment 改为下面的完整对象。
 
 规则：
 - relevant=false 仅用于内容明确属于其他游戏/产品{other_games}且与{game}生态无关联的情形；绝不因"不认识某角色/某活动/某梗"而判 false。身份 identity 为 official 的内容来自已确认的官方账号，除非违规，relevant 恒为 true。
@@ -857,8 +843,13 @@ def _review_system_prompt(community: str = DEFAULT_COMMUNITY) -> str:
 - quality_score 为 0 到 100 的编辑价值：官方版本、角色、活动、维护和实质公告优先；社区内容重视明确主题、信息量和独立表达，播放量只代表热度。
 - category_hint 只能是 official_announce/version_update/presale/balance/delay/shipping/arrived/unboxing/review/quality/promotion/chat/other 或 null。
 - links：从正文中提取的站外链接数组，只收有实际内容的页面（网页活动、H5 小游戏、奖励领取、新闻详情等），忽略社媒主页、下载页、官网首页和视频页；每项 {{"url":"原文中的完整链接","label":"不超过 12 字的简体中文名称，说明该链接是什么（如 B站主题收藏集、H5 签到活动）"}}；没有则返回空数组 []。label 必须是简体中文。
-- 若输入包含 product_context（内容命中了在售联名商品的匹配词），必须输出商品履约预判字段：
-  "fulfillment":{{"kind":"...","confidence":0-100,"reason":"不超过 60 字的简体中文依据"}}，缺省该字段视为输出错误。
-  kind 只能是 self_purchase（自购开箱/到货晒单/订单截图）、pr_sample（官方送测/样品/共创）、forward（转发剪辑/非实拍内容）、none（普通资讯，与商品履约无关）。
-  依据要点：实拍图、订单或收货信息、开箱时间线指向 self_purchase；提到送测、样品、官方寄送、共创指向 pr_sample；明显转发他人视频或二剪指向 forward；拿不准时 confidence 不超过 40。
+- product_context.products 是本条内容命中的商品列表。必须逐商品、逐信号独立判断并输出：
+  "fulfillment":{{"schema_version":2,"kind":"none","confidence":30,"reason":"简短总述","signals":[{{"product_id":1,"signal_type":"consumer_received","verdict":"uncertain","confidence":30,"quote":"","reason":"购买方式未说明","acquisition_type":"unknown"}}]}}。
+  示例只展示一项，product_id 必须使用输入商品 id；每个商品必须完整返回以下七种 signal_type 各一项，不得遗漏或重复：presale_open 开启预售、balance_open 开启尾款、delayed 延期、shipping_started 已开始发货、aftersales_notice 售后说明、consumer_received 作者实物到手展示、quality_issue 商品质量问题。
+  verdict 只能是 supported（原文支持）、unsupported（原文明示否定/未来计划/转发冒充自身到货）、uncertain（没有提及或无法判断）；没有相关信息填 uncertain、confidence=0、quote=""、reason="原文未涉及"。confidence 为 0-100，reason 简短。
+  quote 必须逐字摘自输入 title 或 text，同一段中保留必要语境；不得从图片、matched_keywords、模型推论或外部知识编造文字，不得拼接标题和正文。supported/unsupported 需原文引文，无法摘录则 uncertain。
+  acquisition_type 只能是 self_purchase/seeded/unknown。只有原文明示自购、自费、自己下单/付款才是 self_purchase；送测、样品、官方寄送是 seeded；仅开箱、到货、实拍或展示订单但无本人购买说明，不得推断自购。确认实物展示但购买方式不明时可 supported + unknown。引文需覆盖购买方式依据。
+  区分作者本人和转述他人；转发、二剪不能当作作者自己收货。未来发货日期/承诺不等于已经发货；“没有质量问题”等否定不能判质量问题。开箱、质量问题及售后可同时出现，每轴单独引用，确认到货不能顺便确认质量。
+  多商品对比必须核对每句话的主语：“爱弥斯比较值，达妮娅质量一般”不支持爱弥斯质量问题；不能将另一商品评价归给标题商品。“用Amg65改了一个爱弥斯主题键盘”等其他型号DIY不等于目标联名商品，consumer_received 应 unsupported；“不断连”是否定故障。本人补款/付尾款可作为购买方式证据，但不能单凭付款证明已经收货。
+  kind 仅保留兼容总述，可用 self_purchase/pr_sample/forward/none；不确定用 none。content_version 由服务端绑定，不需要模型填写。商品或轴缺项视作输出错误。
 - 若输入附带封面图，须结合图片与文字综合判断：图片低俗或违规记 violation=true；图文完全无关可作为参考，但相关性仍按词表规则定。不得补充外部事实。"""
