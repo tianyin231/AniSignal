@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime, timedelta
 from html import escape
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -90,7 +90,9 @@ async def prepare_instant_notifications(session: AsyncSession) -> int:
             await session.commit()
             continue
         if user.instant_notification_cursor is None:
-            user.instant_notification_cursor = await session.scalar(select(func.max(EventRevision.id))) or 0
+            user.instant_notification_cursor = await session.scalar(
+                select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1).with_for_update()
+            ) or 0
             await session.commit()
             continue
         revisions = list(await session.scalars(select(EventRevision).where(
