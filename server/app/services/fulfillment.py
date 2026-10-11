@@ -4,6 +4,7 @@ import re
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.communities import DEFAULT_COMMUNITY
@@ -173,6 +174,7 @@ async def _active_signal_rows(session: AsyncSession, product_id: int) -> list[tu
     return list(
         await session.execute(
             select(ProductSignal, ProductSignalEvidence, RawContent, Source)
+            .options(defer(RawContent.raw_json))
             .join(ProductSignalEvidence, ProductSignalEvidence.signal_id == ProductSignal.id)
             .join(RawContent, RawContent.id == ProductSignalEvidence.raw_content_id)
             .join(Source, Source.id == RawContent.source_id, isouter=True)
@@ -185,6 +187,22 @@ async def _active_signal_rows(session: AsyncSession, product_id: int) -> list[tu
             .order_by(ProductSignal.occurred_at.desc(), ProductSignal.id.desc())
         )
     )
+
+
+async def load_product_signal_data(session: AsyncSession, product_id: int) -> tuple[list, dict]:
+    """同一次商品响应共享信号与 AI 提示，避免三轴快照和候选列表各查一遍。"""
+    rows = await _active_signal_rows(session, product_id)
+    raw_ids = {e.raw_content_id for _, e, _, _ in rows}
+    hints = {}
+    if raw_ids:
+        result = await session.execute(
+            select(ContentReview.raw_content_id, ContentReview.fulfillment).where(
+                ContentReview.raw_content_id.in_(raw_ids),
+                ContentReview.fulfillment.is_not(None),
+            )
+        )
+        hints = dict(result.all())
+    return rows, hints
 
 
 KIND_PREVIEW_LABELS = {
@@ -245,22 +263,12 @@ def _axis(
     }
 
 
-async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> dict:
-    rows = await _active_signal_rows(session, product_id)
+async def build_fulfillment_snapshot(
+    session: AsyncSession, product_id: int, *, signal_data: tuple[list, dict] | None = None
+) -> dict:
+    rows, ai_hints = signal_data if signal_data is not None else await load_product_signal_data(session, product_id)
     verified = [(s, e) for s, e, _, _ in rows if s.review_status == "verified"]
     candidates = [(s, e) for s, e, _, _ in rows if s.review_status == "candidate"]
-
-    # 候选信号的 AI 履约预判（未核验时三轴的补充结论）
-    ai_hints: dict[int, dict] = {}
-    candidate_raw_ids = {e.raw_content_id for _, e in candidates}
-    if candidate_raw_ids:
-        hint_rows = await session.execute(
-            select(ContentReview.raw_content_id, ContentReview.fulfillment).where(
-                ContentReview.raw_content_id.in_(candidate_raw_ids),
-                ContentReview.fulfillment.is_not(None),
-            )
-        )
-        ai_hints = {rid: hint for rid, hint in hint_rows}
 
     official = [(s, e) for s, e in verified if s.actor_type == "official" and s.signal_type in OFFICIAL_TYPES]
     official_candidates = {s.id for s, _ in candidates if s.signal_type in OFFICIAL_TYPES}
@@ -390,24 +398,13 @@ async def build_fulfillment_snapshot(session: AsyncSession, product_id: int) -> 
 
 
 async def list_product_signals(
-    session: AsyncSession, product_id: int, *, include_rejected: bool = False
+    session: AsyncSession, product_id: int, *, include_rejected: bool = False,
+    signal_data: tuple[list, dict] | None = None, include_notes: bool = True,
 ) -> list[dict]:
-    from app.models import ContentReview
-
-    rows = await _active_signal_rows(session, product_id)
+    rows, ai_hints = signal_data if signal_data is not None else await load_product_signal_data(session, product_id)
     last_notes: dict[int, str] = {}
     signal_ids = [signal.id for signal, _, _, _ in rows]
-    ai_hints: dict[int, dict] = {}
-    if signal_ids:
-        raw_ids = {evidence.raw_content_id for _, evidence, _, _ in rows}
-        review_rows = await session.execute(
-            select(ContentReview.raw_content_id, ContentReview.fulfillment).where(
-                ContentReview.raw_content_id.in_(raw_ids),
-                ContentReview.fulfillment.is_not(None),
-            )
-        )
-        ai_hints = {rid: hint for rid, hint in review_rows}
-    if signal_ids:
+    if signal_ids and include_notes:
         revisions = await session.scalars(
             select(ProductSignalRevision)
             .where(ProductSignalRevision.signal_id.in_(signal_ids))

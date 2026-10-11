@@ -38,14 +38,16 @@ const homeCommunity = computed(() => (aggregate.value ? 'all' : community.value)
 // 客户端先切换频道并显示加载状态；服务端首屏仍等待数据。
 const eventsRequest = useLazyAsyncData(
   () => `home-events-${homeCommunity.value}`,
-  () => api<ApiEventList>('/api/events', {
+  (_app, { signal }) => api<ApiEventList>('/api/events', {
+    signal,
     query: { community: homeCommunity.value, published_within_hours: 24, limit: 10 },
   }),
   { watch: [homeCommunity] },
 )
 const officialRequest = useLazyAsyncData(
   () => `home-official-${homeCommunity.value}-${page.value}`,
-  () => api<PublicContentList>('/api/contents', {
+  (_app, { signal }) => api<PublicContentList>('/api/contents', {
+    signal,
     query: {
       community: homeCommunity.value,
       identity: 'official',
@@ -58,7 +60,8 @@ const officialRequest = useLazyAsyncData(
 )
 const communityRequest = useLazyAsyncData(
   () => `home-community-${homeCommunity.value}-${page.value}`,
-  () => api<PublicContentList>('/api/contents', {
+  (_app, { signal }) => api<PublicContentList>('/api/contents', {
+    signal,
     query: {
       community: homeCommunity.value,
       exclude_identity: 'official',
@@ -71,22 +74,22 @@ const communityRequest = useLazyAsyncData(
 )
 const highlightsRequest = useLazyAsyncData(
   () => `home-highlights-${homeCommunity.value}`,
-  () => api<PublicContentList>('/api/highlights', { query: { community: homeCommunity.value, limit: 5 } }),
+  (_app, { signal }) => api<PublicContentList>('/api/highlights', { query: { community: homeCommunity.value, limit: 5 }, signal }),
   { watch: [homeCommunity] },
 )
 const trendingRequest = useLazyAsyncData(
   () => `home-trending-${homeCommunity.value}`,
-  () => api<PublicContentList>('/api/trending', { query: { community: homeCommunity.value, hours: 24, limit: 5 } }),
+  (_app, { signal }) => api<PublicContentList>('/api/trending', { query: { community: homeCommunity.value, hours: 24, limit: 5 }, signal }),
   { watch: [homeCommunity] },
 )
 const calendarRequest = useLazyAsyncData(
   () => `home-calendar-${homeCommunity.value}`,
-  () => api<CalendarDto>('/api/calendar', { query: { community: homeCommunity.value } }),
+  (_app, { signal }) => api<CalendarDto>('/api/calendar', { query: { community: homeCommunity.value }, signal }),
   { watch: [homeCommunity] },
 )
 const codesRequest = useLazyAsyncData(
   () => `home-codes-${homeCommunity.value}`,
-  () => api<CodesDto>('/api/codes', { query: { community: homeCommunity.value } }),
+  (_app, { signal }) => api<CodesDto>('/api/codes', { query: { community: homeCommunity.value }, signal }),
   { watch: [homeCommunity] },
 )
 
@@ -161,6 +164,7 @@ const loading = computed(() =>
   [eventsStatus, officialStatus, communityStatus].some((s) => s.value === 'pending'),
 )
 const refreshing = ref(false)
+const homeError = computed(() => [eventsRequest, officialRequest, communityRequest, highlightsRequest, trendingRequest, calendarRequest, codesRequest].some(request => request.error.value))
 
 function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
@@ -190,6 +194,7 @@ async function refreshHome() {
 // 有差异时亮出「有新内容」提示，由用户决定何时更新。
 const pendingNewContent = ref(false)
 let updateTimer: ReturnType<typeof setInterval> | undefined
+let probeController: AbortController | undefined
 
 function currentHeads(): [string | null, string | null] {
   const officialHead = officialData.value?.items[0]?.id
@@ -200,13 +205,14 @@ function currentHeads(): [string | null, string | null] {
   ]
 }
 
-async function probeHead(identity: 'official' | 'community'): Promise<string | null> {
+async function probeHead(identity: 'official' | 'community', scope: string, signal: AbortSignal): Promise<string | null> {
   const res = await api<PublicContentList>('/api/contents', {
+    signal,
     query: {
-      community: homeCommunity.value,
+      community: scope,
       limit: 1,
       published_within_hours: 168,
-      ...(identity === 'official' ? { identity } : { exclude_identity: identity }),
+      ...(identity === 'official' ? { identity } : { exclude_identity: 'official' }),
     },
   })
   return res.items[0]?.id != null ? String(res.items[0].id) : null
@@ -214,18 +220,23 @@ async function probeHead(identity: 'official' | 'community'): Promise<string | n
 
 async function checkForUpdates() {
   if (document.visibilityState !== 'visible') return
-  if (pendingNewContent.value || loading.value || refreshing.value) return
+  if (page.value !== 1 || pendingNewContent.value || loading.value || refreshing.value || homeError.value || probeController) return
+  const scope = homeCommunity.value
+  const controller = new AbortController()
+  probeController = controller
   try {
     const [officialHead, communityHead] = await Promise.all([
-      probeHead('official'),
-      probeHead('community'),
+      probeHead('official', scope, controller.signal),
+      probeHead('community', scope, controller.signal),
     ])
+    if (controller.signal.aborted || scope !== homeCommunity.value || page.value !== 1) return
     const [currentOfficial, currentCommunity] = currentHeads()
     const changed
-      = (officialHead && currentOfficial && officialHead !== currentOfficial)
-        || (communityHead && currentCommunity && communityHead !== currentCommunity)
+      = (officialHead && officialHead !== currentOfficial)
+        || (communityHead && communityHead !== currentCommunity)
     if (changed) pendingNewContent.value = true
   } catch { /* 探测失败静默跳过 */ }
+  finally { if (probeController === controller) probeController = undefined }
 }
 
 function onVisibilityChange() {
@@ -241,6 +252,7 @@ async function applyUpdates() {
 }
 
 watch([page, homeCommunity], () => {
+  probeController?.abort()
   pendingNewContent.value = false
 })
 
@@ -249,6 +261,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisibilityChange)
 })
 onBeforeUnmount(() => {
+  probeController?.abort()
   if (updateTimer) clearInterval(updateTimer)
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
@@ -296,6 +309,9 @@ onBeforeUnmount(() => {
     </div>
 
     <OfficialLinks variant="strip" />
+    <section v-if="homeError" role="alert" class="panel mb-4 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+      部分内容暂时加载失败。<button type="button" class="ml-1 underline" :disabled="refreshing" @click="refreshHome">重新加载</button>
+    </section>
     <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
 
     <template v-else>

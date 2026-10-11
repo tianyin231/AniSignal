@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import BotDelivery, BotTarget, ContentSchedule, ContentVersion, RawContent, RedeemCode, Source
+from app.models import AiUsage, BotDelivery, BotTarget, ContentSchedule, ContentVersion, RawContent, RedeemCode, Source
 from app.services import extract as extract_module
 from app.services.extract import _parse_extraction, extract_entities, sweep_extractions
 from app.services.ingest import ingest_items
@@ -199,6 +199,36 @@ async def test_sweep_extracts_pending_official_only(client, session, monkeypatch
 
     # 再扫一轮：无待抽取内容
     assert (await sweep_extractions(session))["candidates"] == 0
+
+
+@pytest.mark.parametrize("failure", [TimeoutError("upstream timeout"), "not JSON"])
+async def test_extraction_failure_is_retried_after_cooldown(session, monkeypatch, failure):
+    content_id = await _seed_official(session)
+    raw = await session.get(RawContent, content_id)
+    chat = AsyncMock(side_effect=[failure if isinstance(failure, Exception) else (failure, None),
+                                 ('{"schedules": [], "codes": []}', None)])
+    monkeypatch.setattr(extract_module, "chat", chat)
+    monkeypatch.setattr(extract_module, "get_ai_config", AsyncMock(return_value=_fake_config()))
+    assert (await sweep_extractions(session))["failed"] == 1
+    assert raw.extracted_at is None
+    assert (await sweep_extractions(session))["candidates"] == 0
+    monkeypatch.setattr("app.services.ai.utcnow", lambda: utcnow() + timedelta(minutes=11))
+    assert (await sweep_extractions(session))["candidates"] == 1
+    assert raw.extracted_at is not None
+    assert chat.await_count == 2
+
+
+async def test_extraction_stops_after_three_failures(session, monkeypatch):
+    content_id = await _seed_official(session)
+    version = await session.scalar(select(ContentVersion).where(ContentVersion.raw_content_id == content_id))
+    version.parsed_at = utcnow() - timedelta(hours=2)
+    session.add_all([AiUsage(task="extract_entities", ref_id=content_id, model="test", status="failed",
+                             created_at=utcnow() - timedelta(hours=1)) for _ in range(3)])
+    await session.commit()
+    chat = AsyncMock()
+    monkeypatch.setattr(extract_module, "chat", chat)
+    assert (await sweep_extractions(session))["candidates"] == 0
+    chat.assert_not_awaited()
 
 
 async def test_calendar_groups_by_status_and_codes_hide_expired(client, session):

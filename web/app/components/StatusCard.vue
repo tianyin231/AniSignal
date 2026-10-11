@@ -8,12 +8,25 @@ const route = useRoute()
 const { community } = useGameSection()
 // 履约信号跟随页面视角：community=all（首页聚合）时展示全部分区商品
 const scope = computed(() =>
-  String(route.query.community || '') === 'all' ? 'all' : community.value,
+  route.query.community === 'all' || (route.path === '/' && !route.query.community) ? 'all' : community.value,
 )
+const fetchedAt = useState<Record<string, number>>('status-products-fetched-at', () => ({}))
 const { data } = await useLazyAsyncData(
   () => `status-product-${scope.value}`,
-  () => api<ApiProductList>('/api/products', { query: { community: scope.value } }),
-  { watch: [scope] },
+  async (_app, { signal }) => {
+    const key = `status-product-${scope.value}`
+    const result = await api<ApiProductList>('/api/products', { query: { community: scope.value }, signal })
+    fetchedAt.value[key] = Date.now()
+    return result
+  },
+  {
+    dedupe: 'defer',
+    // 桌面与移动端卡片同时挂载，只共享短期结果，不阻止手动刷新。
+    getCachedData: (key, app, { cause }) => {
+      if (cause === 'refresh:manual' || cause === 'refresh:hook') return
+      if (app.isHydrating || Date.now() - (fetchedAt.value[key] || 0) < 30_000) return app.payload.data[key]
+    },
+  },
 )
 const products = computed(() => data.value?.items ?? [])
 // 多商品：默认展示第一个，可通过 chips 切换

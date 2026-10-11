@@ -4,7 +4,7 @@
 - 只处理官方身份内容（Source.identity=official），非官方不抽取。
 - 抽取过的内容置 raw_contents.extracted_at，无论结果是否为空都算完成（不重复付费）。
 - 新兑换码 / 维护延期即时进入 bot 推送通道（updates 类，按目标 community 匹配）。
-- AI 失败安全：无配置/超时/解析失败只影响当轮，内容仍标记已抽取。
+- AI 临时失败保留待抽取状态；后台限次退避补偿。
 """
 
 import json
@@ -14,12 +14,12 @@ import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
 from app.models import BotTarget, ContentSchedule, RawContent, RedeemCode, Source, ContentVersion
-from app.services.ai import ai_available, chat, get_ai_config, record_usage
+from app.services.ai import ai_available, chat, get_ai_config, record_usage, retry_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def _date_supported(value: str, evidence: str, published_at: datetime) -> bool:
     return False
 
 
-def _parse_extraction(raw_out: str, *, source_text: str | None = None, published_at: datetime | None = None) -> tuple[list[dict], list[dict]]:
+def _parse_extraction(raw_out: str, *, source_text: str | None = None, published_at: datetime | None = None, strict: bool = False) -> tuple[list[dict], list[dict]]:
     """健壮解析抽取结果（容忍 ```json 围栏与字段缺失）。"""
     text = (raw_out or "").strip()
     if text.startswith("```"):
@@ -88,9 +88,15 @@ def _parse_extraction(raw_out: str, *, source_text: str | None = None, published
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
+        if strict:
+            raise ValueError("invalid extraction JSON") from None
         return [], []
     if not isinstance(payload, dict):
+        if strict:
+            raise ValueError("invalid extraction object")
         return [], []
+    if strict and any(not isinstance(payload.get(key), list) for key in ("schedules", "codes")):
+        raise ValueError("extraction must contain schedules and codes lists")
     schedules: list[dict] = []
     for entry in payload.get("schedules") or []:
         if not isinstance(entry, dict):
@@ -215,23 +221,22 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
     published_bj = published + timedelta(hours=8)
     user = _USER_TEMPLATE.format(year=published_bj.year, published_at=f"{published_bj:%Y/%m/%d %H:%M}（北京时间）", title=title, text=text)
     started = time.monotonic()
+    usage = None
     try:
         raw_out, usage = await chat(config, _SYSTEM, user, json_mode=True)
+        schedules, codes = _parse_extraction(raw_out, source_text=f"{title}\n{text}", published_at=published, strict=True)
     except Exception as exc:  # noqa: BLE001
         await record_usage(
-            session, task="extract_entities", config=config, usage=None,
+            session, task="extract_entities", config=config, usage=usage,
             duration_ms=int((time.monotonic() - started) * 1000),
             ref_id=content_id, status="failed",
         )
-        raw.extracted_at = utcnow()
-        await session.commit()
         return {"status": "failed", "reason": str(exc)[:200]}
     await record_usage(
         session, task="extract_entities", config=config, usage=usage,
         duration_ms=int((time.monotonic() - started) * 1000), ref_id=content_id,
     )
 
-    schedules, codes = _parse_extraction(raw_out, source_text=f"{title}\n{text}", published_at=published)
     community = raw.community or "wuwa"
     now = utcnow()
     new_schedules = 0
@@ -339,6 +344,9 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
 async def sweep_extractions(session: AsyncSession, limit: int = EXTRACT_BATCH_LIMIT) -> dict:
     """扫一批待抽取的官方内容（30 天内、未抽取、未下架）。"""
     cutoff = utcnow() - timedelta(days=EXTRACT_WINDOW_DAYS)
+    latest_parsed = select(func.max(ContentVersion.parsed_at)).where(
+        ContentVersion.raw_content_id == RawContent.id,
+    ).correlate(RawContent).scalar_subquery()
     ids = list(
         await session.scalars(
             select(RawContent.id)
@@ -348,6 +356,7 @@ async def sweep_extractions(session: AsyncSession, limit: int = EXTRACT_BATCH_LI
                 RawContent.hidden.is_(False),
                 RawContent.extracted_at.is_(None),
                 RawContent.collected_at >= cutoff,
+                retry_allowed("extract_entities", latest_parsed),
             )
             .order_by(RawContent.id.desc())
             .limit(limit)

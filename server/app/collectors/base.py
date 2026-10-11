@@ -7,6 +7,7 @@ CLI/HTTP 返回的外层结构在不同平台差异很大，且可能随版本�
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 from app.schemas.content import FetchResult
@@ -69,6 +70,14 @@ class CollectorError(RuntimeError):
     """采集失败（网络/CLI/风控），用于健康状态更新。"""
 
 
+class CollectorDeferred(CollectorError):
+    """平台冷却期间未发出请求；延后调度，不算一次真实采集失败。"""
+
+    def __init__(self, message: str, *, retry_at: datetime):
+        super().__init__(message)
+        self.retry_at = retry_at
+
+
 USER_AGENT = "AniSignal/0.1 (public content monitor)"
 
 
@@ -125,6 +134,7 @@ async def platform_slot(redis: Any, platform: str, min_interval_seconds: float):
 
 __all__ = [
     "CollectorError",
+    "CollectorDeferred",
     "FetchResult",
     "extract_items",
     "find_first_list",

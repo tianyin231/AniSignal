@@ -335,6 +335,6 @@ export function usePublicApi() {
   const config = useRuntimeConfig()
   // SSR 直连 FastAPI；浏览器走同源（Nitro routeRules 代理）
   const baseURL = import.meta.server ? config.apiSsrBase : config.public.apiBase
-  const api = $fetch.create({ baseURL })
+  const api = $fetch.create({ baseURL, timeout: 15_000, retry: 0 })
   return { api }
 }

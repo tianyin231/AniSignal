@@ -6,6 +6,7 @@ export default defineNuxtConfig({
   // 私有项目不需要遥测；同时避免首跑交互提示阻塞终端
   telemetry: false,
   css: ['~/assets/css/main.css'],
+  nitro: { compressPublicAssets: true },
   runtimeConfig: {
     // SSR 服务端直连 FastAPI（app 容器内同网络命名空间）
     apiSsrBase: 'http://127.0.0.1:8000',

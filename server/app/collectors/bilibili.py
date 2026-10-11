@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import httpx
 
 from app.clock import utcnow
-from app.collectors.base import CollectorError, extract_items
+from app.collectors.base import CollectorDeferred, CollectorError, extract_items
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
@@ -84,8 +84,9 @@ class BilibiliCollector:
         """
         command = args[0] if args else ""
         if _circuit_open(command):
-            raise BiliRiskControlError(
-                f"bili {command} skipped: circuit open after risk-control refusals"
+            raise CollectorDeferred(
+                f"bili {command} skipped: circuit open after risk-control refusals",
+                retry_at=_CIRCUIT_STATE[command]["until"],
             )
         last_error: Exception | None = None
         for attempt in range(self._max_retries + 1):

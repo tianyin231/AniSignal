@@ -298,7 +298,7 @@ onMounted(refreshRuns)
             <td class="px-4 py-2 text-slate-600 dark:text-zinc-300">{{ targetName(run.target_id) }}</td>
             <td class="mono px-4 py-2 text-slate-400">{{ fmtTime(run.started_at) }}</td>
             <td class="px-4 py-2">
-              <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-slate-500/10 text-slate-500'">{{ run.status }}</span>
+              <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-slate-500/10 text-slate-500'">{{ run.status === 'skipped' ? '冷却跳过' : run.status }}</span>
             </td>
             <td class="mono px-4 py-2 text-slate-500 dark:text-zinc-400">
               抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 入库 {{ run.items_new ?? 0 }}

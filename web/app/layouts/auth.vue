@@ -6,11 +6,20 @@ import { categoryMeta, toAppEvent } from '~/utils/public-utils'
 // 认证专属布局：极简品牌头 + 居中表单 + 站点内容预览（真实数据）
 const { api } = usePublicApi()
 const { community } = useGameSection()
-const { data: stats } = await useAsyncData('auth-stats', () => api<PublicStats>('/api/stats'))
-const { data: eventsData } = await useAsyncData(
+const showPreview = ref(false)
+let previewMedia: MediaQueryList | undefined
+const updatePreview = () => { showPreview.value = previewMedia?.matches ?? false }
+onMounted(() => {
+  previewMedia = window.matchMedia('(min-width: 1024px)')
+  updatePreview()
+  previewMedia.addEventListener('change', updatePreview)
+})
+onBeforeUnmount(() => previewMedia?.removeEventListener('change', updatePreview))
+const { data: stats } = useLazyAsyncData('auth-stats', (_app, { signal }) => api<PublicStats>('/api/stats', { signal }), { server: false, enabled: showPreview, watch: [showPreview] })
+const { data: eventsData } = useLazyAsyncData(
   () => `auth-events-${community.value}`,
-  () => api<ApiEventList>('/api/events', { query: { limit: 3, community: community.value } }),
-  { watch: [community] },
+  (_app, { signal }) => api<ApiEventList>('/api/events', { query: { limit: 3, community: community.value }, signal }),
+  { server: false, enabled: showPreview, watch: [showPreview] },
 )
 const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 </script>

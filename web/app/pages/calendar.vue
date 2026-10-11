@@ -21,9 +21,9 @@ const community = computed({
   get: () => GAME_COMMUNITIES.some(c => c.key === route.query.community) ? String(route.query.community) : 'all',
   set: (value: string) => router.replace({ query: { ...route.query, community: value } }),
 })
-const { data, status, error, refresh } = await useAsyncData(
+const { data, status, error, refresh } = await useLazyAsyncData(
   () => `calendar-month-${community.value}-${month.value}`,
-  () => api<{ month: string, items: CalendarEntry[] }>('/api/calendar/month', { query: { community: community.value, month: month.value } }),
+  (_app, { signal }) => api<{ month: string, items: CalendarEntry[] }>('/api/calendar/month', { query: { community: community.value, month: month.value }, signal }),
   { watch: [community, month] },
 )
 const days = computed(() => calendarDays(month.value, status.value === 'success' ? data.value?.items ?? [] : []))

@@ -1,5 +1,7 @@
 """AI 账号池：密钥轮询分摊、限流冷却与全失败抛错。"""
 
+import asyncio
+import time
 import httpx
 import pytest
 
@@ -101,3 +103,41 @@ async def test_non_key_errors_rotate_without_cooldown(monkeypatch):
     out, _ = await chat(CONFIG, "s", "u")
     assert out == "ok" and calls == ["keyA", "keyB"]
     assert ai_module._KEY_COOLDOWN.get("keyA") is None
+
+
+async def test_concurrent_calls_reserve_different_keys(monkeypatch):
+    calls = []
+    async def once(config, key, *args, **kwargs):
+        calls.append(key)
+        await asyncio.sleep(0)
+        return "ok", None
+    monkeypatch.setattr(ai_module, "_chat_once", once)
+    await asyncio.gather(chat(CONFIG, "s", "u"), chat(CONFIG, "s", "u"))
+    assert calls == ["keyA", "keyB"]
+
+
+async def test_all_cooling_keys_send_no_request(monkeypatch):
+    from unittest.mock import AsyncMock
+    once = AsyncMock()
+    monkeypatch.setattr(ai_module, "_chat_once", once)
+    ai_module._KEY_COOLDOWN.update({key: time.monotonic() + 60 for key in CONFIG["api_keys"]})
+    with pytest.raises(ai_module.AiPoolCoolingDown):
+        await chat(CONFIG, "s", "u")
+    once.assert_not_awaited()
+
+
+async def test_timeout_covers_entire_key_pool(monkeypatch):
+    calls = []
+    async def once(config, key, *args, **kwargs):
+        calls.append(key)
+        await asyncio.sleep(0.035)
+        raise httpx.ConnectError("temporary")
+    monkeypatch.setattr(ai_module, "_chat_once", once)
+    monkeypatch.setattr(ai_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
+    with pytest.raises(TimeoutError):
+        await chat(CONFIG, "s", "u")
+    assert calls == ["keyA", "keyB"]
+
+
+def test_api_key_pool_without_primary_is_available():
+    assert ai_module.ai_available({**CONFIG, "api_key": ""})

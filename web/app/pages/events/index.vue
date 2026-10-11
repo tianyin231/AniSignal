@@ -16,7 +16,7 @@ const route = useRoute()
 const router = useRouter()
 const tab = computed({
   get: () => String(route.query.tab || 'all'),
-  set: (v: string) => router.replace({ query: { ...route.query, tab: v } }),
+  set: (v: string) => router.replace({ query: { ...route.query, tab: v, page: undefined } }),
 })
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
@@ -24,10 +24,11 @@ const pageSize = 30
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐行标注分区
 const { scope, isAll } = useCommunityScope()
-const { data, status } = await useAsyncData(
+const { data, status, error, refresh } = await useLazyAsyncData(
   () => `events-${scope.value}-${tab.value}-${page.value}`,
-  () =>
+  (_app, { signal }) =>
     api<ApiEventList>('/api/events', {
+      signal,
       query: {
         community: scope.value,
         limit: pageSize,
@@ -56,6 +57,7 @@ useSeoMeta({ title: '事件库' })
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…
     </section>
+    <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">事件暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
     <section v-else class="panel overflow-hidden">
       <EventRow v-for="e in list" :key="e.id" :event="e" :show-community="isAll" />
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">

@@ -48,6 +48,23 @@ async def test_ai_review_is_structured_and_recorded(session, monkeypatch):
     assert usage.total_tokens == 100
 
 
+async def test_game_version_changed_during_review_requests_retry(session, monkeypatch):
+    await set_setting(session, "ai", {"base_url": "https://example.com", "model": "test", "api_key": "x"})
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    raw = await session.scalar(select(RawContent))
+
+    async def changed_while_reviewing(config, candidate):
+        raw.content_hash = "newer-body"
+        await session.commit()
+        return {}, None, False, 1
+
+    monkeypatch.setattr(curation, "_review_one", changed_while_reviewing)
+    stats = await curation.review_contents(session, [raw.id])
+    assert stats.failed_batches == 1
+    assert stats.reviewed == 0
+    assert await session.get(ContentReview, raw.id) is None
+
+
 async def test_highlights_mix_official_and_hot_community(client, session):
     await seed_defaults(session)
     official = deepcopy(KURO_ITEM)

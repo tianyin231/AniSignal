@@ -21,27 +21,27 @@ const pageSize = 30
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐行标注分区
 const { scope, isAll } = useCommunityScope()
-const { data, status, error } = await useAsyncData(
+const contentsRequest = useLazyAsyncData(
   () => `contents-${scope.value}-${platform.value}-${q.value}-${page.value}-${tab.value}`,
-  () =>
-    tab.value === 'trending'
-      ? Promise.resolve({ items: [], total: 0 })
-      : api<PublicContentList>('/api/contents', {
-          query: {
-            community: scope.value,
-            limit: pageSize,
-            offset: (page.value - 1) * pageSize,
-            ...(platform.value ? { platform: platform.value } : {}),
-            ...(q.value ? { q: q.value } : {}),
-          },
-        }),
-  { watch: [scope, platform, q, page, tab] },
+  (_app, { signal }) => api<PublicContentList>('/api/contents', {
+    signal,
+    query: {
+      community: scope.value,
+      limit: pageSize,
+      offset: (page.value - 1) * pageSize,
+      ...(platform.value ? { platform: platform.value } : {}),
+      ...(q.value ? { q: q.value } : {}),
+    },
+  }),
+  { enabled: computed(() => tab.value !== 'trending') },
 )
-const { data: trendingData, status: trendingStatus, error: trendingError } = await useAsyncData(
+const trendingRequest = useLazyAsyncData(
   () => `trending-${scope.value}`,
-  () => api<PublicContentList>('/api/trending', { query: { community: scope.value, hours: 24, limit: 20 } }),
-  { watch: [scope] },
+  (_app, { signal }) => api<PublicContentList>('/api/trending', { query: { community: scope.value, hours: 24, limit: 20 }, signal }),
+  { enabled: computed(() => tab.value === 'trending'), watch: [tab] },
 )
+const [{ data, status, error }, { data: trendingData, status: trendingStatus, error: trendingError }] = await Promise.all([contentsRequest, trendingRequest])
+const retry = () => tab.value === 'trending' ? trendingRequest.refresh() : contentsRequest.refresh()
 
 const list = computed(() =>
   tab.value === 'trending'
@@ -117,7 +117,7 @@ function applyQuery(patch: Record<string, string | undefined>) {
     </div>
 
     <section v-if="(tab === 'trending' ? trendingStatus : status) === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
-    <section v-else-if="tab === 'trending' ? trendingError : error" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">内容暂时加载失败，请稍后刷新。</section>
+    <section v-else-if="tab === 'trending' ? trendingError : error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">内容暂时加载失败。<button type="button" class="ml-1 underline" @click="retry">重新加载</button></section>
     <section v-else class="panel overflow-hidden">
       <RawFeedRow
         v-for="item in list"

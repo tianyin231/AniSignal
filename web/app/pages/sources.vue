@@ -8,9 +8,9 @@ useSeoMeta({ title: '来源健康' })
 
 const { api } = usePublicApi()
 // 系统级页面：展示全部分区的来源，不跟随顶栏分区
-const { data } = await useAsyncData(
+const { data, status, error, refresh } = await useLazyAsyncData(
   'public-sources-all',
-  () => api<{ items: PublicSource[] }>('/api/sources', { query: { community: 'all' } }),
+  (_app, { signal }) => api<{ items: PublicSource[] }>('/api/sources', { query: { community: 'all' }, signal }),
 )
 
 function communityBadge(community?: string) {
@@ -41,7 +41,9 @@ const targetTypeLabels: Record<string, string> = {
       <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">来源健康</h1>
     </section>
 
-    <section class="panel overflow-x-auto">
+    <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
+    <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">来源暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
+    <section v-else class="panel overflow-x-auto">
       <table class="w-full min-w-[760px] text-left text-[13px]">
         <thead>
           <tr class="border-b border-slate-200 text-xs text-slate-400 dark:border-zinc-800">

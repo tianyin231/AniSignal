@@ -8,6 +8,7 @@ import logging
 import math
 import re
 import time
+import httpx
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -28,7 +29,7 @@ from app.models import (
     Source,
 )
 from app.models.enums import Category
-from app.services.ai import ai_available, chat, get_ai_config, record_usage
+from app.services.ai import AiPoolCoolingDown, ai_available, chat, get_ai_config, record_usage
 from app.services.classify import HIDDEN_CATEGORIES
 from app.services.ai_news import constrain_news, parse_news
 
@@ -45,9 +46,7 @@ def _shared_review_semaphore():
         _review_loop, _review_semaphore = loop, asyncio.Semaphore(REVIEW_CONCURRENCY)
     return _review_semaphore
 
-# AI 限流（429）退避：免费模型批量重审时常见，等待比换并发更稳
-REVIEW_429_BACKOFF_SECONDS = 20
-REVIEW_429_RETRIES = 4
+REVIEW_TIMEOUT_SECONDS = 180
 HIGHLIGHT_WINDOW = timedelta(days=7)
 COMMUNITY_MIN_VIEWS = 10_000
 _PROMOTION_TERMS = (
@@ -109,7 +108,7 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
             candidate, (decision, usage, failed, duration_ms) = await outcome
             content_id = candidate["id"]
             is_news = get_community(candidate.get("community")).domain == "news"
-            if failed or decision is None:
+            if failed or decision is None or (is_news and decision.get("news") is None):
                 stats.failed_batches += 1
                 await record_usage(
                     session,
@@ -123,7 +122,6 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
                 if is_news:
                     await session.commit()
                 continue
-            stats.reviewed += 1
             await record_usage(
                 session,
                 task="review_content",
@@ -132,16 +130,18 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
                 duration_ms=duration_ms,
                 ref_id=content_id,
             )
-            raw = await session.get(RawContent, content_id, populate_existing=is_news, with_for_update=is_news)
-            if is_news and raw and raw.content_hash != candidate["content_hash"]:
-                # 审核期间正文已更新，旧摘要不能解锁新正文；下次采集补审。
+            raw = await session.get(RawContent, content_id, populate_existing=True, with_for_update=True)
+            if raw and raw.content_hash != candidate["content_hash"]:
+                # 新版入队可能被当前任务去重，必须让当前任务延迟重试。
+                stats.failed_batches += 1
                 continue
-            if is_news:
-                current_version = await session.scalar(select(ContentVersion.version).where(
-                    ContentVersion.raw_content_id == content_id,
-                ).order_by(ContentVersion.version.desc()).limit(1).with_for_update())
-                if current_version != candidate["content_version"]:
-                    continue
+            current_version = await session.scalar(select(ContentVersion.version).where(
+                ContentVersion.raw_content_id == content_id,
+            ).order_by(ContentVersion.version.desc()).limit(1).with_for_update())
+            if current_version != candidate["content_version"]:
+                stats.failed_batches += 1
+                continue
+            stats.reviewed += 1
             row = await session.get(ContentReview, content_id)
             if row is None:
                 row = ContentReview(raw_content_id=content_id, model=config["model"])
@@ -215,7 +215,7 @@ async def _review_one(
     """单条审核：文本 JSON + 封面数据图（多模态）。返回 (判定, usage, 是否失败, 耗时)。
 
     带图调用失败时降级为纯文本重试一次，保证审核不因图片中断；
-    命中 AI 限流（429）时按退避重试整轮（免费模型批量重审时常见），不立即放弃。
+    限流与超时留给后台补偿，不占着 worker 长时间睡眠重试。
     """
     started = time.monotonic()
     usage = None
@@ -252,8 +252,10 @@ async def _review_one(
                 raise ValueError("model returned no valid review")
             return decision, usage
         except Exception as cover_exc:  # noqa: BLE001 - 带图失败降级纯文本重试
-            if "429" in repr(cover_exc):
-                raise  # 限流直接走退避，不追加一次同样会被拒绝的纯文本请求。
+            if isinstance(cover_exc, (AiPoolCoolingDown, TimeoutError, httpx.TimeoutException)) or (
+                isinstance(cover_exc, httpx.HTTPStatusError) and cover_exc.response.status_code in {401, 402, 403, 429}
+            ):
+                raise
             logger.info(
                 "content review with cover failed for %s (%r), retrying text-only",
                 candidate.get("id"), cover_exc,
@@ -271,21 +273,13 @@ async def _review_one(
             raise ValueError("model returned no valid review")
         return decision, usage
 
-    for remaining_attempts in range(REVIEW_429_RETRIES, -1, -1):
-        try:
+    try:
+        async with asyncio.timeout(REVIEW_TIMEOUT_SECONDS):
             decision, usage = await attempt_with_text_fallback()
             return decision, usage, False, int((time.monotonic() - started) * 1000)
-        except Exception as exc:  # noqa: BLE001 - 单条失败不阻断其余内容
-            if remaining_attempts > 0 and "429" in repr(exc):
-                logger.info(
-                    "content review rate-limited for %s, backing off %ss (%d retries left)",
-                    candidate.get("id"), REVIEW_429_BACKOFF_SECONDS, remaining_attempts,
-                )
-                await asyncio.sleep(REVIEW_429_BACKOFF_SECONDS)
-                continue
-            logger.warning("content review failed for %s: %r", candidate.get("id"), exc)
-            return None, usage, True, int((time.monotonic() - started) * 1000)
-    return None, usage, True, int((time.monotonic() - started) * 1000)  # pragma: no cover
+    except Exception as exc:  # noqa: BLE001 - 单条失败不阻断其余内容
+        logger.warning("content review failed for %s: %r", candidate.get("id"), exc)
+        return None, usage, True, int((time.monotonic() - started) * 1000)
 
 
 async def review_recent_contents(
@@ -323,6 +317,8 @@ async def select_trending(
     返回 PublicContentItem 兼容 dict，额外带 delta_view（窗口内播放增量）。
     """
     from app.services import settings as settings_service
+    from sqlalchemy import BigInteger, cast
+    from sqlalchemy.orm import aliased, defer
 
     window_start = utcnow() - timedelta(hours=hours)
     latest = _latest_version_subquery()
@@ -348,16 +344,26 @@ async def select_trending(
         .having(func.count(MetricSnapshot.id) >= 2)
         .subquery()
     )
+    first_snapshot = aliased(MetricSnapshot)
+    last_snapshot = aliased(MetricSnapshot)
+    # 显式有符号整数转换同时支持 MySQL / SQLite、数字字符串及缺失的播放量。
+    first_view = func.coalesce(cast(first_snapshot.metrics["view"].as_string(), BigInteger), 0)
+    last_view = func.coalesce(cast(last_snapshot.metrics["view"].as_string(), BigInteger), 0)
+    delta = last_view - first_view
     rows = list(
         await session.execute(
             select(
-                snap_sq.c.first_id,
-                snap_sq.c.last_id,
+                delta.label("delta_view"),
+                last_snapshot.metrics,
                 RawContent,
                 Source.name,
                 Source.identity,
                 ContentVersion,
             )
+            .options(defer(RawContent.raw_json))
+            .select_from(snap_sq)
+            .join(first_snapshot, first_snapshot.id == snap_sq.c.first_id)
+            .join(last_snapshot, last_snapshot.id == snap_sq.c.last_id)
             .join(RawContent, RawContent.id == snap_sq.c.rid)
             .join(latest, latest.c.rid == RawContent.id)
             .join(
@@ -366,22 +372,14 @@ async def select_trending(
                 & (ContentVersion.version == latest.c.version),
             )
             .join(Source, RawContent.source_id == Source.id, isouter=True)
-            .where(*conditions)
+            .where(*conditions, delta > 0)
+            .order_by(delta.desc(), RawContent.id.desc())
+            .limit(limit)
         )
     )
-    edge_ids = {snap_id for row in rows for snap_id in (row.first_id, row.last_id)}
-    edge_metrics: dict[int, dict] = {}
-    if edge_ids:
-        edge_rows = await session.execute(
-            select(MetricSnapshot).where(MetricSnapshot.id.in_(edge_ids))
-        )
-        edge_metrics = {snap.id: (snap.metrics or {}) for snap in edge_rows.scalars()}
 
     items: list[dict] = []
-    for first_id, last_id, raw, source_name, source_identity, version in rows:
-        delta = _views(edge_metrics.get(last_id)) - _views(edge_metrics.get(first_id))
-        if delta <= 0:
-            continue
+    for delta_view, metrics, raw, source_name, source_identity, version in rows:
         normalized = version.normalized_json if version else None
         media = (normalized or {}).get("media") or []
         text = (version.text if version else None) or str((normalized or {}).get("text") or "")
@@ -402,18 +400,17 @@ async def select_trending(
                 "source_name": source_name,
                 "identity": source_identity or "unknown",
                 "category": version.category,
-                "metrics": edge_metrics.get(last_id),
+                "metrics": metrics,
                 "cover": media[0] if isinstance(media, list) and media else None,
                 "preview_mode": (
                     "full" if text and text.strip() else ("partial" if media else "external_only")
                 ),
                 "matched_keywords": (raw.matched_keywords or []),
                 "community": (raw.community or DEFAULT_COMMUNITY),
-                "delta_view": delta,
+                "delta_view": delta_view,
             }
         )
-    items.sort(key=lambda x: x["delta_view"], reverse=True)
-    return items[:limit]
+    return items
 
 
 async def select_highlights(
@@ -587,7 +584,18 @@ async def _review_candidates(
         community: await _load_known_terms(session, community) for community in communities
     }
     candidates = []
+    reviews = {row.raw_content_id: row for row in await session.scalars(
+        select(ContentReview).where(ContentReview.raw_content_id.in_(ids))
+    )}
     for raw, version, source in rows:
+        review = reviews.get(raw.id)
+        if review is not None:
+            if get_community(raw.community).domain == "news":
+                news = review.news or {}
+                if news.get("content_hash") == raw.content_hash and news.get("content_version") == version.version:
+                    continue
+            elif review.updated_at >= version.parsed_at:
+                continue
         normalized = version.normalized_json or {}
         media = normalized.get("media") or []
         cover = next((item for item in media if isinstance(item, str) and item), None)

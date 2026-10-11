@@ -12,9 +12,9 @@ useSeoMeta({ title: '商品' })
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐卡标注分区
 const { scope, isAll } = useCommunityScope()
-const { data, status } = await useAsyncData(
+const { data, status, error, refresh } = await useLazyAsyncData(
   () => `products-${scope.value}`,
-  () => api<ApiProductList>('/api/products', { query: { community: scope.value } }),
+  (_app, { signal }) => api<ApiProductList>('/api/products', { query: { community: scope.value }, signal }),
   { watch: [scope] },
 )
 const products = computed(() => data.value?.items ?? [])
@@ -28,6 +28,7 @@ const products = computed(() => data.value?.items ?? [])
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…
     </section>
+    <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">商品暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
     <div v-else-if="products.length" class="grid gap-4 sm:grid-cols-2">
       <NuxtLink
         v-for="p in products"

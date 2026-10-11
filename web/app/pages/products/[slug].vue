@@ -6,15 +6,11 @@ const route = useRoute()
 const router = useRouter()
 const { api } = usePublicApi()
 
-const { data: productData, error } = await useAsyncData(
+const productRequest = useAsyncData(
   () => `product-${route.params.slug}`,
-  () => api<ApiProduct>(`/api/products/${route.params.slug}`),
+  (_app, { signal }) => api<ApiProduct>(`/api/products/${route.params.slug}`, { signal }),
   { watch: [() => route.params.slug] },
 )
-if (error.value || !productData.value)
-  throw createError({ statusCode: 404, statusMessage: '商品不存在', fatal: true })
-
-const product = computed(() => productData.value!)
 const tabs = [
   { key: 'overview', label: '总览' },
   { key: 'timeline', label: '事件时间线' },
@@ -25,16 +21,24 @@ const view = computed({
   set: (value: string) => router.replace({ query: { ...route.query, view: value } }),
 })
 
-const { data: eventsData } = await useAsyncData(
+const eventsRequest = useAsyncData(
   () => `product-events-${route.params.slug}`,
-  () => api<ApiEventList>('/api/events', { query: { product_slug: route.params.slug, limit: 50 } }),
+  (_app, { signal }) => api<ApiEventList>('/api/events', { query: { community: 'all', product_slug: route.params.slug, limit: 50 }, signal }),
   { watch: [() => route.params.slug] },
 )
-const { data: signalData } = await useAsyncData(
+const signalsRequest = useAsyncData(
   () => `product-signals-${route.params.slug}`,
-  () => api<ApiProductSignalList>(`/api/products/${route.params.slug}/signals`),
+  (_app, { signal }) => api<ApiProductSignalList>(`/api/products/${route.params.slug}/signals`, { signal }),
   { watch: [() => route.params.slug] },
 )
+const [
+  { data: productData, error },
+  { data: eventsData, error: eventsError, refresh: refreshEvents },
+  { data: signalData, error: signalsError, refresh: refreshSignals },
+] = await Promise.all([productRequest, eventsRequest, signalsRequest])
+if (error.value) throw createError({ statusCode: error.value.statusCode || 503, statusMessage: error.value.statusCode === 404 ? '商品不存在' : '商品暂时加载失败，请稍后重试', fatal: true })
+if (!productData.value) throw createError({ statusCode: 404, statusMessage: '商品不存在', fatal: true })
+const product = computed(() => productData.value!)
 const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const signals = computed(() => signalData.value?.items ?? [])
 
@@ -108,20 +112,23 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
           <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">最近履约信号</h2>
           <button type="button" class="link min-h-11 text-xs" @click="view = 'evidence'">查看全部</button>
         </div>
-        <ProductSignalList :items="signals.slice(0, 3)" />
+        <p v-if="signalsError" role="alert" class="mt-3 text-sm text-amber-700 dark:text-amber-300">信号暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshSignals()">重试</button></p>
+        <ProductSignalList v-else :items="signals.slice(0, 3)" />
       </section>
     </section>
 
     <section v-else-if="view === 'timeline'" class="panel overflow-hidden">
+      <p v-if="eventsError" role="alert" class="px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">事件暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshEvents()">重试</button></p>
       <EventRow v-for="event in events" :key="event.id" :event="event" />
-      <p v-if="!events.length" class="px-4 py-10 text-center text-sm text-slate-400">在已接入来源中暂无该商品的相关事件。</p>
+      <p v-if="!eventsError && !events.length" class="px-4 py-10 text-center text-sm text-slate-400">在已接入来源中暂无该商品的相关事件。</p>
     </section>
 
     <section v-else class="panel p-4 sm:p-5">
       <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约信号（{{ signals.length }}）</h2>
       <p class="mt-1 text-xs text-slate-400">公开结论只统计“已核验”；候选信号仅供查看，不参与状态计算。</p>
       <div class="mt-4">
-        <ProductSignalList :items="signals" />
+        <p v-if="signalsError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">信号暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshSignals()">重试</button></p>
+        <ProductSignalList v-else :items="signals" />
       </div>
     </section>
   </div>

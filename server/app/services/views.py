@@ -2,8 +2,9 @@
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.communities import DEFAULT_COMMUNITY
 from app.models import (
@@ -33,6 +34,23 @@ _REGION_OF_PLATFORM = {
 }
 
 
+async def _latest_titles(session: AsyncSession, raw_ids: list[int]) -> dict[int, str | None]:
+    if not raw_ids:
+        return {}
+    latest = (
+        select(ContentVersion.raw_content_id.label("rid"), func.max(ContentVersion.version).label("v"))
+        .where(ContentVersion.raw_content_id.in_(raw_ids))
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
+    rows = await session.execute(
+        select(ContentVersion.raw_content_id, ContentVersion.title).join(
+            latest, (ContentVersion.raw_content_id == latest.c.rid) & (ContentVersion.version == latest.c.v)
+        )
+    )
+    return dict(rows.all())
+
+
 async def events_to_out(
     session: AsyncSession, events: list[Event], include_detail: bool = False
 ) -> list[EventOut]:
@@ -43,6 +61,7 @@ async def events_to_out(
 
     evidence_rows = await session.execute(
         select(Evidence, RawContent, Source)
+        .options(defer(RawContent.raw_json))
         .join(RawContent, Evidence.raw_content_id == RawContent.id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(Evidence.event_id.in_(event_ids), RawContent.hidden.is_(False))
@@ -54,15 +73,7 @@ async def events_to_out(
     latest_evidence_by_event: dict[int, datetime] = {}
     evidence_data = list(evidence_rows)
     raw_ids = [raw.id for _, raw, _ in evidence_data]
-    titles: dict[int, str | None] = {}
-    if raw_ids:
-        version_rows = await session.execute(
-            select(ContentVersion)
-            .where(ContentVersion.raw_content_id.in_(raw_ids))
-            .order_by(ContentVersion.raw_content_id, ContentVersion.version.desc())
-        )
-        for version in version_rows.scalars():
-            titles.setdefault(version.raw_content_id, version.title)
+    titles = await _latest_titles(session, raw_ids)
 
     for evidence, raw, source in evidence_data:
         if evidence.role == "excluded":
@@ -151,13 +162,15 @@ async def events_to_out(
 
 async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
     """商品公开视图：结论只来自已核验履约信号，旧事件仅作证据目录。"""
-    from app.services.fulfillment import build_fulfillment_snapshot, list_product_signals
+    from app.services.fulfillment import build_fulfillment_snapshot, list_product_signals, load_product_signal_data
 
-    fulfillment = await build_fulfillment_snapshot(session, product.id)
-    signals = await list_product_signals(session, product.id)
+    signal_data = await load_product_signal_data(session, product.id)
+    fulfillment = await build_fulfillment_snapshot(session, product.id, signal_data=signal_data)
+    signals = await list_product_signals(session, product.id, signal_data=signal_data, include_notes=False)
 
     rows = await session.execute(
         select(Evidence, Event, RawContent, Source)
+        .options(defer(RawContent.raw_json))
         .join(Event, Evidence.event_id == Event.id)
         .join(RawContent, Evidence.raw_content_id == RawContent.id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
@@ -170,15 +183,7 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
     )
     evidence_rows = list(rows)
     raw_ids = list({raw.id for _, _, raw, _ in evidence_rows})
-    titles: dict[int, str | None] = {}
-    if raw_ids:
-        versions = await session.execute(
-            select(ContentVersion)
-            .where(ContentVersion.raw_content_id.in_(raw_ids))
-            .order_by(ContentVersion.raw_content_id, ContentVersion.version.desc())
-        )
-        for version in versions.scalars():
-            titles.setdefault(version.raw_content_id, version.title)
+    titles = await _latest_titles(session, raw_ids)
 
     evidence_items: list[ProductEvidenceOut] = []
     seen_raw_ids: set[int] = set()
