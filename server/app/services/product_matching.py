@@ -11,6 +11,8 @@ _HTML_TAG = re.compile(r"<[^>]+>")
 QUALITY_PROBLEM_TERMS = (
     "品控", "质量问题", "质量差", "做工问题", "故障", "瑕疵", "掉漆",
     "失灵", "断连", "坏轴", "漏轴", "连击", "漏光", "歪轴", "键帽松动",
+    "没有反应", "没反应", "毫无反应", "无法输入", "无法连接", "不亮",
+    "咔擦声", "异响", "阻力",
 )
 _FUTURE_OR_NEGATED = re.compile(
     r"预计|预期|计划|将|即将|准备|等待|承诺|尚未|还未|还没|没有|未能|不能|暂不|不再|什么时候|何时"
@@ -22,8 +24,8 @@ _SHIPPING = re.compile(
 )
 _QUALITY_POSITIVE = re.compile(r"(?:品控|质量).{0,4}(?:不错|很好|很棒|优秀|完美|正常|过关|没问题|没有问题)")
 _QUALITY_NEGATED = re.compile(
-    r"(?:没有|并无|不存在|未发现|没发现|从未|不会|不再|无|未出现|不)(?:出现|发生|再)?"
-    r"(?:质量问题|品控问题|故障|瑕疵|断连|失灵|漏光|连击|掉漆|坏轴|漏轴|歪轴|键帽松动)"
+    r"(?:没有|并无|不存在|未发现|没发现|从未|不会|不再|无|未出现|不)(?:出现|发生|再)?(?:明显|任何)?"
+    r"(?:质量问题|品控问题|故障|瑕疵|断连|失灵|漏光|连击|掉漆|坏轴|漏轴|歪轴|键帽松动|咔擦声|异响|阻力)"
 )
 _CURRENT_SHIPPING = re.compile(
     r"(?:现已|已经|已|正在|今天|今日|目前).{0,6}(?:发货|出库|揽收)"
@@ -103,3 +105,10 @@ def detect_product_signal_types(title: str | None, text: str | None, category: s
             if not _FUTURE_OR_NEGATED.search(prefix) and (not planned_context or _CURRENT_SHIPPING.search(prefix)):
                 signals.add("shipping_started")
     return signals
+
+
+def quality_claim_conflicts(text: str) -> bool:
+    """否定异常且没有其他真实故障时，不能自动采纳为质量问题。"""
+    plain = _plain(text)
+    has_negation = bool(_QUALITY_POSITIVE.search(plain) or _QUALITY_NEGATED.search(plain))
+    return has_negation and "quality_issue" not in detect_product_signal_types(plain, "", None)

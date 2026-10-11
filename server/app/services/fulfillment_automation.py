@@ -7,7 +7,7 @@ import math
 import re
 from collections.abc import Iterable
 
-from app.services.product_matching import detect_product_signal_types
+from app.services.product_matching import detect_product_signal_types, quality_claim_conflicts
 
 
 SIGNAL_TYPES = frozenset({
@@ -196,14 +196,7 @@ def decide_signal_automation(
                 elif signal_type == "shipping_started" and re.search(r"预计|计划|将|尚未|还未|还没|没有|明天|下月", quote):
                     conflict = "shipping_started" not in detect_product_signal_types(quote, "", None)
                 elif signal_type == "quality_issue":
-                    checked = re.sub(r"(?:不|不会|没有|从未|未曾)(?:再|出现)?(?:断连|失灵|漏光|连击|掉漆)", "", quote)
-                    denies_issue = re.search(
-                        r"(?:没有|并无|未发现|不存在|无)(?:明显|任何)?(?:质量问题|故障|瑕疵|品控问题)"
-                        r"|(?:品控|质量)(?:不错|很好|正常|没问题|没有问题)", quote,
-                    )
-                    if checked != quote or denies_issue:
-                        has_other_fault = bool(re.search(r"没有反应|毫无反应|无法输入|无法连接|按键不亮", checked))
-                        conflict = not has_other_fault and "quality_issue" not in detect_product_signal_types(checked, "", None)
+                    conflict = quality_claim_conflicts(quote)
                 if conflict:
                     result.update(review_status="conflict", reason="原文与支持判定存在冲突，继续自动跟踪")
                 elif not _has_axis_basis(signal_type, quote):
