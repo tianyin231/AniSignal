@@ -28,16 +28,16 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
     <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">商品总览</h1>
     <p class="mb-4 mt-1 text-sm text-slate-600 dark:text-zinc-400">{{ isAll ? '全部分区' : '当前分区' }}的商品履约动态，按最近信号更新排序。</p>
 
-    <section v-if="status === 'pending' && !data" class="panel-solid px-4 py-10 text-center text-sm text-slate-600 dark:text-zinc-400">
+    <section v-if="status === 'pending' && !data" class="panel px-4 py-10 text-center text-sm text-slate-600 dark:text-zinc-400">
       加载中…
     </section>
-    <section v-else-if="error" role="alert" class="panel-solid px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">商品暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
+    <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">商品暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
     <div v-else-if="products.length" class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] gap-4">
       <NuxtLink
         v-for="p in products"
         :key="p.slug"
         :to="{ path: `/products/${p.slug}`, query: { community: scope } }"
-        class="panel-solid min-w-0 p-4 transition-shadow hover:shadow-lg sm:p-5 [overflow-wrap:anywhere]"
+        class="panel min-w-0 p-4 transition-shadow hover:shadow-lg sm:p-5 [overflow-wrap:anywhere]"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
@@ -67,7 +67,7 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
         <p v-if="p.fulfillment.candidate_total" class="mt-3 text-xs text-amber-800 dark:text-amber-300">{{ p.fulfillment.candidate_total }} 条信号正在自动跟踪</p>
       </NuxtLink>
     </div>
-    <section v-else class="panel-solid px-4 py-10 text-center text-sm text-slate-600 dark:text-zinc-400">
+    <section v-else class="panel px-4 py-10 text-center text-sm text-slate-600 dark:text-zinc-400">
       暂无追踪中的商品。商品与监控词由管理员在后台维护。
     </section>
 

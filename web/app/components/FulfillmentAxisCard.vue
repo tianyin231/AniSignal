@@ -15,7 +15,7 @@ const toneClass = computed(() => ({
 </script>
 
 <template>
-  <article class="panel-solid min-w-0 p-4 [overflow-wrap:anywhere]" :class="toneClass">
+  <article class="panel min-w-0 p-4 [overflow-wrap:anywhere]" :class="toneClass">
     <div class="flex flex-wrap items-start justify-between gap-2">
       <p class="text-xs font-medium">{{ axis.label }}</p>
       <span v-if="axis.candidate_count" class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 dark:bg-amber-950 dark:text-amber-200">
