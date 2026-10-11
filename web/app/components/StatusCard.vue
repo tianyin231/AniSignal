@@ -10,7 +10,7 @@ const { community } = useGameSection()
 const scope = computed(() =>
   String(route.query.community || '') === 'all' ? 'all' : community.value,
 )
-const { data } = await useAsyncData(
+const { data } = await useLazyAsyncData(
   () => `status-product-${scope.value}`,
   () => api<ApiProductList>('/api/products', { query: { community: scope.value } }),
   { watch: [scope] },

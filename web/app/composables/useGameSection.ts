@@ -134,12 +134,24 @@ export function useGameSection() {
     hydrated.value = true
   }
 
-  async function setCommunity(key: string) {
+  function rememberCommunity(key: string) {
     if (!VALID_KEYS.has(key)) return
     stored.value = key as GameCommunityKey
     hydrated.value = true
     try { localStorage.setItem(STORAGE_KEY, key) }
     catch { /* 存不进就只在当前会话生效 */ }
+  }
+
+  /** 由顶栏在挂载和路由变化时调用，避免每个分区消费者各自监听路由。 */
+  function rememberRouteCommunity() {
+    if (!import.meta.client) return
+    const key = route.path === '/ai' ? 'ai' : String(route.query.community || '')
+    rememberCommunity(key)
+  }
+
+  async function setCommunity(key: string) {
+    if (!VALID_KEYS.has(key)) return
+    rememberCommunity(key)
     await router.replace({
       query: {
         ...route.query,
@@ -155,14 +167,11 @@ export function useGameSection() {
    */
   async function selectCommunity(key: string) {
     if (!VALID_KEYS.has(key)) return
-    stored.value = key as GameCommunityKey
-    hydrated.value = true
-    try { localStorage.setItem(STORAGE_KEY, key) }
-    catch { /* 存不进就只在当前会话生效 */ }
+    rememberCommunity(key)
     await router.push(key === 'ai' ? { path: '/ai' } : { path: '/', query: { community: key } })
   }
 
   if (import.meta.client) onMounted(hydrate)
 
-  return { community, currentCommunity, communityQuery, setCommunity, selectCommunity, communities: GAME_COMMUNITIES }
+  return { community, currentCommunity, communityQuery, rememberRouteCommunity, setCommunity, selectCommunity, communities: GAME_COMMUNITIES }
 }

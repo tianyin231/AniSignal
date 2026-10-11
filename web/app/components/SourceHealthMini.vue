@@ -4,7 +4,7 @@ import { fmtTime } from '~/utils/admin-types'
 
 const { api } = usePublicApi()
 const { community } = useGameSection()
-const { data } = await useAsyncData(
+const { data } = await useLazyAsyncData(
   () => `rail-sources-${community.value}`,
   () => api<{ items: PublicSource[] }>('/api/sources', { query: { community: community.value } }),
   { watch: [community] },

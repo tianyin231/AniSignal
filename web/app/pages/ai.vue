@@ -35,7 +35,7 @@ const filters = computed(() => ({
   hours: [24, 168, 720].includes(Number(route.query.hours)) ? Number(route.query.hours) : 168,
 }))
 const request = computed(() => ({ ...filters.value, limit: 20, offset: (page.value - 1) * 20 }))
-const { data, status, error, refresh } = await useAsyncData(
+const { data, status, error, refresh } = await useLazyAsyncData(
   () => `ai-news-${JSON.stringify(request.value)}`,
   () => api<NewsList>('/api/ai-news', { query: request.value }),
 )
