@@ -147,7 +147,7 @@ def test_product_comparison_never_certifies_another_products_quality():
     assert decide(review, product_id=2, signal_type="quality_issue", title=title, text=text)["review_status"] == "verified"
 
 
-@pytest.mark.parametrize("quote", ["测试键盘的空格按下去完全没有反应", "没有断连，但是空格无法输入"])
+@pytest.mark.parametrize("quote", ["测试键盘的空格按下去完全没有反应", "没有断连，但是空格无法输入", "这么大的咔擦声，明显的阻力", "按键有异响"])
 def test_actual_failure_is_not_mistaken_for_negating_a_quality_issue(quote):
     result = decide(supported(quote, signal_type="quality_issue"), signal_type="quality_issue", text=quote)
     assert result["review_status"] == "verified"

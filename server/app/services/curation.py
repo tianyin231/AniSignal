@@ -48,6 +48,12 @@ def _shared_review_semaphore():
     return _review_semaphore
 
 REVIEW_TIMEOUT_SECONDS = 180
+_FULFILLMENT_RETRY_GUIDANCE = """请重做完整 JSON，不要复用有问题的引文：
+1. schema_version=2；product_context.products 中每个商品都须包含七轴且无重复。没有原文事实的轴用 uncertain、confidence=0、quote=""、reason="原文未涉及"。
+2. quote 只能选 title 或 text 中一个字段内的连续短摘录，不得拼接、改写或补词。格式示例：title="某键盘到货开箱"，text="补款后收到"；正确 quote="某键盘到货开箱"，也可 quote="补款后收到"；错误 quote="某键盘到货开箱，补款后收到"。示例只讲格式，不能拿来当本条证据。
+3. 消费者到货不能推理官方已发货、曾预售或开启尾款；没有直接原文时，这些官方轴全部 uncertain，不编造预售公告或发货引文。
+4. consumer_received 只判断是否有作者实物到手依据；购买方式未知填 acquisition_type=unknown，不因此降低实物到手轴的 confidence。购买方式与到手事实分别判断。
+5. 输出前逐项检查 supported/unsupported 的 quote 是否能在 title 或 text 的单个字段原样找到；找不到就改 uncertain，不得合并两个字段凑出引用。"""
 HIGHLIGHT_WINDOW = timedelta(days=7)
 COMMUNITY_MIN_VIEWS = 10_000
 _PROMOTION_TERMS = (
@@ -252,8 +258,10 @@ async def _review_one(
         return await chat(config, system_prompt, content, json_mode=True)
 
     async def attempt_with_text_fallback() -> tuple[dict, dict | None]:
+        validation_failed = False
         try:
             raw_response, usage = await attempt(with_image=True)
+            validation_failed = True
             decision = _parse_review(
                 raw_response, candidate["id"], candidate.get("product_context"),
                 source_title=candidate.get("title") or "", source_text=candidate.get("text") or "",
@@ -270,9 +278,13 @@ async def _review_one(
                 "content review with cover failed for %s (%r), retrying text-only",
                 candidate.get("id"), cover_exc,
             )
+        retry_prompt = _review_system_prompt(candidate.get("community") or DEFAULT_COMMUNITY)
+        if candidate.get("product_context"):
+            retry_prompt += ("\n\n上轮未通过 schema/引文校验。\n" if validation_failed else "\n\n本次为纯文本重试，请特别核对 schema/引文。\n")
+            retry_prompt += _FULFILLMENT_RETRY_GUIDANCE
         raw_response, usage = await chat(
             config,
-            _review_system_prompt(candidate.get("community") or DEFAULT_COMMUNITY),
+            retry_prompt,
             json.dumps({k: v for k, v in candidate.items() if k != "cover"}, ensure_ascii=False),
             json_mode=True,
         )
@@ -848,8 +860,10 @@ def _review_system_prompt(community: str = DEFAULT_COMMUNITY) -> str:
   示例只展示一项，product_id 必须使用输入商品 id；每个商品必须完整返回以下七种 signal_type 各一项，不得遗漏或重复：presale_open 开启预售、balance_open 开启尾款、delayed 延期、shipping_started 已开始发货、aftersales_notice 售后说明、consumer_received 作者实物到手展示、quality_issue 商品质量问题。
   verdict 只能是 supported（原文支持）、unsupported（原文明示否定/未来计划/转发冒充自身到货）、uncertain（没有提及或无法判断）；没有相关信息填 uncertain、confidence=0、quote=""、reason="原文未涉及"。confidence 为 0-100，reason 简短。
   quote 必须逐字摘自输入 title 或 text，同一段中保留必要语境；不得从图片、matched_keywords、模型推论或外部知识编造文字，不得拼接标题和正文。supported/unsupported 需原文引文，无法摘录则 uncertain。
+  quote 只选单个字段中的连续短摘录。例如 title="某键盘到货开箱"、text="补款后收到" 时，可摘录"某键盘到货开箱"或"补款后收到"，不可拼成"某键盘到货开箱，补款后收到"。示例不能作为本条证据。
   acquisition_type 只能是 self_purchase/seeded/unknown。只有原文明示自购、自费、自己下单/付款才是 self_purchase；送测、样品、官方寄送是 seeded；仅开箱、到货、实拍或展示订单但无本人购买说明，不得推断自购。确认实物展示但购买方式不明时可 supported + unknown。引文需覆盖购买方式依据。
   区分作者本人和转述他人；转发、二剪不能当作作者自己收货。未来发货日期/承诺不等于已经发货；“没有质量问题”等否定不能判质量问题。开箱、质量问题及售后可同时出现，每轴单独引用，确认到货不能顺便确认质量。
+  不得从消费者已到货倒推官方已发货、曾预售或开启尾款；原文没说的官方轴一律 uncertain、confidence=0、quote=""，不编造任何前置流程。购买方式未知只影响 acquisition_type，不因此降低已有实物到手证据的 consumer_received confidence。
   多商品对比必须核对每句话的主语：“爱弥斯比较值，达妮娅质量一般”不支持爱弥斯质量问题；不能将另一商品评价归给标题商品。“用Amg65改了一个爱弥斯主题键盘”等其他型号DIY不等于目标联名商品，consumer_received 应 unsupported；“不断连”是否定故障。本人补款/付尾款可作为购买方式证据，但不能单凭付款证明已经收货。
   kind 仅保留兼容总述，可用 self_purchase/pr_sample/forward/none；不确定用 none。content_version 由服务端绑定，不需要模型填写。商品或轴缺项视作输出错误。
 - 若输入附带封面图，须结合图片与文字综合判断：图片低俗或违规记 violation=true；图文完全无关可作为参考，但相关性仍按词表规则定。不得补充外部事实。"""

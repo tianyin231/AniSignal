@@ -25,7 +25,7 @@ _AXIS_BASIS = {
     "shipping_started": r"发货|出库|揽收|物流|shipp|dispatch",
     "aftersales_notice": r"售后|召回|维修|退换|保修|退款|after.?sales|recall|refund|repair",
     "consumer_received": r"到货|收到|收货|拿到|到手|开箱|拆箱|实物|实拍|到了|received|arrived|unbox|in hand",
-    "quality_issue": r"质量|品控|做工|故障|瑕疵|问题|差|坏|无法|没[有]?反应|失灵|断连|漏光|连击|掉漆|不亮|不灵|断触|变形|开裂|defect|broken|quality|fault|fail|not working",
+    "quality_issue": r"质量|品控|做工|故障|瑕疵|问题|差|坏|无法|没[有]?反应|失灵|断连|漏光|连击|掉漆|不亮|不灵|断触|变形|开裂|咔擦声|异响|阻力|defect|broken|quality|fault|fail|not working",
 }
 
 
