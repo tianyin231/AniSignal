@@ -368,6 +368,7 @@ class FulfillmentSnapshotOut(BaseModel):
     sample_count: int = 0
     candidate_total: int = 0
     last_verified_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ProductSignalOut(BaseModel):
@@ -408,6 +409,15 @@ class ProductSignalUpdate(BaseModel):
     note: str = Field(default="", max_length=1000)
 
 
+class ProductMonitorOut(BaseModel):
+    target_id: int
+    keyword: str
+    enabled: bool
+    interval_minutes: int
+    min_views: int
+    tier: str
+
+
 class ProductOut(BaseModel):
     id: int
     slug: str
@@ -421,6 +431,7 @@ class ProductOut(BaseModel):
     original_ship_at: str | None
     ship_note: str | None
     watch_terms: list[str] = []
+    monitor: ProductMonitorOut | None = None
     stage_hint: int = -1
     current_stage: int
     stage_label: str
@@ -457,6 +468,9 @@ class ProductCreate(BaseModel):
     watch_terms: list[str] = Field(default_factory=list)
     create_bilibili_target: bool = True
     monitor_keyword: str | None = Field(default=None, max_length=255)
+    monitor_enabled: bool | None = None
+    monitor_interval_minutes: int = Field(default=30, ge=5, le=1440)
+    monitor_min_views: int = Field(default=0, ge=0)
 
 
 class ProductUpdate(BaseModel):
@@ -470,6 +484,10 @@ class ProductUpdate(BaseModel):
     original_ship_at: str | None = Field(default=None, max_length=64)
     ship_note: str | None = None
     watch_terms: list[str] | None = None
+    monitor_enabled: bool | None = None
+    monitor_keyword: str | None = Field(default=None, max_length=255)
+    monitor_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
+    monitor_min_views: int | None = Field(default=None, ge=0)
     stage_hint: int | None = Field(default=None, ge=-1, le=5)
     stage_hint_reason: str | None = None
     stage_hint_evidence_ids: list[int] | None = None

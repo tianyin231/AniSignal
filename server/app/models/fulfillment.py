@@ -34,7 +34,7 @@ class ProductSignal(Base):
         ForeignKey("products.id", name="fk_product_signals_product_id_products", ondelete="CASCADE"),
         index=True,
     )
-    # 分区冗余列：信号跟随商品分区，同步时强制覆盖（避免 join 才能按分区过滤）
+    # 记录证据所属分区；商品迁移时旧信号失活，不能换标签搬走原始证据。
     community: Mapped[str] = mapped_column(String(16), default=DEFAULT_COMMUNITY)
     signal_type: Mapped[str] = mapped_column(String(32))
     actor_type: Mapped[str] = mapped_column(String(16), default="unknown")

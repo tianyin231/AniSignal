@@ -7,6 +7,8 @@ collector 只拿数据，ingest 只管入库，本模块负责任务记录、
 
 import logging
 import random
+import re
+import unicodedata
 from datetime import datetime, timedelta
 
 from arq import create_pool
@@ -15,7 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import DEFAULT_COMMUNITY, get_community
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community
 from app.collectors.base import CollectorDeferred, CollectorError, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.kuro import KuroCollector
@@ -24,9 +26,10 @@ from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import CollectRun, CollectTarget, Platform, RunStatus
+from app.models import CollectRun, CollectTarget, Platform, Product, RawContent, RunStatus
 from app.services.ingest import IngestStats, ingest_items
 from app.services.queue import enqueue_review_jobs
+from app.services.product_matching import matches_product_text
 
 logger = logging.getLogger(__name__)
 
@@ -44,14 +47,57 @@ class CollectError(RuntimeError):
     pass
 
 
-def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict], int]:
+def _source_alias_hit(title: str, alias: str) -> bool:
+    title = unicodedata.normalize("NFKC", title).casefold()
+    alias = unicodedata.normalize("NFKC", alias).casefold()
+    # 不让 HSR 命中 longerhsrword；中文别名可直接连接角色名。
+    prefix = r"(?<![a-z0-9])" if alias[:1].isascii() and alias[:1].isalnum() else ""
+    suffix = r"(?![a-z0-9])" if alias[-1:].isascii() and alias[-1:].isalnum() else ""
+    return bool(re.search(prefix + re.escape(alias) + suffix, title))
+
+
+def youtube_title_communities(title: str) -> set[str]:
+    """只按标题识别游戏，供共享频道目标做排他的分区匹配。"""
+    return {
+        meta.key for meta in COMMUNITIES.values() if meta.domain == "game"
+        and any(_source_alias_hit(title, alias) for alias in (*meta.game_names, *meta.source_aliases))
+    }
+
+
+def filter_relevant(
+    items: list[dict], target: CollectTarget, *, product_watch_terms: list[str] | None = None,
+) -> tuple[list[dict], int]:
     """采集相关性过滤：共现词（标题需至少命中一个）+ 热度门槛。
 
     返回 (保留列表, 过滤数量)。官方账号类目标（notices/dynamics/videos）
     不做过滤——官方内容本身就是信号。
     """
+    original_count = len(items)
+    if product_watch_terms is not None:
+        # 只过滤显式关联的商品目标。搜索引擎的宽泛相关结果不等于商品证据。
+        items = [item for item in items if matches_product_text(
+            str(item.get("title") or ""),
+            str(item.get("text") or item.get("description") or item.get("desc") or item.get("summary") or ""),
+            product_watch_terms,
+        )]
+    co_terms = [t for t in (target.co_terms or []) if t]
+    if target.platform == "youtube" and co_terms:
+        # raw_content 只能属于一个分区；多游戏标题不可由最先运行的目标抢归属。
+        meta = get_community(target.community)
+        aliases = (*meta.game_names, *meta.source_aliases)
+        uses_game_terms = any(
+            unicodedata.normalize("NFKC", term).casefold() == unicodedata.normalize("NFKC", alias).casefold()
+            for term in co_terms for alias in aliases
+        )
+        if uses_game_terms:
+            items = [item for item in items if
+                youtube_title_communities(str(item.get("title") or "")) == {meta.key}
+                # 同一系列的独立游戏不能借母系列名称混进来。
+                and not any(_source_alias_hit(str(item.get("title") or ""), term) for term in meta.source_exclusions)
+            ]
+            co_terms = list(dict.fromkeys([*co_terms, *aliases]))
     if target.target_type == "notices":
-        return items, 0
+        return items, original_count - len(items)
     is_news = get_community(target.community).domain == "news"
     if is_news:
         from app.services.ai_news import is_news_candidate
@@ -62,19 +108,20 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
                 continue
             item["_matched_keywords"] = [target.target_value]
             kept.append(item)
-        return kept, len(items) - len(kept)
+        return kept, original_count - len(kept)
     if getattr(target, "tier", "general") == "core":
         # 核心关键词目标（商品/联名等特定内容）：豁免共现词；
         # min_views > 0 时仍作为兜底门槛（管理员可为核心词设下限）
         kept = []
-        co_terms = [t for t in (target.co_terms or []) if t]
         min_views = target.min_views or 0
         for item in items:
             keywords = [target.target_value] if target.target_type == "keyword_search" else [
                 target.display_name or target.target_value
             ]
             haystack = str(item.get("title") or "").casefold()
-            hit_terms = [t for t in co_terms if t.casefold() in haystack]
+            hit_terms = [t for t in co_terms if (
+                _source_alias_hit(haystack, t) if target.platform == "youtube" else t.casefold() in haystack
+            )]
             item["_matched_keywords"] = sorted({*keywords, *hit_terms})
             views = int(
                 item.get("view_count")
@@ -85,16 +132,17 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
             if min_views > 0 and views < min_views:
                 continue
             kept.append(item)
-        return kept, len(items) - len(kept)
-    co_terms = [t for t in (target.co_terms or []) if t]
+        return kept, original_count - len(kept)
     min_views = target.min_views or 0
     kept: list[dict] = []
-    filtered = 0
+    filtered = original_count - len(items)
     for item in items:
         # 社区视频简介常带整段频道标签或往期游戏名，拿简介匹配会把其他
         # 游戏的视频误判为鸣潮信息；标题信号更精确，也与后台字段说明一致。
         haystack = str(item.get("title") or "").casefold()
-        hit_terms = [t for t in co_terms if t.casefold() in haystack]
+        hit_terms = [t for t in co_terms if (
+            _source_alias_hit(haystack, t) if target.platform == "youtube" else t.casefold() in haystack
+        )]
         if co_terms and not hit_terms:
             filtered += 1
             continue
@@ -202,6 +250,7 @@ async def run_collection(redis, target_id: int) -> dict:
             if collector_factory is None:
                 raise CollectError(f"no collector for platform {target.platform}")
             collector = collector_factory()
+            product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))
             is_news = get_community(target.community).domain == "news"
             if is_news and isinstance(collector, BilibiliCollector):
                 collector.newest_first = True
@@ -212,7 +261,20 @@ async def run_collection(redis, target_id: int) -> dict:
                     target.target_type, target.target_value, settings.collect_limit
                 )
             items_fetched = len(fetch_result.items)
-            fetch_result.items, filtered_out = filter_relevant(fetch_result.items, target)
+            fetch_result.items, filtered_out = filter_relevant(
+                fetch_result.items, target,
+                product_watch_terms=product.watch_terms if product is not None else None,
+            )
+            if target.platform == "youtube" and fetch_result.items:
+                # 标题后续改成另一游戏时，也不能经新分区目标更新已有异区证据。
+                other_owned = set((await session.scalars(select(RawContent.external_id).where(
+                    RawContent.platform == "youtube",
+                    RawContent.external_id.in_([str(item.get("id") or "") for item in fetch_result.items]),
+                    RawContent.community != target.community,
+                ))).all())
+                kept = [item for item in fetch_result.items if str(item.get("id") or "") not in other_owned]
+                filtered_out += len(fetch_result.items) - len(kept)
+                fetch_result.items = kept
             items_filtered = filtered_out
             if not filtered_out and target.target_type in ("keyword_search", "account_videos", "account_dynamics"):
                 # 未配置过滤时也打关键词溯源标

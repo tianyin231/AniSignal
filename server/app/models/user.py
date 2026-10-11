@@ -24,6 +24,7 @@ class User(Base):
     instant_notification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # 开启时记录当前修订位置，只处理之后发生的变化。
     instant_notification_cursor: Mapped[int | None] = mapped_column(Integer)
+    instant_fulfillment_cursor: Mapped[int | None] = mapped_column(Integer)
     feed_preferences: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active/banned
     banned_reason: Mapped[str | None] = mapped_column(Text)

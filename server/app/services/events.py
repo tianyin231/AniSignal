@@ -6,8 +6,8 @@
 2. 商品履约 —— 命中商品 watch_terms 且类目属履约类的内容挂到对应商品事件，
    再同步为待逐条审核的结构化信号。
 
-ensure 语义：事件只在创建时由引擎写标题/结论等字段，之后仅追加证据、
-更新观测字段；manual_locked 的事件引擎完全跳过（§12 人工修正优先）。
+官方和商品事件均对账有效证据；人工锁定保留编辑字段，分区或商品词失效的
+证据退出公开计算，原始内容与逐条审核记录仍保留。
 """
 
 import logging
@@ -16,11 +16,13 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import format_beijing, to_naive_utc, utcnow
 from app.communities import DEFAULT_COMMUNITY, game_name_boilerplate
+from app.services.product_matching import detect_product_signal_types, matches_product_text
 from app.models import (
     ANNOUNCE_CATEGORIES,
     Category,
@@ -118,10 +120,18 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
             select(Evidence.raw_content_id).where(Evidence.role == "excluded")
         )
     )
+    latest_versions = (
+        select(ContentVersion.raw_content_id.label("rid"), func.max(ContentVersion.version).label("v"))
+        .group_by(ContentVersion.raw_content_id).subquery()
+    )
     rows = await session.execute(
         select(RawContent, ContentVersion, Source)
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id, isouter=True)
+        .options(defer(RawContent.raw_json))
+        .join(latest_versions, latest_versions.c.rid == RawContent.id)
+        .join(ContentVersion, (ContentVersion.raw_content_id == RawContent.id) & (ContentVersion.version == latest_versions.c.v))
         .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .where(RawContent.hidden.is_(False))
+        .execution_options(populate_existing=True)
         .order_by(RawContent.id, ContentVersion.version.desc())
     )
     seen: set[int] = set()
@@ -292,20 +302,19 @@ _CATEGORY_CONCLUSION = {
 }
 
 
-async def run_aggregation(session: AsyncSession) -> AggStats:
+async def run_aggregation(session: AsyncSession, *, product_snapshots: dict | None = None) -> AggStats:
     """全量扫描并维护事件（ensure 语义），调用方负责 commit。"""
     from app.services.classify import seed_defaults
 
     stats = AggStats()
-    await seed_defaults(session)
+    await seed_defaults(session, commit=False)
     contents = await load_classified_contents(session)
 
     await _aggregate_official(session, contents, stats)
 
-    products = list((await session.execute(select(Product))).scalars())
+    products = list((await session.execute(select(Product).order_by(Product.id).with_for_update().execution_options(populate_existing=True))).scalars())
     for product in products:
-        if product.watch_terms:
-            await _aggregate_product(session, product, contents, stats)
+        await _aggregate_product(session, product, contents, stats, before=(product_snapshots or {}).get(product.id))
     await _backfill_facts(session, stats)
     return stats
 
@@ -568,20 +577,72 @@ async def _reconcile_official_event(
 
 
 async def _aggregate_product(
-    session: AsyncSession, product: Product, contents: list[ContentRow], stats: AggStats
+    session: AsyncSession, product: Product, contents: list[ContentRow], stats: AggStats,
+    *, before: dict | None = None,
 ) -> None:
+    from app.services.fulfillment import build_fulfillment_snapshot, sync_product_signals
+
+    if before is None:
+        before = await build_fulfillment_snapshot(session, product.id)
     matched = [
         row
         for row in contents
         if row.community == (product.community or DEFAULT_COMMUNITY)
-        and row.category in FULFILLMENT_CATEGORIES
         and _matches_product(row, product)
     ]
+    signal_categories = {
+        "presale_open": "presale", "balance_open": "balance", "delayed": "delay",
+        "shipping_started": "shipping", "consumer_received": "arrived",
+        "quality_issue": "quality", "aftersales_notice": "quality",
+    }
     by_category: dict[str, list[ContentRow]] = {}
     for row in matched:
-        by_category.setdefault(row.category, []).append(row)
+        categories = {signal_categories[kind] for kind in detect_product_signal_types(row.title, row.text, row.category)}
+        if row.category == "unboxing" and "arrived" in categories:
+            categories.remove("arrived")
+            categories.add("unboxing")
+        for category in categories:
+            by_category.setdefault(category, []).append(row)
+
+    # 商品词、分区或原文变化后，对账现有证据；保留排除记录和人工审核历史。
+    existing_events = list(await session.scalars(select(Event).where(
+        Event.product_id == product.id, or_(Event.is_active.is_(True), Event.manual_locked.is_(True)),
+    ).execution_options(populate_existing=True)))
+    locked_ids: dict[str, set[int]] = {}
+    for event in existing_events:
+        manually_disabled = event.manual_locked and not event.is_active
+        expected = {row.raw_id for row in by_category.get(event.category, [])} if event.community == product.community else set()
+        links = list(await session.scalars(select(Evidence).where(
+            Evidence.event_id == event.id, Evidence.role != "excluded",
+        )))
+        removed = [link for link in links if link.raw_content_id not in expected]
+        remaining = [link for link in links if link.raw_content_id in expected]
+        for link in removed:
+            await session.delete(link)
+        if removed or (not remaining and event.is_active):
+            was_active = event.is_active
+            stats.evidences_removed += len(removed)
+            event.last_updated_at = utcnow()
+            event.summary = None
+            event.summary_status = None
+            event.summary_updated_at = None
+            event.is_active = bool(remaining) and not manually_disabled
+            if not remaining:
+                event.facts = []
+                stats.events_deactivated += int(was_active)
+            elif not event.manual_locked:
+                valid_rows = [row for row in by_category[event.category] if row.raw_id in {link.raw_content_id for link in remaining}]
+                event.facts = _build_facts(event.category, valid_rows, product)
+                event.conclusion = _product_conclusion(event.category, valid_rows, product)
+            _add_revision(session, event, stats, f"商品证据对账：移除 {len(removed)} 条失效证据")
+            stats.touched_event_ids.append(event.id)
+        if event.manual_locked:
+            locked_ids.setdefault(event.category, set()).update(link.raw_content_id for link in remaining)
 
     for category, items in by_category.items():
+        items = [row for row in items if row.raw_id not in locked_ids.get(category, set())]
+        if not items:
+            continue
         identity = "official" if all(r.identity == "official" for r in items) else "user"
         confidence, reason = _product_confidence(category, items)
         await _ensure_event(
@@ -600,14 +661,11 @@ async def _aggregate_product(
         )
 
     # 履约 V2：事件继续负责聚合，公开商品状态只读取经审核的结构化信号。
-    from app.services.fulfillment import sync_product_signals
-
-    await sync_product_signals(session, product.id)
+    await sync_product_signals(session, product.id, before=before)
 
 
 def _matches_product(row: ContentRow, product: Product) -> bool:
-    haystack = f"{row.title}\n{row.text}"
-    return any(term and term in haystack for term in (product.watch_terms or []))
+    return matches_product_text(row.title, row.text, product.watch_terms or [])
 
 
 def _product_confidence(category: str, items: list[ContentRow]) -> tuple[str, str]:
@@ -789,12 +847,16 @@ async def split_event(
     content_by_id = {
         row.raw_id: row for row in await load_classified_contents(session)
     }
+    if any(evidence.raw_content_id not in content_by_id for evidence in selected):
+        raise ValueError("evidence_not_found")
     selected_rows = [content_by_id[evidence.raw_content_id] for evidence in selected]
     remaining_rows = [
         content_by_id[evidence.raw_content_id]
         for evidence in evidences
-        if evidence.raw_content_id not in requested_ids
+        if evidence.raw_content_id not in requested_ids and evidence.raw_content_id in content_by_id
     ]
+    if not remaining_rows:
+        raise ValueError("cannot_split_all_evidences")
     product = await session.get(Product, event.product_id) if event.product_id else None
     first = sorted(selected_rows, key=_sort_key)[0]
     split = Event(
@@ -855,6 +917,9 @@ async def exclude_evidence(
     )
     if evidence is None:
         raise ValueError("evidence_not_found")
+    from app.services.fulfillment import capture_content_fulfillment, refresh_content_fulfillment
+
+    snapshots = await capture_content_fulfillment(session, content_id)
 
     other_evidences = list(
         await session.scalars(
@@ -877,9 +942,13 @@ async def exclude_evidence(
         content_by_id = {
             row.raw_id: row for row in await load_classified_contents(session)
         }
-        remaining_rows = [content_by_id[item.raw_content_id] for item in other_evidences]
+        remaining_rows = [content_by_id[item.raw_content_id] for item in other_evidences if item.raw_content_id in content_by_id]
         product = await session.get(Product, event.product_id) if event.product_id else None
-        _refresh_manual_event(event, remaining_rows, product)
+        if remaining_rows:
+            _refresh_manual_event(event, remaining_rows, product)
+        else:
+            event.is_active = False
+            event.facts = []
     else:
         event.is_active = False
         event.facts = []
@@ -891,4 +960,5 @@ async def exclude_evidence(
             note=f"人工移除并排除证据内容 #{content_id}",
         )
     )
+    await refresh_content_fulfillment(session, snapshots)
     return len(other_evidences), not other_evidences

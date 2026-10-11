@@ -102,11 +102,10 @@ async def create_target(
             CollectTarget.platform == body.platform,
             CollectTarget.target_type == body.target_type,
             CollectTarget.target_value == body.target_value,
-            CollectTarget.community == body.community,
         )
     )
     if duplicate is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "target already exists")
+        raise HTTPException(status.HTTP_409_CONFLICT, "该采集目标已存在；不同分区请使用包含游戏名称的独立搜索词")
     min_views = body.min_views if "min_views" in body.model_fields_set else 10000
     if body.community == "ai" or not supports_view_threshold(body.platform, body.target_type):
         min_views = 0
@@ -140,6 +139,9 @@ async def update_target(
     target = await session.get(CollectTarget, target_id)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "target not found")
+    bound_product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))
+    if bound_product and body.community is not None and body.community != bound_product.community:
+        raise HTTPException(status.HTTP_409_CONFLICT, "该目标已关联商品，请从商品管理修改所属分区")
     if body.display_name is not None:
         target.display_name = body.display_name
     if body.interval_minutes is not None:
@@ -150,7 +152,6 @@ async def update_target(
                 CollectTarget.platform == target.platform,
                 CollectTarget.target_type == target.target_type,
                 CollectTarget.target_value == body.target_value,
-                CollectTarget.community == target.community,
                 CollectTarget.id != target.id,
             )
         )
@@ -382,7 +383,11 @@ async def set_content_visibility(
 ):
     """人工下架/恢复：公开侧立即排除 hidden 内容，AI 不会再自动改动人工状态。"""
     raw = await _get_content_or_404(session, content_id)
+    from app.services.fulfillment import capture_content_fulfillment, refresh_content_fulfillment
+
+    snapshots = await capture_content_fulfillment(session, content_id)
     raw.hidden = bool(body.get("hidden"))
+    await refresh_content_fulfillment(session, snapshots, reaggregate=not raw.hidden)
     await session.commit()
     invalidate_official_links_cache()
     return {"id": raw.id, "hidden": raw.hidden}
@@ -396,7 +401,12 @@ async def delete_content(
 ):
     """彻底删除内容（版本/指标/审核/证据随 FK 级联清除；事件本身保留）。"""
     raw = await _get_content_or_404(session, content_id)
+    from app.services.fulfillment import capture_content_fulfillment, refresh_content_fulfillment
+
+    snapshots = await capture_content_fulfillment(session, content_id)
     await session.delete(raw)
+    await session.flush()
+    await refresh_content_fulfillment(session, snapshots)
     await session.commit()
     invalidate_official_links_cache()
 
@@ -445,6 +455,10 @@ async def edit_content(
     )
     if latest_version is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "该内容暂无可编辑的解析版本")
+    from app.services.fulfillment import capture_content_fulfillment
+    from app.services.events import run_aggregation
+
+    snapshots = await capture_content_fulfillment(session, content_id)
     new_version = ContentVersion(
         raw_content_id=content_id,
         version=latest_version.version + 1,
@@ -455,6 +469,7 @@ async def edit_content(
         category=latest_version.category,
     )
     session.add(new_version)
+    await run_aggregation(session, product_snapshots=snapshots)
     await session.commit()
     invalidate_official_links_cache()
     return {"id": content_id, "version": new_version.version}
@@ -551,6 +566,9 @@ async def update_event(
     event = await session.get(Event, event_id)
     if event is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
+    from app.services.fulfillment import build_fulfillment_snapshot, sync_product_signals
+
+    before = await build_fulfillment_snapshot(session, event.product_id) if event.product_id else None
     changes: list[str] = []
     for field, value in body.model_dump(exclude_unset=True).items():
         if getattr(event, field) != value:
@@ -568,6 +586,8 @@ async def update_event(
                 event_id=event.id, actor="admin", note=f"人工编辑字段：{', '.join(changes)}"
             )
         )
+        if event.product_id:
+            await sync_product_signals(session, event.product_id, before=before)
     await session.commit()
     await session.refresh(event)
     return (await events_to_out(session, [event], include_detail=True))[0]
@@ -737,40 +757,25 @@ async def create_product(body: ProductCreate, session: AsyncSession = Depends(ge
     if not watch_terms:
         watch_terms = [body.name.strip()]
     data = body.model_dump(
-        exclude={"slug", "create_bilibili_target", "monitor_keyword"}
+        exclude={"slug", "create_bilibili_target", "monitor_keyword", "monitor_enabled", "monitor_interval_minutes", "monitor_min_views"}
     )
     data["watch_terms"] = watch_terms
     product = Product(slug=slug, **data)
     session.add(product)
     await session.flush()
 
-    if body.create_bilibili_target:
-        # 搜索词默认使用完整商品名，避免以角色名等宽泛匹配词采回大量无关内容。
-        keyword = (body.monitor_keyword or "").strip() or body.name.strip()
-        target = await session.scalar(
-            select(CollectTarget).where(
-                CollectTarget.platform == "bilibili",
-                CollectTarget.target_type == "keyword_search",
-                CollectTarget.target_value == keyword,
-            )
+    from app.services.product_monitoring import configure_product_monitor
+
+    try:
+        await configure_product_monitor(
+            session, product,
+            enabled=body.monitor_enabled if body.monitor_enabled is not None else body.create_bilibili_target,
+            keyword=body.monitor_keyword, interval_minutes=body.monitor_interval_minutes,
+            min_views=body.monitor_min_views,
         )
-        if target is None:
-            target = CollectTarget(
-                platform="bilibili",
-                target_type="keyword_search",
-                target_value=keyword,
-                display_name=f"B站搜索·{product.name}",
-                interval_minutes=30,
-                enabled=True,
-                co_terms=[],
-                min_views=0,
-                community=body.community,
-                next_run_at=utcnow(),
-            )
-            session.add(target)
-        else:
-            target.enabled = True
-            target.next_run_at = target.next_run_at or utcnow()
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
     # 新商品立即回看已入库内容；新监控位由调度器在下一轮执行。
     await run_aggregation(session)
@@ -783,7 +788,7 @@ async def create_product(body: ProductCreate, session: AsyncSession = Depends(ge
 async def update_product(
     product_id: int, body: ProductUpdate, session: AsyncSession = Depends(get_session)
 ):
-    product = await session.get(Product, product_id)
+    product = await session.get(Product, product_id, with_for_update=True)
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "product not found")
     changes = body.model_dump(exclude_unset=True)
@@ -797,16 +802,27 @@ async def update_product(
             status.HTTP_410_GONE,
             "整段履约阶段覆盖已停用，请改为审核具体履约信号",
         )
+    from app.services.fulfillment import build_fulfillment_snapshot
+    from app.services.product_monitoring import configure_product_monitor
+
+    before = await build_fulfillment_snapshot(session, product_id)
+    monitor_changes = {key.removeprefix("monitor_"): changes.pop(key) for key in list(changes) if key.startswith("monitor_")}
     for field, value in changes.items():
         setattr(product, field, value)
-    if "watch_terms" in changes:
+    try:
+        if monitor_changes or product.monitor_target_id:
+            await configure_product_monitor(session, product, **monitor_changes)
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    if {"watch_terms", "community"}.intersection(changes):
         from app.services.events import run_aggregation
 
         product.watch_terms = list(
             dict.fromkeys(t.strip() for t in (product.watch_terms or []) if t.strip())
         )
         await session.flush()
-        await run_aggregation(session)
+        await run_aggregation(session, product_snapshots={product_id: before})
     await session.commit()
     await session.refresh(product)
     return await product_to_out(session, product)
@@ -868,6 +884,12 @@ async def delete_product(product_id: int, session: AsyncSession = Depends(get_se
     product = await session.get(Product, product_id)
     if product is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "product not found")
+    if product.monitor_target_id:
+        target = await session.get(CollectTarget, product.monitor_target_id)
+        if target:
+            target.enabled = False
+    for event in await session.scalars(select(Event).where(Event.product_id == product.id)):
+        event.is_active = False
     await session.delete(product)
     await session.commit()
 

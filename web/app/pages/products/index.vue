@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ApiProductList } from '~/composables/usePublicApi'
 import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { sortProductsBySignal } from '~/utils/product-utils'
 
 function communityChip(community?: string) {
   const meta = GAME_COMMUNITIES.find(c => c.key === community)
@@ -17,7 +18,8 @@ const { data, status, error, refresh } = await useLazyAsyncData(
   (_app, { signal }) => api<ApiProductList>('/api/products', { query: { community: scope.value }, signal }),
   { watch: [scope] },
 )
-const products = computed(() => data.value?.items ?? [])
+const products = computed(() => sortProductsBySignal(data.value?.items ?? []))
+useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pending')
 </script>
 
 <template>
@@ -25,7 +27,7 @@ const products = computed(() => data.value?.items ?? [])
     <BackToChannelHome />
     <h1 class="mb-4 text-lg font-semibold text-slate-900 dark:text-zinc-50">商品</h1>
 
-    <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
+    <section v-if="status === 'pending' && !data" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…
     </section>
     <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">商品暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
@@ -33,7 +35,7 @@ const products = computed(() => data.value?.items ?? [])
       <NuxtLink
         v-for="p in products"
         :key="p.slug"
-        :to="`/products/${p.slug}`"
+        :to="{ path: `/products/${p.slug}`, query: { community: scope } }"
         class="panel block p-4 transition-shadow hover:shadow-lg sm:p-5"
       >
         <div class="flex items-start justify-between gap-3">

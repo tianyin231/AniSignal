@@ -2,7 +2,7 @@
 import type { ApiProductSignal } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 
-defineProps<{ items: ApiProductSignal[] }>()
+defineProps<{ items: ApiProductSignal[]; community?: string }>()
 
 const fulfillmentKindLabels: Record<string, string> = {
   self_purchase: '自购开箱',
@@ -40,7 +40,7 @@ const statusMeta = {
         {{ item.claim_quote }}
       </blockquote>
       <div class="mt-3 flex flex-wrap gap-3 text-xs">
-        <NuxtLink :to="`/contents/${item.content_id}`" class="link min-h-11 inline-flex items-center">查看站内原文</NuxtLink>
+        <NuxtLink :to="{ path: `/contents/${item.content_id}`, query: { community: item.community || community } }" class="link min-h-11 inline-flex items-center">查看站内原文</NuxtLink>
         <a v-if="item.url" :href="item.url" target="_blank" rel="noopener noreferrer" class="link min-h-11 inline-flex items-center">打开来源 ↗</a>
       </div>
     </article>

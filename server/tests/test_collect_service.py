@@ -41,6 +41,52 @@ class _StubCollector:
         return FetchResult(platform="bilibili", fetch_kind="bilibili_search", items=[VIDEO_RAW])
 
 
+def test_linked_product_filters_search_noise_without_splitting_search_terms():
+    target = CollectTarget(platform="bilibili", community="wuwa", target_type="keyword_search", target_value="爱弥斯 联名键盘", tier="core", min_views=0)
+    items = [
+        {"title": "爱弥斯键盘品控拉完了"},
+        {"title": "爱弥斯 联名－机械键盘开箱"},
+        {"title": "爱弥斯人物传记"},
+        {"title": "绝区零联动机械键盘"},
+    ]
+    kept, filtered = collect_module.filter_relevant(items, target, product_watch_terms=["爱弥斯键盘", "爱弥斯联名机械键盘"])
+    assert [item["title"] for item in kept] == [items[0]["title"], items[1]["title"]]
+    assert filtered == 2
+    # 未绑定商品的普通目标维持现有筛选语义。
+    assert collect_module.filter_relevant(items, target)[1] == 0
+
+
+@pytest.mark.parametrize("community,term,title", [
+    ("wuwa", "鸣潮", "Wuthering Waves NEW UPDATE"),
+    ("blhx", "碧蓝航线", "Azur Lane New Ship"),
+    ("hsr", "星穹铁道", "Honkai: Star Rail 4.0"),
+    ("hsr", "星穹铁道", "ＨＳＲ 新角色"),
+    ("arknights", "明日方舟", "Arknights Update"),
+])
+def test_youtube_aliases_keep_only_one_game_community(community, term, title):
+    target = CollectTarget(platform="youtube", community=community, target_type="channel_rss", target_value="channel", co_terms=[term], min_views=0)
+    kept, filtered = collect_module.filter_relevant([{"title": title}], target)
+    assert len(kept) == 1 and filtered == 0
+
+
+@pytest.mark.parametrize("community,term,title", [
+    ("wuwa", "鸣潮", "Wuthering Waves vs Honkai Star Rail"),
+    ("hsr", "星穹铁道", "Wuthering Waves vs HSR"),
+    ("hsr", "星穹铁道", "ABC_HSRLONG Update"),
+    ("arknights", "明日方舟", "Arknights: Endfield Update"),
+    ("blhx", "碧蓝航线", "Wuthering Waves New Update"),
+])
+def test_youtube_ambiguous_other_games_and_partial_abbreviations_are_filtered(community, term, title):
+    target = CollectTarget(platform="youtube", community=community, target_type="channel_rss", target_value="channel", co_terms=[term], min_views=0)
+    kept, filtered = collect_module.filter_relevant([{"title": title, "summary": term}], target)
+    assert kept == [] and filtered == 1
+
+
+def test_official_youtube_source_keeps_explicit_source_ownership():
+    target = CollectTarget(platform="youtube", community="wuwa", target_type="channel_rss", target_value="official", co_terms=[], min_views=0)
+    assert collect_module.filter_relevant([{"title": "Wuthering Waves x HSR"}], target)[1] == 0
+
+
 @pytest.fixture
 def patched_collect(monkeypatch, session_factory):
     _StubCollector.fail = False
@@ -90,6 +136,49 @@ async def test_run_collection_success(session, patched_collect):
     assert target.last_success_at is not None
     assert target.consecutive_failures == 0
     assert target.last_error is None
+
+
+async def test_run_collection_applies_explicit_product_binding(session, patched_collect, monkeypatch):
+    from app.models import Product
+
+    target = await _make_target(session)
+    target.tier = "core"
+    target.min_views = 0
+    session.add(Product(slug="keyboard", name="爱弥斯键盘", community="wuwa", watch_terms=["爱弥斯键盘"], monitor_target_id=target.id))
+    await session.commit()
+
+    async def fetch(*args):
+        return FetchResult(platform="bilibili", fetch_kind="bilibili_search", items=[
+            dict(VIDEO_RAW, bvid="good", title="爱弥斯键盘品控拉完了", description=""),
+            dict(VIDEO_RAW, bvid="noise", title="爱弥斯人物传记", description=""),
+        ])
+
+    monkeypatch.setattr(_StubCollector, "fetch", fetch)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    run = await session.get(CollectRun, result["run_id"])
+    assert run.items_fetched == 2 and run.items_filtered == 1 and run.items_new == 1
+    assert (await session.scalars(select(RawContent.external_id))).all() == ["good"]
+
+
+async def test_youtube_existing_other_community_content_is_not_updated(session, patched_collect, monkeypatch):
+    from app.services.ingest import ingest_items
+
+    old = {"id": "shared-video", "title": "Wuthering Waves update", "channel_id": "shared", "summary": ""}
+    await ingest_items(session, "youtube_rss", [old], community="wuwa")
+    target = CollectTarget(platform="youtube", community="hsr", target_type="channel_rss", target_value="shared", co_terms=["星穹铁道"], min_views=0)
+    session.add(target)
+    await session.commit()
+
+    class YoutubeStub:
+        async def fetch(self, *args):
+            return FetchResult(platform="youtube", fetch_kind="youtube_rss", items=[dict(old, title="Honkai Star Rail update")])
+
+    monkeypatch.setattr(collect_module, "_COLLECTORS", {"youtube": YoutubeStub})
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    run = await session.get(CollectRun, result["run_id"])
+    raw = await session.scalar(select(RawContent))
+    assert run.items_fetched == 1 and run.items_filtered == 1 and run.items_updated == 0
+    assert raw.community == "wuwa" and raw.raw_json["title"] == old["title"]
 
 
 async def test_run_collection_failure_updates_health(session, patched_collect):

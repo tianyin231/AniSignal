@@ -16,6 +16,7 @@ from app.models import (
     ContentVersion,
     CustomFeed,
     EventRevision,
+    ProductFulfillmentRevision,
     NotificationDelivery,
     RawContent,
     Source,
@@ -202,6 +203,9 @@ async def update_notification_preference(
         # MySQL 的普通查询可能沿用鉴权阶段的旧快照；锁定读取得真正的最新基线。
         user.instant_notification_cursor = await session.scalar(
             select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1).with_for_update()
+        ) or 0
+        user.instant_fulfillment_cursor = await session.scalar(
+            select(ProductFulfillmentRevision.id).order_by(ProductFulfillmentRevision.id.desc()).limit(1).with_for_update()
         ) or 0
     if not user.notification_enabled or not user.instant_notification_enabled:
         await session.execute(update(NotificationDelivery).where(

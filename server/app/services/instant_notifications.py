@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.config import get_settings
-from app.models import Event, EventRevision, Evidence, NotificationDelivery, User
+from app.models import Event, EventRevision, Evidence, NotificationDelivery, ProductFulfillmentRevision, User
 from app.services.email_templates import document
+from app.services.fulfillment_notifications import fulfillment_notification_payload, prepare_user_fulfillment_notifications
 from app.services.mailer import send_email
 from app.services.notifications import _plain, _safe_url, beijing_today, enabled_keywords, load_candidates
 from app.services.settings import get_effective_smtp
@@ -93,14 +94,11 @@ async def prepare_instant_notifications(session: AsyncSession) -> int:
             user.instant_notification_cursor = await session.scalar(
                 select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1).with_for_update()
             ) or 0
-            await session.commit()
-            continue
-        revisions = list(await session.scalars(select(EventRevision).where(
-            EventRevision.id > user.instant_notification_cursor,
-        ).order_by(EventRevision.id).limit(200)))
-        if not revisions:
-            await session.commit()
-            continue
+            revisions = []
+        else:
+            revisions = list(await session.scalars(select(EventRevision).where(
+                EventRevision.id > user.instant_notification_cursor,
+            ).order_by(EventRevision.id).limit(200)))
         # 同一轮聚合的创建、增补证据等修订合并为一封，不为摘要改写发信。
         by_event = {row.event_id: row for row in revisions if _business_revision(row)}
         for event_id, revision in by_event.items():
@@ -121,7 +119,9 @@ async def prepare_instant_notifications(session: AsyncSession) -> int:
                 content_ids=[item["id"] for item in items],
             ))
             created += 1
-        user.instant_notification_cursor = revisions[-1].id
+        if revisions:
+            user.instant_notification_cursor = revisions[-1].id
+        created += await prepare_user_fulfillment_notifications(session, user)
         await session.commit()
     return created
 
@@ -133,15 +133,33 @@ async def send_instant_notification(session: AsyncSession, delivery_id: int) -> 
     user = await session.get(User, delivery.user_id, populate_existing=True, with_for_update=True)
     eligible = user and user.status == "active" and user.is_verified and user.notification_enabled and user.instant_notification_enabled
     revision_id = int((delivery.dedupe_key or "").rsplit(":", 1)[-1])
-    revision = await session.get(EventRevision, revision_id, populate_existing=True)
-    event = await session.get(Event, revision.event_id, populate_existing=True) if revision else None
-    items = await _matching_items(session, user, event) if eligible and event and _important(event) else []
-    if not items:
+    payload = None
+    if (delivery.dedupe_key or "").startswith("instant-fulfillment:"):
+        revision = await session.get(ProductFulfillmentRevision, revision_id, populate_existing=True)
+        if eligible and revision:
+            payload = await fulfillment_notification_payload(session, user, revision)
+    else:
+        revision = await session.get(EventRevision, revision_id, populate_existing=True)
+        event = await session.get(Event, revision.event_id, populate_existing=True) if revision else None
+        items = []
+        if eligible and event and _important(event):
+            # 新业务修订取代旧待发通知；摘要、锁定等维护记录不应使通知失效。
+            newer = await session.scalars(select(EventRevision).where(
+                EventRevision.event_id == event.id, EventRevision.id > revision.id,
+            ).with_for_update())
+            if not any(_business_revision(row) for row in newer):
+                items = await _matching_items(session, user, event)
+        if items:
+            subject, body, html = _render(event, revision, items)
+            payload = {"subject": subject, "body": body, "html": html,
+                       "keywords": sorted({keyword for item in items for keyword in item["keywords"]}),
+                       "content_ids": [item["id"] for item in items]}
+    if not payload:
         delivery.status = "skipped"
-        delivery.error = "通知已关闭、事件不再重要或已不符合当前关注条件"
+        delivery.error = "通知已关闭、状态已更新或已不符合当前关注条件"
         await session.commit()
         return {"status": "skipped"}
-    subject, body, html = _render(event, revision, items)
+    subject, body, html = payload["subject"], payload["body"], payload["html"]
     # SMTP 结果不明时不自动重发，避免 worker 重启后重复投递。
     claimed = await session.execute(update(NotificationDelivery).where(
         NotificationDelivery.id == delivery.id, NotificationDelivery.status == "pending",
@@ -161,8 +179,8 @@ async def send_instant_notification(session: AsyncSession, delivery_id: int) -> 
     except Exception as exc:
         sent, error = False, f"邮件发送异常（{type(exc).__name__}），未自动重发"
     delivery.subject, delivery.body, delivery.html_body = subject, body, html
-    delivery.matched_keywords = sorted({keyword for item in items for keyword in item["keywords"]})
-    delivery.content_ids = [item["id"] for item in items]
+    delivery.matched_keywords = payload["keywords"]
+    delivery.content_ids = payload["content_ids"]
     delivery.status = "sent" if sent else "failed"
     delivery.error = error
     delivery.sent_at = utcnow() if sent else None

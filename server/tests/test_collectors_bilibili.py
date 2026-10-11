@@ -37,6 +37,34 @@ async def test_run_once_flags_risk_control_stderr(monkeypatch):
         await BilibiliCollector()._run_once("video", "BV1")
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_timeout_and_cancellation_reap_cli_process(monkeypatch, cancel):
+    class FakeProc:
+        returncode = None
+        calls = 0
+        killed = False
+
+        async def communicate(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise bili_module.asyncio.CancelledError() if cancel else TimeoutError()
+            return b"", b""
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    proc = FakeProc()
+
+    async def fake_exec(*args, **kwargs):
+        return proc
+
+    monkeypatch.setattr(bili_module.asyncio, "create_subprocess_exec", fake_exec)
+    with pytest.raises(bili_module.asyncio.CancelledError if cancel else CollectorError):
+        await BilibiliCollector()._run_once("dynamics", "1")
+    assert proc.killed and proc.calls == 2
+
+
 @pytest.mark.parametrize("exit_code", [4, 6])
 async def test_cli_refusal_exit_codes_do_not_retry(monkeypatch, exit_code):
     calls = []

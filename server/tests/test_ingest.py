@@ -30,6 +30,25 @@ async def test_ingest_new_item(session):
     assert snapshots[0].metrics["view"] == 680
 
 
+async def test_reparse_can_target_only_selected_contents_and_empty_list_is_noop(session):
+    from app.services.classify import seed_defaults
+    from app.services.ingest import reparse_contents
+
+    await ingest_items(session, "bilibili_search", [
+        dict(VIDEO_RAW, bvid="selected", title="爱弥斯键盘品控拉完了"),
+        dict(VIDEO_RAW, bvid="untouched", title="另一键盘品控拉完了"),
+    ])
+    raws = {row.external_id: row for row in (await session.scalars(select(RawContent))).all()}
+    await seed_defaults(session)
+    result = await reparse_contents(session, "bilibili", "video", content_ids=[raws["selected"].id])
+    assert result == {"checked": 1, "updated": 1, "failed": 0}
+    versions = (await session.scalars(select(ContentVersion).order_by(ContentVersion.version.desc()))).all()
+    assert [(row.version, row.category) for row in versions if row.raw_content_id == raws["selected"].id] == [(2, "quality"), (1, None)]
+    assert [(row.version, row.category) for row in versions if row.raw_content_id == raws["untouched"].id] == [(1, None)]
+    assert await reparse_contents(session, "bilibili", content_ids=[]) == {"checked": 0, "updated": 0, "failed": 0}
+    assert await reparse_contents(session, "bilibili", "video", content_ids=[raws["selected"].id]) == {"checked": 1, "updated": 0, "failed": 0}
+
+
 async def test_ingest_repeated_is_idempotent(session):
     await ingest_items(session, "bilibili_search", [VIDEO_RAW])
     stats = await ingest_items(session, "bilibili_search", [VIDEO_RAW])
