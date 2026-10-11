@@ -50,13 +50,17 @@ def test_actual_shipping_and_presale_can_coexist():
     }
 
 
-@pytest.mark.parametrize("title", ["爱弥斯键盘品控不错", "爱弥斯键盘没有瑕疵", "爱弥斯键盘没有质量问题", "爱弥斯键盘丝滑顺畅不断连", "爱弥斯键盘不会出现失灵"])
+@pytest.mark.parametrize("title", ["爱弥斯键盘品控不错", "爱弥斯键盘没有瑕疵", "爱弥斯键盘没有质量问题", "爱弥斯键盘丝滑顺畅不断连", "爱弥斯键盘不会出现失灵", "爱弥斯键盘没有异响", "爱弥斯键盘无明显阻力", "爱弥斯键盘没有咔擦声"])
 def test_positive_quality_is_not_an_issue(title):
     assert "quality_issue" not in detect_product_signal_types(title, None, "quality")
 
 
-def test_negated_fault_does_not_hide_a_different_real_issue():
-    assert "quality_issue" in detect_product_signal_types("爱弥斯键盘不断连但是漏光", None, "quality")
+@pytest.mark.parametrize("title", [
+    "爱弥斯键盘不断连但是漏光", "爱弥斯键盘不断连但空格完全没有反应",
+    "爱弥斯键盘没有异响，但是空格无法输入", "爱弥斯键盘无阻力，但是背光不亮",
+])
+def test_negated_fault_does_not_hide_a_different_real_issue(title):
+    assert "quality_issue" in detect_product_signal_types(title, None, "quality")
 
 
 async def test_new_quality_rules_and_transactional_seed(session):

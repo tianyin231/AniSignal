@@ -131,6 +131,9 @@ def test_quote_normalizes_markup_but_does_not_join_title_and_body():
     ("consumer_received", "用Amg65改了一个爱弥斯主题键盘", "更换键帽，diy出自己的爱弥斯键盘"),
     ("shipping_started", "爱弥斯键盘预售", "预计下月开始发货"),
     ("quality_issue", "爱弥斯键盘体验", "没有质量问题，不断连"),
+    ("quality_issue", "爱弥斯键盘体验", "键盘没有异响"),
+    ("quality_issue", "爱弥斯键盘体验", "按压没有明显阻力"),
+    ("quality_issue", "爱弥斯键盘体验", "键盘没有咔擦声"),
 ])
 def test_explicit_repost_diy_future_and_negation_conflict_with_claim(signal_type, title, quote):
     result = decide(supported(quote, signal_type=signal_type), signal_type=signal_type, title=title, text=quote)
@@ -147,7 +150,7 @@ def test_product_comparison_never_certifies_another_products_quality():
     assert decide(review, product_id=2, signal_type="quality_issue", title=title, text=text)["review_status"] == "verified"
 
 
-@pytest.mark.parametrize("quote", ["测试键盘的空格按下去完全没有反应", "没有断连，但是空格无法输入", "这么大的咔擦声，明显的阻力", "按键有异响"])
+@pytest.mark.parametrize("quote", ["测试键盘的空格按下去完全没有反应", "没有断连，但是空格无法输入", "这么大的咔擦声，明显的阻力", "按键有异响", "没有异响，但空格完全没有反应", "无阻力，但是背光不亮"])
 def test_actual_failure_is_not_mistaken_for_negating_a_quality_issue(quote):
     result = decide(supported(quote, signal_type="quality_issue"), signal_type="quality_issue", text=quote)
     assert result["review_status"] == "verified"
