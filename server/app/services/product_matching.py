@@ -21,6 +21,10 @@ _SHIPPING = re.compile(
     r"|(?:发货|出库|揽收)了|物流(?:已|已经)?更新"
 )
 _QUALITY_POSITIVE = re.compile(r"(?:品控|质量).{0,4}(?:不错|很好|很棒|优秀|完美|正常|过关|没问题|没有问题)")
+_QUALITY_NEGATED = re.compile(
+    r"(?:没有|并无|不存在|未发现|没发现|从未|不会|不再|无|未出现|不)(?:出现|发生|再)?"
+    r"(?:质量问题|品控问题|故障|瑕疵|断连|失灵|漏光|连击|掉漆|坏轴|漏轴|歪轴|键帽松动)"
+)
 _CURRENT_SHIPPING = re.compile(
     r"(?:现已|已经|已|正在|今天|今日|目前).{0,6}(?:发货|出库|揽收)"
     r"|(?:发货|出库|揽收)了|物流(?:已|已经)?更新"
@@ -82,12 +86,12 @@ def detect_product_signal_types(title: str | None, text: str | None, category: s
     quality = False
     for sentence in sentences:
         # 正面品控评价与否定问题陈述，不作为质量异常候选。
-        checked = _QUALITY_POSITIVE.sub("", sentence)
+        checked = _QUALITY_NEGATED.sub("", _QUALITY_POSITIVE.sub("", sentence))
         if any(_affirmed_occurrence(checked, term) for term in QUALITY_PROBLEM_TERMS):
             quality = True
             break
     if quality or (category == "quality" and not any(
-        _QUALITY_POSITIVE.search(sentence) or re.search(r"(?:没有|无|未发现).{0,3}(?:质量问题|瑕疵|故障)", sentence)
+        _QUALITY_POSITIVE.search(sentence) or _QUALITY_NEGATED.search(sentence)
         for sentence in sentences
     )):
         signals.add("quality_issue")

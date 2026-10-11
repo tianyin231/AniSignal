@@ -113,3 +113,33 @@ async def test_ungrounded_and_cross_field_quote_stay_retryable(session, monkeypa
     result = await curation.review_contents(session, [raw.id])
     assert result.failed_batches == 1 and result.reviewed == 0
     assert await session.get(ContentReview, raw.id) is None
+
+
+async def test_text_retry_explains_quote_failure_and_accepts_corrected_v2(session, monkeypatch):
+    product, raw = await _seed_product_content(session)
+    calls = []
+
+    async def chat(config, system, user, *, json_mode=False):
+        calls.append(system)
+        payload = json.loads(user if isinstance(user, str) else user[0]["text"])
+        if len(calls) == 1:
+            quote = f"{payload['title']} {payload['text']}"
+            assert "上轮未通过 schema/引文校验" not in system
+        else:
+            assert "上轮未通过 schema/引文校验" in system
+            assert '错误 quote="某键盘到货开箱，补款后收到"' in system
+            assert "不能推理官方已发货" in system
+            assert "不因此降低实物到手轴" in system
+            quote = payload["title"]
+        review = make_review(product_ids=(product.id,), updates={(product.id, "consumer_received"): {
+            "verdict": "supported", "confidence": 95, "quote": quote, "reason": "明确实物开箱", "acquisition_type": "unknown",
+        }})
+        return _response(review), None
+
+    monkeypatch.setattr(curation, "chat", chat)
+    result = await curation.review_contents(session, [raw.id])
+    assert result.reviewed == 1 and result.failed_batches == 0 and len(calls) == 2
+    stored = (await session.get(ContentReview, raw.id)).fulfillment
+    assert stored["schema_version"] == 2 and stored["content_version"] == 1
+    receipt = next(item for item in stored["signals"] if item["signal_type"] == "consumer_received")
+    assert receipt["quote"] == "我自购的爱弥斯键盘今天到货开箱"
