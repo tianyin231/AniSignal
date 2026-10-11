@@ -78,7 +78,9 @@ class HighlightCandidate:
     official: bool
 
 
-async def review_contents(session: AsyncSession, content_ids: list[int]) -> ReviewStats:
+async def review_contents(
+    session: AsyncSession, content_ids: list[int], *, force: bool = False
+) -> ReviewStats:
     """逐条多模态审核（标题/正文/封面）；违规或不相关的内容自动下架，管理端可恢复。
 
     AI 判定并发执行（限流），结果顺序落库；单条失败不影响其余内容。
@@ -93,7 +95,7 @@ async def review_contents(session: AsyncSession, content_ids: list[int]) -> Revi
         return stats
 
     tracked_products = await _load_tracked_products(session)
-    candidates = await _review_candidates(session, ids, tracked_products)
+    candidates = await _review_candidates(session, ids, tracked_products, force=force)
     stats.candidates = len(candidates)
     semaphore = _shared_review_semaphore()
 
@@ -306,7 +308,7 @@ async def review_recent_contents(
         ids.append(content_id)
         if len(ids) >= limit:
             break
-    return await review_contents(session, ids)
+    return await review_contents(session, ids, force=not only_missing)
 
 
 async def select_trending(
@@ -558,7 +560,7 @@ def _latest_version_subquery():
 
 
 async def _review_candidates(
-    session: AsyncSession, ids: list[int], tracked_products: list[dict]
+    session: AsyncSession, ids: list[int], tracked_products: list[dict], *, force: bool = False
 ) -> list[dict]:
     latest = _latest_version_subquery()
     rows = list(
@@ -589,7 +591,7 @@ async def _review_candidates(
     )}
     for raw, version, source in rows:
         review = reviews.get(raw.id)
-        if review is not None:
+        if review is not None and not force:
             if get_community(raw.community).domain == "news":
                 news = review.news or {}
                 if news.get("content_hash") == raw.content_hash and news.get("content_version") == version.version:

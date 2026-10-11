@@ -2,11 +2,14 @@
 
 from copy import deepcopy
 from datetime import timedelta
+from unittest.mock import AsyncMock
+
+import pytest
 
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import AiUsage, CollectTarget, ContentReview, RawContent
+from app.models import AiUsage, CollectTarget, ContentReview, ContentVersion, RawContent
 from app.services import curation
 from app.services.classify import seed_defaults
 from app.services.ingest import ingest_items
@@ -63,6 +66,50 @@ async def test_game_version_changed_during_review_requests_retry(session, monkey
     assert stats.failed_batches == 1
     assert stats.reviewed == 0
     assert await session.get(ContentReview, raw.id) is None
+
+
+@pytest.mark.parametrize("community", ["wuwa", "ai"])
+async def test_recent_force_review_updates_same_version_without_disabling_queue_dedup(
+    session, monkeypatch, community
+):
+    await set_setting(session, "ai", {"base_url": "https://example.com", "model": "test", "api_key": "x"})
+    await ingest_items(
+        session, "bilibili_search",
+        [dict(VIDEO_RAW, title="Codex 新功能开始测试", description="作者报道新功能。")],
+        community=community,
+    )
+    raw = await session.scalar(select(RawContent))
+    version = await session.scalar(select(ContentVersion))
+    raw.published_at = utcnow() - timedelta(hours=1)
+    session.add(ContentReview(
+        raw_content_id=raw.id, model="old-model", quality_score=20, reason="旧判定",
+        updated_at=utcnow(),
+        news={"content_hash": raw.content_hash, "content_version": version.version},
+    ))
+    await session.commit()
+    chat = AsyncMock(return_value=(
+        '{"review":{"relevant":true,"promotional":false,"violation":false,'
+        '"quality_score":91,"category_hint":"ai_news","reason":"重新判定",'
+        '"news":{"newsworthy":true,"headline":"作者报道 Codex 新功能测试",'
+        '"summary":"作者称新功能开始测试，开放范围待核实。","kind":"report","topics":["Codex"]}}}',
+        None,
+    ))
+    monkeypatch.setattr(curation, "chat", chat)
+    monkeypatch.setattr(curation, "_cover_data_url", AsyncMock(return_value=None))
+
+    assert (await curation.review_contents(session, [raw.id])).candidates == 0
+    assert (await curation.review_recent_contents(session, only_missing=True)).candidates == 0
+    chat.assert_not_awaited()
+
+    stats = await curation.review_recent_contents(session, only_missing=False)
+    assert stats.candidates == stats.reviewed == 1
+    chat.assert_awaited_once()
+    review = await session.get(ContentReview, raw.id)
+    assert review.quality_score == 91
+    assert review.reason == "重新判定"
+    assert review.model == "test"
+    assert (await curation.review_contents(session, [raw.id])).candidates == 0
+    chat.assert_awaited_once()
 
 
 async def test_highlights_mix_official_and_hot_community(client, session):
