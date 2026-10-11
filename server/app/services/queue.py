@@ -11,6 +11,16 @@ import time
 logger = logging.getLogger(__name__)
 
 
+async def enqueue_review_jobs(redis, content_ids: list[int]) -> str | None:
+    """同一内容排队/执行期间只保留一份审核，完成后允许新版本入队。"""
+    first_job_id = None
+    for content_id in dict.fromkeys(content_ids):
+        job = await redis.enqueue_job("review_contents", [content_id], _job_id=f"review-content:{content_id}")
+        if job is not None and first_job_id is None:
+            first_job_id = getattr(job, "job_id", None)
+    return first_job_id
+
+
 class BaseQueue:
     async def enqueue_collect(self, target_id: int) -> str | None:
         raise NotImplementedError
@@ -188,8 +198,7 @@ class ArqQueue(BaseQueue):
         return getattr(job, "job_id", None) if job is not None else None
 
     async def enqueue_review(self, content_ids: list[int]) -> str | None:
-        job = await self._pool.enqueue_job("review_contents", content_ids)
-        return getattr(job, "job_id", None) if job is not None else None
+        return await enqueue_review_jobs(self._pool, content_ids)
 
     async def enqueue_admin_email(self, delivery_ids: list[int]) -> str | None:
         job = await self._pool.enqueue_job("send_admin_emails", delivery_ids)

@@ -6,6 +6,7 @@ arq CLI 入口：`arq app.worker.settings.WorkerSettings`
 import logging
 
 from arq.connections import RedisSettings
+from arq.worker import Retry, func
 
 from app.config import get_settings
 from app.services.collect import run_collection
@@ -45,6 +46,9 @@ async def review_contents(ctx, content_ids: list[int]) -> dict:
 
     async with SessionLocal() as session:
         stats = await run(session, content_ids)
+        if stats.failed_batches:
+            # 交还 worker 槽位，游戏审核和快讯都允许有限的延迟重试。
+            raise Retry(defer=600)
         return stats.__dict__
 
 
@@ -55,6 +59,18 @@ async def send_user_notification(ctx, delivery_id: int) -> dict:
 
     async with SessionLocal() as session:
         return await process_delivery(session, delivery_id)
+
+
+async def review_pending_news(ctx) -> dict:
+    """补偿未完成的近期快讯，候选查询负责冷却和次数上限。"""
+    from app.db import SessionLocal
+    from app.services.ai_news import pending_news_ids
+    from app.services.queue import enqueue_review_jobs
+
+    async with SessionLocal() as session:
+        ids = await pending_news_ids(session)
+    await enqueue_review_jobs(ctx["redis"], ids)
+    return {"candidates": len(ids)}
 
 
 async def collect_custom_feeds(ctx) -> dict:
@@ -70,12 +86,20 @@ async def extract_entities_sweep(ctx) -> dict:
     """官方内容实体抽取轮询：日程与兑换码（每轮限量）。"""
     from app.db import SessionLocal
     from app.services.extract import sweep_extractions
+    import secrets
 
-    async with SessionLocal() as session:
-        result = await sweep_extractions(session)
-        if result["candidates"]:
-            logger.info("extract_entities_sweep -> %s", result)
-        return result
+    token = secrets.token_hex(16)
+    key = "anisignal:extract-sweep-lock"
+    if not await ctx["redis"].set(key, token, nx=True, ex=1900):
+        return {"status": "busy"}
+    try:
+        async with SessionLocal() as session:
+            result = await sweep_extractions(session)
+            if result["candidates"]:
+                logger.info("extract_entities_sweep -> %s", result)
+            return result
+    finally:
+        await ctx["redis"].eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0", 1, key, token)
 
 
 async def send_admin_emails(ctx, delivery_ids: list[int]) -> dict:
@@ -109,6 +133,13 @@ async def on_startup(ctx) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    from app.db import SessionLocal
+    from app.services.collect import recover_stale_runs
+
+    async with SessionLocal() as session:
+        recovered = await recover_stale_runs(session)
+    if recovered:
+        logger.warning("recovered %s interrupted collection runs", recovered)
 
 
 async def send_bot_notifications(ctx):
@@ -133,7 +164,8 @@ class WorkerSettings:
         collect_target,
         summarize_event,
         translate_content,
-        review_contents,
+        func(review_contents, keep_result=0, max_tries=3),
+        review_pending_news,
         send_user_notification,
         send_morning_notifications,
         send_admin_emails,

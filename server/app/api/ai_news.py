@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.db import get_session
@@ -65,6 +66,7 @@ async def list_news(
     news = ContentReview.news
     query = (
         select(RawContent, ContentVersion, Source, ContentReview)
+        .options(defer(RawContent.raw_json), defer(ContentVersion.normalized_json))
         .join(latest, latest.c.rid == RawContent.id)
         .join(ContentVersion, (ContentVersion.raw_content_id == latest.c.rid)
               & (ContentVersion.version == latest.c.version))

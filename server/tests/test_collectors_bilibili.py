@@ -6,7 +6,7 @@ import pytest
 import httpx
 
 from app.collectors import bilibili as bili_module
-from app.collectors.base import CollectorError
+from app.collectors.base import CollectorDeferred, CollectorError
 from app.collectors.bilibili import BiliRiskControlError, BilibiliCollector
 
 
@@ -162,8 +162,9 @@ async def test_circuit_opens_after_consecutive_refusals(monkeypatch):
 
     assert bili_module._circuit_open("video")
     # 熔断后直接短路，不再触碰端点
-    with pytest.raises(BiliRiskControlError):
+    with pytest.raises(CollectorDeferred) as deferred:
         await collector._run("video", "BV2")
+    assert deferred.value.retry_at == bili_module._CIRCUIT_STATE["video"]["until"]
     assert len(calls) == 2
     # 其他命令不受影响
     assert bili_module._circuit_open("search") is False

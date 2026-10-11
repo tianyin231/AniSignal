@@ -37,7 +37,7 @@ const filters = computed(() => ({
 const request = computed(() => ({ ...filters.value, limit: 20, offset: (page.value - 1) * 20 }))
 const { data, status, error, refresh } = await useLazyAsyncData(
   () => `ai-news-${JSON.stringify(request.value)}`,
-  () => api<NewsList>('/api/ai-news', { query: request.value }),
+  (_app, { signal }) => api<NewsList>('/api/ai-news', { query: request.value, signal }),
 )
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total || 0) / 20)))
 const hasFilters = computed(() => !!(filters.value.q || filters.value.topic || filters.value.kind !== 'all'))
@@ -73,21 +73,26 @@ async function reload() {
     if (!error.value) pendingNew.value = false
   } finally { refreshBusy.value = false }
 }
+let probeController: AbortController | undefined
 async function checkUpdates() {
-  if (document.visibilityState !== 'visible' || pendingNew.value || page.value !== 1 || refreshBusy.value) return
+  if (document.visibilityState !== 'visible' || pendingNew.value || page.value !== 1 || refreshBusy.value || status.value !== 'success' || probeController) return
+  const controller = new AbortController()
+  probeController = controller
   try {
-    const head = await api<NewsList>('/api/ai-news', { query: { ...filters.value, limit: 1 } })
-    if (head.items[0] && head.items[0].id !== data.value?.items[0]?.id) pendingNew.value = true
+    const head = await api<NewsList>('/api/ai-news', { query: { ...filters.value, limit: 1 }, signal: controller.signal })
+    if (!controller.signal.aborted && head.items[0] && head.items[0].id !== data.value?.items[0]?.id) pendingNew.value = true
   } catch { /* 保留正在阅读的列表，用户手动刷新时显示错误。 */ }
+  finally { if (probeController === controller) probeController = undefined }
 }
 let timer: ReturnType<typeof setInterval> | undefined
 watch(() => route.query.q, value => { search.value = String(value || '') })
-watch(request, () => { pendingNew.value = false })
+watch(request, () => { probeController?.abort(); pendingNew.value = false })
 onMounted(() => {
   timer = setInterval(checkUpdates, 60_000)
   document.addEventListener('visibilitychange', checkUpdates)
 })
 onBeforeUnmount(() => {
+  probeController?.abort()
   if (timer) clearInterval(timer)
   document.removeEventListener('visibilitychange', checkUpdates)
 })

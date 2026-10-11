@@ -10,10 +10,11 @@ import { identityMeta, platformMeta, type Identity, type Platform } from '~/util
 
 const route = useRoute()
 const { api } = usePublicApi()
-const { data: detail, error } = await useAsyncData(`content-${route.params.id}`, () =>
-  api<ContentDetail>(`/api/contents/${route.params.id}`),
+const { data: detail, error } = await useAsyncData(() => `content-${route.params.id}`, (_app, { signal }) =>
+  api<ContentDetail>(`/api/contents/${route.params.id}`, { signal }),
 )
-if (error.value || !detail.value)
+if (error.value) throw createError({ statusCode: error.value.statusCode || 503, statusMessage: error.value.statusCode === 404 ? '内容不存在' : '内容暂时加载失败，请稍后重试', fatal: true })
+if (!detail.value)
   throw createError({ statusCode: 404, statusMessage: '内容不存在', fatal: true })
 
 const d = computed(() => detail.value!)

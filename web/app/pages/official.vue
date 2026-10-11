@@ -30,10 +30,11 @@ watch(scope, () => {
 })
 
 const { api } = usePublicApi()
-const { data, status } = await useAsyncData(
+const { data, status, error, refresh } = await useLazyAsyncData(
   () => `official-feed-${scope.value}`,
-  () =>
+  (_app, { signal }) =>
     api<PublicContentList>('/api/contents', {
+      signal,
       query: { community: scope.value, identity: 'official', limit: 100 },
     }),
   { watch: [scope] },
@@ -65,6 +66,7 @@ useSeoMeta({ title: '官方动态' })
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…
     </section>
+    <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">官方动态暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
     <section v-else class="panel overflow-hidden">
       <RawFeedRow v-for="row in list" :key="row.id" :item="row" />
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">

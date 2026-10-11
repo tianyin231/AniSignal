@@ -371,6 +371,9 @@ async def test_official_recompute_reconciles_stale_evidence(session):
 async def test_high_confidence_cross_language_match_merges_official_contents(
     session, monkeypatch
 ):
+    from datetime import timedelta, timezone
+
+    from app.clock import utcnow
     from app.services import similarity
     from app.services.settings import set_setting
     from tests.test_parsers_others import YOUTUBE_ITEM
@@ -380,6 +383,7 @@ async def test_high_confidence_cross_language_match_merges_official_contents(
         "ai",
         {"base_url": "https://api.example.com/v1", "model": "test-model", "api_key": "x"},
     )
+    published = (utcnow() - timedelta(days=1)).replace(tzinfo=timezone.utc)
     bili = dict(
         VIDEO_RAW,
         bvid="BVofficial",
@@ -387,13 +391,13 @@ async def test_high_confidence_cross_language_match_merges_official_contents(
         description="清宵角色音乐现已发布",
         owner_mid=1955897084,
         owner_name="鸣潮",
-        pubdate=1787193000,
+        pubdate=int(published.timestamp()),
     )
     youtube = dict(
         YOUTUBE_ITEM,
         id="qaVli_4qiVs",
         title='Wuthering Waves EP3.6 — Qingxiao - "Outside the Mountain"',
-        published="2026-08-20T02:30:04+00:00",
+        published=(published + timedelta(seconds=4)).isoformat(),
     )
     await ingest_items(session, "bilibili_search", [bili])
     await ingest_items(session, "youtube_rss", [youtube])

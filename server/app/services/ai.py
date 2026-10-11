@@ -5,11 +5,13 @@
 定价（每百万 token 单价）在 ai 设置里配置，费用 = tokens × 单价 / 1e6。
 """
 
+import asyncio
 import json
 import logging
 import re
 import time
 from html import unescape
+from datetime import timedelta
 
 import httpx
 from sqlalchemy import func, select
@@ -51,7 +53,7 @@ async def get_ai_config(session: AsyncSession) -> dict:
 
 
 def ai_available(config: dict) -> bool:
-    return bool(config.get("base_url") and config.get("api_key") and config.get("model"))
+    return bool(config.get("base_url") and any(_pool_keys(config)) and config.get("model"))
 
 
 async def record_usage(
@@ -88,7 +90,23 @@ async def record_usage(
 _POOL_INDEX = 0
 _KEY_COOLDOWN: dict[str, float] = {}
 _KEY_COOLDOWN_SECONDS = 60.0
+_CHAT_TIMEOUT_SECONDS = 120.0
 _POOL_ROTATE_STATUSES = {401, 402, 403, 429}  # 密钥级失败：换下一把并冷却
+
+
+class AiPoolCoolingDown(RuntimeError):
+    """所有密钥都在冷却，本轮不再向上游发送请求。"""
+
+
+def retry_allowed(task: str, since):
+    """同一内容版本最多自动失败三次，间隔十分钟；复用用量记录。"""
+    conditions = (
+        AiUsage.task == task, AiUsage.ref_id == RawContent.id,
+        AiUsage.status == "failed", AiUsage.created_at >= since,
+    )
+    attempts = select(func.count(AiUsage.id)).where(*conditions).correlate(RawContent).scalar_subquery()
+    last = select(func.max(AiUsage.created_at)).where(*conditions).correlate(RawContent).scalar_subquery()
+    return (attempts < 3) & ((last.is_(None)) | (last <= utcnow() - timedelta(minutes=10)))
 
 
 def _pool_keys(config: dict) -> list[str]:
@@ -134,36 +152,36 @@ async def chat(
 
     user 为 str 时是纯文本；为 list 时是 OpenAI 多模态 content 分片
     （如 [{"type": "text", ...}, {"type": "image_url", ...}]），原样透传。
-    密钥池轮询：成功一次推进起点，把连续调用摊到各密钥上；密钥级失败
+    密钥池轮询：请求发出前推进起点，把并发调用摊到各密钥上；密钥级失败
     （429/401/402/403）立即换下一把并给该密钥 60 秒冷却；全部密钥失败时
     抛出最后一个异常，由上层任务按既有退避逻辑处理。
     """
     global _POOL_INDEX
     keys = _pool_keys(config)
+    start = _POOL_INDEX
+    _POOL_INDEX = (start + 1) % len(keys)
     last_error: Exception | None = None
-    for offset in range(len(keys)):
-        index = (_POOL_INDEX + offset) % len(keys)
-        api_key = keys[index]
-        in_cooldown = _KEY_COOLDOWN.get(api_key, 0) > time.monotonic()
-        if in_cooldown and offset < len(keys) - 1:
-            continue  # 冷却中的密钥让位；全部冷却时仍按序兜底尝试
-        try:
-            result = await _chat_once(config, api_key, system, user, json_mode=json_mode)
-        except httpx.HTTPStatusError as exc:
-            last_error = exc
-            status = exc.response.status_code
-            if status in _POOL_ROTATE_STATUSES:
-                _KEY_COOLDOWN[api_key] = time.monotonic() + _KEY_COOLDOWN_SECONDS
-            continue
-        except (httpx.TransportError, ValueError, KeyError) as exc:
-            last_error = exc
-            continue
-        _KEY_COOLDOWN.pop(api_key, None)
-        _POOL_INDEX = (index + 1) % len(keys)
-        return result
+    # 总时限覆盖整个密钥池，避免每换一把密钥又等待两分钟。
+    async with asyncio.timeout(_CHAT_TIMEOUT_SECONDS):
+        for offset in range(len(keys)):
+            api_key = keys[(start + offset) % len(keys)]
+            if _KEY_COOLDOWN.get(api_key, 0) > time.monotonic():
+                continue
+            try:
+                result = await _chat_once(config, api_key, system, user, json_mode=json_mode)
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                if exc.response.status_code in _POOL_ROTATE_STATUSES:
+                    _KEY_COOLDOWN[api_key] = time.monotonic() + _KEY_COOLDOWN_SECONDS
+                continue
+            except (httpx.TransportError, ValueError, KeyError, IndexError) as exc:
+                last_error = exc
+                continue
+            _KEY_COOLDOWN.pop(api_key, None)
+            return result
     if last_error is not None:
         raise last_error
-    raise RuntimeError("no api key configured")
+    raise AiPoolCoolingDown("AI 密钥池正在冷却，稍后重试")
 
 
 def _public_view(config: dict) -> dict:

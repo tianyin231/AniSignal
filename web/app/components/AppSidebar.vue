@@ -25,6 +25,7 @@ const tools = computed(() => [
           <li v-for="q in tools" :key="q.label">
             <NuxtLink
               :to="q.to"
+              :prefetch-on="q.to === '/stats' ? 'interaction' : 'visibility'"
               class="block truncate rounded-md px-2 py-1.5 text-slate-600 transition-colors hover:bg-slate-200/70 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
             >
               {{ q.label }}

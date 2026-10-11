@@ -15,9 +15,9 @@ const range = ref(30)
 const refreshing = ref(false)
 const theme = useState<'light' | 'dark'>('theme', () => 'light')
 const { api } = usePublicApi()
-const request = useAsyncData(
+const request = useLazyAsyncData(
   () => `public-statistics-${range.value}`,
-  () => api<StatisticsOverview>('/api/statistics', { query: { days: range.value } }),
+  (_app, { signal }) => api<StatisticsOverview>('/api/statistics', { query: { days: range.value }, signal }),
   { watch: [range] },
 )
 const { data, status, error } = await request
@@ -44,13 +44,14 @@ function duration(value: number | null) {
 }
 
 function statusLabel(status: string) {
-  return { running: '进行中', success: '成功', partial: '部分成功', failed: '失败' }[status] || status
+  return { running: '进行中', success: '成功', partial: '部分成功', failed: '失败', skipped: '冷却跳过' }[status] || status
 }
 
 function statusClass(status: string) {
   if (status === 'running') return 'bg-blue-500/10 text-blue-700 dark:text-blue-300'
   if (status === 'failed') return 'bg-red-500/10 text-red-600 dark:text-red-400'
   if (status === 'partial') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  if (status === 'skipped') return 'bg-slate-500/10 text-slate-600 dark:text-zinc-400'
   return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
 }
 
@@ -256,7 +257,7 @@ useSeoMeta({ title: '数据统计' })
       正在汇总统计…
     </section>
     <section v-else-if="error" class="panel px-5 py-16 text-center text-sm text-red-600 dark:text-red-400">
-      统计加载失败，请稍后刷新。
+      统计加载失败。<button type="button" class="ml-1 underline" @click="refresh">重新加载</button>
     </section>
 
     <template v-else-if="data">
@@ -279,10 +280,11 @@ useSeoMeta({ title: '数据统计' })
         </article>
         <article class="panel p-4">
           <div class="flex items-center justify-between text-slate-500 dark:text-zinc-400">
-            <span class="text-xs">采集成功率</span><Activity :size="16" aria-hidden="true" />
+            <span class="text-xs">完整成功率</span><Activity :size="16" aria-hidden="true" />
           </div>
           <p class="mono mt-2 text-2xl font-semibold text-slate-900 dark:text-zinc-50">{{ percent(data.totals.success_rate) }}</p>
           <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">{{ data.totals.collection_runs }} 次 · 失败 {{ data.totals.failed_runs }} 次</p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">仅完整成功计入；部分成功计入总次数，冷却跳过不计入。</p>
         </article>
         <article class="panel p-4">
           <div class="flex items-center justify-between text-slate-500 dark:text-zinc-400">

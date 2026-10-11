@@ -16,10 +16,11 @@ const { api } = usePublicApi()
 const page = computed(() => Math.max(1, Number(useRoute().query.page) || 1))
 const pageSize = 30
 
-const { data, status } = await useLazyAsyncData(
+const { data, status, error, refresh } = await useLazyAsyncData(
   () => `custom-feeds-${page.value}`,
-  () =>
+  (_app, { signal }) =>
     api<{ items: CustomFeedCard[], total: number }>('/api/custom/feeds', {
+      signal,
       query: { page: page.value, page_size: pageSize },
     }),
   { watch: [page] },
@@ -45,6 +46,7 @@ const kindLabel = (kind: string) => (kind === 'uid' ? 'UID 监控' : '关键词�
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…
     </section>
+    <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">监控列表暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
     <template v-else>
       <div v-if="items.length" class="grid gap-3 sm:grid-cols-2">
         <NuxtLink

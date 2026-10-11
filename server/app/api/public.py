@@ -11,8 +11,9 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import BigInteger, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.communities import (
     COMMUNITIES,
@@ -227,8 +228,9 @@ async def list_contents(
         conditions.append(ContentVersion.title.like(f"%{q}%"))
 
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
-    rows = await session.execute(
+    query = (
         select(RawContent, Source.name, Source.identity, ContentVersion)
+        .options(defer(RawContent.raw_json))
         .join(latest_sq, latest_sq.c.rid == RawContent.id)
         .join(
             ContentVersion,
@@ -237,10 +239,22 @@ async def list_contents(
         )
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(*conditions)
-        .order_by(publication_time.desc(), RawContent.id.desc())
-        .limit(200 if sort == "hot" else limit)
-        .offset(0 if sort == "hot" else offset)
     )
+    if sort == "hot":
+        from app.models import MetricSnapshot
+
+        latest_metrics = (
+            select(MetricSnapshot.raw_content_id.label("rid"), func.max(MetricSnapshot.id).label("sid"))
+            .group_by(MetricSnapshot.raw_content_id)
+            .subquery()
+        )
+        views = func.coalesce(cast(MetricSnapshot.metrics["view"].as_string(), BigInteger), 0)
+        query = (query.outerjoin(latest_metrics, latest_metrics.c.rid == RawContent.id)
+                 .outerjoin(MetricSnapshot, MetricSnapshot.id == latest_metrics.c.sid)
+                 .order_by(views.desc()))
+    rows = await session.execute(query.order_by(
+        publication_time.desc(), RawContent.id.desc(),
+    ).limit(limit).offset(offset))
     candidates: list[PublicContentItem] = []
     seen: set[int] = set()
     for raw, source_name, source_identity, version in rows:
@@ -275,13 +289,7 @@ async def list_contents(
     metrics_map = await _latest_metrics(session, [i.id for i in candidates])
     for item in candidates:
         item.metrics = metrics_map.get(item.id)
-    if sort == "hot":
-        candidates.sort(
-            key=lambda i: (i.metrics or {}).get("view", 0), reverse=True
-        )
-        items = candidates[offset : offset + limit]
-    else:
-        items = candidates
+    items = candidates
 
     count_sq = (
         select(func.count(func.distinct(RawContent.id)))
@@ -611,7 +619,9 @@ async def list_events(
         conditions.append(EventModel.title.like(f"%{q}%"))
 
     total = await session.scalar(
-        select(func.count(EventModel.id)).where(*conditions)
+        select(func.count(EventModel.id))
+        .join(latest_evidence_sq, latest_evidence_sq.c.event_id == EventModel.id)
+        .where(*conditions)
     ) or 0
     events = list(
         (

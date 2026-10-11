@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.clock import utcnow
 from app.collectors.bilibili import BilibiliCollector
-from app.models import CollectTarget, ContentReview, RawContent
+from app.models import AiUsage, CollectTarget, ContentReview, ContentVersion, RawContent
 from app.services import curation
 from app.services.ai_news import constrain_news, is_news_candidate, parse_news, pending_news_ids, reference_links
 from app.services.collect import filter_relevant
@@ -20,7 +20,8 @@ from tests.test_parsers_bilibili import VIDEO_RAW
 async def add_video(session, bvid="BVnews", hours=1, **overrides):
     item = dict(VIDEO_RAW, bvid=bvid, title="Codex 新功能开始测试", description="作者报道新功能，仅部分用户可用。",
                 view_count=6, owner_mid=999, owner_name="资讯作者",
-                pubdate=int((utcnow() - timedelta(hours=hours)).replace(tzinfo=timezone.utc).timestamp()), **overrides)
+                pubdate=int((utcnow() - timedelta(hours=hours)).replace(tzinfo=timezone.utc).timestamp()))
+    item.update(overrides)
     await ingest_items(session, "bilibili_search", [item], community="ai")
     return await session.scalar(select(RawContent).where(RawContent.external_id == bvid))
 
@@ -93,8 +94,33 @@ async def test_tutorial_and_missing_news_fields_stay_hidden(session, monkeypatch
     await review(session, monkeypatch, [raw.id], tutorial)
     assert raw.hidden is True
     assert await pending_news_ids(session) == []
+    # 管理员重审会先删除旧审核；普通重复入队应保持既有结果。
+    await session.delete(await session.get(ContentReview, raw.id))
+    await session.commit()
     await review(session, monkeypatch, [raw.id], decision(news=None))
     assert raw.hidden is True
+    assert await pending_news_ids(session) == []  # 失败后先冷却
+    monkeypatch.setattr("app.services.ai.utcnow", lambda: utcnow() + timedelta(minutes=11))
+    assert await pending_news_ids(session) == [raw.id]
+
+
+async def test_review_deduplicates_version_and_retries_new_body(session, monkeypatch):
+    raw = await add_video(session)
+    assert (await review(session, monkeypatch, [raw.id])).reviewed == 1
+    assert (await review(session, monkeypatch, [raw.id])).candidates == 0
+    await add_video(session, description="作者报道新增功能开始测试，具体开放范围正在扩大。")
+    assert (await review(session, monkeypatch, [raw.id])).reviewed == 1
+
+
+async def test_pending_news_caps_failures_but_new_version_can_retry(session):
+    raw = await add_video(session)
+    version = await session.scalar(select(ContentVersion).where(ContentVersion.raw_content_id == raw.id))
+    version.parsed_at = utcnow() - timedelta(hours=2)
+    session.add_all([AiUsage(task="review_content", ref_id=raw.id, model="test", status="failed",
+                             created_at=utcnow() - timedelta(hours=1)) for _ in range(3)])
+    await session.commit()
+    assert await pending_news_ids(session) == []
+    await add_video(session, description="新的官方产品进展已补充到正文。")
     assert await pending_news_ids(session) == [raw.id]
 
 

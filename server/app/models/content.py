@@ -92,6 +92,8 @@ class MetricSnapshot(Base):
     __tablename__ = "metric_snapshots"
     __table_args__ = (
         Index("ix_metric_snapshots_content_time", "raw_content_id", "captured_at"),
+        Index("ix_metric_snapshots_time_content", "captured_at", "raw_content_id"),
+        Index("ix_metric_snapshots_content_id", "raw_content_id", "id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -169,6 +171,7 @@ class AiUsage(Base):
     __tablename__ = "ai_usage"
     __table_args__ = (
         Index("ix_ai_usage_created", "created_at"),
+        Index("ix_ai_usage_retry", "task", "ref_id", "status", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

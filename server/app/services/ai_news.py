@@ -103,8 +103,13 @@ def reference_links(text: str) -> list[dict]:
 
 
 async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None = None) -> list[int]:
+    from app.services.ai import retry_allowed
+
     fingerprint = ContentReview.news["content_hash"].as_string()
     latest_version = select(func.max(ContentVersion.version)).where(
+        ContentVersion.raw_content_id == RawContent.id,
+    ).correlate(RawContent).scalar_subquery()
+    latest_parsed = select(func.max(ContentVersion.parsed_at)).where(
         ContentVersion.raw_content_id == RawContent.id,
     ).correlate(RawContent).scalar_subquery()
     query = (select(RawContent.id)
@@ -112,6 +117,7 @@ async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None
         .where(
             RawContent.community == "ai",
             RawContent.published_at >= utcnow() - timedelta(days=7),
+            retry_allowed("review_content", latest_parsed),
             (fingerprint.is_(None)) | (fingerprint != RawContent.content_hash)
             | (ContentReview.news["content_version"].as_integer().is_(None))
             | (ContentReview.news["content_version"].as_integer() != latest_version),

@@ -60,6 +60,7 @@ class Identity(StrEnum):
 
 class RunStatus(StrEnum):
     RUNNING = "running"
+    SKIPPED = "skipped"
     SUCCESS = "success"
     PARTIAL = "partial"
     FAILED = "failed"

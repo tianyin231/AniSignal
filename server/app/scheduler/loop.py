@@ -2,8 +2,8 @@
 
 设计要点：
 - 每 poll 秒扫一次到期目标（enabled && next_run_at <= now）；
-- 投递前先把 next_run_at 推后（含抖动），避免投递失败时被反复扫到；
-- 失败退避由 services.collect.next_run_with_jitter 统一计算。
+- 投递前先预约 next_run_at（含抖动），避免在任务执行期间反复投递；
+- 采集完成后按本轮结果重算 next_run_at，恢复成功不沿用旧失败退避。
 """
 
 import asyncio
@@ -142,6 +142,8 @@ async def main() -> None:
                     await redis.enqueue_job("send_bot_notifications", _job_id=f"bot-sweep:{int(now.timestamp() // 60)}")
                     # 定制监控轮询：5 分钟桶去重，worker 内部再按 next_run_at 限速
                     bucket = int(now.timestamp() // 300)
+                    await redis.enqueue_job(
+                        "review_pending_news", _job_id=f"review-pending-news:{bucket}")
                     if not await redis.get(f"anisignal:custom-sweep-enqueued:{bucket}"):
                         job = await redis.enqueue_job(
                             "collect_custom_feeds", _job_id=f"custom-sweep:{bucket}")

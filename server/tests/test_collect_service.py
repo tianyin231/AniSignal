@@ -3,10 +3,12 @@
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import func, select
 
 import app.services.collect as collect_module
 from app.clock import utcnow
-from app.models import CollectionDailyStat, CollectRun, CollectTarget, RunStatus
+from app.collectors.base import CollectorDeferred
+from app.models import CollectionDailyStat, CollectRun, CollectTarget, RawContent, RunStatus
 from app.schemas.content import FetchResult
 from app.services.statistics import beijing_date
 
@@ -115,6 +117,145 @@ async def test_failure_backoff_doubles_interval(session, patched_collect):
     assert timedelta(minutes=100) < (nxt - now) < timedelta(minutes=140)
 
 
+async def test_success_restores_interval_after_failure_backoff(session, patched_collect):
+    target = await _make_target(session)
+    target.consecutive_failures = 5
+    target.next_run_at = utcnow() + timedelta(hours=16)
+    await session.commit()
+
+    await collect_module.run_collection(_FakeRedis(), target.id)
+    await session.refresh(target)
+
+    assert target.consecutive_failures == 0
+    assert timedelta(minutes=27) <= target.next_run_at - target.last_run_at <= timedelta(minutes=33)
+
+
+async def test_failure_reschedules_using_current_failure_count(session, patched_collect):
+    target = await _make_target(session)
+    _StubCollector.fail = True
+    await collect_module.run_collection(_FakeRedis(), target.id)
+    await session.refresh(target)
+    assert timedelta(minutes=54) <= target.next_run_at - target.last_run_at <= timedelta(minutes=66)
+
+
+async def test_circuit_cooldown_is_skipped_without_increasing_failures(session, patched_collect, monkeypatch):
+    target = await _make_target(session)
+    target.consecutive_failures = 2
+    target.last_error = "previous actual refusal"
+    await session.commit()
+    retry_at = utcnow() + timedelta(minutes=45)
+
+    async def deferred(*args):
+        raise CollectorDeferred("platform cooling down", retry_at=retry_at)
+
+    monkeypatch.setattr(_StubCollector, "fetch", deferred)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    await session.refresh(target)
+    run = await session.get(CollectRun, result["run_id"])
+    assert run.status == "skipped"
+    assert run.error == "platform cooling down"
+    assert target.consecutive_failures == 2
+    assert target.last_error == "previous actual refusal"
+    assert target.last_success_at is None
+    assert target.next_run_at == result["retry_at"] == retry_at
+
+
+@pytest.mark.parametrize("all_invalid", [True, False])
+async def test_parse_failure_reports_failed_or_partial(session, patched_collect, monkeypatch, all_invalid):
+    target = await _make_target(session)
+
+    async def fetch(*args):
+        items = [{}] if all_invalid else [VIDEO_RAW, {}]
+        return FetchResult(platform="bilibili", fetch_kind="bilibili_search", items=items)
+
+    monkeypatch.setattr(_StubCollector, "fetch", fetch)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    await session.refresh(target)
+    run = await session.get(CollectRun, result["run_id"])
+    assert run.status == ("failed" if all_invalid else "partial")
+    assert run.parse_failed == 1
+    assert "parse failed" in run.error
+    assert target.consecutive_failures == (1 if all_invalid else 0)
+    assert (target.last_success_at is None) == all_invalid
+
+
+@pytest.mark.parametrize("database_error", [False, True])
+async def test_postprocessing_failure_preserves_ingestion_and_records_partial(
+    session, patched_collect, monkeypatch, database_error,
+):
+    from app.services import events
+
+    target = await _make_target(session)
+
+    async def fail_aggregation(collect_session):
+        if database_error:
+            collect_session.add(CollectTarget(
+                platform=target.platform, target_type=target.target_type,
+                target_value=target.target_value,
+            ))
+            await collect_session.flush()
+        raise RuntimeError("aggregation unavailable")
+
+    monkeypatch.setattr(events, "run_aggregation", fail_aggregation)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    await session.refresh(target)
+    run = await session.get(CollectRun, result["run_id"])
+    assert run.status == "partial"
+    assert run.error == result["error"]
+    assert run.error
+    assert target.last_error == run.error
+    assert target.last_success_at is not None
+    assert await session.scalar(select(func.count()).select_from(RawContent)) == 1
+
+
+async def test_statistics_excludes_skips_and_counts_only_full_success(session):
+    from app.services.statistics import build_statistics, record_collection_stat
+
+    target = await _make_target(session)
+    for status in (RunStatus.SUCCESS, RunStatus.PARTIAL, RunStatus.FAILED, RunStatus.SKIPPED):
+        run = CollectRun(
+            target_id=target.id, status=status, started_at=utcnow(), finished_at=utcnow(),
+            items_found=0, items_new=0,
+        )
+        session.add(run)
+        await record_collection_stat(session, run)
+    await session.commit()
+
+    overview = await build_statistics(session, 7)
+    assert overview.totals.collection_runs == 3
+    assert overview.totals.failed_runs == 1
+    assert overview.totals.success_rate == 33.3
+    assert overview.targets[0].runs == 3
+    assert any(run.status == "skipped" for run in overview.recent_runs)
+
+
+async def test_recover_stale_runs_is_idempotent_and_preserves_current_target_health(session):
+    target = await _make_target(session)
+    target.consecutive_failures = 2
+    schedule = target.next_run_at
+    old_start = utcnow() - timedelta(days=2)
+    stale = CollectRun(target_id=target.id, started_at=old_start, status=RunStatus.RUNNING)
+    active = CollectRun(target_id=target.id, started_at=utcnow() - timedelta(minutes=45), status=RunStatus.RUNNING)
+    completed = CollectRun(target_id=target.id, started_at=old_start, status=RunStatus.SUCCESS)
+    session.add_all([stale, active, completed])
+    await session.commit()
+
+    assert await collect_module.recover_stale_runs(session) == 1
+    assert await collect_module.recover_stale_runs(session) == 0
+    assert stale.status == RunStatus.FAILED
+    assert stale.finished_at == old_start + timedelta(minutes=30)
+    assert "启动时恢复" in stale.error
+    assert active.status == RunStatus.RUNNING
+    assert completed.status == RunStatus.SUCCESS
+    await session.refresh(target)
+    assert target.consecutive_failures == 2
+    assert target.next_run_at == schedule
+    daily = await session.get(CollectionDailyStat, {
+        "stat_date": beijing_date(stale.finished_at), "target_id": target.id, "status": "failed",
+    })
+    assert daily.runs == 1
+
+
 def test_community_youtube_rss_filters_by_title_case_insensitively():
     target = CollectTarget(
         platform="youtube",
@@ -159,6 +300,7 @@ async def test_core_tier_semantics(session):
     high = {"title": "爱弥斯联名键盘开箱", "view_count": 50000}
     kept, filtered = collect_module.filter_relevant([low, high], target)
     assert [i["view_count"] for i in kept] == [50000]
+    assert filtered == 1
 
 
 async def test_general_tier_keeps_thresholds(session):

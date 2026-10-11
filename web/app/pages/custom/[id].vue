@@ -31,11 +31,11 @@ const route = useRoute()
 const feedId = computed(() => Number(route.params.id))
 const { api } = usePublicApi()
 const forwardedHeaders = useRequestHeaders(['cookie'])
-const { error, data } = await useAsyncData(
+const { error, data, status, refresh } = await useLazyAsyncData(
   () => `custom-feed-${feedId.value}`,
-  async () => {
+  async (_app, { signal }) => {
     try {
-      return await api<CustomFeedDetail>(`/api/custom/feeds/${feedId.value}`, { headers: forwardedHeaders })
+      return await api<CustomFeedDetail>(`/api/custom/feeds/${feedId.value}`, { headers: forwardedHeaders, signal })
     } catch (exc: any) {
       if (exc?.status === 404) return null
       throw exc
@@ -47,8 +47,10 @@ const { error, data } = await useAsyncData(
 
 <template>
   <div>
-    <section v-if="!data" class="panel px-4 py-10 text-center text-sm text-slate-500 dark:text-zinc-400">
+    <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
+    <section v-else-if="!data" class="panel px-4 py-10 text-center text-sm text-slate-500 dark:text-zinc-400">
       <p>{{ error ? '监控暂时加载失败，请稍后刷新。' : '监控不存在，或需要登录所属账号后查看。' }}</p>
+      <button v-if="error" type="button" class="mt-3 underline" @click="refresh()">重新加载</button>
       <NuxtLink to="/account#custom-monitors" class="link mt-3 inline-block">我的监控</NuxtLink>
     </section>
     <template v-else>

@@ -5,9 +5,19 @@ import { fmtTime } from '~/utils/admin-types'
 const props = withDefaults(defineProps<{ variant?: 'list' | 'strip' }>(), { variant: 'list' })
 
 const { community } = useGameSection()
-const { items, fetchOnce } = useOfficialLinks()
-onMounted(() => fetchOnce(community.value))
-watch(community, (value) => fetchOnce(value))
+const { items, fetchOnce } = useOfficialLinks(community)
+const refreshVisible = () => { if (document.visibilityState === 'visible') void fetchOnce() }
+let refreshTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  refreshVisible()
+  refreshTimer = setInterval(refreshVisible, 60_000)
+  document.addEventListener('visibilitychange', refreshVisible)
+})
+watch(community, () => fetchOnce())
+onBeforeUnmount(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+  document.removeEventListener('visibilitychange', refreshVisible)
+})
 
 const categoryLabels: Record<string, string> = {
   kuro: '库洛',

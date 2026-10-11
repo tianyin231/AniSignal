@@ -6,7 +6,7 @@ const { api } = usePublicApi()
 const { community } = useGameSection()
 const { data } = await useLazyAsyncData(
   () => `rail-sources-${community.value}`,
-  () => api<{ items: PublicSource[] }>('/api/sources', { query: { community: community.value } }),
+  (_app, { signal }) => api<{ items: PublicSource[] }>('/api/sources', { query: { community: community.value }, signal }),
   { watch: [community] },
 )
 const shown = computed(() =>

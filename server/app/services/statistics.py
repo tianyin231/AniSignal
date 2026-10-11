@@ -244,7 +244,12 @@ async def build_statistics(session: AsyncSession, days: int) -> StatisticsOvervi
         }
     )
     target_map: dict[int, dict] = {}
+    successful_runs = 0
     for row, display_name, target_value, platform, target_type in collection_rows:
+        # 冷却跳过没有访问平台；进行中也还没有最终结果，均不进入成功率分母。
+        if row.status not in (RunStatus.SUCCESS, RunStatus.PARTIAL, RunStatus.FAILED):
+            continue
+        successful_runs += row.runs if row.status == RunStatus.SUCCESS else 0
         daily = collection_map[row.stat_date]
         daily["runs"] += row.runs
         daily["failed"] += row.runs if row.status == RunStatus.FAILED else 0
@@ -333,7 +338,7 @@ async def build_statistics(session: AsyncSession, days: int) -> StatisticsOvervi
             period_new=period_new,
             collection_runs=run_count,
             failed_runs=failed_runs,
-            success_rate=_rate(run_count - failed_runs, run_count),
+            success_rate=_rate(successful_runs, run_count),
             items_found=period_found,
             items_new=period_run_new,
             yield_rate=_rate(period_run_new, period_found),

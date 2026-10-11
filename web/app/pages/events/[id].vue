@@ -6,10 +6,11 @@ import { platformMeta, type Platform } from '~/utils/data'
 
 const route = useRoute()
 const { api } = usePublicApi()
-const { data: raw, error } = await useAsyncData(`event-${route.params.id}`, () =>
-  api<ApiEvent>(`/api/events/${route.params.id}`),
+const { data: raw, error } = await useAsyncData(() => `event-${route.params.id}`, (_app, { signal }) =>
+  api<ApiEvent>(`/api/events/${route.params.id}`, { signal }),
 )
-if (error.value || !raw.value)
+if (error.value) throw createError({ statusCode: error.value.statusCode || 503, statusMessage: error.value.statusCode === 404 ? '事件不存在' : '事件暂时加载失败，请稍后重试', fatal: true })
+if (!raw.value)
   throw createError({ statusCode: 404, statusMessage: '事件不存在', fatal: true })
 
 const event = computed(() => toAppEvent(raw.value!))

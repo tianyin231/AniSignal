@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.communities import DEFAULT_COMMUNITY, get_community
-from app.collectors.base import CollectorError, platform_slot
+from app.collectors.base import CollectorDeferred, CollectorError, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.kuro import KuroCollector
 from app.collectors.miyoushe import MiyousheCollector
@@ -26,6 +26,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import CollectRun, CollectTarget, Platform, RunStatus
 from app.services.ingest import IngestStats, ingest_items
+from app.services.queue import enqueue_review_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def filter_relevant(items: list[dict], target: CollectTarget) -> tuple[list[dict
             if min_views > 0 and views < min_views:
                 continue
             kept.append(item)
-        return kept, 0
+        return kept, len(items) - len(kept)
     co_terms = [t for t in (target.co_terms or []) if t]
     min_views = target.min_views or 0
     kept: list[dict] = []
@@ -188,9 +189,12 @@ async def run_collection(redis, target_id: int) -> dict:
         run = CollectRun(target_id=target.id, started_at=utcnow(), status=RunStatus.RUNNING)
         session.add(run)
         await session.commit()
+        run_id = run.id
 
         stats: IngestStats | None = None
         error_text: str | None = None
+        postprocess_errors: list[str] = []
+        retry_at: datetime | None = None
         items_fetched = 0
         items_filtered = 0
         try:
@@ -233,11 +237,12 @@ async def run_collection(redis, target_id: int) -> dict:
                 external_ids = [str(item.get("bvid") or item.get("id") or "") for item in fetch_result.items]
                 pending_ids = await pending_news_ids(session, external_ids=external_ids)
                 if pending_ids:
-                    await redis.enqueue_job("review_contents", pending_ids)
+                    await enqueue_review_jobs(redis, pending_ids)
             if fetch_result.fetch_kind == "bilibili_dynamics":
                 try:
                     await _backfill_empty_draw_dynamics(session, collector_factory())
-                except Exception:  # noqa: BLE001 - 回填失败不影响本轮采集
+                except Exception as exc:  # noqa: BLE001 - 回填失败不影响本轮采集
+                    postprocess_errors.append(f"dynamic backfill failed: {type(exc).__name__}: {exc}")
                     logger.warning("empty DRAW backfill failed", exc_info=True)
             match_stats = None
             if stats.touched_content_ids:
@@ -254,7 +259,10 @@ async def run_collection(redis, target_id: int) -> dict:
                         match_stats.positive,
                         match_stats.failed_batches,
                     )
-                except Exception:  # noqa: BLE001 - AI 匹配不得阻断采集主链路
+                    if match_stats.failed_batches:
+                        postprocess_errors.append(f"official content matching failed: {match_stats.failed_batches} batches")
+                except Exception as exc:  # noqa: BLE001 - AI 匹配不得阻断采集主链路
+                    postprocess_errors.append(f"official content matching failed: {type(exc).__name__}: {exc}")
                     logger.exception("official content matching failed")
             if stats.items_new or stats.items_updated or (match_stats and match_stats.decisions):
                 # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
@@ -273,11 +281,24 @@ async def run_collection(redis, target_id: int) -> dict:
                     for content_id in stats.touched_content_ids:
                         await redis.enqueue_job("translate_content", content_id)
                 if not is_news and stats.touched_content_ids and hasattr(redis, "enqueue_job"):
-                    await redis.enqueue_job("review_contents", stats.touched_content_ids)
+                    await enqueue_review_jobs(redis, stats.touched_content_ids)
+        except CollectorDeferred as exc:
+            retry_at = exc.retry_at
+            error_text = str(exc)
+            logger.info("collect target %s deferred until %s: %s", target_id, retry_at, exc)
         except Exception as exc:  # noqa: BLE001 - 任何失败都落到健康状态里
             error_text = f"{type(exc).__name__}: {exc}"
             logger.error("collect target %s failed: %s", target_id, error_text)
+            # 入库已单独提交；后处理事务失败时先回滚，确保健康记录仍能落库。
+            await session.rollback()
+            target = await session.get(CollectTarget, target_id)
+            run = await session.get(CollectRun, run_id)
 
+        if not session.is_active:
+            # 可选回填/匹配可能吞掉了数据库异常，但失败事务不能继续写健康记录。
+            await session.rollback()
+            target = await session.get(CollectTarget, target_id)
+            run = await session.get(CollectRun, run_id)
         now = utcnow()
         target.last_run_at = now
         run.finished_at = now
@@ -291,16 +312,25 @@ async def run_collection(redis, target_id: int) -> dict:
         run.community_items = stats.community_items if stats else 0
         run.duration_ms = max(0, int((now - run.started_at).total_seconds() * 1000))
 
-        if stats is not None:
-            run.status = RunStatus.SUCCESS if stats.parse_failed == 0 else RunStatus.PARTIAL
+        errors = ([error_text] if error_text else []) + postprocess_errors + (stats.errors[:3] if stats else [])
+        run.error = "; ".join(errors) or None
+        all_parse_failed = bool(stats and stats.items_found and stats.parse_failed == stats.items_found)
+        if retry_at is not None:
+            run.status = RunStatus.SKIPPED
+            # 冷却不累加失败，也不绕过目标本身的正常间隔。
+            target.next_run_at = max(retry_at, now + timedelta(minutes=target.interval_minutes))
+        elif stats is not None and not all_parse_failed:
+            run.status = RunStatus.PARTIAL if errors or stats.parse_failed else RunStatus.SUCCESS
             target.last_success_at = now
             target.consecutive_failures = 0
-            target.last_error = "; ".join(stats.errors[:3]) or None
+            target.last_error = run.error
         else:
             run.status = RunStatus.FAILED
-            run.error = error_text
             target.consecutive_failures += 1
-            target.last_error = error_text
+            target.last_error = run.error
+        if retry_at is None:
+            # 调度前的预约只防重复投递；完成后按本轮结果恢复周期或退避。
+            target.next_run_at = next_run_with_jitter(target, now)
         from app.services.statistics import record_collection_stat
 
         await record_collection_stat(session, run)
@@ -315,7 +345,8 @@ async def run_collection(redis, target_id: int) -> dict:
             "status": run.status,
             "items_found": run.items_found,
             "items_new": run.items_new,
-            "error": error_text,
+            "error": run.error,
+            "retry_at": target.next_run_at if retry_at is not None else None,
         }
 
 
@@ -333,6 +364,25 @@ def next_run_with_jitter(target: CollectTarget, now: datetime | None = None) -> 
         1 - settings.scheduler_jitter_ratio, 1 + settings.scheduler_jitter_ratio
     )
     return now + timedelta(seconds=base * jitter)
+
+
+async def recover_stale_runs(session: AsyncSession) -> int:
+    """恢复超过一小时的遗留 running，避开仍在 30 分钟任务时限内的副本。"""
+    from app.services.statistics import record_collection_stat
+
+    runs = list(await session.scalars(
+        select(CollectRun)
+        .where(CollectRun.status == RunStatus.RUNNING, CollectRun.started_at < utcnow() - timedelta(hours=1))
+        .with_for_update(skip_locked=True)
+    ))
+    for run in runs:
+        run.status = RunStatus.FAILED
+        run.error = "采集进程中断或任务超时（启动时恢复遗留记录）"
+        # 用原任务的超时截止时间归档，不能把几周前的中断算进今天的失败率。
+        run.finished_at = run.started_at + timedelta(minutes=30)
+        await record_collection_stat(session, run)
+    await session.commit()
+    return len(runs)
 
 
 async def get_redis_pool():

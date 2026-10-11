@@ -30,16 +30,20 @@ const community = computed({
   set: (value: string) => router.replace({ query: { ...route.query, community: value, page: undefined } }),
 })
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
-const { data: eventsData, status: eventsStatus } = await useAsyncData(
+const eventsRequest = useLazyAsyncData(
   () => `search-events-${community.value}-${q.value}-${page.value}`,
-  () => (q.value ? api<ApiEventList>('/api/events', { query: { community: community.value, q: q.value, limit: 30, offset: (page.value - 1) * 30 } }) : Promise.resolve({ items: [], total: 0 })),
+  (_app, { signal }) => (q.value ? api<ApiEventList>('/api/events', { query: { community: community.value, q: q.value, limit: 30, offset: (page.value - 1) * 30 }, signal }) : Promise.resolve({ items: [], total: 0 })),
   { watch: [community, q, page] },
 )
-const { data: contentsData, status: contentsStatus } = await useAsyncData(
+const contentsRequest = useLazyAsyncData(
   () => `search-contents-${community.value}-${q.value}-${page.value}`,
-  () => (q.value ? api<PublicContentList>('/api/contents', { query: { community: community.value, q: q.value, limit: 30, offset: (page.value - 1) * 30 } }) : Promise.resolve({ items: [], total: 0 })),
+  (_app, { signal }) => (q.value ? api<PublicContentList>('/api/contents', { query: { community: community.value, q: q.value, limit: 30, offset: (page.value - 1) * 30 }, signal }) : Promise.resolve({ items: [], total: 0 })),
   { watch: [community, q, page] },
 )
+const [
+  { data: eventsData, status: eventsStatus, error: eventsError, refresh: refreshEvents },
+  { data: contentsData, status: contentsStatus, error: contentsError, refresh: refreshContents },
+] = await Promise.all([eventsRequest, contentsRequest])
 const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const contents = computed(() => (contentsData.value?.items ?? []).map(toRawItem))
 const total = computed(() => (tab.value === 'events' ? eventsData.value?.total : contentsData.value?.total) ?? 0)
@@ -97,6 +101,7 @@ useSeoMeta({ title: '搜索' })
     </section>
     <section v-else-if="tab === 'events'" class="panel mt-4 overflow-hidden">
       <p v-if="eventsStatus === 'pending'" class="px-4 py-10 text-center text-sm text-slate-400">搜索中…</p>
+      <p v-else-if="eventsError" role="alert" class="px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">搜索暂时失败。<button type="button" class="ml-1 underline" @click="refreshEvents()">重试</button></p>
       <template v-else>
         <EventRow v-for="e in events" :key="e.id" :event="e" :show-community="community === 'all'" />
         <p v-if="!events.length" class="px-4 py-10 text-center text-sm text-slate-400">
@@ -106,6 +111,7 @@ useSeoMeta({ title: '搜索' })
     </section>
     <section v-else class="panel mt-4 overflow-hidden">
       <p v-if="contentsStatus === 'pending'" class="px-4 py-10 text-center text-sm text-slate-400">搜索中…</p>
+      <p v-else-if="contentsError" role="alert" class="px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">搜索暂时失败。<button type="button" class="ml-1 underline" @click="refreshContents()">重试</button></p>
       <template v-else>
         <RawFeedRow v-for="c in contents" :key="c.id" :item="c" :show-community="community === 'all'" />
         <p v-if="!contents.length" class="px-4 py-10 text-center text-sm text-slate-400">没有匹配的内容。</p>
