@@ -58,12 +58,17 @@ def format_merged_updates(items: list[dict], now: datetime) -> str:
 def collect_images(items: list[dict], limit: int) -> list[str]:
     images: list[str] = []
     for item in items:
-        image = item.get("image")
-        if image and image not in images:
-            images.append(image)
-        if len(images) >= limit:
-            break
+        for source in [item, *(item.get("sources") or [])]:
+            image = source.get("image")
+            if image and image not in images:
+                images.append(image)
+            if len(images) >= limit:
+                return images[:limit]
     return images
+
+
+def image_limit(config: dict) -> int:
+    return max(1, min(9, int(config.get("max_images", 1))))
 
 
 def _merge_setting_key(target_id: int) -> str:
@@ -475,7 +480,7 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
             body = format_short_update(item)
         else:
             body = format_brief(brief)
-        values = {"brief": brief, "body": body, "media": collect_images(usable, 1) or None}
+        values = {"brief": brief, "body": body, "media": collect_images(usable, image_limit(config)) or None}
     else:
         values = {"status": "cancelled", "receipt": None, "updated_at": now,
                   "error": "来源动态正文和图片均为空，已取消本次推送" if empty_sources else "来源发布时间未知或已超过 24 小时，不再作为新动态推送"}
@@ -514,7 +519,7 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
         can_send = False
     if can_send:
         brief = notification_brief(await build_brief(session, buffer["items"], now), buffer["items"])
-        images = collect_images(brief["items"], 1)
+        images = collect_images(brief["items"], max_images)
         text = format_brief(brief)
         window_key = hashlib.sha256(
             (f"merge:{target.id}:" + "".join(sorted(i["dedupe"] for i in buffer["items"]))).encode()
@@ -543,7 +548,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
         quiet_critical = bool(config.get("quiet_critical", False))
         merge_minutes = int(config.get("merge_minutes", 30) or 0)
         hourly_limit = int(config.get("hourly_limit", 2) or 0)
-        max_images = 1
+        max_images = image_limit(config)
         if config.get("reminders_enabled"):
             reminder_ids = list(await session.scalars(select(BotReminder.id).where(
                 BotReminder.target_id == target.id, BotReminder.status == "pending", BotReminder.due_at <= now,
@@ -566,12 +571,11 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     payload = await query_target(session, target, now=due)
                     items = payload.get("items") or []
                     style = config.get("daily_style", "compact")
-                    # 早报封面只带 1 张：多图会被 QQ 官方拆成多条消息。
-                    covers = collect_images(items, 1)
+                    covers = collect_images(items, max_images)
                     if style == "split" and items:
                         head = payload["text"].split("\n", 2)[0]
                         lifespan = {"scheduled_at": due.isoformat(), "expires_at": (due + timedelta(hours=2)).isoformat()}
-                        await create_delivery(session, target, "daily", f"{head}\n共 {len(items)} 条重点，详情如下", key, media=covers[:1],
+                        await create_delivery(session, target, "daily", f"{head}\n共 {len(items)} 条重点，详情如下", key, media=covers,
                                               brief={**lifespan, "mode": "notice", "items": []})
                         for idx, item in enumerate(items[:2], 1):
                             await create_delivery(
@@ -614,7 +618,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     if brief["items"]:
                         await create_delivery(session, target, kind, format_brief(brief),
                                               f"{kind}:{target.id}:{item['dedupe']}",
-                                              media=collect_images(brief["items"], 1), brief=brief)
+                                              media=collect_images(brief["items"], max_images), brief=brief)
             if normal_items and merge_minutes > 0:
                 known = {key for entry in buffer.get("items", []) for key in (entry.get("dedupe"), entry.get("topic_key") or notification_topic(entry)) if key}
                 for item in normal_items:

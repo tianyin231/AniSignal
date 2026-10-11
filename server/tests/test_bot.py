@@ -137,7 +137,7 @@ async def test_scoped_queries_exclude_hidden_and_old_updates(session, monkeypatc
 async def test_merge_window_batches_normal_updates(session, monkeypatch):
     now = datetime(2026, 9, 13, 4, 0)  # 北京 12:00
     row = await target(session, community='wuwa', daily_enabled=False, updates_enabled=True,
-                       quiet_start=0, quiet_end=0, merge_minutes=5, hourly_limit=0)
+                       quiet_start=0, quiet_end=0, merge_minutes=5, hourly_limit=0, max_images=2)
     row.last_scan_at = now - timedelta(minutes=10)
     source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
     session.add(source)
@@ -147,7 +147,8 @@ async def test_merge_window_batches_normal_updates(session, monkeypatch):
                          collected_at=now - timedelta(minutes=2), published_at=now - timedelta(hours=1), url=f'https://example.com/{n}')
         session.add(raw)
         await session.flush()
-        session.add(ContentVersion(raw_content_id=raw.id, title=f'合并消息{n}', text='正文', category='announcement'))
+        session.add(ContentVersion(raw_content_id=raw.id, title=f'合并消息{n}', text='正文', category='announcement',
+                                   normalized_json={'media': [f'https://img.example/merge{n}.jpg']}))
     await session.commit()
     calls = []
     async def send(*args):
@@ -162,6 +163,7 @@ async def test_merge_window_batches_normal_updates(session, monkeypatch):
     assert '刚刚的重点' not in rows[0].body and '/展开' not in rows[0].body
     assert rows[0].body.startswith('1. ') and '\n\n2. ' in rows[0].body
     assert '合并消息0' in rows[0].body and '合并消息1' in rows[0].body
+    assert set(rows[0].media) == {'https://img.example/merge0.jpg', 'https://img.example/merge1.jpg'}
 
 
 async def test_short_format_and_multi_image(session, monkeypatch):

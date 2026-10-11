@@ -4,7 +4,7 @@ import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import literal, or_, select, func, union_all
+from sqlalchemy import literal, or_, select, func, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -15,6 +15,7 @@ from app.api.admin import get_queue
 from app.models import (
     ContentVersion,
     CustomFeed,
+    EventRevision,
     NotificationDelivery,
     RawContent,
     Source,
@@ -155,6 +156,7 @@ async def notification_status(
     )
     return {
         "enabled": user.notification_enabled,
+        "instant_enabled": user.instant_notification_enabled,
         "schedule": "每天 08:00（北京时间）",
         "records": [
             {
@@ -181,9 +183,30 @@ async def update_notification_preference(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    user.notification_enabled = bool(body.get("enabled"))
+    # 与即时通知准备共用用户行锁，防止恢复时的新基线被旧批次覆盖。
+    user = await session.get(User, user.id, populate_existing=True, with_for_update=True)
+    was_active = user.notification_enabled and user.instant_notification_enabled
+    for field in ("enabled", "instant_enabled"):
+        if field in body and not isinstance(body[field], bool):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "通知开关必须是布尔值")
+    if body.get("instant_enabled"):
+        if not user.is_verified:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先验证邮箱")
+        if not await enabled_keywords(session, user.id):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先启用至少一个关键词")
+    if "enabled" in body:
+        user.notification_enabled = body["enabled"]
+    if "instant_enabled" in body:
+        user.instant_notification_enabled = body["instant_enabled"]
+    if user.notification_enabled and user.instant_notification_enabled and not was_active:
+        user.instant_notification_cursor = await session.scalar(select(func.max(EventRevision.id))) or 0
+    if not user.notification_enabled or not user.instant_notification_enabled:
+        await session.execute(update(NotificationDelivery).where(
+            NotificationDelivery.user_id == user.id, NotificationDelivery.kind == "instant",
+            NotificationDelivery.status == "pending",
+        ).values(status="skipped", error="用户已关闭即时邮件通知"))
     await session.commit()
-    return {"enabled": user.notification_enabled, "schedule": "每天 08:00（北京时间）"}
+    return {"enabled": user.notification_enabled, "instant_enabled": user.instant_notification_enabled, "schedule": "每天 08:00（北京时间）"}
 
 
 @router.post("/notifications/send", status_code=status.HTTP_202_ACCEPTED)
@@ -423,19 +446,24 @@ def _validate_custom_payload(body: dict, *, partial: bool = False) -> dict:
     if platform and platform not in {"bilibili"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "定制平台当前仅支持 B 站")
     name = str(body.get("name") or "").strip()
-    if name and len(name) > 64:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控名称不超过 64 字")
+    if ("name" in body or not partial) and not 1 <= len(name) <= 64:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控名称需为 1 至 64 字")
     target = str(body.get("target_value") or "").strip()
-    if target and len(target) > 128:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控目标过长")
+    if ("target_value" in body or not partial) and not 1 <= len(target) <= 128:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控目标需为 1 至 128 字")
     if kind == "uid" and target and not target.isdigit():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
     min_views = body.get("min_views")
     if min_views is not None:
         try:
-            min_views = max(0, min(10_000_000, int(min_views)))
-        except (TypeError, ValueError):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "播放量门槛不合法")
+            parsed_views = int(min_views)
+            if isinstance(min_views, bool) or (isinstance(min_views, float) and min_views != parsed_views):
+                raise ValueError
+            if not 0 <= parsed_views <= 10_000_000:
+                raise ValueError
+            min_views = parsed_views
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "播放量门槛需为 0 至 10000000 的整数")
     return {
         "name": name,
         "kind": kind,
@@ -527,15 +555,23 @@ async def update_custom_feed(
     if feed is None or feed.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
     payload = _validate_custom_payload(body, partial=True)
+    if ("kind" in body and payload["kind"] != feed.kind) or (
+        "platform" in body and payload["platform"] != feed.platform
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控类型与平台创建后不可修改")
     if payload["name"]:
         feed.name = payload["name"]
     if payload["target_value"]:
-        if payload["kind"] == "uid" and not payload["target_value"].isdigit():
+        if feed.kind == "uid" and not payload["target_value"].isdigit():
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
-        feed.target_value = payload["target_value"]
-        feed.last_collected_at = None
-    if payload["min_views"] is not None:
+        if payload["target_value"] != feed.target_value:
+            # 已采集历史保留，新的目标从下一次调度开始生效。
+            feed.target_value = payload["target_value"]
+            feed.last_collected_at = None
+            feed.next_run_at = None
+    if payload["min_views"] is not None and payload["min_views"] != feed.min_views:
         feed.min_views = payload["min_views"]
+        feed.next_run_at = None
     if payload["push_enabled"] is not None:
         feed.push_enabled = bool(payload["push_enabled"])
     if payload["is_public"] is not None:

@@ -43,6 +43,12 @@ class BaseQueue:
     async def enqueue_custom_sweep(self) -> str | None:
         raise NotImplementedError
 
+    async def enqueue_ai_batch(self, task: str, ref_ids: list[int], *, only_missing: bool = True) -> int:
+        raise NotImplementedError
+
+    async def enqueue_instant(self) -> str | None:
+        raise NotImplementedError
+
     async def aclose(self) -> None:
         pass
 
@@ -79,6 +85,9 @@ class LocalQueue(BaseQueue):
     def __init__(self) -> None:
         self._redis = LocalRedis()
         self._tasks: set[asyncio.Task] = set()
+        self._ai_jobs: set[tuple[str, int]] = set()
+        self._ai_slots = asyncio.Semaphore(2)
+        self._instant_task: asyncio.Task | None = None
 
     @property
     def redis(self) -> LocalRedis:
@@ -164,6 +173,49 @@ class LocalQueue(BaseQueue):
         except Exception:  # noqa: BLE001 - 与 arq worker 行为一致：单任务失败不终止
             logger.exception("local collect task %s failed", target_id)
 
+    async def enqueue_ai_batch(self, task: str, ref_ids: list[int], *, only_missing: bool = True) -> int:
+        from app.db import SessionLocal
+        from app.services.ai_maintenance import AI_TASKS, repair_ai_item
+
+        if task not in AI_TASKS:
+            raise ValueError("不支持的 AI 补处理任务")
+
+        async def run(ref_id: int) -> None:
+            try:
+                async with self._ai_slots, SessionLocal() as session:
+                    await repair_ai_item(session, task, ref_id, only_missing)
+            except Exception:
+                logger.exception("local AI repair failed: %s %s", task, ref_id)
+            finally:
+                self._ai_jobs.discard((task, ref_id))
+
+        queued = 0
+        for ref_id in dict.fromkeys(ref_ids):
+            if (task, ref_id) in self._ai_jobs:
+                continue
+            self._ai_jobs.add((task, ref_id))
+            job = asyncio.create_task(run(ref_id))
+            self._tasks.add(job)
+            job.add_done_callback(self._tasks.discard)
+            queued += 1
+        return queued
+
+    async def enqueue_instant(self) -> str | None:
+        from app.db import SessionLocal
+        from app.services.instant_notifications import run_instant_notifications
+
+        if self._instant_task and not self._instant_task.done():
+            return None
+
+        async def run() -> None:
+            async with SessionLocal() as session:
+                await run_instant_notifications(session)
+
+        self._instant_task = asyncio.create_task(run())
+        self._tasks.add(self._instant_task)
+        self._instant_task.add_done_callback(self._tasks.discard)
+        return f"local:instant:{time.time():.0f}"
+
     async def pending_count(self) -> int | None:
         return len(self._tasks)
 
@@ -180,6 +232,24 @@ class ArqQueue(BaseQueue):
 
     async def enqueue_collect(self, target_id: int) -> str | None:
         job = await self._pool.enqueue_job("collect_target", target_id)
+        return getattr(job, "job_id", None) if job is not None else None
+
+    async def enqueue_ai_batch(self, task: str, ref_ids: list[int], *, only_missing: bool = True) -> int:
+        from app.services.ai_maintenance import AI_TASKS
+
+        if task not in AI_TASKS:
+            raise ValueError("不支持的 AI 补处理任务")
+        queued = 0
+        for ref_id in dict.fromkeys(ref_ids):
+            job = await self._pool.enqueue_job(
+                "repair_ai_item", task, ref_id, only_missing,
+                _job_id=f"ai-repair:{task}:{ref_id}",
+            )
+            queued += job is not None
+        return queued
+
+    async def enqueue_instant(self) -> str | None:
+        job = await self._pool.enqueue_job("send_instant_notifications", _job_id="instant-notifications")
         return getattr(job, "job_id", None) if job is not None else None
 
     async def pending_count(self) -> int | None:

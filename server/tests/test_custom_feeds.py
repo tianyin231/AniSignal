@@ -2,9 +2,11 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta
+from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.api import main as api_main
 from app.clock import utcnow
@@ -12,6 +14,13 @@ from app.models import CustomFeed, CustomFeedItem, NotificationDelivery, User
 from app.services.auth import hash_password
 
 admin_headers = {"X-Admin-Token": "test-admin-token"}
+
+
+@pytest.fixture(autouse=True)
+def fake_mail(monkeypatch):
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.services.notifications.send_email", send)
+    return send
 
 
 async def _login(client, session, email: str) -> None:
@@ -137,7 +146,7 @@ async def test_custom_feed_sweep_filters_and_dedupes(client, session, fake_bili)
     )
     assert len(items) == 1 and items[0].external_id == "BVcustomHot"
 
-    # 推送已创建（fake send_email 由 send_admin_email 走 SMTP 失败也可，只要投递行落库）
+    # 推送已创建并通过 mock 邮件服务发送，不连接真实 SMTP。
     delivery = await session.scalar(
         select(NotificationDelivery).where(NotificationDelivery.kind == "custom")
     )
@@ -218,3 +227,117 @@ async def test_worker_collect_custom_feeds(session, session_factory, fake_bili, 
         await session.refresh(feed)
         assert feed.last_collected_at is not None
         assert feed.next_run_at > feed.last_collected_at
+
+
+async def test_custom_detail_paginates_all_history_and_preserves_private_access(client, session):
+    user = User(email="pages@anisignal.dev", password_hash="x", is_verified=True)
+    session.add(user)
+    await session.flush()
+    feed = CustomFeed(user_id=user.id, name="历史监控", kind="keyword", target_value="关键词")
+    session.add(feed)
+    await session.flush()
+    session.add_all([
+        CustomFeedItem(feed_id=feed.id, platform="bilibili", external_id=f"page-{i}",
+                       title=f"历史 {i}", published_at=utcnow() - timedelta(minutes=i))
+        for i in range(65)
+    ])
+    await session.commit()
+    await _login(client, session, user.email)
+    pages = [(await client.get(f"/api/custom/feeds/{feed.id}", params={"page": p})).json()
+             for p in (1, 2, 3)]
+    assert [len(page["items"]) for page in pages] == [30, 30, 5]
+    assert all(page["total"] == page["item_count"] == 65 for page in pages)
+    assert all(page["page_size"] == 30 and page["status"] == "active" for page in pages)
+    assert len({item["id"] for page in pages for item in page["items"]}) == 65
+    assert (await client.get(f"/api/custom/feeds/{feed.id}?page=0")).status_code == 422
+    assert (await client.get(f"/api/custom/feeds/{feed.id}?page_size=101")).status_code == 422
+    client.cookies.clear()
+    assert (await client.get(f"/api/custom/feeds/{feed.id}?page=2")).status_code == 404
+
+
+async def test_custom_edit_validates_existing_kind_and_keeps_history(client, session):
+    user = User(email="edit@anisignal.dev", password_hash="x", is_verified=True)
+    session.add(user)
+    await session.flush()
+    feed = CustomFeed(user_id=user.id, name="原监控", kind="uid", target_value="123",
+                      last_collected_at=utcnow(), next_run_at=utcnow() + timedelta(hours=1))
+    session.add(feed)
+    await session.flush()
+    history = CustomFeedItem(feed_id=feed.id, platform="bilibili", external_id="old")
+    session.add(history)
+    await session.commit()
+    await _login(client, session, user.email)
+    endpoint = f"/api/account/custom-feeds/{feed.id}"
+    for body in ({"target_value": "abc"}, {"target_value": " "}, {"name": ""},
+                 {"min_views": -1}, {"min_views": 10_000_001}, {"min_views": 1.5},
+                 {"kind": "keyword"}, {"platform": "youtube"}):
+        response = await client.patch(endpoint, json=body)
+        assert response.status_code == 400, (body, response.text)
+    response = await client.patch(endpoint, json={"name": "新监控", "target_value": "456",
+                                                   "is_public": True, "min_views": 500})
+    assert response.status_code == 200
+    await session.refresh(feed)
+    assert (feed.name, feed.target_value, feed.min_views) == ("新监控", "456", 500)
+    assert feed.next_run_at is None and feed.last_collected_at is None
+    assert await session.get(CustomFeedItem, history.id) is not None
+    assert (await client.get("/api/custom/feeds")).json()["total"] == 1
+    assert (await client.patch(endpoint, json={"enabled": False})).status_code == 200
+    assert (await client.get("/api/custom/feeds")).json()["total"] == 0
+    assert (await client.patch(endpoint, json={"enabled": True, "is_public": False})).status_code == 200
+    assert (await client.get("/api/custom/feeds")).json()["total"] == 0
+
+
+async def test_custom_digest_respects_master_switch_and_beijing_day(session, monkeypatch, fake_mail):
+    from app.services import custom_feeds
+
+    user = User(email="digest@anisignal.dev", password_hash="x", is_verified=True,
+                notification_enabled=False)
+    session.add(user)
+    await session.flush()
+    feed = CustomFeed(user_id=user.id, name="新内容", kind="keyword", target_value="关键词", push_enabled=True)
+    session.add(feed)
+    await session.flush()
+    items = [CustomFeedItem(feed_id=feed.id, platform="bilibili", external_id=f"digest-{i}",
+                            title=f"条目 {i}", url=f"https://example.com/{i}") for i in range(2)]
+    session.add_all(items)
+    await session.commit()
+    assert not await custom_feeds.push_custom_feed_digest(session, feed, 2)
+    assert await session.scalar(select(NotificationDelivery)) is None
+    fake_mail.assert_not_awaited()
+
+    user.notification_enabled = True
+    await session.commit()
+    monkeypatch.setattr(custom_feeds, "utcnow", lambda: datetime(2026, 10, 11, 15, 59))
+    assert await custom_feeds.push_custom_feed_digest(session, feed, 2)
+    # 北京时间跨零点可以发送；UTC 零点不应重新计算一个推送日。
+    monkeypatch.setattr(custom_feeds, "utcnow", lambda: datetime(2026, 10, 11, 16, 1))
+    assert await custom_feeds.push_custom_feed_digest(session, feed, 2)
+    monkeypatch.setattr(custom_feeds, "utcnow", lambda: datetime(2026, 10, 12, 0, 1))
+    assert not await custom_feeds.push_custom_feed_digest(session, feed, 2)
+    rows = list(await session.scalars(select(NotificationDelivery).order_by(NotificationDelivery.id)))
+    assert [row.period_date for row in rows] == [date(2026, 10, 11), date(2026, 10, 12)]
+    assert rows[1].dedupe_key == f"custom-push:{feed.id}:2026-10-12"
+    assert set(rows[1].content_ids) == {item.id for item in items}
+    assert "https://example.com/0" in rows[1].body and "北京时间" in rows[1].body
+    assert fake_mail.await_count == 2
+
+
+@pytest.mark.parametrize("kind,expected", [("custom", "skipped"), ("admin", "sent"), ("broadcast", "sent")])
+async def test_custom_send_rechecks_current_mail_switch(session, fake_mail, kind, expected):
+    from app.services.notifications import send_admin_email
+
+    user = User(email="recheck@anisignal.dev", password_hash="x", is_verified=True, notification_enabled=True)
+    session.add(user)
+    await session.flush()
+    delivery = NotificationDelivery(user_id=user.id, kind=kind, source="schedule",
+                                    period_date=date(2026, 10, 11), subject="摘要", body="正文")
+    session.add(delivery)
+    await session.commit()
+    # 模拟另一请求更新开关，当前会话仍缓存旧 User 对象。
+    await session.execute(update(User).where(User.id == user.id).values(notification_enabled=False)
+                          .execution_options(synchronize_session=False))
+    await session.commit()
+    assert user.notification_enabled is True
+    result = await send_admin_email(session, delivery.id)
+    assert result["status"] == expected and delivery.status == expected
+    assert fake_mail.await_count == (1 if expected == "sent" else 0)

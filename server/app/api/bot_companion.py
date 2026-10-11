@@ -15,6 +15,7 @@ from app.clock import utcnow
 from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget, RawContent
 from app.services.bot_policy import reserve_delivery
+from app.services.bot import image_limit
 from app.services.bot_briefs import format_detail, publication_label
 from app.services.settings import get_setting, set_setting
 
@@ -222,11 +223,12 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session)):
             continue
         if row.status == "failed" and row.updated_at > now - timedelta(minutes=5):
             continue
-        max_images = 1
+        max_images = image_limit(target.config)
         receipt = secrets.token_hex(24)
         if await reserve_delivery(session, target, row, now=now, receipt=receipt):
             return {"delivery": {"id": row.id, "receipt": receipt, "umo": target.umo, "body": row.body,
-                    "kind": row.kind, "images": (row.media or [])[:max_images], "provider_id": target.config.get("ai_provider_id", ""),
+                    "kind": row.kind, "images": (row.media or [])[:max_images], "max_images": max_images,
+                    "provider_id": target.config.get("ai_provider_id", ""),
                     "brief": row.brief,
                     "instructions": target.config.get("ai_prompt", "")}}
     return {"delivery": None}

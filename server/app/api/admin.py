@@ -26,6 +26,7 @@ from app.models import (
     RawContent,
     Source,
 )
+from app.models.collect_target import supports_view_threshold
 from app.schemas.api import (
     CollectTargetCreate,
     CollectTargetOut,
@@ -106,6 +107,9 @@ async def create_target(
     )
     if duplicate is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "target already exists")
+    min_views = body.min_views if "min_views" in body.model_fields_set else 10000
+    if body.community == "ai" or not supports_view_threshold(body.platform, body.target_type):
+        min_views = 0
     target = CollectTarget(
         platform=body.platform,
         target_type=body.target_type,
@@ -114,7 +118,7 @@ async def create_target(
         interval_minutes=body.interval_minutes,
         enabled=body.enabled,
         co_terms=body.co_terms,
-        min_views=body.min_views,
+        min_views=min_views,
         tier=body.tier,
         community=body.community,
         next_run_at=utcnow() if body.enabled else None,
@@ -159,6 +163,8 @@ async def update_target(
         target.community = body.community
     if body.min_views is not None:
         target.min_views = body.min_views
+    if target.community == "ai" or not supports_view_threshold(target.platform, target.target_type):
+        target.min_views = 0
     if body.co_terms is not None:
         target.co_terms = body.co_terms
     if body.enabled is not None:

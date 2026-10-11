@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
+from app.api.admin import get_queue
 from app.db import get_session
 from app.services import settings as settings_service
 from app.services.email_templates import notice_email
@@ -78,29 +79,12 @@ async def test_ai(session: AsyncSession = Depends(get_session)):
 
 @router.post("/ai/summarize-all")
 async def summarize_all_events(
-    only_missing: bool = True, session: AsyncSession = Depends(get_session)
+    only_missing: bool = True, session: AsyncSession = Depends(get_session), queue=Depends(get_queue)
 ):
     """为事件补 AI 摘要（only_missing=True 只处理还没有 AI 摘要的事件）。"""
-    from sqlalchemy import select as _select
+    from app.api.admin_ai import summarize_all
 
-    from app.models import Event
-    from app.services.ai import summarize_event
-
-    query = _select(Event.id).where(Event.is_active.is_(True))
-    if only_missing:
-        query = query.where(Event.summary.is_(None))
-    ids = [row for row in await session.scalars(query)]
-    done = skipped = failed = 0
-    for event_id in ids[:200]:
-        result = await summarize_event(session, event_id)
-        status = result.get("status")
-        if status == "ok":
-            done += 1
-        elif status == "skipped":
-            skipped += 1
-        else:
-            failed += 1
-    return {"attempted": len(ids), "ok": done, "skipped": skipped, "failed": failed}
+    return await summarize_all(only_missing=only_missing, session=session, queue=queue)
 
 
 @router.put("/smtp")
@@ -215,13 +199,13 @@ async def put_media_visibility(body: dict, session: AsyncSession = Depends(get_s
     """保存媒体可见性策略：default + platforms（按平台覆盖）。"""
     stored = await settings_service.get_media_visibility(session)
     default_in = body.get("default") or {}
-    merged_platforms = {**stored.get("platforms", {}), **(body.get("platforms") or {})}
+    platforms = (body.get("platforms") or {}) if "platforms" in body else stored.get("platforms", {})
     value = {
         "default": {
             "image": str(default_in.get("image") or stored.get("default", {}).get("image") or "show"),
             "video": str(default_in.get("video") or stored.get("default", {}).get("video") or "show"),
         },
-        "platforms": merged_platforms,
+        "platforms": platforms,
     }
     normalized = settings_service._normalize_media_visibility(value)
     await settings_service.set_setting(session, "media_visibility", normalized)

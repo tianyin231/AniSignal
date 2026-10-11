@@ -21,6 +21,9 @@ def plugin(monkeypatch):
         return lambda fn: fn
 
     class Chain:
+        def __init__(self):
+            self.images = []
+
         def message(self, text):
             self.text = text
             self.image_url = None
@@ -28,10 +31,12 @@ def plugin(monkeypatch):
 
         def url_image(self, url):
             self.image_url = url
+            self.images.append(url)
             return self
 
         def file_image(self, path):
             self.image_url = path
+            self.images.append(path)
             return self
 
     module('aiohttp', ClientError=ConnectionError)
@@ -780,6 +785,27 @@ async def test_delivery_uses_at_most_one_image(plugin):
     row = {**delivery(), 'images': ['first', 'second', 'third']}
     await plugin.send_delivery(row)
     assert plugin.context.send_message.call_args.args[1].image_url == 'first'
+    assert plugin.context.send_message.call_args.args[1].images == ['first']
+
+
+@pytest.mark.parametrize('max_images', [1, 3, 9])
+async def test_delivery_honors_configured_image_limit(plugin, max_images):
+    row = {**delivery(), 'images': [f'image-{i}' for i in range(10)], 'max_images': max_images}
+    await plugin.send_delivery(row)
+    assert plugin.context.send_message.call_args.args[1].images == row['images'][:max_images]
+    plugin.context.send_message.assert_awaited_once()
+
+
+async def test_daily_card_counts_toward_image_limit(plugin, monkeypatch):
+    card = importlib.import_module('plugin_under_test.card')
+    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font: path)
+    row = {**delivery(), 'brief': {'mode': 'daily', 'items': [{'title': '今日消息'}]},
+           'images': ['first', 'second', 'third'], 'max_images': 3}
+    await plugin.send_delivery(row)
+    images = plugin.context.send_message.call_args.args[1].images
+    assert len(images) == 3 and images[0].endswith('brief.png')
+    assert images[1:] == ['first', 'second']
+    plugin.context.send_message.assert_awaited_once()
 
 
 @pytest.fixture

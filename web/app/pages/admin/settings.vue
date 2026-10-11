@@ -221,11 +221,11 @@ async function testAi() {
 }
 
 async function summarizeAll() {
-  if (!confirm('为缺少摘要的事件批量生成 AI 摘要？')) return
+  if (!confirm('为缺少摘要或使用降级模板的事件补 AI 摘要？人工编辑和锁定的事件会保留。')) return
   startBusy('summarizeAll')
   try {
-    const r = await api<{ attempted: number; ok: number; skipped: number }>('/api/admin/settings/ai/summarize-all', { method: 'POST' })
-    toast.ok(`AI 摘要完成：处理 ${r.attempted}，成功 ${r.ok}，跳过 ${r.skipped}`)
+    const r = await api<{ candidates: number; queued: number; remaining: number }>('/api/admin/settings/ai/summarize-all', { method: 'POST' })
+    toast.info(r.queued ? `已新增 ${r.queued} 条摘要任务，后台处理中；当前待补 ${r.remaining} 条（含队列中）` : r.remaining ? '本批摘要任务已在队列中，请稍后查看 AI 调用记录' : '无需补充摘要')
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '执行失败'
   } finally {
