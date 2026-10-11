@@ -8,6 +8,7 @@ from sqlalchemy.orm import defer
 
 from app.communities import DEFAULT_COMMUNITY
 from app.models import (
+    CollectTarget,
     ContentVersion,
     Event,
     EventRevision,
@@ -176,9 +177,11 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(
             Event.product_id == product.id,
+            Event.community == product.community,
             Event.is_active.is_(True),
             Evidence.role != "excluded",
             RawContent.hidden.is_(False),
+            RawContent.community == product.community,
         )
     )
     evidence_rows = list(rows)
@@ -246,6 +249,11 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         ),
     ]
 
+    target = await session.get(CollectTarget, product.monitor_target_id) if product.monitor_target_id else None
+    monitor = {
+        "target_id": target.id, "keyword": target.target_value, "enabled": target.enabled,
+        "interval_minutes": target.interval_minutes, "min_views": target.min_views, "tier": target.tier,
+    } if target else None
     return ProductOut(
         id=product.id,
         slug=product.slug,
@@ -259,6 +267,7 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         original_ship_at=product.original_ship_at,
         ship_note=product.ship_note,
         watch_terms=(product.watch_terms or []),
+        monitor=monitor,
         stage_hint=-1,
         current_stage=effective,
         stage_label=consumer["state_label"],

@@ -148,3 +148,44 @@ async def test_sender_exception_does_not_block_next_delivery(session, monkeypatc
     assert result == {"created": 2, "sent": 1, "failed": 1, "skipped": 0}
     rows = list(await session.scalars(select(NotificationDelivery).order_by(NotificationDelivery.id)))
     assert [row.status for row in rows] == ["failed", "sent"]
+
+
+async def test_new_business_revision_supersedes_pending_event_notification(session, monkeypatch):
+    user = await _user_with_keyword(session)
+    user.instant_notification_enabled = True
+    user.instant_notification_cursor = 0
+    event, _, _ = await _event(session)
+    assert await instant.prepare_instant_notifications(session) == 1
+    session.add(EventRevision(event_id=event.id, note="新增证据 2 条（bilibili）"))
+    await session.commit()
+    sender = AsyncMock(return_value=True)
+    monkeypatch.setattr(instant, "send_email", sender)
+
+    result = await instant.run_instant_notifications(session)
+
+    assert result == {"created": 1, "sent": 1, "failed": 0, "skipped": 1}
+    rows = list(await session.scalars(select(NotificationDelivery).order_by(NotificationDelivery.id)))
+    assert [row.status for row in rows] == ["skipped", "sent"]
+    sender.assert_awaited_once()
+    assert "新增证据 2 条" in sender.await_args.args[2]
+
+
+@pytest.mark.parametrize("note", [
+    "AI 摘要更新（test）", "安全回退摘要更新（test）", "人工锁定，引擎暂停改动",
+    "解除锁定，恢复引擎维护", "人工编辑字段：summary, manual_locked",
+])
+async def test_maintenance_revision_keeps_pending_event_notification(session, monkeypatch, note):
+    user = await _user_with_keyword(session)
+    user.instant_notification_enabled = True
+    user.instant_notification_cursor = 0
+    event, _, _ = await _event(session)
+    assert await instant.prepare_instant_notifications(session) == 1
+    session.add(EventRevision(event_id=event.id, note=note))
+    await session.commit()
+    sender = AsyncMock(return_value=True)
+    monkeypatch.setattr(instant, "send_email", sender)
+
+    result = await instant.run_instant_notifications(session)
+
+    assert result == {"created": 0, "sent": 1, "failed": 0, "skipped": 0}
+    sender.assert_awaited_once()

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Integer, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.clock import utcnow
@@ -37,6 +37,12 @@ class Product(Base):
     ship_note: Mapped[str | None] = mapped_column(Text)
     # 命中任一词的内容会关联到该商品（履约类目时）
     watch_terms: Mapped[list] = mapped_column(JSON, default=list)
+    # 显式绑定专属采集目标；搜索词与商品匹配词分别维护，不猜测二者关系。
+    monitor_target_id: Mapped[int | None] = mapped_column(
+        ForeignKey("collect_targets.id", name="fk_products_monitor_target", ondelete="SET NULL"),
+        unique=True,
+    )
+    fulfillment_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     # 管理端或 AI 指定的当前阶段（-1 = 跟随引擎计算）
     stage_hint: Mapped[int] = mapped_column(Integer, default=-1)
     stage_hint_source: Mapped[str | None] = mapped_column(String(16))  # manual / ai

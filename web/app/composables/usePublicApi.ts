@@ -218,11 +218,13 @@ export interface FulfillmentSnapshot {
   sample_count: number
   candidate_total: number
   last_verified_at: string | null
+  updated_at?: string | null
 }
 
 export interface ApiProductSignal {
   id: number
   product_id: number
+  community?: string
   signal_type: string
   signal_label: string
   actor_type: string
@@ -261,6 +263,14 @@ export interface ApiProduct {
   original_ship_at: string | null
   ship_note: string | null
   watch_terms: string[]
+  monitor?: {
+    target_id: number
+    keyword: string
+    enabled: boolean
+    interval_minutes: number
+    min_views: number
+    tier: string
+  } | null
   stage_hint: number
   current_stage: number
   stage_label: string

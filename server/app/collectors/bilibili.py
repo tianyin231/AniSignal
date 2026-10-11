@@ -116,7 +116,13 @@ class BilibiliCollector:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self._timeout)
         except TimeoutError:
             proc.kill()
+            await proc.communicate()
             raise CollectorError(f"bili command timed out after {self._timeout}s: {args}") from None
+        except asyncio.CancelledError:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.communicate()
+            raise
         if proc.returncode != 0:
             stderr_text = stderr.decode(errors="replace")
             # bili 0.3: 4=匿名首屏静默拒绝，6=限频；不再只靠英文 risk control。

@@ -183,6 +183,7 @@ async function refreshHome() {
       trendingRequest.refresh(),
       calendarRequest.refresh(),
       codesRequest.refresh(),
+      refreshNuxtData(`status-product-${homeCommunity.value}`),
     ])
   }
   finally {
@@ -400,7 +401,7 @@ onBeforeUnmount(() => {
     </template>
 
     <div class="mt-6 space-y-4 xl:hidden">
-      <StatusCard />
+      <StatusCard mobile />
       </div>
   </div>
 </template>

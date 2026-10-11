@@ -175,7 +175,14 @@ async def review_contents(
                     )
                 if should_hide and not raw.hidden:
                     hidden_ids.append(content_id)
+                snapshots = {}
+                if raw.hidden != should_hide:
+                    from app.services.fulfillment import capture_content_fulfillment, refresh_content_fulfillment
+
+                    snapshots = await capture_content_fulfillment(session, content_id)
                 raw.hidden = should_hide
+                if snapshots:
+                    await refresh_content_fulfillment(session, snapshots, reaggregate=not should_hide)
             if is_news:
                 # 快讯逐条落库，一条慢请求不应拖住已完成的整批消息。
                 await session.commit()
@@ -634,11 +641,13 @@ def _match_product_context(
     tracked_products: list[dict], community: str, title: str, text: str, matched_keywords: list
 ) -> dict | None:
     """内容命中所属分区在售商品的匹配词时，附带商品上下文供 AI 做履约预判。"""
-    haystack = f"{title} {text} {' '.join(str(k) for k in matched_keywords)}"
+    from app.services.product_matching import matches_product_text
+
     for product in tracked_products:
         if (product.get("community") or DEFAULT_COMMUNITY) != community:
             continue
-        hits = [term for term in product["terms"] if term and term in haystack]
+        # 搜索溯源词只说明“由哪个任务抓到”，不能代替正文中的商品命中。
+        hits = [term for term in product["terms"] if matches_product_text(title, text, [term])]
         if hits:
             return {"name": product["name"], "matched_terms": hits[:6]}
     return None

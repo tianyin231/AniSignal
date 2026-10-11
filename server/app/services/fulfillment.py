@@ -8,6 +8,7 @@ from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.communities import DEFAULT_COMMUNITY
+from app.services.product_matching import detect_product_signal_types, matches_product_text
 from app.models import (
     ContentReview,
     ContentVersion,
@@ -65,14 +66,16 @@ def _source_key(raw: RawContent, source: Source | None) -> str:
     return f"{raw.platform}:content:{raw.external_id}"
 
 
-async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
-    """把当前有效商品事件同步为候选信号；已人工审核的字段不覆盖。
-
-    信号分区跟随商品分区，创建与刷新时都强制覆盖（商品改分区后旧信号自动对齐）。
-    """
-    product_community = (
-        await session.scalar(select(Product.community).where(Product.id == product_id))
-    ) or DEFAULT_COMMUNITY
+async def sync_product_signals(
+    session: AsyncSession, product_id: int, *, before: dict | None = None,
+) -> int:
+    """对账当前有效证据，保留人工审核字段，失效证据退出公开计算。"""
+    product = await session.scalar(select(Product).where(Product.id == product_id).with_for_update().execution_options(populate_existing=True))
+    if product is None:
+        return 0
+    if before is None:
+        before = await build_fulfillment_snapshot(session, product_id)
+    product_community = product.community or DEFAULT_COMMUNITY
     latest = (
         select(
             ContentVersion.raw_content_id.label("rid"),
@@ -84,6 +87,7 @@ async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
     rows = list(
         await session.execute(
             select(Event, RawContent, Source, ContentVersion)
+            .options(defer(RawContent.raw_json))
             .join(Evidence, Evidence.event_id == Event.id)
             .join(RawContent, RawContent.id == Evidence.raw_content_id)
             .join(Source, Source.id == RawContent.source_id, isouter=True)
@@ -95,11 +99,16 @@ async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
             )
             .where(
                 Event.product_id == product_id,
+                Event.community == product_community,
                 Event.is_active.is_(True),
                 Evidence.role == "support",
+                RawContent.community == product_community,
                 RawContent.hidden.is_(False),
-                Event.category.in_(tuple(CATEGORY_TO_SIGNAL)),
+                ~select(Evidence.id).where(
+                    Evidence.raw_content_id == RawContent.id, Evidence.role == "excluded",
+                ).correlate(RawContent).exists(),
             )
+            .execution_options(populate_existing=True)
         )
     )
 
@@ -114,14 +123,27 @@ async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
         (evidence.raw_content_id, signal.signal_type): (signal, evidence)
         for signal, evidence in existing_rows
     }
-    for signal, _ in existing_rows:
+    expected = {}
+    event_signal_types = {
+        category: {kind} for category, kind in CATEGORY_TO_SIGNAL.items()
+    }
+    event_signal_types["quality"].add("aftersales_notice")
+    for event, raw, source, version in rows:
+        if not matches_product_text(version.title, version.text, product.watch_terms or []):
+            continue
+        for kind in detect_product_signal_types(version.title, version.text, version.category) & event_signal_types.get(event.category, set()):
+            expected[(raw.id, kind)] = (event, raw, source, version)
+    changed = False
+    for signal, evidence in existing_rows:
         if signal.source_method == "rule":
-            signal.active = False
+            active = (evidence.raw_content_id, signal.signal_type) in expected and signal.community == product_community
+            if signal.active != active:
+                signal.active = active
+                changed = True
 
     created = 0
-    for event, raw, source, version in rows:
-        signal_type = CATEGORY_TO_SIGNAL[event.category]
-        key = (raw.id, signal_type)
+    for key, (event, raw, source, version) in expected.items():
+        signal_type = key[1]
         actor = source.identity if source else "unknown"
         is_official = actor == "official" and signal_type in OFFICIAL_TYPES
         title = _plain(version.title or event.title or raw.external_id)
@@ -129,8 +151,10 @@ async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
         current = existing.get(key)
         if current:
             signal, evidence = current
+            # 不把其他分区历史信号换标签复活。
+            if signal.community != product_community:
+                continue
             signal.active = True
-            signal.community = product_community
             if not signal.locked:
                 signal.actor_type = actor
                 signal.occurred_at = raw.published_at or raw.collected_at
@@ -140,6 +164,7 @@ async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
                 evidence.claim_quote = quote
                 evidence.independent_source_key = _source_key(raw, source)
                 evidence.acquisition_type = "seeded" if actor == "seeded" else "unknown"
+            changed = changed or session.is_modified(signal, include_collections=False) or session.is_modified(evidence, include_collections=False)
             continue
 
         signal = ProductSignal(
@@ -167,6 +192,16 @@ async def sync_product_signals(session: AsyncSession, product_id: int) -> int:
         session.add(evidence)
         existing[key] = (signal, evidence)
         created += 1
+    if changed or created:
+        product.fulfillment_updated_at = utcnow()
+    await session.flush()
+    from app.services.fulfillment_revisions import record_product_fulfillment_change
+
+    after = await build_fulfillment_snapshot(session, product_id)
+    if before != after and not (changed or created):
+        product.fulfillment_updated_at = utcnow()
+        after["updated_at"] = product.fulfillment_updated_at
+    await record_product_fulfillment_change(session, product_id, before, after, "履约证据同步")
     return created
 
 
@@ -177,14 +212,18 @@ async def _active_signal_rows(session: AsyncSession, product_id: int) -> list[tu
             .options(defer(RawContent.raw_json))
             .join(ProductSignalEvidence, ProductSignalEvidence.signal_id == ProductSignal.id)
             .join(RawContent, RawContent.id == ProductSignalEvidence.raw_content_id)
+            .join(Product, Product.id == ProductSignal.product_id)
             .join(Source, Source.id == RawContent.source_id, isouter=True)
             .where(
                 ProductSignal.product_id == product_id,
                 ProductSignal.active.is_(True),
+                ProductSignal.community == Product.community,
+                RawContent.community == Product.community,
                 RawContent.hidden.is_(False),
                 ProductSignalEvidence.role != "excluded",
             )
             .order_by(ProductSignal.occurred_at.desc(), ProductSignal.id.desc())
+            .execution_options(populate_existing=True)
         )
     )
 
@@ -354,7 +393,8 @@ async def build_fulfillment_snapshot(
         s.occurred_at or s.updated_at for s, _ in verified if s.id in quality_ids
     ]
 
-    verified_times = [s.occurred_at or s.updated_at for s, _ in verified]
+    verified_times = [s.updated_at for s, _ in verified]
+    product = await session.get(Product, product_id)
     return {
         "official": _axis(
             "official",
@@ -394,6 +434,7 @@ async def build_fulfillment_snapshot(
         "sample_count": len(sample_sources),
         "candidate_total": len({s.id for s, _ in candidates}),
         "last_verified_at": max(verified_times, default=None),
+        "updated_at": (product.fulfillment_updated_at if product else None) or max((s.updated_at for s, _, _, _ in rows), default=None),
     }
 
 
@@ -461,6 +502,8 @@ async def review_product_signal(
 ) -> None:
     if review_status not in REVIEW_STATUSES:
         raise ValueError("invalid_review_status")
+    product = await session.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    before = await build_fulfillment_snapshot(session, product_id)
     signal = await session.scalar(
         select(ProductSignal).where(
             ProductSignal.id == signal_id,
@@ -475,6 +518,9 @@ async def review_product_signal(
     )
     if evidence is None:
         raise ValueError("signal_evidence_not_found")
+    raw = await session.get(RawContent, evidence.raw_content_id)
+    if product is None or raw is None or raw.hidden or raw.community != product.community or signal.community != product.community:
+        raise ValueError("signal_not_found")
     if acquisition_type is not None and acquisition_type not in ACQUISITION_TYPES:
         raise ValueError("invalid_acquisition_type")
     if actor_type is not None and actor_type not in ACTOR_TYPES:
@@ -504,6 +550,7 @@ async def review_product_signal(
     signal.summary = next_summary
     signal.locked = review_status != "candidate"
     signal.updated_at = utcnow()
+    product.fulfillment_updated_at = signal.updated_at
     evidence.acquisition_type = next_acquisition
     evidence.claim_quote = next_quote or None
     session.add(
@@ -515,3 +562,46 @@ async def review_product_signal(
             note=note.strip() or f"履约信号审核：{previous} → {review_status}",
         )
     )
+    await session.flush()
+    from app.services.fulfillment_revisions import record_product_fulfillment_change
+
+    await record_product_fulfillment_change(session, product_id, before, await build_fulfillment_snapshot(session, product_id), "履约信号核验")
+
+
+async def capture_content_fulfillment(session: AsyncSession, content_id: int) -> dict[int, dict]:
+    """在原文隐藏、删除或修订前，保存受影响商品的公开状态。"""
+    product_ids = set(await session.scalars(select(ProductSignal.product_id).join(
+        ProductSignalEvidence, ProductSignalEvidence.signal_id == ProductSignal.id,
+    ).where(ProductSignalEvidence.raw_content_id == content_id)))
+    product_ids.update(await session.scalars(select(Event.product_id).join(Evidence).where(
+        Evidence.raw_content_id == content_id, Event.product_id.is_not(None),
+    )))
+    raw = await session.get(RawContent, content_id)
+    version = await session.scalar(select(ContentVersion).where(
+        ContentVersion.raw_content_id == content_id,
+    ).order_by(ContentVersion.version.desc()).limit(1))
+    if raw and version:
+        for product in await session.scalars(select(Product).where(Product.community == raw.community)):
+            if matches_product_text(version.title, version.text, product.watch_terms or []):
+                product_ids.add(product.id)
+    result = {}
+    for product_id in sorted(product_ids):
+        await session.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+        result[product_id] = await build_fulfillment_snapshot(session, product_id)
+    return result
+
+
+async def refresh_content_fulfillment(
+    session: AsyncSession, snapshots: dict[int, dict], *, reaggregate: bool = False,
+) -> None:
+    if reaggregate and snapshots:
+        from app.services.events import AggStats, _aggregate_product, load_classified_contents
+
+        contents = await load_classified_contents(session)
+        for product_id, before in snapshots.items():
+            product = await session.get(Product, product_id)
+            if product:
+                await _aggregate_product(session, product, contents, AggStats(), before=before)
+        return
+    for product_id, before in snapshots.items():
+        await sync_product_signals(session, product_id, before=before)

@@ -299,7 +299,8 @@ _REPARSE_KIND = {
 
 
 async def reparse_contents(
-    session: AsyncSession, platform: str, content_type: str | None = None
+    session: AsyncSession, platform: str, content_type: str | None = None,
+    *, content_ids: list[int] | None = None,
 ) -> dict:
     """用当前 parser + 分类词典重算已入库内容（原始数据不可覆盖、解析可重算）。
 
@@ -309,6 +310,8 @@ async def reparse_contents(
     query = select(RawContent).where(RawContent.platform == platform)
     if content_type:
         query = query.where(RawContent.content_type == content_type)
+    if content_ids is not None:
+        query = query.where(RawContent.id.in_(content_ids))
     rows = list((await session.execute(query)).scalars())
     rules = await load_rules(session)
     checked = updated = failed = 0

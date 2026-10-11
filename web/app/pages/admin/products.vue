@@ -34,8 +34,10 @@ const form = reactive({
   ship_note: '',
   watch_terms: '',
   community: 'wuwa',
-  create_bilibili_target: true,
+  monitor_enabled: true,
   monitor_keyword: '',
+  monitor_interval_minutes: 30,
+  monitor_min_views: 0,
 })
 const editing = ref<ApiProduct | null>(null)
 const termsTouched = ref(false)
@@ -92,7 +94,8 @@ function resetForm() {
   Object.assign(form, {
     slug: '', name: '', publisher: '', skus: '', price_note: '', presale_at: '',
     balance_window: '', original_ship_at: '', ship_note: '', watch_terms: '',
-    community: 'wuwa', create_bilibili_target: true, monitor_keyword: '',
+    community: communityFilter.value || 'wuwa', monitor_enabled: true, monitor_keyword: '',
+    monitor_interval_minutes: 30, monitor_min_views: 0,
   })
 }
 
@@ -110,8 +113,11 @@ function startEdit(product: ApiProduct) {
     original_ship_at: product.original_ship_at ?? '',
     ship_note: product.ship_note ?? '',
     watch_terms: product.watch_terms.join(', '),
-    create_bilibili_target: false,
-    monitor_keyword: '',
+    community: product.community || 'wuwa',
+    monitor_enabled: product.monitor?.enabled ?? false,
+    monitor_keyword: product.monitor?.keyword ?? '',
+    monitor_interval_minutes: product.monitor?.interval_minutes ?? 30,
+    monitor_min_views: product.monitor?.min_views ?? 0,
   })
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
@@ -135,6 +141,10 @@ async function submit() {
     ship_note: form.ship_note.trim() || null,
     watch_terms: listValue(form.watch_terms),
     community: form.community,
+    monitor_enabled: form.monitor_enabled,
+    monitor_keyword: form.monitor_keyword.trim() || null,
+    monitor_interval_minutes: form.monitor_interval_minutes,
+    monitor_min_views: form.monitor_min_views,
   }
   try {
     if (editing.value) {
@@ -146,16 +156,14 @@ async function submit() {
         body: {
           ...body,
           slug: form.slug.trim() || null,
-          create_bilibili_target: form.create_bilibili_target,
-          monitor_keyword: form.monitor_keyword.trim() || null,
         },
       })
-      toast.ok(form.create_bilibili_target ? '商品与 B 站监控已创建' : '商品已创建')
+      toast.ok(form.monitor_enabled ? '商品与 B 站监控已创建' : '商品已创建')
     }
     resetForm()
     await refresh()
   } catch (exc: any) {
-    error.value = exc?.statusCode === 409 ? 'URL 标识已存在' : `保存失败：${exc?.data?.detail ?? exc?.message}`
+    error.value = `保存失败：${exc?.data?.detail ?? exc?.message ?? '请稍后重试'}`
     toast.err(error.value)
   } finally {
     busy.value = false
@@ -241,7 +249,7 @@ async function saveSignal() {
     <div>
       <h1 class="text-lg font-semibold">商品管理</h1>
       <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
-        新增时只填商品名称即可；系统自动生成精确匹配词并创建采集。规则或 AI 只生成候选信号，公开结论必须逐条核验。
+        新增时可按商品名称创建采集。官方履约按来源身份核验，消费者到货与质量反馈需要逐条审核。
       </p>
     </div>
 
@@ -257,11 +265,11 @@ async function saveSignal() {
         </label>
       </div>
 
-      <label v-if="!editing" class="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-sm">
-        <input v-model="form.create_bilibili_target" type="checkbox" class="checkbox mt-0.5">
+      <label class="mt-3 flex cursor-pointer items-start gap-2 rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-sm">
+        <input v-model="form.monitor_enabled" type="checkbox" class="checkbox mt-0.5">
         <span>
-          <span class="font-medium text-slate-700 dark:text-zinc-200">同时创建 B 站关键词监控</span>
-          <span class="mt-0.5 block text-xs text-slate-500 dark:text-zinc-400">默认按完整商品名、每 30 分钟采集；已有同名监控会直接复用。</span>
+          <span class="font-medium text-slate-700 dark:text-zinc-200">启用 B 站关键词采集</span>
+          <span class="mt-0.5 block text-xs text-slate-500 dark:text-zinc-400">搜索词留空使用完整商品名；同一分区的同词监控可复用，跨分区需设置独立搜索词。</span>
         </span>
       </label>
 
@@ -284,7 +292,17 @@ async function saveSignal() {
           <input v-model="form.balance_window" placeholder="尾款窗口" class="input px-3 py-2 text-sm">
           <input v-model="form.original_ship_at" placeholder="原定发货" class="input px-3 py-2 text-sm">
           <input v-model="form.ship_note" placeholder="发货说明" class="input px-3 py-2 text-sm">
-          <input v-if="!editing && form.create_bilibili_target" v-model="form.monitor_keyword" placeholder="B站搜索词，留空用完整商品名" class="input px-3 py-2 text-sm">
+          <template v-if="form.monitor_enabled || editing?.monitor">
+            <label class="text-xs text-slate-500 dark:text-zinc-400">B 站搜索词
+              <input v-model="form.monitor_keyword" maxlength="255" placeholder="留空用完整商品名" class="input mt-1 w-full px-3 py-2 text-sm">
+            </label>
+            <label class="text-xs text-slate-500 dark:text-zinc-400">采集间隔（分钟）
+              <input v-model.number="form.monitor_interval_minutes" type="number" min="5" max="1440" step="1" required class="input mt-1 w-full px-3 py-2 text-sm">
+            </label>
+            <label class="text-xs text-slate-500 dark:text-zinc-400">最低播放量
+              <input v-model.number="form.monitor_min_views" type="number" min="0" step="1" required class="input mt-1 w-full px-3 py-2 text-sm">
+            </label>
+          </template>
         </div>
       </details>
 

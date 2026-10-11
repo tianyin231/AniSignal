@@ -13,6 +13,7 @@ from app.models import ClassificationRule, Identity
 from app.communities import DEFAULT_COMMUNITY, get_community
 from app.models.enums import Category
 from app.schemas.content import NormalizedContent
+from app.services.product_matching import QUALITY_PROBLEM_TERMS
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ DEFAULT_RULES: list[tuple[str, str, int]] = [
     ("quality", "售后", 51),
     ("quality", "故障", 52),
     ("quality", "瑕疵", 53),
+    *[("quality", term, 54) for term in QUALITY_PROBLEM_TERMS if term not in {"故障", "瑕疵"}],
     ("review", "评测", 60),
     ("review", "测评", 61),
     ("arrived", "到货", 70),
@@ -67,7 +69,7 @@ HIDDEN_CATEGORIES = {"chat", "other", "promotion"}
 _OFFICIAL_FALLBACK_PLATFORMS = {"kuro_cn", "kuro_global"}
 
 
-async def seed_defaults(session: AsyncSession) -> int:
+async def seed_defaults(session: AsyncSession, *, commit: bool = True) -> int:
     """播种默认规则；已存在的 (category, pattern) 跳过（补充式，老库也能长出新词典）。"""
     existing = {
         (rule.category, rule.pattern)
@@ -84,7 +86,10 @@ async def seed_defaults(session: AsyncSession) -> int:
         ClassificationRule(category=category, pattern=pattern, priority=priority)
         for category, pattern, priority in missing
     )
-    await session.commit()
+    if commit:
+        await session.commit()
+    else:
+        await session.flush()
     return len(missing)
 
 

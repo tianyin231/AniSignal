@@ -27,6 +27,8 @@ class CommunityMeta:
     official_bili_mid_default: str | None  # 配置缺失时的兜底 UID
     extra_names: tuple[str, ...] = ()  # 游戏名的常见变体（如"崩坏：星穹铁道"带冒号/繁体）
     domain: str = "game"  # news 分区采用资讯筛选，不沿用游戏词典与审核规则
+    source_aliases: tuple[str, ...] = ()  # 仅用于跨区采集分流，英文缩写需按词边界匹配
+    source_exclusions: tuple[str, ...] = ()  # 含同系列名称的独立游戏，不能借简称入本分区
 
     @property
     def game_names(self) -> tuple[str, ...]:
@@ -45,6 +47,7 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         color="blue",
         bili_mid_setting="wuthering_waves_bili_mid",
         official_bili_mid_default="1955897084",
+        source_aliases=("Wuthering Waves", "WuWa", "鳴潮"),
     ),
     "blhx": CommunityMeta(
         key="blhx",
@@ -56,6 +59,7 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         color="cyan",
         bili_mid_setting="azur_lane_bili_mid",
         official_bili_mid_default="233114659",
+        source_aliases=("Azur Lane", "碧藍航線"),
     ),
     "hsr": CommunityMeta(
         key="hsr",
@@ -68,6 +72,7 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         bili_mid_setting="star_rail_bili_mid",
         official_bili_mid_default="1340190821",
         extra_names=("崩坏：星穹铁道", "崩壞星穹鐵道", "崩壞：星穹鐵道", "星穹铁道", "星穹鐵道"),
+        source_aliases=("Honkai Star Rail", "Honkai: Star Rail", "Star Rail", "HSR"),
     ),
     "arknights": CommunityMeta(
         key="arknights",
@@ -79,6 +84,8 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         color="orange",
         bili_mid_setting="arknights_bili_mid",
         official_bili_mid_default="161775300",
+        source_aliases=("Arknights", "明日方舟"),
+        source_exclusions=("Endfield", "终末地", "終末地"),
     ),
     "ai": CommunityMeta(
         key="ai", label="AI", game_name="人工智能", bare_name="AI",

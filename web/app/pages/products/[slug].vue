@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ApiEventList, ApiProduct, ApiProductSignalList } from '~/composables/usePublicApi'
 import { toAppEvent } from '~/utils/public-utils'
+import { GAME_COMMUNITIES, communityClasses } from '~/composables/useGameSection'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,21 +39,36 @@ const [
 ] = await Promise.all([productRequest, eventsRequest, signalsRequest])
 if (error.value) throw createError({ statusCode: error.value.statusCode || 503, statusMessage: error.value.statusCode === 404 ? '商品不存在' : '商品暂时加载失败，请稍后重试', fatal: true })
 if (!productData.value) throw createError({ statusCode: 404, statusMessage: '商品不存在', fatal: true })
-const product = computed(() => productData.value!)
+const lastProduct = shallowRef(productData.value!)
+watch(productData, value => { if (value) lastProduct.value = value })
+const product = computed(() => productData.value ?? lastProduct.value)
+const productCommunity = computed(() => product.value.community || 'wuwa')
+const communityMeta = computed(() => GAME_COMMUNITIES.find(item => item.key === productCommunity.value))
+// 分享直达时使用商品自身分区，聚合列表传来的 all 视角则保留。
+if (route.query.community !== 'all' && route.query.community !== productCommunity.value) {
+  await navigateTo({ path: route.path, query: { ...route.query, community: productCommunity.value } }, { replace: true })
+}
+const listFallback = computed(() => `/products?community=${route.query.community === 'all' ? 'all' : productCommunity.value}`)
 const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 const signals = computed(() => signalData.value?.items ?? [])
+useVisibleRefresh(() => Promise.all([
+  productRequest.refresh({ dedupe: 'defer' }),
+  eventsRequest.refresh({ dedupe: 'defer' }),
+  signalsRequest.refresh({ dedupe: 'defer' }),
+]))
 
 useSeoMeta({ title: () => `${product.value.name} · 商品` })
 </script>
 
 <template>
   <div class="space-y-4">
-    <BackButton fallback="/products" label="返回商品" />
+    <BackButton :fallback="listFallback" label="返回商品" />
+    <p v-if="error" role="alert" class="text-sm text-amber-700 dark:text-amber-300">商品状态暂时更新失败，当前显示上次结果。<button type="button" class="ml-1 underline" @click="productRequest.refresh()">重试</button></p>
 
     <section class="panel p-4 sm:p-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">{{ product.name }}</h1>
+          <h1 class="flex flex-wrap items-center gap-2 text-lg font-semibold text-slate-900 dark:text-zinc-50">{{ product.name }}<span v-if="communityMeta" class="chip text-xs" :class="communityClasses(communityMeta.color).chip">{{ communityMeta.label }}</span></h1>
           <p class="mt-0.5 text-xs text-slate-400 dark:text-zinc-500">
             {{ product.publisher || '—' }}<template v-if="product.skus.length"> · {{ product.skus.join(' / ') }}</template>
           </p>
@@ -113,7 +129,7 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
           <button type="button" class="link min-h-11 text-xs" @click="view = 'evidence'">查看全部</button>
         </div>
         <p v-if="signalsError" role="alert" class="mt-3 text-sm text-amber-700 dark:text-amber-300">信号暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshSignals()">重试</button></p>
-        <ProductSignalList v-else :items="signals.slice(0, 3)" />
+        <ProductSignalList v-else :items="signals.slice(0, 3)" :community="productCommunity" />
       </section>
     </section>
 
@@ -128,7 +144,7 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
       <p class="mt-1 text-xs text-slate-400">公开结论只统计“已核验”；候选信号仅供查看，不参与状态计算。</p>
       <div class="mt-4">
         <p v-if="signalsError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">信号暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshSignals()">重试</button></p>
-        <ProductSignalList v-else :items="signals" />
+        <ProductSignalList v-else :items="signals" :community="productCommunity" />
       </div>
     </section>
   </div>
