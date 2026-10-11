@@ -35,14 +35,15 @@ const isActive = (to: string) => route.path.startsWith(to)
 const aggregate = computed(() => !route.query.community || route.query.community === 'all')
 const homeCommunity = computed(() => (aggregate.value ? 'all' : community.value))
 
-const eventsRequest = useAsyncData(
+// 客户端先切换频道并显示加载状态；服务端首屏仍等待数据。
+const eventsRequest = useLazyAsyncData(
   () => `home-events-${homeCommunity.value}`,
   () => api<ApiEventList>('/api/events', {
     query: { community: homeCommunity.value, published_within_hours: 24, limit: 10 },
   }),
   { watch: [homeCommunity] },
 )
-const officialRequest = useAsyncData(
+const officialRequest = useLazyAsyncData(
   () => `home-official-${homeCommunity.value}-${page.value}`,
   () => api<PublicContentList>('/api/contents', {
     query: {
@@ -55,7 +56,7 @@ const officialRequest = useAsyncData(
   }),
   { watch: [homeCommunity, page] },
 )
-const communityRequest = useAsyncData(
+const communityRequest = useLazyAsyncData(
   () => `home-community-${homeCommunity.value}-${page.value}`,
   () => api<PublicContentList>('/api/contents', {
     query: {
@@ -68,22 +69,22 @@ const communityRequest = useAsyncData(
   }),
   { watch: [homeCommunity, page] },
 )
-const highlightsRequest = useAsyncData(
+const highlightsRequest = useLazyAsyncData(
   () => `home-highlights-${homeCommunity.value}`,
   () => api<PublicContentList>('/api/highlights', { query: { community: homeCommunity.value, limit: 5 } }),
   { watch: [homeCommunity] },
 )
-const trendingRequest = useAsyncData(
+const trendingRequest = useLazyAsyncData(
   () => `home-trending-${homeCommunity.value}`,
   () => api<PublicContentList>('/api/trending', { query: { community: homeCommunity.value, hours: 24, limit: 5 } }),
   { watch: [homeCommunity] },
 )
-const calendarRequest = useAsyncData(
+const calendarRequest = useLazyAsyncData(
   () => `home-calendar-${homeCommunity.value}`,
   () => api<CalendarDto>('/api/calendar', { query: { community: homeCommunity.value } }),
   { watch: [homeCommunity] },
 )
-const codesRequest = useAsyncData(
+const codesRequest = useLazyAsyncData(
   () => `home-codes-${homeCommunity.value}`,
   () => api<CodesDto>('/api/codes', { query: { community: homeCommunity.value } }),
   { watch: [homeCommunity] },

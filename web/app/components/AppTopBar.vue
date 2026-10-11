@@ -12,7 +12,9 @@ const channels = [
   { key: 'custom', label: '定制化', color: 'blue' as const, to: '/custom' },
 ]
 
-const { community } = useGameSection()
+const { community, rememberRouteCommunity } = useGameSection()
+onMounted(rememberRouteCommunity)
+watch(() => [route.path, route.query.community], rememberRouteCommunity)
 
 // 选中频道：聚合首页 → 首页；分区首页 → 该分区；栏目页 → 当前分区
 const activeChannel = computed<string | null>(() => {
@@ -31,7 +33,15 @@ const activeChannel = computed<string | null>(() => {
 const channelNav = ref<HTMLElement | null>(null)
 let navObserver: ResizeObserver | undefined
 function revealActiveChannel() {
-  channelNav.value?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' })
+  const nav = channelNav.value
+  const active = nav?.querySelector<HTMLElement>('[aria-current="page"]')
+  if (!nav || !active) return
+  const bounds = nav.getBoundingClientRect()
+  const item = active.getBoundingClientRect()
+  // 只滚动频道条，避免切换频道时连带滚动整个页面。
+  if (item.left < bounds.left || item.right > bounds.right) {
+    nav.scrollTo({ left: nav.scrollLeft + item.left - bounds.left - (bounds.width - item.width) / 2 })
+  }
 }
 watch(activeChannel, () => nextTick(revealActiveChannel))
 onMounted(() => {

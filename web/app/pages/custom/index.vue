@@ -16,7 +16,7 @@ const { api } = usePublicApi()
 const page = computed(() => Math.max(1, Number(useRoute().query.page) || 1))
 const pageSize = 30
 
-const { data, status } = await useAsyncData(
+const { data, status } = await useLazyAsyncData(
   () => `custom-feeds-${page.value}`,
   () =>
     api<{ items: CustomFeedCard[], total: number }>('/api/custom/feeds', {
