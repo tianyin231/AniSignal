@@ -51,10 +51,10 @@ const axisMeta = [
 </script>
 
 <template>
-  <section class="panel-solid min-w-0 p-4">
+  <section class="panel-glass min-w-0 p-4">
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100"><NuxtLink :to="overviewTo" class="inline-flex min-h-11 items-center hover:text-blue-600 dark:hover:text-blue-300">履约信号</NuxtLink></h2>
-      <NuxtLink :to="overviewTo" class="link inline-flex min-h-11 shrink-0 items-center text-xs">商品总览</NuxtLink>
+      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100"><NuxtLink :to="overviewTo" class="inline-flex min-h-11 items-center hover:text-blue-600 dark:hover:text-blue-300 xl:min-h-0">履约信号</NuxtLink></h2>
+      <NuxtLink :to="overviewTo" class="link inline-flex min-h-11 shrink-0 items-center text-xs xl:min-h-0">商品总览</NuxtLink>
     </div>
     <p v-if="error" role="alert" class="mt-2 text-xs text-amber-700 dark:text-amber-300">履约信号暂时更新失败。<button class="ml-1 underline" type="button" @click="refresh()">重试</button></p>
     <template v-if="product">
@@ -79,7 +79,7 @@ const axisMeta = [
       <div
         v-for="axis in axisMeta"
         :key="axis.key"
-        class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-zinc-700 dark:bg-zinc-800"
+        class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-lg border border-slate-900/5 bg-white/40 px-2.5 py-2 dark:border-white/10 dark:bg-white/5"
       >
         <span class="flex shrink-0 items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-zinc-300">
           <component :is="axis.icon" :size="13" /> {{ product.fulfillment[axis.key].label }}
@@ -87,7 +87,7 @@ const axisMeta = [
         <span class="min-w-0 text-xs font-medium text-slate-700 dark:text-zinc-200 [overflow-wrap:anywhere]">{{ product.fulfillment[axis.key].state_label }}</span>
       </div>
     </div>
-    <div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2.5 dark:border-zinc-800">
+    <div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-900/5 pt-2.5 dark:border-white/10">
       <span v-if="product.fulfillment.candidate_total" class="chip bg-amber-500/10 text-amber-800 dark:text-amber-300">{{ product.fulfillment.candidate_total }} 条自动跟踪</span>
       <span v-if="product.fulfillment.automated_count" class="chip bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{{ product.fulfillment.automated_count }} 条自动采纳</span>
       <span v-if="product.fulfillment.updated_at" class="mono text-[11px] text-slate-500 dark:text-zinc-400">信号更新 {{ fmtTime(product.fulfillment.updated_at) }}</span>
