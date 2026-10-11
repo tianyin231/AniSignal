@@ -21,6 +21,9 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     notification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    instant_notification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 开启时记录当前修订位置，只处理之后发生的变化。
+    instant_notification_cursor: Mapped[int | None] = mapped_column(Integer)
     feed_preferences: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active/banned
     banned_reason: Mapped[str | None] = mapped_column(Text)
@@ -91,7 +94,7 @@ class UserSession(Base):
 
 
 class NotificationDelivery(Base):
-    """用户通知任务与投递结果；dedupe_key 只用于自动早报防重复。"""
+    """用户通知任务与投递结果；dedupe_key 用于自动通知防重复。"""
 
     __tablename__ = "notification_deliveries"
     __table_args__ = (
@@ -104,7 +107,7 @@ class NotificationDelivery(Base):
         ForeignKey("users.id", name="fk_notification_deliveries_user_id_users", ondelete="CASCADE"),
         index=True,
     )
-    kind: Mapped[str] = mapped_column(String(16))  # morning / ai
+    kind: Mapped[str] = mapped_column(String(16))  # morning / ai / instant / custom / admin / broadcast
     source: Mapped[str] = mapped_column(String(16))  # schedule / manual
     period_date: Mapped[date] = mapped_column(Date)
     dedupe_key: Mapped[str | None] = mapped_column(String(128), nullable=True)

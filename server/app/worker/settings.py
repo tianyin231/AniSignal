@@ -39,6 +39,30 @@ async def translate_content(ctx, content_id: int) -> dict:
         return await run(session, content_id)
 
 
+async def repair_ai_item(ctx, task: str, ref_id: int, only_missing: bool = True) -> dict:
+    from app.db import SessionLocal
+    from app.services.ai_maintenance import repair_ai_item as run
+
+    async with SessionLocal() as session:
+        return await run(session, task, ref_id, only_missing)
+
+
+async def send_instant_notifications(ctx) -> dict:
+    import secrets
+    from app.db import SessionLocal
+    from app.services.instant_notifications import run_instant_notifications
+
+    token = secrets.token_hex(16)
+    key = "anisignal:instant-notifications-lock"
+    if not await ctx["redis"].set(key, token, nx=True, ex=1900):
+        return {"status": "busy"}
+    try:
+        async with SessionLocal() as session:
+            return await run_instant_notifications(session)
+    finally:
+        await ctx["redis"].eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0", 1, key, token)
+
+
 async def review_contents(ctx, content_ids: list[int]) -> dict:
     """AI 批量筛选与精选评分（失败不影响内容入库）。"""
     from app.db import SessionLocal
@@ -164,6 +188,8 @@ class WorkerSettings:
         collect_target,
         summarize_event,
         translate_content,
+        func(repair_ai_item, keep_result=0),
+        func(send_instant_notifications, keep_result=0),
         func(review_contents, keep_result=0, max_tries=3),
         review_pending_news,
         send_user_notification,

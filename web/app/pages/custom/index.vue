@@ -13,7 +13,8 @@ interface CustomFeedCard {
 }
 
 const { api } = usePublicApi()
-const page = computed(() => Math.max(1, Number(useRoute().query.page) || 1))
+const route = useRoute()
+const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
 
 const { data, status, error, refresh } = await useLazyAsyncData(
@@ -30,7 +31,7 @@ const items = computed(() => data.value?.items ?? [])
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 const router = useRouter()
 function goPage(p: number) {
-  router.replace({ query: { ...useRoute().query, page: p > 1 ? String(p) : undefined } })
+  router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
 }
 
 const kindLabel = (kind: string) => (kind === 'uid' ? 'UID 监控' : '关键词监控')
@@ -72,9 +73,9 @@ const kindLabel = (kind: string) => (kind === 'uid' ? 'UID 监控' : '关键词�
         还没有公开的定制监控。在账号中心创建并选择"公开到全站"后会出现在这里。
       </div>
 
-      <div v-if="totalPages > 1" class="mt-4 flex items-center justify-between px-1 text-xs text-slate-400">
+      <div v-if="data?.total" class="mt-4 flex items-center justify-between px-1 text-xs text-slate-400">
         <span>共 {{ data?.total }} 个公开监控</span>
-        <div class="flex items-center gap-3">
+        <div v-if="totalPages > 1" class="flex items-center gap-3">
           <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page - 1)">« 上一页</button>
           <span class="mono">{{ page }} / {{ totalPages }}</span>
           <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page + 1)">下一页 »</button>

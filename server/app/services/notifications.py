@@ -10,6 +10,7 @@ from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.services.feed_preferences import preference_conditions
@@ -158,21 +159,24 @@ async def load_candidates(
     collected_after: datetime | None = None,
     preferences: dict | None = None,
     text_limit: int | None = 800,
+    content_ids: list[int] | None = None,
 ) -> list[dict]:
     """None 表示全站早报；关键词通知只取明确命中内容，正文命中交给 AI 复核。"""
-    if keywords == []:
+    if keywords == [] or content_ids == []:
         return []
     latest_sq = (
         select(
             ContentVersion.raw_content_id.label("rid"),
             func.max(ContentVersion.version).label("version"),
         )
+        .where(*([ContentVersion.raw_content_id.in_(content_ids)] if content_ids is not None else []))
         .group_by(ContentVersion.raw_content_id)
         .subquery()
     )
     published = func.coalesce(RawContent.published_at, RawContent.collected_at)
-    rows = await session.execute(
+    query = (
         select(RawContent, ContentVersion, Source, ContentTranslation)
+        .options(defer(RawContent.raw_json), defer(Source.raw_json))
         .join(latest_sq, latest_sq.c.rid == RawContent.id)
         .where(RawContent.hidden.is_(False))
         .join(
@@ -188,63 +192,73 @@ async def load_candidates(
             *preference_conditions(preferences),
             *([RawContent.community == community] if community != "all" else []),
             *([RawContent.collected_at > collected_after] if collected_after else []),
+            *([RawContent.id.in_(content_ids)] if content_ids is not None else []),
             or_(
                 ContentVersion.category.notin_(HIDDEN_CATEGORIES),
                 ContentVersion.category.is_(None),
             ),
         )
         .order_by(published.desc(), RawContent.id.desc())
-        .limit(200)
     )
+    if keywords is None:
+        query = query.limit(200)
 
     candidates: list[dict] = []
-    for raw, version, source, translation in rows:
-        title = _plain(version.title or raw.external_id)
-        text = _plain(version.text or "")
-        translated = _plain(translation.text if translation else "")
-        title_folded = title.casefold()
-        body_folded = f"{text}\n{translated}".casefold()
-        provenance = [str(item).casefold() for item in (raw.matched_keywords or [])]
-        strong: list[str] = []
-        weak: list[str] = []
-        for keyword in keywords or []:
-            folded = keyword.casefold()
-            if folded in title_folded or folded in provenance:
-                strong.append(keyword)
-            elif folded in body_folded:
-                weak.append(keyword)
-        if keywords is not None and not strong and not weak:
-            continue
-        normalized = version.normalized_json or {}
-        media = normalized.get("media") if isinstance(normalized, dict) else []
-        image = next(
-            (
-                safe
-                for value in (media if isinstance(media, list) else [])
-                if isinstance(value, str) and (safe := _bot_image_url(value))
-            ),
-            None,
-        )
-        candidate = {
-            "id": raw.id,
-            "community": raw.community,
-            "title": title,
-            "text": (translated or text)[:text_limit],
-            "url": _safe_url(raw.url),
-            "image": image,
-            "platform": raw.platform,
-            "content_type": raw.content_type,
-            "source": source.name if source else None,
-            "identity": source.identity if source else "unknown",
-            # 采集时间只供窗口筛选和排序，不能冒充原始发布时间。
-            "published_at": raw.published_at,
-            "collected_at": raw.collected_at,
-            "keywords": strong or weak,
-            "strength": "strong" if keywords is None or strong else "weak",
-            "category": version.category,
-        }
-        if not is_empty_dynamic_item(candidate):
-            candidates.append(candidate)
+    # 关键词在清理 HTML、翻译和溯源词后匹配，不能先截断全站最新 200 条。
+    # 游标分批取数，最多保留 200 条命中，避免把整个时间窗口载入内存。
+    rows = await session.stream(query.execution_options(yield_per=200))
+    try:
+        async for raw, version, source, translation in rows:
+            title = _plain(version.title or raw.external_id)
+            text = _plain(version.text or "")
+            translated = _plain(translation.text if translation else "")
+            title_folded = title.casefold()
+            body_folded = f"{text}\n{translated}".casefold()
+            provenance = [str(item).casefold() for item in (raw.matched_keywords or [])]
+            strong: list[str] = []
+            weak: list[str] = []
+            for keyword in keywords or []:
+                folded = keyword.casefold()
+                if folded in title_folded or folded in provenance:
+                    strong.append(keyword)
+                elif folded in body_folded:
+                    weak.append(keyword)
+            if keywords is not None and not strong and not weak:
+                continue
+            normalized = version.normalized_json or {}
+            media = normalized.get("media") if isinstance(normalized, dict) else []
+            image = next(
+                (
+                    safe
+                    for value in (media if isinstance(media, list) else [])
+                    if isinstance(value, str) and (safe := _bot_image_url(value))
+                ),
+                None,
+            )
+            candidate = {
+                "id": raw.id,
+                "community": raw.community,
+                "title": title,
+                "text": (translated or text)[:text_limit],
+                "url": _safe_url(raw.url),
+                "image": image,
+                "platform": raw.platform,
+                "content_type": raw.content_type,
+                "source": source.name if source else None,
+                "identity": source.identity if source else "unknown",
+                # 采集时间只供窗口筛选和排序，不能冒充原始发布时间。
+                "published_at": raw.published_at,
+                "collected_at": raw.collected_at,
+                "keywords": strong or weak,
+                "strength": "strong" if keywords is None or strong else "weak",
+                "category": version.category,
+            }
+            if not is_empty_dynamic_item(candidate):
+                candidates.append(candidate)
+                if len(candidates) == 200:
+                    break
+    finally:
+        await rows.close()
     return candidates
 
 
@@ -769,19 +783,25 @@ async def run_scheduled_morning(session: AsyncSession) -> dict:
 
 
 async def send_admin_email(session: AsyncSession, delivery_id: int) -> dict:
-    """发送管理端撰写的单发/广播邮件（kind=admin/broadcast，正文已在投递行里）。
+    """发送已写好正文的管理邮件或定制摘要（kind=admin/broadcast/custom）。
 
     封禁用户跳过（广播批量入队后用户可能恰好被封）；失败不重试，错误落库可见。
     """
     delivery = await session.get(NotificationDelivery, delivery_id)
     if delivery is None or delivery.status != "pending":
         return {"status": "skipped", "reason": "delivery_not_pending"}
-    user = await session.get(User, delivery.user_id)
+    # 用户可能在投递入队后关闭邮件；刷新本次会话中缓存的用户状态再发送。
+    user = await session.get(User, delivery.user_id, populate_existing=True)
     if user is None or user.status != "active" or not user.is_verified:
         delivery.status = "skipped"
         delivery.error = "用户未验证或已封禁"
         await session.commit()
         return {"status": "skipped", "reason": "user_not_eligible"}
+    if delivery.kind == "custom" and not user.notification_enabled:
+        delivery.status = "skipped"
+        delivery.error = "用户已关闭邮件通知"
+        await session.commit()
+        return {"status": "skipped", "reason": "notifications_disabled"}
 
     subject = (delivery.subject or "AniSignal 通知").strip()
     body = delivery.body or ""

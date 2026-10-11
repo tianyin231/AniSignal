@@ -93,12 +93,12 @@ async function runTest() {
 }
 
 async function summarizeAll() {
-  if (!confirm('为缺少摘要的事件批量生成 AI 摘要？')) return
+  if (!confirm('为缺少摘要或使用降级模板的事件补 AI 摘要？人工编辑和锁定的事件会保留。')) return
   busy.value = true; busyWhat.value = 'summarize'
-  toast.info('AI 摘要任务执行中…')
+  toast.info('正在提交 AI 摘要任务…')
   try {
-    const r = await api<{ attempted: number; ok: number; skipped: number; failed: number }>('/api/admin/ai/summarize-all', { method: 'POST' })
-    toast.ok(`摘要完成：${r.ok} 成功 / ${r.failed} 失败 / ${r.skipped} 跳过`)
+    const r = await api<{ candidates: number; queued: number; remaining: number }>('/api/admin/ai/summarize-all', { method: 'POST' })
+    toast.info(r.queued ? `已新增 ${r.queued} 条摘要任务，后台处理中；当前待补 ${r.remaining} 条（含队列中）` : r.remaining ? '本批摘要任务已在队列中，请稍后查看调用记录' : '无需补充摘要')
     await loadUsage()
   } catch (exc: any) {
     toast.err(exc?.data?.detail ?? '执行失败')
@@ -108,10 +108,10 @@ async function summarizeAll() {
 async function translateMissing() {
   if (!confirm('为外语内容（国际服公告 / YouTube）补机翻？')) return
   busy.value = true; busyWhat.value = 'translate'
-  toast.info('翻译任务执行中…')
+  toast.info('正在提交翻译任务…')
   try {
-    const r = await api<{ ok: number; failed: number; pending: number }>('/api/admin/ai/translate-missing', { method: 'POST' })
-    toast.ok(`翻译完成：${r.ok} 成功 / ${r.failed} 失败（待翻 ${r.pending}）`)
+    const r = await api<{ candidates: number; queued: number; remaining: number }>('/api/admin/ai/translate-missing', { method: 'POST' })
+    toast.info(r.queued ? `已新增 ${r.queued} 条翻译任务，后台处理中；当前待翻 ${r.remaining} 条（含队列中）` : r.remaining ? '本批翻译任务已在队列中，请稍后查看调用记录' : '无需补充翻译')
     await loadUsage()
   } catch (exc: any) {
     toast.err(exc?.data?.detail ?? '执行失败')
@@ -196,7 +196,7 @@ async function translateMissing() {
     <section class="panel p-5">
       <h2 class="text-sm font-semibold">批量任务</h2>
       <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-        平时事件摘要随采集自动触发；这里可手动补齐存量或重跑失败项。翻译针对国际服公告与 YouTube 内容。
+        平时事件摘要随采集自动触发；这里可后台补齐缺失与降级摘要，保留人工编辑和锁定内容。每批最多 200 条摘要或 50 条翻译，可稍后查看调用记录并继续补齐。翻译针对国际服公告与 YouTube 内容。
       </p>
       <div class="mt-3 flex flex-wrap gap-2">
         <button class="btn-primary px-4 py-2" :disabled="busy" @click="summarizeAll">{{ busyWhat === 'summarize' ? '执行中…' : '补事件摘要' }}</button>

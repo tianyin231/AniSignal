@@ -5,7 +5,7 @@
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,9 +15,7 @@ from app.collectors.base import platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.models import CustomFeed, CustomFeedItem, NotificationDelivery, User
 from app.parsers.bilibili import parse_dynamic, parse_video
-from app.services.email_templates import notice_email
-from app.services.mailer import send_email
-from app.services.settings import get_effective_smtp
+from app.services.notifications import beijing_today
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +86,10 @@ async def collect_custom_feed(session: AsyncSession, feed: CustomFeed, redis) ->
 
 async def push_custom_feed_digest(session: AsyncSession, feed: CustomFeed, new_count: int) -> bool:
     """新消息推送：每监控每天至多一封，正文列出最新几条标题。"""
-    user = await session.get(User, feed.user_id)
-    if user is None or user.status != "active" or not user.is_verified:
+    user = await session.get(User, feed.user_id, populate_existing=True)
+    if user is None or user.status != "active" or not user.is_verified or not user.notification_enabled:
         return False
-    today = utcnow().date()
+    today = beijing_today(utcnow())
     dedupe_key = f"custom-push:{feed.id}:{today.isoformat()}"
     existing = await session.scalar(
         select(NotificationDelivery.id).where(NotificationDelivery.dedupe_key == dedupe_key)
@@ -109,9 +107,10 @@ async def push_custom_feed_digest(session: AsyncSession, feed: CustomFeed, new_c
             )
         ).scalars()
     )
-    lines = [f"- {item.title or item.external_id}" for item in latest]
+    lines = [f"- {item.title or item.external_id}" + (f"\n  {item.url}" if item.url else "") for item in latest]
     subject = f"定制监控「{feed.name}」有 {new_count} 条新内容"
-    body = f"你监控的「{feed.name}」新增 {new_count} 条内容：\n" + "\n".join(lines)
+    body = (f"你监控的「{feed.name}」新增 {new_count} 条内容，以下为最近 {len(latest)} 条：\n"
+            + "\n".join(lines) + "\n\n每个监控每天最多发送一封摘要（北京时间）。可在账号中心关闭此监控推送或关闭邮件通知。")
     delivery = NotificationDelivery(
         user_id=feed.user_id,
         kind="custom",
@@ -121,6 +120,8 @@ async def push_custom_feed_digest(session: AsyncSession, feed: CustomFeed, new_c
         status="pending",
         subject=subject[:255],
         body=body,
+        # custom 类型下记录的是独立监控条目 ID，供投递记录显示真实条数。
+        content_ids=[item.id for item in latest],
     )
     session.add(delivery)
     await session.commit()

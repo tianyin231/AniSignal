@@ -31,12 +31,31 @@ interface Overview {
   feed_total: number
 }
 const overview = ref<Overview | null>(null)
+const sectionLabels = { overview: '账号概览', keywords: '关键词', feed: '关注流', notifications: '通知状态', custom: '定制监控' }
+type AccountSection = keyof typeof sectionLabels
+const sectionLoading = reactive<Record<AccountSection, boolean>>({ overview: true, keywords: true, feed: true, notifications: true, custom: true })
+const sectionError = reactive<Record<AccountSection, string>>({ overview: '', keywords: '', feed: '', notifications: '', custom: '' })
+
+async function loadSection(section: AccountSection, load: () => Promise<void>) {
+  sectionLoading[section] = true
+  sectionError[section] = ''
+  try {
+    await load()
+    return true
+  } catch {
+    sectionError[section] = `${sectionLabels[section]}暂时加载失败，请重试。`
+    return false
+  } finally {
+    sectionLoading[section] = false
+  }
+}
+const fetchOverview = () => loadSection('overview', async () => { overview.value = await $fetch<Overview>('/api/account/overview') })
 
 interface NotificationRecord {
   id: number
-  kind: 'morning' | 'ai'
-  source: 'schedule' | 'manual'
-  status: 'pending' | 'sent' | 'skipped' | 'failed'
+  kind: string
+  source: string
+  status: 'pending' | 'sending' | 'sent' | 'skipped' | 'failed'
   subject: string | null
   matched_keywords: string[]
   content_count: number
@@ -46,6 +65,7 @@ interface NotificationRecord {
 }
 interface NotificationStatus {
   enabled: boolean
+  instant_enabled: boolean
   schedule: string
   records: NotificationRecord[]
 }
@@ -54,16 +74,19 @@ const notificationBusy = ref('')
 const notificationMessage = ref('')
 const notificationError = ref('')
 let notificationPoll: ReturnType<typeof setTimeout> | undefined
+let accountActive = true
 
-const notificationReady = computed(() => Boolean(notificationInfo.value?.enabled))
+const enabledKeywordCount = computed(() => keywords.value.filter(keyword => keyword.enabled).length)
+const notificationReady = computed(() => Boolean(notificationInfo.value?.enabled && !sectionLoading.notifications && !sectionError.notifications))
 const aiNotificationReady = computed(() => Boolean(
   notificationReady.value
-  && (overview.value?.keywords_enabled ?? 0) > 0,
+  && !sectionLoading.keywords && !sectionError.keywords && enabledKeywordCount.value > 0,
 ))
 const notificationBlockReason = computed(() => {
+  if (sectionLoading.notifications || sectionError.notifications) return ''
   // 登录用户必然已验证（login/register 流程保证），此处只提示通知链路自身的前置条件
   if (!notificationInfo.value?.enabled) return '请先开启邮件通知，之后才能手动发送。'
-  if (!(overview.value?.keywords_enabled ?? 0)) return '每日早报已开启。AI 精炼通知需先添加关键词。'
+  if (!sectionLoading.keywords && !sectionError.keywords && !enabledKeywordCount.value) return '每日早报已开启。AI 精炼和重要变化通知需先添加关键词。'
   return ''
 })
 
@@ -73,6 +96,7 @@ const keywords = ref<Keyword[]>([])
 const newKeyword = ref('')
 const keywordError = ref('')
 const busy = ref(false)
+const fetchKeywords = () => loadSection('keywords', async () => { keywords.value = await $fetch<Keyword[]>('/api/account/keywords') })
 
 // ---------- 关注流（每页 20 条，可按关键词筛选）----------
 const FEED_PAGE_SIZE = 20
@@ -93,18 +117,33 @@ interface CustomFeedRow {
 }
 const customFeeds = ref<CustomFeedRow[]>([])
 const customError = ref('')
+const customMessage = ref('')
 const customForm = reactive({ name: '', kind: 'keyword', target_value: '', min_views: 0, push_enabled: false, is_public: false })
 const customBusy = ref(false)
+const customEditing = ref<number | null>(null)
+const customDraft = reactive({ name: '', target_value: '', min_views: 0 })
 
 async function refreshCustomFeeds() {
-  try {
+  await loadSection('custom', async () => {
     customFeeds.value = await $fetch<CustomFeedRow[]>('/api/account/custom-feeds')
-  } catch { /* 未登录等场景静默 */ }
+  })
+}
+
+function editCustomFeed(feed: CustomFeedRow) {
+  customEditing.value = feed.id
+  Object.assign(customDraft, { name: feed.name, target_value: feed.target_value, min_views: feed.min_views })
+  customError.value = customMessage.value = ''
+}
+
+async function saveCustomFeed(feed: CustomFeedRow) {
+  const saved = await patchCustomFeed(feed, { ...customDraft, name: customDraft.name.trim(), target_value: customDraft.target_value.trim() }, '监控已更新。')
+  if (saved) customEditing.value = null
 }
 
 async function createCustomFeed() {
   if (customBusy.value) return
   customBusy.value = true
+  customError.value = customMessage.value = ''
   try {
     await $fetch('/api/account/custom-feeds', {
       method: 'POST',
@@ -114,6 +153,7 @@ async function createCustomFeed() {
     customForm.name = ''
     customForm.target_value = ''
     customForm.min_views = 0
+    customMessage.value = '监控已创建，后台会开始采集。'
     await refreshCustomFeeds()
   } catch (exc: any) {
     customError.value = exc?.data?.detail ?? '创建失败'
@@ -123,14 +163,17 @@ async function createCustomFeed() {
 }
 
 async function patchCustomFeed(feed: CustomFeedRow, body: Record<string, unknown>, okText: string) {
-  if (customBusy.value) return
+  if (customBusy.value) return false
   customBusy.value = true
+  customError.value = customMessage.value = ''
   try {
     await $fetch(`/api/account/custom-feeds/${feed.id}`, { method: 'PATCH', body })
     Object.assign(feed, body)
-    customError.value = ''
+    customMessage.value = okText
+    return true
   } catch (exc: any) {
     customError.value = exc?.data?.detail ?? '操作失败'
+    return false
   } finally {
     customBusy.value = false
   }
@@ -139,10 +182,12 @@ async function patchCustomFeed(feed: CustomFeedRow, body: Record<string, unknown
 async function removeCustomFeed(feed: CustomFeedRow) {
   if (customBusy.value || !confirm(`删除监控「${feed.name}」及其全部抓取记录？`)) return
   customBusy.value = true
+  customError.value = customMessage.value = ''
   try {
     await $fetch(`/api/account/custom-feeds/${feed.id}`, { method: 'DELETE' })
     customFeeds.value = customFeeds.value.filter(f => f.id !== feed.id)
-    customError.value = ''
+    if (customEditing.value === feed.id) customEditing.value = null
+    customMessage.value = '监控已删除。'
   } catch (exc: any) {
     customError.value = exc?.data?.detail ?? '删除失败'
   } finally {
@@ -162,8 +207,24 @@ const feedQuery = computed(() => ({
   ...(selectedKeywordId.value ? { keyword_id: selectedKeywordId.value } : {}),
 }))
 
+let feedController: AbortController | undefined
 async function fetchFeed() {
-    feed.value = await $fetch<PublicContentList>('/api/account/feed', { query: feedQuery.value })
+  feedController?.abort()
+  const controller = new AbortController()
+  feedController = controller
+  sectionLoading.feed = true
+  sectionError.feed = ''
+  try {
+    const result = await $fetch<PublicContentList>('/api/account/feed', { query: feedQuery.value, signal: controller.signal })
+    if (!controller.signal.aborted) feed.value = result
+  } catch {
+    if (!controller.signal.aborted) sectionError.feed = '关注流暂时加载失败，请重试。'
+  } finally {
+    if (feedController === controller) {
+      sectionLoading.feed = false
+      feedController = undefined
+    }
+  }
 }
 
 function refreshPersonalFeed() {
@@ -196,50 +257,56 @@ function feedGoPage(p: number) {
 }
 
 async function refresh() {
-  try {
-    const [ov, kw, fd, nt] = await Promise.all([
-      $fetch<Overview>('/api/account/overview'),
-      $fetch<Keyword[]>('/api/account/keywords'),
-      $fetch<PublicContentList>('/api/account/feed', { query: feedQuery.value }),
-      $fetch<NotificationStatus>('/api/account/notifications'),
-    ])
-    overview.value = ov
-    keywords.value = kw
-    feed.value = fd
-    notificationInfo.value = nt
-    scheduleNotificationPoll()
-  } catch {
-    /* 未登录由守卫处理 */
-  }
+  await Promise.all([fetchOverview(), fetchKeywords(), fetchFeed(), fetchNotifications()])
 }
 onMounted(() => {
   refresh()
   refreshCustomFeeds()
 })
 onBeforeUnmount(() => {
+  accountActive = false
+  feedController?.abort()
   if (notificationPoll) clearTimeout(notificationPoll)
 })
 
 function scheduleNotificationPoll() {
   if (notificationPoll) clearTimeout(notificationPoll)
-  if (!notificationInfo.value?.records.some(record => record.status === 'pending')) return
+  if (!accountActive || !notificationInfo.value?.records.some(record => ['pending', 'sending'].includes(record.status))) return
   notificationPoll = setTimeout(fetchNotifications, 5000)
 }
 
 async function fetchNotifications() {
-  notificationInfo.value = await $fetch<NotificationStatus>('/api/account/notifications')
-  scheduleNotificationPoll()
+  const success = await loadSection('notifications', async () => {
+    notificationInfo.value = await $fetch<NotificationStatus>('/api/account/notifications')
+  })
+  if (success) scheduleNotificationPoll()
 }
 
 async function toggleNotifications() {
-  if (notificationBusy.value) return
+  if (notificationBusy.value || sectionLoading.notifications || sectionError.notifications) return
   notificationBusy.value = 'toggle'
   notificationMessage.value = notificationError.value = ''
   try {
     const enabled = !notificationInfo.value?.enabled
     await $fetch('/api/account/notifications', { method: 'PUT', body: { enabled } })
-    notificationMessage.value = enabled ? '每日早报已启用，会按个人偏好筛选。' : '邮件通知已关闭。'
-    await refresh()
+    notificationMessage.value = enabled ? '邮件通知已启用，每日早报会按个人偏好筛选。' : '邮件通知已关闭，早报、重要变化和定制监控邮件均已暂停。'
+    await fetchNotifications()
+  } catch (exc: any) {
+    notificationError.value = exc?.data?.detail ?? '通知设置保存失败'
+  } finally {
+    notificationBusy.value = ''
+  }
+}
+
+async function toggleInstantNotifications() {
+  if (notificationBusy.value || !notificationReady.value) return
+  notificationBusy.value = 'instant'
+  notificationMessage.value = notificationError.value = ''
+  try {
+    const instant_enabled = !notificationInfo.value?.instant_enabled
+    await $fetch('/api/account/notifications', { method: 'PUT', body: { instant_enabled } })
+    notificationMessage.value = instant_enabled ? '重要变化通知已启用，仅接收之后的新变化。' : '重要变化通知已关闭。'
+    await fetchNotifications()
   } catch (exc: any) {
     notificationError.value = exc?.data?.detail ?? '通知设置保存失败'
   } finally {
@@ -272,9 +339,13 @@ function focusKeywordInput() {
 
 const notificationStatusLabel: Record<NotificationRecord['status'], string> = {
   pending: '生成中',
+  sending: '发送中',
   sent: '已发送',
-  skipped: '无匹配',
+  skipped: '已跳过',
   failed: '失败',
+}
+const notificationKindLabel: Record<string, string> = {
+  morning: '每日早报', ai: 'AI 精炼通知', instant: '重要变化', custom: '定制监控', admin: '管理员通知', broadcast: '站点公告',
 }
 
 async function addKeyword() {
@@ -295,9 +366,12 @@ async function addKeyword() {
 
 async function toggleKeyword(k: Keyword) {
   busy.value = true
+  keywordError.value = ''
   try {
     await $fetch(`/api/account/keywords/${k.id}`, { method: 'PUT', body: { enabled: !k.enabled } })
     await refresh()
+  } catch (exc: any) {
+    keywordError.value = exc?.data?.detail ?? '关键词更新失败，请重试。'
   } finally {
     busy.value = false
   }
@@ -305,9 +379,12 @@ async function toggleKeyword(k: Keyword) {
 
 async function removeKeyword(k: Keyword) {
   busy.value = true
+  keywordError.value = ''
   try {
     await $fetch(`/api/account/keywords/${k.id}`, { method: 'DELETE' })
     await refresh()
+  } catch (exc: any) {
+    keywordError.value = exc?.data?.detail ?? '关键词删除失败，请重试。'
   } finally {
     busy.value = false
   }
@@ -387,6 +464,9 @@ async function changePassword() {
         </div>
       </div>
 
+      <p v-if="sectionLoading.overview" class="mt-3 text-xs text-slate-400" role="status">正在加载账号概览…</p>
+      <p v-else-if="sectionError.overview" class="mt-3 text-xs text-amber-700 dark:text-amber-300" role="alert">{{ sectionError.overview }}<button class="ml-2 underline" @click="fetchOverview">重试</button></p>
+
       <!-- 资料编辑 -->
       <div v-if="editingProfile" class="mt-5 rounded-xl border border-blue-500/30 bg-blue-500/5 p-4">
         <h3 class="text-sm font-semibold">编辑资料</h3>
@@ -421,7 +501,7 @@ async function changePassword() {
         <section id="keyword-monitor" class="panel scroll-mt-20 p-5">
           <div class="flex items-center justify-between gap-2">
             <h2 class="text-sm font-semibold">关键词监控</h2>
-            <span class="text-xs text-slate-400">{{ overview?.keywords_enabled ?? 0 }} 个启用中<span v-if="overview?.keywords_enabled" class="ml-1 hidden sm:inline">· 点击关键词可筛选下方关注流</span></span>
+            <span v-if="!sectionLoading.keywords && !sectionError.keywords" class="text-xs text-slate-400">{{ enabledKeywordCount }} 个启用中<span v-if="enabledKeywordCount" class="ml-1 hidden sm:inline">· 点击关键词可筛选下方关注流</span></span>
           </div>
           <form class="mt-3 flex gap-2" @submit.prevent="addKeyword">
             <div class="relative flex-1">
@@ -433,7 +513,9 @@ async function changePassword() {
           </form>
           <p v-if="keywordError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ keywordError }}</p>
 
-          <div class="mt-3 flex flex-wrap gap-2">
+          <p v-if="sectionLoading.keywords" role="status" class="mt-3 text-xs text-slate-400">正在加载关键词…</p>
+          <p v-else-if="sectionError.keywords" role="alert" class="mt-3 text-xs text-amber-700 dark:text-amber-300">{{ sectionError.keywords }}<button class="ml-2 underline" @click="fetchKeywords">重试</button></p>
+          <div v-else class="mt-3 flex flex-wrap gap-2">
             <div v-if="!keywords.length" class="w-full py-6 text-center text-sm text-slate-400 dark:text-zinc-500">
               还没有关键词，添加一个开始构建你的关注流。
             </div>
@@ -488,11 +570,16 @@ async function changePassword() {
             </select>
             <input
               v-model="customForm.target_value"
+              required
+              maxlength="128"
+              :pattern="customForm.kind === 'uid' ? '[0-9]+' : undefined"
               :placeholder="customForm.kind === 'uid' ? 'B 站 UID（纯数字）' : '监控关键词'"
               class="input px-3 py-2 text-sm"
             />
             <input
               v-model="customForm.name"
+              required
+              maxlength="64"
               placeholder="监控名称（如：某UP主动态 / 某话题）"
               class="input px-3 py-2 text-sm sm:col-span-2"
             />
@@ -501,6 +588,8 @@ async function changePassword() {
               v-model.number="customForm.min_views"
               type="number"
               min="0"
+              max="10000000"
+              step="1"
               placeholder="播放量门槛（可选）"
               class="input px-3 py-2 text-sm"
             />
@@ -513,10 +602,14 @@ async function changePassword() {
               </label>
               <button type="submit" class="btn-primary ml-auto px-4 py-2 text-sm" :disabled="customBusy">创建监控</button>
             </div>
-            <p v-if="customError" class="text-xs text-red-600 sm:col-span-2 dark:text-red-400">{{ customError }}</p>
           </form>
+          <p class="mt-2 text-xs leading-relaxed text-slate-400 dark:text-zinc-500">推送需开启邮件通知总开关；每个监控每天最多一封新内容摘要。</p>
+          <p v-if="customError" role="alert" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ customError }}</p>
+          <p v-if="customMessage" role="status" class="mt-2 text-xs text-emerald-600 dark:text-emerald-400">{{ customMessage }}</p>
 
-          <ul class="mt-3 space-y-1.5">
+          <p v-if="sectionLoading.custom" role="status" class="mt-3 text-xs text-slate-400">正在加载监控…</p>
+          <p v-else-if="sectionError.custom" role="alert" class="mt-3 text-xs text-amber-700 dark:text-amber-300">{{ sectionError.custom }}<button class="ml-2 underline" @click="refreshCustomFeeds">重试</button></p>
+          <ul v-else class="mt-3 space-y-1.5">
             <li
               v-for="f in customFeeds"
               :key="f.id"
@@ -529,14 +622,15 @@ async function changePassword() {
               <span class="font-medium">{{ f.name }}</span>
               <span class="mono truncate text-xs text-slate-400">{{ f.target_value }}</span>
               <span class="mono text-xs text-slate-400">{{ f.item_count }} 条</span>
-              <span
-                class="chip whitespace-nowrap"
-                :class="f.is_public
-                  ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
-              >{{ f.is_public ? '公开' : '私有' }}</span>
+              <span class="text-xs text-slate-400">{{ f.status !== 'active' ? '管理员已停用' : f.enabled ? '采集中' : '已暂停' }}</span>
+              <button type="button" :disabled="customBusy" class="link text-xs disabled:opacity-40" @click="editCustomFeed(f)">编辑</button>
+              <button type="button" :disabled="customBusy" :aria-label="`${f.is_public ? '设为私有' : '公开到全站'}：${f.name}`" class="link text-xs disabled:opacity-40" @click="patchCustomFeed(f, { is_public: !f.is_public }, f.is_public ? '监控已设为私有。' : '监控已公开到全站。')">{{ f.is_public ? '设为私有' : '公开到全站' }}</button>
+              <button type="button" :disabled="customBusy || f.status !== 'active'" :aria-label="`${f.enabled ? '暂停' : '恢复'}监控：${f.name}`" class="link text-xs disabled:opacity-40" @click="patchCustomFeed(f, { enabled: !f.enabled }, f.enabled ? '监控已暂停。' : '监控已恢复。')">{{ f.enabled ? '暂停' : '恢复' }}</button>
               <button
-                class="text-xs text-slate-500 underline-offset-2 hover:underline dark:text-zinc-400"
+                type="button"
+                :disabled="customBusy"
+                :aria-label="`${f.push_enabled ? '关闭' : '开启'}监控邮件：${f.name}`"
+                class="text-xs text-slate-500 underline-offset-2 hover:underline disabled:opacity-40 dark:text-zinc-400"
                 @click="patchCustomFeed(f, { push_enabled: !f.push_enabled }, `推送已${!f.push_enabled ? '开启' : '关闭'}`)"
               >推送{{ f.push_enabled ? '开' : '关' }}</button>
               <NuxtLink :to="`/custom/${f.id}`" class="link text-xs">查看</NuxtLink>
@@ -545,6 +639,16 @@ async function changePassword() {
                 :disabled="customBusy"
                 @click="removeCustomFeed(f)"
               >删除</button>
+              <form v-if="customEditing === f.id" class="grid w-full gap-3 border-t border-slate-900/5 pt-3 dark:border-white/10 sm:grid-cols-2" @submit.prevent="saveCustomFeed(f)">
+                <label class="text-xs text-slate-500 dark:text-zinc-400">监控名称<input v-model="customDraft.name" required maxlength="64" class="input mt-1 w-full px-3 py-2 text-sm"></label>
+                <label class="text-xs text-slate-500 dark:text-zinc-400">{{ f.kind === 'uid' ? 'B 站 UID' : '监控关键词' }}<input v-model="customDraft.target_value" required maxlength="128" :pattern="f.kind === 'uid' ? '[0-9]+' : undefined" class="input mt-1 w-full px-3 py-2 text-sm"></label>
+                <label v-if="f.kind === 'keyword'" class="text-xs text-slate-500 dark:text-zinc-400">最低播放量<input v-model.number="customDraft.min_views" type="number" required min="0" max="10000000" step="1" class="input mt-1 w-full px-3 py-2 text-sm"></label>
+                <p class="text-xs leading-relaxed text-slate-400 sm:col-span-2">修改目标后保留已采集内容，之后按新目标采集。</p>
+                <div class="flex gap-3 sm:col-span-2">
+                  <button type="submit" :disabled="customBusy" class="btn-primary px-3 py-2 text-xs">{{ customBusy ? '保存中…' : '保存监控' }}</button>
+                  <button type="button" :disabled="customBusy" class="px-3 py-2 text-xs text-slate-500" @click="customEditing = null">取消</button>
+                </div>
+              </form>
             </li>
             <li v-if="!customFeeds.length" class="text-xs text-slate-400 dark:text-zinc-500">
               还没有定制监控。创建一个 UID 或关键词监控，后台会每 30 分钟抓取一次。
@@ -567,12 +671,14 @@ async function changePassword() {
                 {{ selectedKeyword.keyword }} <X :size="12" />
               </button>
             </div>
-            <div class="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-500">
+            <div v-if="!sectionLoading.feed && !sectionError.feed" class="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-500">
               <span v-if="(feed?.new_today ?? 0) > 0" class="rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-600 dark:text-emerald-400">近24h +{{ feed?.new_today }}</span>
               <span>{{ feed?.total ?? 0 }} 条命中</span>
             </div>
           </div>
-          <div v-if="feed?.items?.length" class="border-t border-slate-900/5 dark:border-white/5">
+          <p v-if="sectionLoading.feed" role="status" class="border-t border-slate-900/5 px-5 py-8 text-center text-sm text-slate-400 dark:border-white/5">正在加载关注流…</p>
+          <p v-else-if="sectionError.feed" role="alert" class="border-t border-slate-900/5 px-5 py-8 text-center text-sm text-amber-700 dark:border-white/5 dark:text-amber-300">{{ sectionError.feed }}<button class="ml-2 underline" @click="fetchFeed">重试</button></p>
+          <div v-else-if="feed?.items?.length" class="border-t border-slate-900/5 dark:border-white/5">
             <!-- 关注流跨分区：每条标注所属游戏分区 -->
             <RawFeedRow v-for="item in feed.items" :key="item.id" :item="toRawItem(item)" show-community />
           </div>
@@ -581,7 +687,7 @@ async function changePassword() {
             <template v-else-if="keywords.length">暂无命中关键词的内容，系统持续采集中。</template>
             <template v-else>添加关键词后，这里会展示命中的最新内容。</template>
           </p>
-          <div v-if="(feed?.total ?? 0) > FEED_PAGE_SIZE" class="flex items-center justify-between border-t border-slate-900/5 px-5 py-2.5 text-xs text-slate-400 dark:border-white/5 dark:text-zinc-500">
+          <div v-if="!sectionLoading.feed && !sectionError.feed && (feed?.total ?? 0) > FEED_PAGE_SIZE" class="flex items-center justify-between border-t border-slate-900/5 px-5 py-2.5 text-xs text-slate-400 dark:border-white/5 dark:text-zinc-500">
             <span>共 {{ feed?.total }} 条 · 每页 {{ FEED_PAGE_SIZE }} 条</span>
             <div class="flex items-center gap-3">
               <button :disabled="feedPage <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="feedGoPage(feedPage - 1)">« 上一页</button>
@@ -607,11 +713,27 @@ async function changePassword() {
               :aria-label="notificationInfo?.enabled ? '关闭邮件通知' : '启用邮件通知'"
               class="relative h-7 w-12 shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               :class="notificationInfo?.enabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-zinc-700'"
-              :disabled="!!notificationBusy"
+              :disabled="!!notificationBusy || sectionLoading.notifications || !!sectionError.notifications"
               @click="toggleNotifications"
             >
               <span class="absolute left-1 top-1 size-5 rounded-full bg-white shadow-sm transition-transform duration-200" :class="notificationInfo?.enabled ? 'translate-x-5' : 'translate-x-0'" />
             </button>
+          </div>
+
+          <p v-if="sectionLoading.notifications" role="status" class="mt-3 text-xs text-slate-400">正在加载通知状态…</p>
+          <p v-else-if="sectionError.notifications" role="alert" class="mt-3 text-xs text-amber-700 dark:text-amber-300">{{ sectionError.notifications }}<button class="ml-2 underline" @click="fetchNotifications">重试</button></p>
+          <p class="mt-2 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">总开关控制每日早报、重要变化和定制监控邮件。关闭后保留各项偏好。</p>
+
+          <div class="mt-4 border-t border-slate-900/5 pt-3 dark:border-white/10">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="text-xs font-medium">重要变化即时邮件</h3>
+              <button type="button" role="switch" :aria-checked="notificationInfo?.instant_enabled ?? false" :aria-label="notificationInfo?.instant_enabled ? '关闭重要变化即时邮件' : '启用重要变化即时邮件'" :disabled="!!notificationBusy || !notificationReady || (!notificationInfo?.instant_enabled && !aiNotificationReady)" class="relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50" :class="notificationInfo?.instant_enabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-zinc-700'" @click="toggleInstantNotifications">
+                <span class="absolute left-1 top-1 size-5 rounded-full bg-white shadow-sm transition-transform" :class="notificationInfo?.instant_enabled ? 'translate-x-5' : 'translate-x-0'" />
+              </button>
+            </div>
+            <p class="mt-2 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">通知关注词命中的重要事件及官方版本、发售、发货等新变化，不补发历史。通常约 1 分钟内进入队列，送达时间取决于队列处理。</p>
+            <p v-if="notificationInfo?.instant_enabled && !notificationInfo.enabled" class="mt-2 text-xs text-amber-700 dark:text-amber-300">即时通知偏好已保留，开启邮件总开关后恢复。</p>
+            <button v-else-if="notificationReady && !sectionLoading.keywords && !sectionError.keywords && !enabledKeywordCount" type="button" class="link mt-2 text-xs" @click="focusKeywordInput">先添加并启用关键词</button>
           </div>
 
           <div v-if="notificationBlockReason" class="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs leading-relaxed text-amber-800 dark:text-amber-300">
@@ -619,7 +741,7 @@ async function changePassword() {
             <div class="min-w-0 flex-1">
               <p>{{ notificationBlockReason }}</p>
               <button
-                v-if="notificationInfo?.enabled && !(overview?.keywords_enabled ?? 0)"
+                v-if="notificationInfo?.enabled && !sectionLoading.keywords && !sectionError.keywords && !enabledKeywordCount"
                 type="button"
                 class="mt-1 font-medium text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200"
                 @click="focusKeywordInput"
@@ -664,12 +786,13 @@ async function changePassword() {
             <div class="mt-2 space-y-2">
               <div v-for="record in notificationInfo.records.slice(0, 3)" :key="record.id" class="rounded-lg bg-slate-500/5 px-3 py-2 dark:bg-white/5">
                 <div class="flex items-center justify-between gap-2 text-xs">
-                  <span class="font-medium">{{ record.kind === 'ai' ? 'AI 精炼通知' : '每日早报' }}</span>
+                  <span class="font-medium">{{ notificationKindLabel[record.kind] ?? '其他通知' }}</span>
                   <span
                     :class="record.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : record.status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-slate-400'"
                   >{{ notificationStatusLabel[record.status] }}</span>
                 </div>
-                <p class="mono mt-1 text-[11px] text-slate-400 dark:text-zinc-500">{{ fmtTime(record.sent_at ?? record.created_at) }} · {{ record.content_count }} 条内容</p>
+                <p v-if="record.subject" class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">{{ record.subject }}</p>
+                <p class="mono mt-1 text-[11px] text-slate-400 dark:text-zinc-500">{{ fmtTime(record.sent_at ?? record.created_at) }}<template v-if="record.content_count > 0"> · {{ record.content_count }} 条内容</template></p>
                 <p v-if="record.error" class="mt-1 text-[11px] leading-relaxed text-slate-500 dark:text-zinc-400">{{ record.error }}</p>
               </div>
             </div>

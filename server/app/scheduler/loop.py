@@ -51,6 +51,7 @@ async def local_loop(queue) -> None:
                 due_now, day = _morning_due(now)
                 from app.services.bot import run_bot_notifications
                 await run_bot_notifications(session, now)
+                await queue.enqueue_instant()
                 if due_now and _local_morning_date != day:
                     await queue.enqueue_morning()
                     _local_morning_date = day
@@ -140,6 +141,7 @@ async def main() -> None:
                         )
                     await _enqueue_morning_if_due(redis, now)
                     await redis.enqueue_job("send_bot_notifications", _job_id=f"bot-sweep:{int(now.timestamp() // 60)}")
+                    await redis.enqueue_job("send_instant_notifications", _job_id="instant-notifications")
                     # 定制监控轮询：5 分钟桶去重，worker 内部再按 next_run_at 限速
                     bucket = int(now.timestamp() // 300)
                     await redis.enqueue_job(

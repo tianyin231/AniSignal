@@ -27,7 +27,7 @@ from astrbot.core.message.message_event_result import MessageChain
 from .persona import CATGIRL_REPLY_RULES
 
 
-VERSION = "1.4.13"
+VERSION = "1.4.14"
 
 
 def _cat_image_preview(uri: str, cache: dict) -> str:
@@ -251,9 +251,10 @@ class AniSignalPlugin(Star):
             intro = ""
         return (intro + "\n\n" if intro else "") + row["body"]
 
-    async def send_brief_message(self, umo, text, brief=None, images=None, body=""):
+    async def send_brief_message(self, umo, text, brief=None, images=None, body="", max_images=1):
         """早报一张小卡，其他消息为短文；制图失败才降级文字，发送异常绝不二次补发。"""
         with tempfile.TemporaryDirectory(prefix="anisignal-brief-") as directory:
+            max_images = max(1, min(9, int(max_images)))
             card = None
             if brief and brief.get("mode") == "daily" and brief.get("items"):
                 try:
@@ -271,9 +272,11 @@ class AniSignalPlugin(Star):
                 if lead:
                     chain = chain.message(lead)
                 chain = chain.file_image(card)
+                for image in (images or [])[:max_images - 1]:
+                    chain = chain.url_image(image)
             else:
                 chain = MessageChain().message(text)
-                for image in (images or [])[:1]:
+                for image in (images or [])[:max_images]:
                     chain = chain.url_image(image)
             sent = await asyncio.wait_for(self.context.send_message(umo, chain), timeout=25)
             return sent, sent_text
@@ -297,7 +300,7 @@ class AniSignalPlugin(Star):
             adapter = self.context.get_platform_inst(platform)
             if kind == "GroupMessage" and adapter and hasattr(adapter, "remember_session_scene"):
                 adapter.remember_session_scene(session_id, "group")
-            sent, sent_text = await self.send_brief_message(row["umo"], text, row.get("brief"), row.get("images"), row["body"])
+            sent, sent_text = await self.send_brief_message(row["umo"], text, row.get("brief"), row.get("images"), row["body"], row.get("max_images", 1))
             status = "accepted" if sent else "failed"
             if not sent:
                 note = "未找到匹配的机器人连接"

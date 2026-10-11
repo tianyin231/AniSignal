@@ -4,7 +4,7 @@ import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import get_queue
@@ -20,8 +20,6 @@ from app.services.ai import (
     chat,
     get_ai_config,
     record_usage,
-    summarize_event,
-    translate_content,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,25 +165,24 @@ async def recent_calls(
 
 @router.post("/summarize-all")
 async def summarize_all(
-    only_missing: bool = True, session: AsyncSession = Depends(get_session)
+    only_missing: bool = True, session: AsyncSession = Depends(get_session), queue=Depends(get_queue)
 ):
     from app.models import Event
 
-    query = select(Event.id).where(Event.is_active.is_(True))
+    query = select(Event.id).where(
+        Event.is_active.is_(True), Event.manual_locked.is_(False),
+        or_(Event.summary_status.is_(None), Event.summary_status != "manual"),
+    )
     if only_missing:
-        query = query.where(Event.summary.is_(None))
-    ids = [row for row in await session.scalars(query)]
-    done = skipped = failed = 0
-    for event_id in ids[:200]:
-        result = await summarize_event(session, event_id)
-        s = result.get("status")
-        if s == "ok":
-            done += 1
-        elif s == "skipped":
-            skipped += 1
-        else:
-            failed += 1
-    return {"attempted": len(ids), "ok": done, "skipped": skipped, "failed": failed}
+        query = query.where(or_(Event.summary.is_(None), Event.summary_status == "fallback"))
+    remaining = await session.scalar(select(func.count()).select_from(query.subquery()))
+    ids = list(await session.scalars(query.order_by(Event.summary_updated_at, Event.id).limit(200)))
+    try:
+        queued = await queue.enqueue_ai_batch("summarize_event", ids, only_missing=only_missing) if ids else 0
+    except Exception as exc:
+        logger.exception("failed to enqueue event summaries")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "摘要队列暂不可用，请稍后重试") from exc
+    return {"candidates": len(ids), "queued": queued, "remaining": remaining}
 
 
 @router.post("/review-recent")
@@ -241,30 +238,20 @@ async def review_community(
 
 
 @router.post("/translate-missing")
-async def translate_missing(session: AsyncSession = Depends(get_session)):
+async def translate_missing(session: AsyncSession = Depends(get_session), queue=Depends(get_queue)):
     """为外语内容（国际服公告 / YouTube）补机翻。"""
     from app.models import ContentTranslation as CT
     from app.models import RawContent
 
-    ids = [
-        row
-        for row in await session.scalars(
-            select(RawContent.id)
-            .where(RawContent.platform.in_(["kuro_global", "youtube"]))
-            .order_by(RawContent.collected_at.desc())
-            .limit(100)
-        )
-    ]
-    existing = set(await session.scalars(select(CT.raw_content_id)))
-    targets = [i for i in ids if i not in existing]
-    done = skipped = failed = 0
-    for content_id in targets[:50]:
-        result = await translate_content(session, content_id)
-        s = result.get("status")
-        if s == "ok":
-            done += 1
-        elif s == "skipped":
-            skipped += 1
-        else:
-            failed += 1
-    return {"candidates": len(ids), "pending": len(targets), "ok": done, "skipped": skipped, "failed": failed}
+    translated = select(CT.raw_content_id).where(CT.raw_content_id == RawContent.id).exists()
+    query = select(RawContent.id).where(
+        RawContent.platform.in_(["kuro_global", "youtube"]), ~translated,
+    )
+    remaining = await session.scalar(select(func.count()).select_from(query.subquery()))
+    ids = list(await session.scalars(query.order_by(RawContent.collected_at.desc(), RawContent.id.desc()).limit(50)))
+    try:
+        queued = await queue.enqueue_ai_batch("translate_content", ids) if ids else 0
+    except Exception as exc:
+        logger.exception("failed to enqueue translations")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "翻译队列暂不可用，请稍后重试") from exc
+    return {"candidates": len(ids), "queued": queued, "remaining": remaining}

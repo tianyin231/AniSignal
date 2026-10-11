@@ -31,6 +31,7 @@ def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None =
         "push_enabled": feed.push_enabled,
         "is_public": feed.is_public,
         "enabled": feed.enabled,
+        "status": feed.status,
         "owner_name": owner_name,
         "item_count": item_count,
         "created_at": feed.created_at,
@@ -84,6 +85,8 @@ async def public_feeds(
 async def feed_detail(
     feed_id: int,
     request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=30, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ):
     """监控详情与条目：公开监控任何人可看；私有监控仅所有者可见。"""
@@ -99,18 +102,25 @@ async def feed_detail(
     owner_name = await session.scalar(
         select(User.display_name).where(User.id == feed.user_id)
     )
+    total = await session.scalar(
+        select(func.count(CustomFeedItem.id)).where(CustomFeedItem.feed_id == feed_id)
+    ) or 0
     items = list(
         (
             await session.execute(
                 select(CustomFeedItem)
                 .where(CustomFeedItem.feed_id == feed_id)
                 .order_by(CustomFeedItem.published_at.desc(), CustomFeedItem.id.desc())
-                .limit(50)
+                .limit(page_size)
+                .offset((page - 1) * page_size)
             )
         ).scalars()
     )
     return {
-        **_feed_out(feed, owner_name),
+        **_feed_out(feed, owner_name, total),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
         "is_owner": is_owner,
         "items": [
             {

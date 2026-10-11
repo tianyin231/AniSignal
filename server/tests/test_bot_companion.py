@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import select
 
 from app.api.bot import TargetBody
@@ -206,12 +207,13 @@ async def test_calendar_reminders_and_query_tools(client, session, monkeypatch):
     assert 'CAL2026' in codes['text']
 
 
-async def test_daily_digest_carries_cover_and_claim_returns_images(client, session, monkeypatch):
+@pytest.mark.parametrize('max_images', [1, 3])
+async def test_daily_digest_carries_cover_and_claim_returns_images(client, session, monkeypatch, max_images):
     now = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     monkeypatch.setattr('app.api.bot_companion.utcnow', lambda: now)
     await set_setting(session, 'bot_bridge', {'tools_key': 'plugin-key'})
     body = TargetBody(name='图群', umo='qq:GroupMessage:media', enabled=True,
-        daily_enabled=True, daily_time='08:00', delivery_mode='astrbot')
+        daily_enabled=True, daily_time='08:00', delivery_mode='astrbot', max_images=max_images)
     row = BotTarget(name=body.name, umo=body.umo, enabled=True,
         config=body.model_dump(exclude={'name', 'umo', 'enabled'}))
     row.created_at = utcnow().replace(hour=0, minute=0) - timedelta(days=1)
@@ -219,16 +221,17 @@ async def test_daily_digest_carries_cover_and_claim_returns_images(client, sessi
     await session.commit()
 
     async def fake_query(session, target, tool='digest', query='', now=None, collected_after=None):
-        return {'text': '今日速报', 'items': [{'id': 7, 'title': '官方新动态', 'image': 'https://img/cover.jpg', 'url': 'https://x', 'identity': 'official'}],
+        return {'text': '今日速报', 'items': [{'id': i, 'title': f'官方新动态{i}', 'image': f'https://img/{i}.jpg', 'url': f'https://x/{i}', 'identity': 'official'} for i in range(7, 10)],
                 'instructions': '', 'grounding': ''}
 
     monkeypatch.setattr(bot, 'query_target', fake_query)
     await bot.run_bot_notifications(session, now)
     delivery = (await session.execute(select(bot.BotDelivery))).scalar_one()
-    assert delivery.media == ['https://img/cover.jpg']
+    assert delivery.media == [f'https://img/{i}.jpg' for i in range(7, 7 + max_images)]
 
     claimed = (await client.post('/api/bot/outbox/claim', headers=HEADERS, json={})).json()['delivery']
-    assert claimed['images'] == ['https://img/cover.jpg']
+    assert claimed['images'] == delivery.media
+    assert claimed['max_images'] == max_images
 
 
 async def test_brief_detail_is_bound_to_original_delivery_and_target(client, session):
@@ -253,7 +256,7 @@ async def test_brief_detail_is_bound_to_original_delivery_and_target(client, ses
 
 
 async def test_claim_cancels_empty_dynamic_and_rebuilds_mixed_brief(client, session):
-    row = await setup(session, updates_enabled=True, quiet_start=0, quiet_end=0)
+    row = await setup(session, updates_enabled=True, quiet_start=0, quiet_end=0, max_images=2)
     empty = {'id': 1, 'title': '空动态不应出现', 'summary': '虚有摘要', 'text': '',
              'platform': 'bilibili', 'content_type': 'dynamic', 'url': 'https://t.bilibili.com/1'}
     cancelled = await bot.create_delivery(session, row, 'updates', '旧空动态正文', 'empty-claim',
@@ -263,11 +266,11 @@ async def test_claim_cancels_empty_dynamic_and_rebuilds_mixed_brief(client, sess
                   'published_at': utcnow().isoformat()}
     mixed = await bot.create_delivery(session, row, 'updates', '空动态不应出现\n纯图片公告', 'mixed-claim',
                                       brief={'mode': 'updates', 'title': '刚刚的重点', 'date': '09/22',
-                                             'items': [empty, image_only]})
+                                             'items': [empty, image_only, {**image_only, 'id': 3, 'image': 'https://img.example/3.jpg'}]})
     claimed = (await client.post('/api/bot/outbox/claim', headers=HEADERS, json={})).json()['delivery']
     assert claimed['id'] == mixed.id
     assert '空动态不应出现' not in claimed['body'] and '纯图片公告' in claimed['body']
-    assert claimed['images'] == ['https://img.example/2.jpg']
-    assert [item['id'] for item in claimed['brief']['items']] == [2]
+    assert claimed['images'] == ['https://img.example/2.jpg', 'https://img.example/3.jpg']
+    assert [item['id'] for item in claimed['brief']['items']] == [2, 3]
     await session.refresh(cancelled)
     assert cancelled.status == 'cancelled' and cancelled.attempts == 0

@@ -10,6 +10,10 @@ from app.models.base import Base
 from app.communities import DEFAULT_COMMUNITY
 
 
+def supports_view_threshold(platform: str, target_type: str) -> bool:
+    return platform == "bilibili" and target_type in {"keyword_search", "account_videos"}
+
+
 class CollectTarget(Base):
     __tablename__ = "collect_targets"
     __table_args__ = (

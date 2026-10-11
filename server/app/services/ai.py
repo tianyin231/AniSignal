@@ -236,7 +236,7 @@ async def summarize_event(
     event = await session.get(Event, event_id)
     if event is None:
         return {"status": "skipped", "reason": "event_not_found"}
-    if event.manual_locked and not force:
+    if (event.manual_locked or event.summary_status == "manual") and not force:
         return {"status": "skipped", "reason": "manual_locked"}
 
     config = await get_ai_config(session)
@@ -324,6 +324,11 @@ async def summarize_event(
         if used_fallback:
             summary = _fallback_summary(event, len(evidences))
 
+    # 模型响应期间可能有人编辑或锁定事件，保存前重新检查。
+    event = await session.get(Event, event_id, populate_existing=True, with_for_update=True)
+    if event is None or ((event.manual_locked or event.summary_status == "manual") and not force):
+        await session.commit()
+        return {"status": "skipped", "reason": "event_not_found" if event is None else "manual_locked"}
     changed = summary != (event.summary or "")
     event.summary = summary
     event.summary_status = "fallback" if used_fallback else "ai"

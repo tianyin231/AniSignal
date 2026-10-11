@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select
 
-from app.models import ContentVersion, NotificationDelivery, RawContent, Source, User, UserKeyword
+from app.models import ContentTranslation, ContentVersion, NotificationDelivery, RawContent, Source, User, UserKeyword
 from app.services import notifications
 from app.services.auth import hash_password
 from app.scheduler.loop import _morning_due
@@ -245,6 +245,50 @@ async def test_personal_notification_candidates_still_require_keywords(session):
     assert [item["id"] for item in candidates] == [matching.id]
     assert candidates[0]["keywords"] == ["爱弥斯"]
     assert await notifications.load_candidates(session, [], start_at, end_at) == []
+
+
+async def test_keyword_candidates_search_beyond_first_200_and_preserve_match_strength(session):
+    strong = await _content(session, "目<b>标</b> Straße 公告")
+    weak = await _content(session, "正文相关公告", text="正文说明目标")
+    provenance = await _content(session, "来源命中公告")
+    provenance.matched_keywords = ["目标"]
+    translated = await _content(session, "外语公告")
+    session.add(ContentTranslation(raw_content_id=translated.id, text="翻译提到目标"))
+    excluded = await _content(session, "目标二创公告")
+    await _content(session, "目标其他分区", community="blhx")
+    # 同时间以 ID 倒序，这 200 条位于所有匹配项之前。
+    source = Source(platform="bilibili", external_id="noise-source", identity="official", raw_json={})
+    session.add(source)
+    await session.flush()
+    noise = [RawContent(platform="bilibili", content_type="video", external_id=f"noise-{i}",
+                        source_id=source.id, published_at=strong.published_at, raw_json={},
+                        content_hash=f"noise-{i}", community="wuwa") for i in range(200)]
+    session.add_all(noise)
+    await session.flush()
+    session.add_all([ContentVersion(raw_content_id=raw.id, version=1, title="无关内容", normalized_json={},
+                                    category="official_announce") for raw in noise])
+    await session.commit()
+    start, end = notifications.morning_window(notifications.beijing_today())
+    candidates = await notifications.load_candidates(session, ["目标", "STRASSE"], start, end,
+                                                     preferences={"communities": ["wuwa"], "exclude_keywords": ["二创"]})
+    by_id = {item["id"]: item for item in candidates}
+    assert set(by_id) == {strong.id, weak.id, provenance.id, translated.id}
+    assert by_id[strong.id]["strength"] == by_id[provenance.id]["strength"] == "strong"
+    assert by_id[strong.id]["keywords"] == ["目标", "STRASSE"]
+    assert by_id[weak.id]["strength"] == by_id[translated.id]["strength"] == "weak"
+    assert excluded.id not in by_id
+    # 全站早报仍只取最新 200 条；提前结束游标后可继续使用同一连接。
+    assert len(await notifications.load_candidates(session, None, start, end)) == 200
+    assert await session.scalar(select(Source.id).where(Source.id == source.id)) == source.id
+
+
+async def test_candidate_content_ids_scope_and_empty_list(session):
+    first = await _content(session, "目标公告一")
+    await _content(session, "目标公告二")
+    start, end = notifications.morning_window(notifications.beijing_today())
+    candidates = await notifications.load_candidates(session, ["目标"], start, end, content_ids=[first.id])
+    assert [item["id"] for item in candidates] == [first.id]
+    assert await notifications.load_candidates(session, None, start, end, content_ids=[]) == []
 
 
 async def test_personal_preferences_filter_mail_and_invalidate_old_snapshot(session, monkeypatch):

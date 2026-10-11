@@ -45,8 +45,10 @@ const filteredTargets = computed(() =>
 )
 
 const availableTypes = computed(() => combos[form.platform] ?? [])
+const supportsViews = computed(() => form.community !== 'ai' && form.platform === 'bilibili' && ['keyword_search', 'account_videos'].includes(form.target_type))
+const defaultMinViews = () => supportsViews.value ? 10000 : 0
 watch(() => form.platform, () => { form.target_type = availableTypes.value[0] ?? 'keyword_search' })
-watch(() => form.community, (key) => { form.min_views = key === 'ai' ? 0 : 10000 })
+watch([() => form.target_type, () => form.community, supportsViews], () => { form.min_views = defaultMinViews() })
 
 async function refresh() {
   try {
@@ -71,7 +73,7 @@ async function create() {
         display_name: form.display_name.trim() || null,
         interval_minutes: Number(form.interval_minutes) || 30,
         co_terms: form.co_terms.split(/[,，]/).map((x: string) => x.trim()).filter(Boolean),
-        min_views: Number(form.min_views) || 0,
+        min_views: supportsViews.value ? Number(form.min_views) || 0 : 0,
         tier: form.tier,
         community: form.community,
       },
@@ -79,7 +81,7 @@ async function create() {
     form.target_value = ''
     form.display_name = ''
     form.co_terms = ''
-    form.min_views = form.community === 'ai' ? 0 : 10000
+    form.min_views = defaultMinViews()
     form.tier = 'general'
     await refresh()
   } catch (exc: any) {
@@ -199,7 +201,7 @@ onMounted(refreshRuns)
         <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
       </select>
       <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="input px-3 py-2 text-sm sm:col-span-2">
-      <input v-model.number="form.min_views" type="number" min="0" :placeholder="form.tier === 'core' ? '最低播放量（核心分级可选，0 不过滤）' : '最低播放量（默认 10000；0 不过滤）'" class="input mono px-3 py-2 text-sm">
+      <label class="text-xs text-slate-500 dark:text-zinc-400">{{ supportsViews ? '最低播放量（0 不过滤）' : '此目标没有播放量门槛' }}<input v-model.number="form.min_views" type="number" min="0" :disabled="!supportsViews" class="input mono mt-1 w-full px-3 py-2 text-sm disabled:opacity-50"></label>
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
         {{ creating ? '创建中…' : '新增目标' }}
       </button>
