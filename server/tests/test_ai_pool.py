@@ -130,8 +130,9 @@ async def test_timeout_covers_entire_key_pool(monkeypatch):
     calls = []
     async def once(config, key, *args, **kwargs):
         calls.append(key)
-        await asyncio.sleep(0.035)
-        raise httpx.ConnectError("temporary")
+        if key == "keyA":
+            raise httpx.ConnectError("temporary")
+        await asyncio.Event().wait()
     monkeypatch.setattr(ai_module, "_chat_once", once)
     monkeypatch.setattr(ai_module, "_CHAT_TIMEOUT_SECONDS", 0.05)
     with pytest.raises(TimeoutError):
