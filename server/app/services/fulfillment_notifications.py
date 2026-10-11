@@ -15,7 +15,7 @@ from app.services.fulfillment_revisions import verified_fulfillment_state
 from app.services.notifications import _plain, _safe_url, beijing_today, enabled_keywords, load_candidates
 
 _AXIS_LABELS = {"official": "官方履约", "consumer": "消费者到货", "quality": "质量风险"}
-_EMPTY_LABELS = {"official": "暂无已核验官方履约", "consumer": "暂无已核验消费者到货", "quality": "暂无已核验质量风险"}
+_EMPTY_LABELS = {"official": "暂无已采纳官方履约信号", "consumer": "暂无已采纳自购到货信号", "quality": "暂无已采纳质量反馈"}
 
 
 async def fulfillment_notification_payload(
@@ -53,23 +53,28 @@ async def fulfillment_notification_payload(
         session, None, datetime(1970, 1, 1), utcnow() + timedelta(seconds=1),
         content_ids=ids, community=product.community, preferences=preferences,
     )
-    # 仍有核验结论时至少保留一条符合偏好的公开证据；全部撤销时仍可发送更正。
-    if (any(state[key]["verified_count"] for key in _AXIS_LABELS) or state["sample_count"]) and not items:
+    # 仍有采纳结论时至少保留一条符合偏好的公开证据；全部撤销时仍可发送更正。
+    if (any(state[key]["verified_count"] for key in _AXIS_LABELS)
+            or state["sample_count"] or state["observation_count"]) and not items:
         return None
     items = items[:5]
     labels = []
     for key, label in _AXIS_LABELS.items():
         count = state[key]["verified_count"]
         value = _plain(current[key]["state_label"]) if count else _EMPTY_LABELS[key]
-        labels.append(f"{label}：{value}（已核验 {count}）")
-    labels.append(f"送测样品：已核验 {state['sample_count']} 个独立来源")
+        labels.append(f"{label}：{value}（已采纳 {count}）")
+    labels.append(f"送测样品：已采纳 {state['sample_count']} 个独立来源")
+    labels.append(f"实物展示：已采纳 {state['observation_count']} 个独立来源，购买方式未注明")
     before = verified_fulfillment_state(revision.previous_snapshot)
     correction = any(state[key]["verified_count"] < before[key]["verified_count"] for key in _AXIS_LABELS)
     correction = correction or state["sample_count"] < before["sample_count"]
-    lead = "原有核验结论已调整，以下为当前状态。" if correction else "已核验履约信息有变化，以下为当前状态。"
+    correction = correction or state["observation_count"] < before["observation_count"]
+    lead = "原有履约判断已更正，以下为当前状态。" if correction else "已采纳履约信息有变化，以下为当前状态。"
+    method = "自动判断仅依据原文证据；自动采纳不等于人工确认，后续证据变化会更新或更正。"
+    method += f" 当前自动采纳 {int(current.get('automated_count') or 0)} 条、人工确认 {int(current.get('manual_count') or 0)} 条。"
     subject = f"AniSignal 履约{'更正' if correction else '变化'} · {name}"[:255]
     detail_url = f"{get_settings().public_base_url.rstrip('/')}/products/{product.slug}"
-    lines = [name, lead, f"命中关注词：{'、'.join(keywords)}", *labels, "", "当前公开证据："]
+    lines = [name, lead, method, f"命中关注词：{'、'.join(keywords)}", *labels, "", "当前公开证据："]
     cards = []
     for item in items:
         title = _plain(item["title"])
@@ -78,12 +83,12 @@ async def fulfillment_notification_payload(
         link = f'<a href="{escape(url, quote=True)}">查看原文</a>' if url else ""
         cards.append(f"<li>{escape(title)} {link}</li>")
     if not items:
-        lines.append("当前没有可展示的已核验证据。")
+        lines.append("当前没有可展示的已采纳证据。")
     lines.extend(["", f"查看履约信号：{detail_url}", "可在账号中心关闭重要变化邮件或调整关注词。"])
     html = document(
-        name, f"<p>{escape(lead)}</p><p>命中关注词：{escape('、'.join(keywords))}</p>"
+        name, f"<p>{escape(lead)}</p><p>{escape(method)}</p><p>命中关注词：{escape('、'.join(keywords))}</p>"
         + "".join(f"<p>{escape(label)}</p>" for label in labels)
-        + (f"<ul>{''.join(cards)}</ul>" if cards else "<p>当前没有可展示的已核验证据。</p>")
+        + (f"<ul>{''.join(cards)}</ul>" if cards else "<p>当前没有可展示的已采纳证据。</p>")
         + f'<p><a href="{escape(detail_url, quote=True)}">查看履约信号</a></p>'
         + "<p>可在账号中心关闭重要变化邮件或调整关注词。</p>", eyebrow="履约变化",
     )

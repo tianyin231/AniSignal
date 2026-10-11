@@ -475,12 +475,19 @@ async def test_ai_review_stores_fulfillment_prejudgment(session, monkeypatch):
 
         payload = _json.loads(user if isinstance(user, str) else user[0]["text"])
         seen_payloads.append(payload)
-        assert payload["product_context"]["name"] == "爱弥斯联名机械键盘"
-        assert "爱弥斯" in payload["product_context"]["matched_terms"]
+        from app.services.fulfillment_automation import SIGNAL_TYPES
+
+        product = payload["product_context"]["products"][0]
+        assert product["name"] == "爱弥斯联名机械键盘"
+        assert "爱弥斯" in product["matched_terms"]
+        fulfillment = {
+            "schema_version": 2, "kind": "self_purchase", "confidence": 85, "reason": "含订单截图与开箱实拍",
+            "signals": [{"product_id": product["id"], "signal_type": signal_type, "verdict": "uncertain", "confidence": 0,
+                         "quote": "", "reason": "原文未涉及", "acquisition_type": "unknown"} for signal_type in SIGNAL_TYPES],
+        }
         return (
-            '{"review":{"relevant":true,"promotional":false,"violation":false,'
-            '"quality_score":78,"category_hint":"arrived","reason":"自购到货开箱",'
-            '"fulfillment":{"kind":"self_purchase","confidence":85,"reason":"含订单截图与开箱实拍"}}}'
+            _json.dumps({"review": {"relevant": True, "promotional": False, "violation": False,
+                "quality_score": 78, "category_hint": "arrived", "reason": "开箱分享", "fulfillment": fulfillment}}, ensure_ascii=False)
         ), None
 
     monkeypatch.setattr(curation, "_cover_data_url", fake_cover)
@@ -490,3 +497,6 @@ async def test_ai_review_stores_fulfillment_prejudgment(session, monkeypatch):
     review = await session.get(ContentReview, raw.id)
     assert review.fulfillment["kind"] == "self_purchase"
     assert review.fulfillment["confidence"] == 85
+    assert review.fulfillment["schema_version"] == 2
+    assert review.fulfillment["content_version"] == 1
+    assert len(review.fulfillment["signals"]) == 7

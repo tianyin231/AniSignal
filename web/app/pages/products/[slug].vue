@@ -61,45 +61,49 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
 </script>
 
 <template>
-  <div class="space-y-4">
-    <BackButton :fallback="listFallback" label="返回商品" />
+  <div class="min-w-0 space-y-4 [overflow-wrap:anywhere]">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <BackButton :fallback="listFallback" label="返回商品" />
+      <NuxtLink :to="listFallback" class="link inline-flex min-h-11 items-center text-sm">商品总览 →</NuxtLink>
+    </div>
     <p v-if="error" role="alert" class="text-sm text-amber-700 dark:text-amber-300">商品状态暂时更新失败，当前显示上次结果。<button type="button" class="ml-1 underline" @click="productRequest.refresh()">重试</button></p>
 
-    <section class="panel p-4 sm:p-5">
+    <section class="panel-solid p-4 sm:p-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div class="min-w-0 flex-1">
           <h1 class="flex flex-wrap items-center gap-2 text-lg font-semibold text-slate-900 dark:text-zinc-50">{{ product.name }}<span v-if="communityMeta" class="chip text-xs" :class="communityClasses(communityMeta.color).chip">{{ communityMeta.label }}</span></h1>
-          <p class="mt-0.5 text-xs text-slate-400 dark:text-zinc-500">
+          <p class="mt-0.5 text-xs text-slate-600 dark:text-zinc-400">
             {{ product.publisher || '—' }}<template v-if="product.skus.length"> · {{ product.skus.join(' / ') }}</template>
           </p>
         </div>
         <span class="chip bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ product.fulfillment.consumer.state_label }}</span>
       </div>
-      <dl class="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] sm:grid-cols-4">
+      <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-[13px] sm:grid-cols-4 [&>div]:min-w-0">
         <div v-if="product.price_note">
-          <dt class="text-xs text-slate-400">价格</dt>
+          <dt class="text-xs text-slate-600 dark:text-zinc-400">价格</dt>
           <dd class="mono mt-0.5 text-slate-700 dark:text-zinc-200">{{ product.price_note }}</dd>
         </div>
         <div v-if="product.presale_at">
-          <dt class="text-xs text-slate-400">预售</dt>
+          <dt class="text-xs text-slate-600 dark:text-zinc-400">预售</dt>
           <dd class="mono mt-0.5 text-slate-700 dark:text-zinc-200">{{ product.presale_at }}</dd>
         </div>
         <div v-if="product.balance_window">
-          <dt class="text-xs text-slate-400">尾款窗口</dt>
+          <dt class="text-xs text-slate-600 dark:text-zinc-400">尾款窗口</dt>
           <dd class="mono mt-0.5 text-slate-700 dark:text-zinc-200">{{ product.balance_window }}</dd>
         </div>
         <div v-if="product.original_ship_at">
-          <dt class="text-xs text-slate-400">原定发货</dt>
+          <dt class="text-xs text-slate-600 dark:text-zinc-400">原定发货</dt>
           <dd class="mono mt-0.5 text-slate-700 dark:text-zinc-200">{{ product.original_ship_at }}</dd>
         </div>
       </dl>
       <p v-if="product.ship_note" class="mt-3 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">{{ product.ship_note }}</p>
       <p v-if="product.fulfillment.candidate_total" class="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-        还有 {{ product.fulfillment.candidate_total }} 条候选信号待人工核验，尚未计入公开结论。
+        正在自动跟踪 {{ product.fulfillment.candidate_total }} 条信号：当前证据不足，系统会继续采集，暂不计入已采纳结论。
       </p>
+      <p class="mt-3 text-xs leading-relaxed text-slate-600 dark:text-zinc-400">持续自动采集与分析，状态随新证据更新。自动采纳与人工确认分别标注，可查看原文依据。</p>
     </section>
 
-    <div class="flex rounded-lg bg-slate-200/60 p-0.5 text-xs dark:bg-zinc-800/70" role="tablist" aria-label="商品履约信息">
+    <div class="flex rounded-lg bg-slate-200 p-0.5 text-xs dark:bg-zinc-800" role="tablist" aria-label="商品履约信息">
       <button
         v-for="tab in tabs"
         :key="tab.key"
@@ -115,15 +119,16 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
     </div>
 
     <section v-if="view === 'overview'" class="space-y-4">
-      <div class="grid gap-3 lg:grid-cols-3">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))] gap-3">
         <FulfillmentAxisCard :axis="product.fulfillment.official" tone="blue" />
         <FulfillmentAxisCard :axis="product.fulfillment.consumer" tone="emerald" />
         <FulfillmentAxisCard :axis="product.fulfillment.quality" tone="amber" />
       </div>
-      <div v-if="product.fulfillment.sample_count" class="panel p-4 text-xs text-slate-500 dark:text-zinc-400">
-        另有 {{ product.fulfillment.sample_count }} 个已核验送测样品来源。送测只作为旁证，不计入普通消费者到货样本。
+      <div v-if="product.fulfillment.sample_count || product.fulfillment.observation_count" class="panel-solid space-y-2 p-4 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
+        <p v-if="product.fulfillment.observation_count">{{ product.fulfillment.observation_count }} 个独立账号展示了实物开箱，购买方式未注明，不计入自购到货样本。</p>
+        <p v-if="product.fulfillment.sample_count">另有 {{ product.fulfillment.sample_count }} 个已采纳送测样品来源。送测只作为旁证，不计入普通消费者到货样本。</p>
       </div>
-      <section class="panel p-4 sm:p-5">
+      <section class="panel-solid p-4 sm:p-5">
         <div class="flex items-center justify-between gap-3">
           <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">最近履约信号</h2>
           <button type="button" class="link min-h-11 text-xs" @click="view = 'evidence'">查看全部</button>
@@ -133,15 +138,15 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
       </section>
     </section>
 
-    <section v-else-if="view === 'timeline'" class="panel overflow-hidden">
+    <section v-else-if="view === 'timeline'" class="panel-solid overflow-hidden">
       <p v-if="eventsError" role="alert" class="px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">事件暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshEvents()">重试</button></p>
       <EventRow v-for="event in events" :key="event.id" :event="event" />
       <p v-if="!eventsError && !events.length" class="px-4 py-10 text-center text-sm text-slate-400">在已接入来源中暂无该商品的相关事件。</p>
     </section>
 
-    <section v-else class="panel p-4 sm:p-5">
+    <section v-else class="panel-solid p-4 sm:p-5">
       <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约信号（{{ signals.length }}）</h2>
-      <p class="mt-1 text-xs text-slate-400">公开结论只统计“已核验”；候选信号仅供查看，不参与状态计算。</p>
+      <p class="mt-1 text-xs leading-relaxed text-slate-600 dark:text-zinc-400">结论依据已采纳信号，并区分自动采纳、官方来源与人工确认。证据不足的信号继续自动跟踪；实物开箱不等于已确认自购。</p>
       <div class="mt-4">
         <p v-if="signalsError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">信号暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshSignals()">重试</button></p>
         <ProductSignalList v-else :items="signals" :community="productCommunity" />

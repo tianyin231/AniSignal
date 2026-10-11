@@ -121,7 +121,7 @@ async def test_snapshot_deduplicates_sources_and_separates_seeded_samples(sessio
     await session.flush()
     snapshot = await build_fulfillment_snapshot(session, product.id)
     assert snapshot["consumer"]["verified_count"] == 0
-    assert snapshot["consumer"]["state"] == "no_verified_receipt"
+    assert snapshot["consumer"]["state"] == "seeded_samples"
 
 
 async def test_quality_candidate_attention_needs_two_independent_sources(session):
@@ -145,7 +145,7 @@ async def test_quality_candidate_attention_needs_two_independent_sources(session
     await _signal(session, product.id, raw2, "quality_issue", "account-2", review_status="candidate")
     snapshot = await build_fulfillment_snapshot(session, product.id)
     assert snapshot["quality"]["state"] == "candidate_attention"
-    assert "尚未核验" in snapshot["quality"]["summary"]
+    assert "自动跟踪" in snapshot["quality"]["summary"]
 
 
 async def test_signal_list_carries_ai_fulfillment_hint(session):

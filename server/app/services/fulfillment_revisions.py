@@ -1,4 +1,4 @@
-"""只为已核验履约状态变化记账，候选和 AI 预判不构成通知。"""
+"""只为已采纳履约状态变化记账，待判断候选不构成通知。"""
 
 import json
 from datetime import date, datetime
@@ -23,6 +23,7 @@ def verified_fulfillment_state(snapshot: dict) -> dict:
         # candidate_attention 是未核验关注态，不能触发已核验状态邮件。
         result[key] = {"state": axis.get("state") if count else empty, "verified_count": count}
     result["sample_count"] = int(snapshot.get("sample_count") or 0)
+    result["observation_count"] = int(snapshot.get("observation_count") or 0)
     return result
 
 
@@ -34,7 +35,7 @@ def _json_snapshot(snapshot: dict) -> dict:
 async def record_product_fulfillment_change(
     session: AsyncSession, product_id: int, before: dict, after: dict, reason: str,
 ) -> ProductFulfillmentRevision | None:
-    """随业务事务落库；返回新修订，未发生已核验状态变化时返回 None。"""
+    """随业务事务落库；返回新修订，未发生已采纳状态变化时返回 None。"""
     current = verified_fulfillment_state(after)
     if verified_fulfillment_state(before) == current:
         return None

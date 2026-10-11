@@ -238,7 +238,7 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
             state="done" if verified_count >= 3 else "current" if verified_count else "pending",
             tone="sky",
             evidence=verified_count or None,
-            note="只统计经人工核验为自购订单的独立账号",
+            note="只统计有明确自购到货证据的独立账号；自动判断可追溯、可纠正",
         ),
         ProductStageOut(
             label="多名独立用户到货",

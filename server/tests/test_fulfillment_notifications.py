@@ -87,7 +87,7 @@ async def test_verified_receipt_and_revocation_send_once_with_current_evidence(s
     await _record(session, product, verified)
     assert (await instant.run_instant_notifications(session))["sent"] == 1
     last = await session.scalar(select(NotificationDelivery).order_by(NotificationDelivery.id.desc()))
-    assert "履约更正" in last.subject and "暂无已核验消费者到货" in last.body
+    assert "履约更正" in last.subject and "暂无已采纳自购到货信号" in last.body
     assert last.content_ids == [] and "自购开箱" not in last.body
     assert sender.await_count == 2
 
@@ -105,7 +105,7 @@ async def test_obsolete_upgrade_is_skipped_and_hidden_evidence_is_not_in_correct
     sender.assert_not_awaited()
     assert (await instant.run_instant_notifications(session))["sent"] == 1
     assert "自购开箱" not in sender.await_args.args[2]
-    assert "暂无已核验消费者到货" in sender.await_args.args[2]
+    assert "暂无已采纳自购到货信号" in sender.await_args.args[2]
 
 
 @pytest.mark.parametrize("change", ["mail_disabled", "instant_disabled", "keyword", "community", "excluded", "moved", "hidden_without_revision"])
@@ -190,3 +190,27 @@ async def test_manual_review_records_change_and_reaches_existing_instant_worker(
     assert sender.await_count == 2
     assert "履约更正" in sender.await_args.args[1]
     assert "内部审核意见" not in sender.await_args.args[2]
+
+
+async def test_automatic_observation_has_evidence_and_correction_mail(session, sender):
+    _, product = await _product(session)
+    before = await build_fulfillment_snapshot(session, product.id)
+    signal, raw = await _receipt(session, product)
+    signal.locked = False
+    signal.details = {"automation": {"method": "ai"}}
+    evidence = await session.scalar(select(ProductSignalEvidence).where(ProductSignalEvidence.signal_id == signal.id))
+    evidence.acquisition_type = "unknown"
+    await session.commit()
+    revision, observation = await _record(session, product, before)
+    assert revision is not None and revision.snapshot["observation_count"] == 1
+    assert (await instant.run_instant_notifications(session))["sent"] == 1
+    first = await session.scalar(select(NotificationDelivery))
+    assert first.content_ids == [raw.id]
+    assert "实物展示：已采纳 1 个独立来源，购买方式未注明" in first.body
+    assert "自动采纳 1 条、人工确认 0 条" in first.body
+    assert "自动采纳不等于人工确认" in first.body and "更正" in first.body
+    raw.hidden = True
+    await _record(session, product, observation)
+    assert (await instant.run_instant_notifications(session))["sent"] == 1
+    last = await session.scalar(select(NotificationDelivery).order_by(NotificationDelivery.id.desc()))
+    assert "履约更正" in last.subject and last.content_ids == []

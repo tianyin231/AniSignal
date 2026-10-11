@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ApiProduct, ApiProductList, ApiProductSignal, ApiProductSignalList } from '~/composables/usePublicApi'
 import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_BADGE, ADMIN_COMMUNITY_LABELS } from '~/utils/admin-communities'
+import { productSignalReviewLabel } from '~/utils/product-utils'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '商品管理 · AniSignal 管理看板' })
@@ -54,13 +55,6 @@ const signalForm = reactive({
   claim_quote: '',
   note: '',
 })
-
-const signalStatusLabel = {
-  candidate: '待核验',
-  verified: '已核验',
-  rejected: '已驳回',
-  conflict: '证据冲突',
-} as const
 
 function suggestedTerms(name: string) {
   const full = name.replace(/\s+/g, '').trim()
@@ -192,7 +186,7 @@ async function openSignals(product: ApiProduct) {
       const candidateDiff =
         Number(right.review_status === 'candidate') - Number(left.review_status === 'candidate')
       if (candidateDiff) return candidateDiff
-      // AI 判自购开箱的候选最可能核验通过，置顶减少人工翻找
+      // 证据不足的信号优先显示，保留人工纠错入口。
       const kindWeight = (s: ApiProductSignal) =>
         s.ai_hint?.kind === 'self_purchase' ? 1 : s.ai_hint?.kind === 'pr_sample' ? 0.5 : 0
       return kindWeight(right) - kindWeight(left)
@@ -249,11 +243,11 @@ async function saveSignal() {
     <div>
       <h1 class="text-lg font-semibold">商品管理</h1>
       <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
-        新增时可按商品名称创建采集。官方履约按来源身份核验，消费者到货与质量反馈需要逐条审核。
+        新增时可按商品名称创建采集。履约信号持续自动分析，证据充分时自动采纳；此处保留人工纠错和确认。
       </p>
     </div>
 
-    <form class="panel p-5" @submit.prevent="submit">
+    <form class="panel-solid p-5" @submit.prevent="submit">
       <div class="flex items-center justify-between gap-3">
         <h2 class="text-sm font-semibold">{{ editing ? `编辑：${editing.name}` : '快速新增商品' }}</h2>
         <button v-if="editing" type="button" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300" @click="resetForm">取消编辑</button>
@@ -314,11 +308,11 @@ async function saveSignal() {
       </div>
     </form>
 
-    <section v-if="signalProduct" class="panel p-5">
+    <section v-if="signalProduct" class="panel-solid p-5">
       <div class="flex items-start justify-between gap-3">
         <div>
-          <h2 class="text-sm font-semibold">审核履约信号：{{ signalProduct.name }}</h2>
-          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">逐条确认主体、获取方式与原文摘录；只有“已核验”信号会影响公开三轴状态。</p>
+          <h2 class="text-sm font-semibold">履约信号：{{ signalProduct.name }}</h2>
+          <p class="mt-1 text-xs text-slate-600 dark:text-zinc-400">系统自动采纳有充分依据的信号；证据不足时继续跟踪。可在此修正主体、获取方式及原文摘录，人工决定会单独标注。</p>
         </div>
         <button class="min-h-11 px-2 text-xs text-slate-400 hover:text-slate-600" @click="signalProduct = null; editingSignal = null">关闭</button>
       </div>
@@ -335,7 +329,7 @@ async function saveSignal() {
           >
             <span class="flex flex-wrap items-center gap-2">
               <span class="chip bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ signal.signal_label }}</span>
-              <span class="chip" :class="signal.review_status === 'verified' ? 'bg-emerald-500/10 text-emerald-700' : signal.review_status === 'candidate' ? 'bg-amber-500/10 text-amber-700' : 'bg-slate-500/10 text-slate-500'">{{ signalStatusLabel[signal.review_status] }}</span>
+              <span class="chip" :class="signal.review_status === 'verified' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : signal.review_status === 'candidate' ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300' : signal.review_status === 'conflict' ? 'bg-red-500/10 text-red-700 dark:text-red-300' : 'bg-slate-500/10 text-slate-600 dark:text-zinc-400'">{{ productSignalReviewLabel(signal) }}</span>
               <span
                 v-if="signal.review_status === 'candidate' && signal.ai_hint && signal.ai_hint.kind !== 'none'"
                 class="chip bg-sky-500/10 text-sky-700 dark:text-sky-300"
@@ -343,6 +337,7 @@ async function saveSignal() {
               >AI：{{ fulfillmentKindLabels[signal.ai_hint.kind] ?? signal.ai_hint.kind }} {{ signal.ai_hint.confidence }}%</span>
             </span>
             <span class="mt-2 block text-sm text-slate-700 dark:text-zinc-200">{{ signal.summary }}</span>
+            <span v-if="signal.review_reason" class="mt-1 block text-xs leading-relaxed text-slate-600 dark:text-zinc-400">{{ signal.review_reason }}</span>
             <span class="mt-1 block text-xs text-slate-400">{{ signal.account || signal.platform }} · 原文 #{{ signal.content_id }}</span>
           </button>
         </div>
@@ -352,7 +347,7 @@ async function saveSignal() {
           <div class="mt-3 grid gap-3">
             <label class="text-xs text-slate-500">审核状态
               <select v-model="signalForm.review_status" class="select mt-1 min-h-11 w-full bg-white px-3 text-sm dark:bg-zinc-900">
-                <option value="candidate">待核验</option><option value="verified">已核验</option><option value="rejected">驳回</option><option value="conflict">证据冲突</option>
+                <option value="candidate">继续自动跟踪</option><option value="verified">人工确认</option><option value="rejected">驳回</option><option value="conflict">证据冲突</option>
               </select>
             </label>
             <div class="grid grid-cols-2 gap-3">
@@ -395,7 +390,7 @@ async function saveSignal() {
         <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
       </select>
     </div>
-    <div class="panel overflow-x-auto">
+    <div class="panel-solid overflow-x-auto">
       <table class="w-full min-w-[900px] text-sm">
         <thead>
           <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
@@ -419,7 +414,7 @@ async function saveSignal() {
             <td class="max-w-52 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.fulfillment.consumer.state_label }}</td>
             <td class="max-w-48 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.fulfillment.quality.state_label }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right">
-              <button class="min-h-11 rounded px-2 text-xs text-emerald-700 hover:underline dark:text-emerald-300" @click="openSignals(p)">审核信号<span v-if="p.fulfillment.candidate_total">（{{ p.fulfillment.candidate_total }}）</span></button>
+              <button class="min-h-11 rounded px-2 text-xs text-emerald-700 hover:underline dark:text-emerald-300" @click="openSignals(p)">查看 / 纠正信号<span v-if="p.fulfillment.candidate_total">（{{ p.fulfillment.candidate_total }}）</span></button>
               <button class="min-h-11 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="startEdit(p)">编辑</button>
               <button class="min-h-11 rounded px-2 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busy" @click="remove(p)">删除</button>
             </td>

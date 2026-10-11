@@ -355,6 +355,8 @@ class FulfillmentAxisOut(BaseModel):
     summary: str
     verified_count: int = 0
     candidate_count: int = 0
+    automated_count: int = 0
+    manual_count: int = 0
     updated_at: datetime | None = None
     signal_ids: list[int] = Field(default_factory=list)
     # 无核验数据时来自 AI 履约预判的候选概览（如"2 条自购开箱候选"）
@@ -366,6 +368,10 @@ class FulfillmentSnapshotOut(BaseModel):
     consumer: FulfillmentAxisOut
     quality: FulfillmentAxisOut
     sample_count: int = 0
+    observation_count: int = 0
+    automated_count: int = 0
+    manual_count: int = 0
+    automation_mode: str = "automatic"
     candidate_total: int = 0
     last_verified_at: datetime | None = None
     updated_at: datetime | None = None
@@ -379,6 +385,8 @@ class ProductSignalOut(BaseModel):
     signal_label: str
     actor_type: str
     review_status: str
+    review_method: str = "pending"
+    review_reason: str = ""
     occurred_at: datetime | None = None
     summary: str
     confidence: float
