@@ -247,7 +247,7 @@ async function saveSignal() {
       </p>
     </div>
 
-    <form class="panel-solid p-5" @submit.prevent="submit">
+    <form class="panel p-5" @submit.prevent="submit">
       <div class="flex items-center justify-between gap-3">
         <h2 class="text-sm font-semibold">{{ editing ? `编辑：${editing.name}` : '快速新增商品' }}</h2>
         <button v-if="editing" type="button" class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300" @click="resetForm">取消编辑</button>
@@ -308,7 +308,7 @@ async function saveSignal() {
       </div>
     </form>
 
-    <section v-if="signalProduct" class="panel-solid p-5">
+    <section v-if="signalProduct" class="panel p-5">
       <div class="flex items-start justify-between gap-3">
         <div>
           <h2 class="text-sm font-semibold">履约信号：{{ signalProduct.name }}</h2>
@@ -346,18 +346,18 @@ async function saveSignal() {
           <p class="text-sm font-medium">审核 #{{ editingSignal.id }}</p>
           <div class="mt-3 grid gap-3">
             <label class="text-xs text-slate-500">审核状态
-              <select v-model="signalForm.review_status" class="select mt-1 min-h-11 w-full bg-white px-3 text-sm dark:bg-zinc-900">
+              <select v-model="signalForm.review_status" class="select mt-1 min-h-11 w-full px-3 text-sm">
                 <option value="candidate">继续自动跟踪</option><option value="verified">人工确认</option><option value="rejected">驳回</option><option value="conflict">证据冲突</option>
               </select>
             </label>
             <div class="grid grid-cols-2 gap-3">
               <label class="text-xs text-slate-500">主体
-                <select v-model="signalForm.actor_type" class="select mt-1 min-h-11 w-full bg-white px-2 text-sm dark:bg-zinc-900">
+                <select v-model="signalForm.actor_type" class="select mt-1 min-h-11 w-full px-2 text-sm">
                   <option value="unknown">待确认</option><option value="official">官方</option><option value="user">普通用户</option><option value="seeded">送测账号</option><option value="media">媒体</option><option value="merchant">商家</option>
                 </select>
               </label>
               <label class="text-xs text-slate-500">获取方式
-                <select v-model="signalForm.acquisition_type" class="select mt-1 min-h-11 w-full bg-white px-2 text-sm dark:bg-zinc-900">
+                <select v-model="signalForm.acquisition_type" class="select mt-1 min-h-11 w-full px-2 text-sm">
                   <option value="unknown">待确认</option><option value="self_purchase">自购</option><option value="seeded">送测</option>
                 </select>
               </label>
@@ -390,7 +390,7 @@ async function saveSignal() {
         <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
       </select>
     </div>
-    <div class="panel-solid overflow-x-auto">
+    <div class="panel overflow-x-auto">
       <table class="w-full min-w-[900px] text-sm">
         <thead>
           <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
