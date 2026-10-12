@@ -163,6 +163,8 @@ def _parse_dt(value) -> datetime | None:
 
 
 async def _targets_for_community(session: AsyncSession, community: str) -> list[BotTarget]:
+    from app.services.bot import subscribed_communities
+
     rows = await session.scalars(
         select(BotTarget).where(BotTarget.enabled.is_(True))
     )
@@ -170,8 +172,7 @@ async def _targets_for_community(session: AsyncSession, community: str) -> list[
     for target in rows:
         if not target.config.get("updates_enabled"):
             continue
-        target_community = target.config.get("community", "all")
-        if target_community in ("all", community):
+        if community in subscribed_communities(target):
             targets.append(target)
     return targets
 

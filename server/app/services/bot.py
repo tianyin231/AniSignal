@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.communities import COMMUNITIES
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Evidence, Product, RawContent, RedeemCode
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
@@ -110,17 +111,46 @@ def classify_item(item: dict) -> str:
     return "normal"
 
 
+def subscribed_communities(target: BotTarget) -> list[str]:
+    if selected := target.config.get("communities"):
+        return selected
+    # 兼容多选上线前的单分区配置。
+    community = target.config.get("community", "all")
+    return list(COMMUNITIES) if community == "all" else [community]
+
+
+def matches_target_scope(target: BotTarget, item: dict) -> bool:
+    community = item.get("community")
+    if not community:
+        return not target.config.get("communities") and target.config.get("community", "all") == "all"
+    return community in subscribed_communities(target)
+
+
+async def load_target_candidates(session, target, keywords, start_at, end_at, *, collected_after=None):
+    selected = subscribed_communities(target)
+    games = [key for key in selected if COMMUNITIES[key].domain == "game"]
+    candidates = await load_candidates(session, keywords, start_at, end_at,
+        preferences={"communities": games}, collected_after=collected_after, text_limit=None) if games else []
+    if any(COMMUNITIES[key].domain == "news" for key in selected):
+        from app.services.ai_news import load_bot_news
+
+        candidates += await load_bot_news(session, keywords, start_at, end_at, collected_after=collected_after)
+    return candidates
+
+
 async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None) -> dict:
     now = now or utcnow()
     config = target.config
-    community = config.get("community", "all")
+    selected = subscribed_communities(target)
+    community = selected[0] if len(selected) == 1 else "all"
     keywords = config.get("keywords", [])
-    scope = COMMUNITY_LABELS.get(community, "全站")
+    scope = "全站" if len(selected) == len(COMMUNITIES) else " / ".join(COMMUNITY_LABELS[key] for key in selected)
     brief = None
     if tool == "trending":
         from app.services.curation import select_trending
 
         items = await select_trending(session, 5, community=community, hours=24)
+        items = [item for item in items if matches_target_scope(target, item)]
         lines = [
             f"{scope} · 热度飙升（24 小时播放增量）",
             (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）"),
@@ -143,6 +173,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
 
         items = []
         entries = await calendar_entries(session, community, now=now)
+        entries = [entry for entry in entries if matches_target_scope(target, entry)]
         entries.sort(key=lambda e: e["end_at"] or e["start_at"])
         lines = [f"{scope} · 活动日历", _fmt_bj(now, "更新于 %Y/%m/%d %H:%M（北京时间）")]
         count = 0
@@ -166,8 +197,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
     elif tool == "codes":
         items = []
         conditions = [RawContent.hidden.is_(False), RedeemCode.status == "active", RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now)]
-        if community != "all":
-            conditions.append(RedeemCode.community == community)
+        conditions.append(RedeemCode.community.in_(selected))
         rows = await session.execute(
             select(RedeemCode, RawContent.url)
             .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
@@ -187,8 +217,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
             lines.append("当前没有可用的兑换码。")
     elif tool == "products":
         stmt = select(Product).order_by(Product.id)
-        if community != "all":
-            stmt = stmt.where(Product.community == community)
+        stmt = stmt.where(Product.community.in_(selected))
         products = list(await session.scalars(stmt))
         products = [p for p in products if (not query or query.casefold() in (p.name + " " + " ".join(p.watch_terms or [])).casefold())
                     and (not keywords or any(k.casefold() in p.name.casefold() for k in keywords))]
@@ -204,24 +233,24 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if not items:
             lines.append("没有找到匹配的商品档案，请使用商品名称或更短的关键词。")
     else:
-        candidates = await load_candidates(
-            session, keywords or None, now - timedelta(hours=24 if tool == "digest" else 168), now,
-            community=community, collected_after=collected_after, text_limit=None,
+        candidates = await load_target_candidates(
+            session, target, keywords or None, now - timedelta(hours=24 if tool == "digest" else 168), now,
+            collected_after=collected_after,
         )
         if tool == "digest" and not collected_after:
             # 晚采到的官方资料最多补一条，发布时间仍取原文，不回灌即时推送。
-            supplements = await load_candidates(session, keywords or None, now - timedelta(days=7),
-                                                now - timedelta(hours=24), community=community,
-                                                collected_after=now - timedelta(hours=24), text_limit=None)
+            supplements = await load_target_candidates(session, target, keywords or None, now - timedelta(days=7),
+                                                      now - timedelta(hours=24), collected_after=now - timedelta(hours=24))
             candidates = [c for c in candidates if is_recent_item(c, now)]
             candidates.extend({**c, "is_supplement": True} for c in supplements
                               if c.get("published_at") and c["collected_at"] < now and c["identity"] == "official")
         if query:
             candidates = [c for c in candidates if query.casefold() in (c["title"] + c["text"]).casefold()]
         candidates = [c for c in candidates if c["strength"] == "strong"]
-        items = await group_candidates(session, candidates)
+        items = await group_candidates(session, [item for item in candidates if not item.get("news")])
+        items += [item for item in candidates if item.get("news")]
         if collected_after:
-            items = [i for i in items if is_recent_item(i, now) and (i["identity"] == "official" or i["importance"])]
+            items = [i for i in items if is_recent_item(i, now) and (i.get("news") or i["identity"] == "official" or i["importance"])]
         elif tool == "digest":
             known = await known_notification_keys(session, target.id, now)
             supplements = [await identify_item(session, i) for i in items if i.get("is_supplement")]
@@ -463,8 +492,17 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     if row.kind not in {"daily", "updates", "critical"} or not row.brief:
         return True
     items = row.brief.get("items") or []
-    usable = [item for item in items if not is_empty_dynamic_item(item)]
-    empty_sources = len(usable) < len(items)
+    scoped = [item for item in items if matches_target_scope(target, item)]
+    usable = [item for item in scoped if not is_empty_dynamic_item(item)]
+    invalid_review = False
+    if any(item.get("news") for item in usable):
+        from app.services.ai_news import approved_news_query
+
+        query = (await approved_news_query(session)).where(RawContent.id.in_([item["id"] for item in usable]))
+        approved = {raw.id: review.news for raw, version, source, review in (await session.execute(query)).all()}
+        invalid_review = any(item.get("news") and item["news"] != approved.get(item["id"]) for item in usable)
+        usable = [item for item in usable if not item.get("news") or item["news"] == approved.get(item["id"])]
+    empty_sources = any(is_empty_dynamic_item(item) for item in scoped)
     # 早报拆条和兑换码各自有有效期；普通即时消息不能用刚入队的时间续命。
     if row.kind in {"updates", "critical"} and not brief.get("scheduled_at") and brief.get("mode") != "notice":
         usable = [item for item in usable if is_recent_item(item, now)]
@@ -483,7 +521,8 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
         values = {"brief": brief, "body": body, "media": collect_images(usable, image_limit(config)) or None}
     else:
         values = {"status": "cancelled", "receipt": None, "updated_at": now,
-                  "error": "来源动态正文和图片均为空，已取消本次推送" if empty_sources else "来源发布时间未知或已超过 24 小时，不再作为新动态推送"}
+                  "error": "消息已不符合此会话订阅范围或审核结果" if invalid_review or len(scoped) < len(items) else
+                           "来源动态正文和图片均为空，已取消本次推送" if empty_sources else "来源发布时间未知或已超过 24 小时，不再作为新动态推送"}
     for key, value in values.items():
         setattr(row, key, value)
     if commit:
@@ -497,6 +536,8 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
     previously_known = set(known)
     usable = []
     for item in buffer.get("items", []):
+        if not matches_target_scope(target, item):
+            continue
         buffered_at = datetime.fromisoformat(item.get("buffered_at") or item.get("published_at") or now.isoformat())
         if item.get("dedupe") in known or buffered_at <= now - timedelta(hours=12) or not is_recent_item(item, now):
             continue
@@ -596,7 +637,9 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             due = scheduled_at(now, config.get("calendar_time", "20:00"))
             key = f"calendar-digest:{target.id}:{local.date()}"
             if due <= now < due + timedelta(hours=2) and not await session.scalar(select(BotDelivery.id).where(BotDelivery.dedupe_key == key)):
-                entries = await upcoming_entries(session, config.get("community", "all"), now)
+                selected = subscribed_communities(target)
+                entries = await upcoming_entries(session, selected[0] if len(selected) == 1 else "all", now)
+                entries = [entry for entry in entries if matches_target_scope(target, entry)]
                 if entries:
                     text, brief = calendar_brief(entries, due)
                     await create_delivery(session, target, "calendar", text, key, brief=brief)

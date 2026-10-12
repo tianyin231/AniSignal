@@ -5,13 +5,13 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
 from app.clock import utcnow
-from app.communities import community_query_pattern
+from app.communities import COMMUNITIES, community_query_pattern
 from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget
 from app.services import bot
@@ -26,6 +26,7 @@ class TargetBody(BaseModel):
     umo: str = Field(min_length=3, max_length=255, pattern=r"^[^:]+:(FriendMessage|GroupMessage):[^:]+$")
     enabled: bool = False
     community: str = Field(default="all", pattern=community_query_pattern())
+    communities: list[str] | None = Field(default=None, max_length=len(COMMUNITIES))
     keywords: list[str] = Field(default_factory=list, max_length=20)
     daily_enabled: bool = True
     daily_time: str = Field(default="08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -48,6 +49,19 @@ class TargetBody(BaseModel):
     reminders_enabled: bool = False
     activities_enabled: bool = False
     manager_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("communities")
+    @classmethod
+    def clean_communities(cls, values):
+        if values is not None and (not values or any(value not in COMMUNITIES for value in values)):
+            raise ValueError("至少选择一个有效分区")
+        return list(dict.fromkeys(values)) if values is not None else None
+
+    @model_validator(mode="after")
+    def sync_legacy_community(self):
+        if self.communities is not None:
+            self.community = self.communities[0] if len(self.communities) == 1 else "all"
+        return self
 
     @field_validator("manager_ids")
     @classmethod
@@ -91,7 +105,8 @@ class MessageBody(BaseModel):
 
 
 def target_view(row):
-    return {**TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **row.config).model_dump(),
+    config = {**row.config, "communities": bot.subscribed_communities(row)}
+    return {**TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **config).model_dump(),
             "id": row.id, "created_at": row.created_at}
 
 

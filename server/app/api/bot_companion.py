@@ -15,7 +15,7 @@ from app.clock import utcnow
 from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget, RawContent
 from app.services.bot_policy import reserve_delivery
-from app.services.bot import image_limit
+from app.services.bot import image_limit, subscribed_communities
 from app.services.bot_briefs import format_detail, publication_label
 from app.services.settings import get_setting, set_setting
 
@@ -53,6 +53,7 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
             config["keywords"] = body.value.replace("，", ",").split(",")
         elif body.action == "community":
             from app.models.enums import COMMUNITY_LABELS
+            config["communities"] = None
             config["community"] = next((k for k, v in COMMUNITY_LABELS.items() if v == body.value), body.value)
             if body.value == "全站":
                 config["community"] = "all"
@@ -70,6 +71,7 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
             raise HTTPException(422, "设置无效，请核对分区、关键词长度或 HH:mm 时间")
         await edit_target(target.id, validated, session)
     return {"name": target.name, "community": target.config.get("community", "all"),
+            "communities": subscribed_communities(target),
             "keywords": target.config.get("keywords", []), "daily_enabled": target.config.get("daily_enabled", True),
             "daily_time": target.config.get("daily_time", "08:00"), "updates_enabled": target.config.get("updates_enabled", False),
             "changed": body.action != "view"}

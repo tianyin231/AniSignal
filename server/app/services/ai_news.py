@@ -7,9 +7,10 @@ from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import utcnow
-from app.models import ContentReview, ContentVersion, RawContent
+from app.models import ContentReview, ContentVersion, RawContent, Source
 
 NEWS_TOPICS = ("OpenAI", "Codex", "Claude", "Gemini", "DeepSeek", "开源模型", "行业动态")
 _AI_SUBJECT = re.compile(
@@ -100,6 +101,57 @@ def reference_links(text: str) -> list[dict]:
         if len(links) == 5:
             break
     return links
+
+
+async def approved_news_query(session: AsyncSession):
+    """网页和机器人共用准入条件，不能拿旧版本的审核结果推送新正文。"""
+    from app.services.settings import get_media_visibility, hidden_platforms
+
+    latest = select(ContentVersion.raw_content_id.label("rid"),
+                    func.max(ContentVersion.version).label("version")).group_by(ContentVersion.raw_content_id).subquery()
+    news = ContentReview.news
+    query = (select(RawContent, ContentVersion, Source, ContentReview)
+        .options(defer(RawContent.raw_json), defer(ContentVersion.normalized_json))
+        .join(latest, latest.c.rid == RawContent.id)
+        .join(ContentVersion, (ContentVersion.raw_content_id == latest.c.rid)
+              & (ContentVersion.version == latest.c.version))
+        .outerjoin(Source, Source.id == RawContent.source_id)
+        .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
+        .where(RawContent.community == "ai", RawContent.hidden.is_(False),
+               ContentReview.relevant.is_(True), ContentReview.promotional.is_(False),
+               ContentReview.violation.is_(False), news["newsworthy"].as_boolean().is_(True),
+               news["content_hash"].as_string() == RawContent.content_hash,
+               news["content_version"].as_integer() == ContentVersion.version))
+    hidden = hidden_platforms(await get_media_visibility(session))
+    return query.where(RawContent.platform.notin_(hidden)) if hidden else query
+
+
+async def load_bot_news(session: AsyncSession, keywords, start_at, end_at, *, collected_after=None) -> list[dict]:
+    query = (await approved_news_query(session)).where(
+        RawContent.published_at >= start_at, RawContent.published_at < end_at,
+        ContentReview.updated_at < end_at,
+    )
+    if collected_after:
+        # 审核异步完成；按审核时间扫增量，避免采集后先扫过、审核后再也收不到。
+        query = query.where(ContentReview.updated_at > collected_after)
+    rows = (await session.execute(query.order_by(RawContent.published_at.desc(), RawContent.id.desc()).limit(200))).all()
+    items = []
+    for raw, version, source, review in rows:
+        news = review.news
+        text = f"{version.title or ''} {version.text or ''} {news['headline']} {news['summary']}".casefold()
+        if keywords and not any(k.casefold() in text for k in keywords):
+            continue
+        items.append({
+            "id": raw.id, "community": raw.community, "title": news["headline"],
+            "source_title": version.title or news["headline"], "text": version.text or "",
+            "summary": news["summary"], "key_points": [news["summary"]], "news": news,
+            "url": raw.url, "image": None, "platform": raw.platform, "content_type": raw.content_type,
+            "source": source.name if source and source.name else "来源未署名",
+            "identity": source.identity if source else "unknown", "published_at": raw.published_at,
+            "collected_at": raw.collected_at, "keywords": keywords or [], "strength": "strong",
+            "category": "ai_news", "event_id": None, "importance": False, "content_ids": [raw.id],
+        })
+    return items
 
 
 async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None = None) -> list[int]:
