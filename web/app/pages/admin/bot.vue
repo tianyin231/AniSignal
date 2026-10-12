@@ -7,7 +7,7 @@ useSeoMeta({ title: '机器人通知 · AniSignal' })
 const { api } = useAdminApi()
 const toast = useAdminToast()
 interface Target {
-  id?: number; name: string; umo: string; enabled: boolean; community: string; keywords: string[]
+  id?: number; name: string; umo: string; enabled: boolean; community: string; communities: string[]; keywords: string[]
   daily_enabled: boolean; daily_time: string; updates_enabled: boolean; quiet_start: number; quiet_end: number
   quiet_critical: boolean; merge_minutes: number; hourly_limit: number; daily_style: string; max_images: number
   min_push_interval_minutes: number; calendar_enabled: boolean; calendar_time: string
@@ -18,7 +18,7 @@ interface Delivery { id: number; target_id: number; name: string; kind: string; 
 interface Reminder { id: number; name: string; body: string; due_at: string; status: string }
 const companion = ref<{ runtime: { online: boolean; version?: string }; counts: Record<string, number>; reminders: Reminder[] }>({ runtime: { online: false }, counts: {}, reminders: [] })
 const activity = ref<Record<string, string>>({})
-const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, quiet_critical: false, merge_minutes: 30, hourly_limit: 2, min_push_interval_minutes: 20, calendar_enabled: true, calendar_time: '20:00', daily_style: 'compact', max_images: 1, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。', ai_provider_id: '', delivery_mode: 'astrbot', chat_controls: false, reminders_enabled: false, activities_enabled: false, manager_ids: [] })
+const defaults = (): Target => ({ name: '', umo: '', enabled: false, community: 'all', communities: ADMIN_COMMUNITIES.map(c => c.key), keywords: [], daily_enabled: true, daily_time: '08:00', updates_enabled: false, quiet_start: 23, quiet_end: 8, quiet_critical: false, merge_minutes: 30, hourly_limit: 2, min_push_interval_minutes: 20, calendar_enabled: true, calendar_time: '20:00', daily_style: 'compact', max_images: 1, tools: ['digest', 'news', 'products'], ai_prompt: '简洁、自然地回答，保留来源与时间。', ai_provider_id: '', delivery_mode: 'astrbot', chat_controls: false, reminders_enabled: false, activities_enabled: false, manager_ids: [] })
 const targets = ref<Target[]>([])
 const deliveries = ref<Delivery[]>([])
 const bridge = reactive({ endpoint: '', api_key: '', api_key_set: false })
@@ -64,6 +64,11 @@ const previewText = ref('')
 const selected = computed(() => targets.value.find(t => t.id === selectedId.value))
 const activeCount = computed(() => targets.value.filter(t => t.enabled).length)
 const inputClass = 'mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-white/15 dark:bg-zinc-900'
+
+function subscriptionLabel(target: Target) {
+  const communities = target.communities || (target.community === 'all' ? ADMIN_COMMUNITIES.map(c => c.key) : [target.community])
+  return communities.length === ADMIN_COMMUNITIES.length ? '全站' : communities.map(key => ADMIN_COMMUNITY_LABELS[key]).join(' / ')
+}
 
 function umoTail(umo: string) {
   return (umo.split(':')[2] || '').slice(-8) || umo
@@ -122,6 +127,10 @@ function edit(target?: Target) {
 function saveTarget() {
   action('target', async () => {
     editorError.value = ''
+    if (!form.value.communities.length) {
+      editorError.value = '请至少选择一个订阅分区'
+      return
+    }
     form.value.keywords = keywordInput.value.split(/[,，\n]/).map(s => s.trim()).filter(Boolean)
     form.value.manager_ids = managerInput.value.split(/[,，\n]/).map(s => s.trim()).filter(Boolean)
     const id = form.value.id
@@ -217,7 +226,7 @@ function cancelReminder(row: Reminder) {
     <div v-if="!targets.length && !loading" class="panel rounded-xl p-10 text-center text-slate-500">添加第一个群聊或私聊，设置它关心的资讯。</div>
     <div class="grid gap-4 sm:grid-cols-2">
       <article v-for="target in targets" :key="target.id" class="panel rounded-xl p-5">
-        <div class="flex items-start justify-between gap-3"><div><h2 class="font-semibold">{{ target.name }}</h2><p class="mt-1 text-sm text-slate-500">{{ target.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ ADMIN_COMMUNITY_LABELS[target.community] || '全站' }} · <span class="mono" :title="target.umo">{{ target.umo.split(':')[0] }} · 尾号 {{ umoTail(target.umo) }}</span></p></div><span class="rounded-full px-2 py-1 text-xs" :class="target.enabled ? 'bg-emerald-500/10 text-emerald-600' : 'bg-slate-500/10 text-slate-500'">{{ target.enabled ? '已启用' : '已暂停' }}</span></div>
+        <div class="flex items-start justify-between gap-3"><div><h2 class="font-semibold">{{ target.name }}</h2><p class="mt-1 text-sm text-slate-500">{{ target.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ subscriptionLabel(target) }} · <span class="mono" :title="target.umo">{{ target.umo.split(':')[0] }} · 尾号 {{ umoTail(target.umo) }}</span></p></div><span class="rounded-full px-2 py-1 text-xs" :class="target.enabled ? 'bg-emerald-500/10 text-emerald-600' : 'bg-slate-500/10 text-slate-500'">{{ target.enabled ? '已启用' : '已暂停' }}</span></div>
         <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? `重要动态推送（合并 ${target.merge_minutes ?? 30} 分钟）` : '即时推送关闭' }}</p>
         <p v-if="target.updates_enabled" class="mt-1 text-xs text-slate-500">自动消息间隔 {{ target.min_push_interval_minutes ?? 20 }} 分钟 · {{ target.calendar_enabled !== false ? `收尾提醒 ${target.calendar_time || '20:00'}，每天最多一条` : '收尾提醒关闭' }}</p>
         <p class="mt-2 text-sm" :class="activity[target.umo] ? 'text-slate-500' : 'text-amber-600'">{{ relTime(activity[target.umo]) }}</p>
@@ -237,12 +246,12 @@ function cancelReminder(row: Reminder) {
       <form class="flex min-h-0 flex-col" @submit.prevent="saveTarget">
       <div class="grid min-h-0 gap-4 overflow-y-auto overscroll-contain p-5 sm:grid-cols-2">
         <p v-if="editorError" role="alert" class="rounded-lg bg-red-500/10 p-3 text-sm text-red-600 sm:col-span-2 dark:text-red-400">{{ editorError }}</p>
-        <label class="text-sm">名称<input v-model.trim="form.name" autofocus required maxlength="100" :class="inputClass" placeholder="我的私聊 / 鸣潮交流群"></label>
-        <label class="text-sm">范围<select v-model="form.community" :class="inputClass"><option value="all">全站</option><option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option></select></label>
+        <label class="text-sm sm:col-span-2">名称<input v-model.trim="form.name" autofocus required maxlength="100" :class="inputClass" placeholder="我的私聊 / 鸣潮交流群"></label>
+        <fieldset class="sm:col-span-2"><legend class="text-sm font-medium">订阅分区</legend><div class="mt-2 flex flex-wrap gap-x-5 gap-y-3"><label v-for="c in ADMIN_COMMUNITIES" :key="c.key" class="flex items-center gap-2 text-sm"><input v-model="form.communities" type="checkbox" :value="c.key">{{ c.label }}</label></div></fieldset>
         <label class="text-sm sm:col-span-2">会话标识（UMO）<input v-model.trim="form.umo" required maxlength="255" :class="inputClass" placeholder="机器人名称:FriendMessage:用户标识 或 机器人名称:GroupMessage:群标识"><span v-if="form.umo" class="mt-1 block text-xs text-slate-500">{{ form.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ form.umo.split(':')[0] }} · 尾号 {{ umoTail(form.umo) }}</span><span v-else class="mt-1 block text-xs text-slate-500">在机器人会话发送 /情报会话 获取：QQ 官方平台是一串机器码（不是群号），NapCat/OneBot 平台直接填群号。</span></label>
         <label class="text-sm sm:col-span-2">关键词（留空不限，逗号分隔）<input v-model="keywordInput" :class="inputClass" placeholder="爱弥斯，联名键盘"></label>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.enabled" type="checkbox">启用此会话的推送与查询</label>
-        <label class="flex items-center gap-2 text-sm"><input v-model="form.updates_enabled" type="checkbox">推送新采集的官方或重要动态</label>
+        <label class="flex items-center gap-2 text-sm"><input v-model="form.updates_enabled" type="checkbox">推送官方动态、重要事件与已筛选快讯</label>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.daily_enabled" type="checkbox">每日早报<input v-model="form.daily_time" type="time" required class="rounded border bg-transparent px-2 py-1">北京时间</label>
         <div class="flex flex-wrap items-center gap-2 text-sm"><span>自动消息免打扰</span><label><span class="sr-only">开始小时</span><input v-model.number="form.quiet_start" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>至</span><label><span class="sr-only">结束小时</span><input v-model.number="form.quiet_end" type="number" min="0" max="23" required class="w-14 rounded border bg-transparent px-2 py-1"></label><span>时（相同则关闭）</span></div>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.quiet_critical" type="checkbox">允许关键动态在免打扰时段发送（日历仍保持安静）</label>

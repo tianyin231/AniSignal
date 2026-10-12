@@ -249,6 +249,7 @@ def _source(item: dict) -> dict:
         "url": item.get("url") or "", "image": item.get("image"),
         "published_at": published.isoformat() if published else None,
         "is_supplement": bool(item.get("is_supplement")),
+        **({"news": item["news"]} if item.get("news") else {}),
     }
 
 
@@ -327,6 +328,22 @@ def _compatible_sources(refs: list[dict]) -> bool:
 
 
 async def select_brief_items(session, items: list[dict], now: datetime, *, limit: int = MAX_ITEMS) -> list[dict]:
+    if any(item.get("news") for item in items):
+        # 快讯已完成编辑筛选，直接保留审核摘要、传闻标记和来源，不再套游戏播报提示词。
+        selected = []
+        for item in [item for item in items if item.get("news")][:limit]:
+            source = _source(item)
+            news = item["news"]
+            label = "AI 传闻" if news["kind"] == "rumor" else "AI 快讯"
+            share = f"[{label}] {news['headline']}\n{news['summary']}\n来源：{source['source']}（转述，待核实）"
+            if source["url"]:
+                share += "\n" + source["url"]
+            selected.append({**source, "title": news["headline"], "summary": news["summary"],
+                             "share_text": share, "sources": [source]})
+        game_items = [item for item in items if not item.get("news")]
+        if game_items:
+            selected += await select_brief_items(session, game_items, now, limit=limit)
+        return sorted(selected, key=lambda item: _published(item.get("published_at")) or datetime.min, reverse=True)[:limit]
     candidates = [i for i in items if not is_empty_dynamic_item(i)
                   and ((i.get("title") or "").strip() not in ("动态", "未命名动态") or i.get("image"))
                   and not _is_low_signal_notification(i)][:30]
@@ -470,6 +487,11 @@ def format_brief(brief: dict) -> str:
         lines.append(f"\n{index}. {prefix}{item['title']}")
         if item.get("summary"):
             lines.append(item["summary"])
+        if item.get("news"):
+            label = "传闻，待核实" if item["news"]["kind"] == "rumor" else "转述，待核实"
+            lines.append(f"来源：{item['source']}（{label}）")
+            if item.get("url"):
+                lines.append(item["url"])
         if when := publication_label(item):
             lines.append(when)
     if items:

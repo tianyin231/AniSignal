@@ -7,12 +7,11 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.db import get_session
 from app.models import CollectTarget, ContentReview, ContentVersion, RawContent, Source
-from app.services.ai_news import NEWS_TOPICS, reference_links
+from app.services.ai_news import NEWS_TOPICS, approved_news_query, reference_links
 from app.services import settings as settings_service
 
 router = APIRouter(prefix="/api/ai-news")
@@ -59,32 +58,9 @@ async def list_news(
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
-    latest = select(
-        ContentVersion.raw_content_id.label("rid"),
-        func.max(ContentVersion.version).label("version"),
-    ).group_by(ContentVersion.raw_content_id).subquery()
     news = ContentReview.news
-    query = (
-        select(RawContent, ContentVersion, Source, ContentReview)
-        .options(defer(RawContent.raw_json), defer(ContentVersion.normalized_json))
-        .join(latest, latest.c.rid == RawContent.id)
-        .join(ContentVersion, (ContentVersion.raw_content_id == latest.c.rid)
-              & (ContentVersion.version == latest.c.version))
-        .outerjoin(Source, Source.id == RawContent.source_id)
-        .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
-        .where(
-            RawContent.community == "ai", RawContent.hidden.is_(False),
-            RawContent.published_at >= utcnow() - timedelta(hours=hours),
-            ContentReview.relevant.is_(True), ContentReview.promotional.is_(False),
-            ContentReview.violation.is_(False),
-            news["newsworthy"].as_boolean().is_(True),
-            news["content_hash"].as_string() == RawContent.content_hash,
-            news["content_version"].as_integer() == ContentVersion.version,
-        )
-    )
+    query = (await approved_news_query(session)).where(RawContent.published_at >= utcnow() - timedelta(hours=hours))
     hidden_platforms = settings_service.hidden_platforms(await settings_service.get_media_visibility(session))
-    if hidden_platforms:
-        query = query.where(RawContent.platform.notin_(hidden_platforms))
     if kind != "all":
         query = query.where(news["kind"].as_string() == kind)
     if topic:
