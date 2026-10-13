@@ -262,8 +262,8 @@ onMounted(refreshRuns)
       </div>
     </div>
 
-    <div class="panel overflow-hidden">
-      <table class="w-full text-sm">
+    <div class="panel overflow-x-auto">
+      <table class="w-full min-w-[850px] text-sm">
         <thead>
           <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
             <th class="px-3 py-2.5 font-medium">目标</th>
