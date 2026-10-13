@@ -34,7 +34,7 @@ class TargetBody(BaseModel):
     quiet_start: int = Field(default=23, ge=0, le=23)
     quiet_end: int = Field(default=8, ge=0, le=23)
     quiet_critical: bool = False
-    merge_minutes: int = Field(default=30, ge=0, le=60)
+    merge_minutes: int = Field(default=0, ge=0, le=60)
     hourly_limit: int = Field(default=2, ge=0, le=50)
     min_push_interval_minutes: int = Field(default=20, ge=0, le=120)
     calendar_enabled: bool = True
