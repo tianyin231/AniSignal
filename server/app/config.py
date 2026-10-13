@@ -58,6 +58,9 @@ class Settings(BaseSettings):
         "UCR0J2NYGuC8epsa1O4DMmXQ:Arknights Official"
     )
 
+    # 只有已核对的组织账号标为官方；开发者个人账号保持用户身份。
+    official_x_accounts: str = "openai:OpenAI,deepseek_ai:DeepSeek"
+
     # 米游社默认游戏 ID（2 = 原神），管理员看板可按目标覆盖
     miyoushe_default_gids: int = 2
 

@@ -333,6 +333,7 @@ export interface ContentDetail {
   title: string | null
   text: string | null
   text_html: string | null
+  text_truncated: boolean
   published_at: string | null
   collected_at: string
   last_seen_at: string | null

@@ -147,6 +147,7 @@ class ContentDetailOut(BaseModel):
     title: str | None
     text: str | None
     text_html: str | None = None  # 含 HTML 的正文经 bleach 消毒后返回
+    text_truncated: bool = False
     published_at: datetime | None
     collected_at: datetime
     last_seen_at: datetime | None = None

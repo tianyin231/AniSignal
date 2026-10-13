@@ -153,15 +153,15 @@ onBeforeUnmount(() => {
           <article v-for="item in data.items" :key="item.id" class="border-b border-slate-900/7 px-4 py-5 last:border-0 sm:px-6 sm:py-6 dark:border-white/8">
             <div class="mb-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs">
               <span class="rounded-md px-2 py-0.5 font-medium" :class="item.kind === 'rumor' ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300' : 'bg-teal-500/10 text-teal-800 dark:text-teal-300'">{{ item.kind === 'rumor' ? '传闻线索' : '报道' }}</span>
-              <span class="text-slate-500 dark:text-zinc-400">二手消息 · 待核实</span>
-              <time :datetime="item.published_at || undefined" class="text-slate-500 sm:ml-auto dark:text-zinc-400" :title="`${dateLabel(item.published_at)}（北京时间），视频发布时间`">视频发布 {{ dateLabel(item.published_at) }}</time>
+              <span class="text-slate-500 dark:text-zinc-400">{{ item.platform === 'x' ? 'X 原帖' : '二手消息' }} · 待核实</span>
+              <time :datetime="item.published_at || undefined" class="text-slate-500 sm:ml-auto dark:text-zinc-400" :title="`${dateLabel(item.published_at)}（北京时间），来源发布时间`">{{ item.platform === 'x' ? '原帖发布' : '视频发布' }} {{ dateLabel(item.published_at) }}</time>
             </div>
             <NuxtLink :to="{ path: `/contents/${item.id}`, query: { community: 'ai' } }" class="block rounded-sm text-[17px] font-semibold leading-relaxed text-slate-900 hover:text-teal-700 sm:text-[19px] dark:text-zinc-100 dark:hover:text-teal-300">
               <h2>{{ item.headline }}</h2>
             </NuxtLink>
             <p class="mt-2 text-sm leading-7 text-slate-600 dark:text-zinc-300">{{ item.summary }}</p>
             <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
-              <span class="text-slate-500 dark:text-zinc-400">{{ item.platform === 'bilibili' ? 'B 站' : item.platform }} · {{ item.source_name }}</span>
+              <span class="text-slate-500 dark:text-zinc-400">{{ item.platform === 'bilibili' ? 'B 站' : item.platform === 'x' ? 'X' : item.platform }} · {{ item.source_name }}</span>
               <span v-for="topic in item.topics" :key="topic" class="text-teal-700 dark:text-teal-300">#{{ topic }}</span>
               <a v-if="item.url" :href="item.url" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-8 items-center gap-1 text-slate-600 hover:text-teal-700 sm:ml-auto dark:text-zinc-300 dark:hover:text-teal-300">看来源 <ArrowUpRight :size="13" aria-hidden="true" /></a>
             </div>
@@ -171,7 +171,7 @@ onBeforeUnmount(() => {
               <div v-if="item.references.length" class="mt-2 flex flex-wrap gap-3">
                 <a v-for="link in item.references" :key="link.url" :href="link.url" target="_blank" rel="noopener noreferrer" class="break-all underline underline-offset-4">{{ link.label }} ↗</a>
               </div>
-              <p class="mt-1 leading-6">{{ item.references.length ? '以上为来源附带的链接，尚未逐条核对。' : '来源简介未附可追溯的一手链接。' }}</p>
+              <p class="mt-1 leading-6">{{ item.references.length ? '以上为来源附带的链接，尚未逐条核对。' : '来源文字未附其他参考链接。' }}</p>
             </details>
           </article>
         </div>
@@ -203,7 +203,6 @@ onBeforeUnmount(() => {
         </section>
         <section class="px-1">
           <h2 class="text-sm font-semibold">消息从哪里来</h2>
-          <p class="mt-2 text-xs leading-6 text-slate-500 dark:text-zinc-400">当前由 B 站快讯补充，X 原帖仍在验证接入。不会把二手转述标成官方确认。</p>
           <ul v-if="data?.sources.length" class="mt-3 space-y-3">
             <li v-for="source in data.sources" :key="`${source.platform}-${source.name}`" class="flex items-center justify-between gap-2 text-xs">
               <span class="min-w-0 truncate text-slate-600 dark:text-zinc-300">{{ source.name }}</span>

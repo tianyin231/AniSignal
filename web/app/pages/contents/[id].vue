@@ -115,6 +115,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         <!-- 正文（站内解析预览） -->
         <section class="panel p-4 sm:p-5 lg:col-span-2">
           <h2 class="text-sm font-semibold">内容解析</h2>
+          <p v-if="d.text_truncated" class="mt-3 text-sm text-amber-700 dark:text-amber-300">当前仅取得部分原文，完整内容请查看来源。</p>
           <div
             v-if="d.text_html"
             class="prose-sm mt-3 max-w-none text-[14px] leading-relaxed text-slate-700 dark:text-zinc-300 [&_a]:text-blue-600 [&_a]:underline dark:[&_a]:text-blue-300"

@@ -23,5 +23,8 @@ def content_fingerprint(content: NormalizedContent) -> str:
         "url": content.url,
         "media": content.media,
     }
+    if content.platform == "x":
+        # 补全状态变化也需要新版本，重新审核先前只拿到片段的原帖。
+        stable["text_truncated"] = bool(content.extra.get("truncated"))
     canonical = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

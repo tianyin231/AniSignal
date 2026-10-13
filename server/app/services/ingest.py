@@ -25,6 +25,7 @@ from app.parsers.miyoushe import PARSER_VERSION as MIYOUSHE_PARSER_VERSION
 from app.parsers.miyoushe import parse_post
 from app.parsers.youtube import PARSER_VERSION as YOUTUBE_PARSER_VERSION
 from app.parsers.youtube import parse_rss_item
+from app.parsers.x import PARSER_VERSION as X_PARSER_VERSION, parse_post as parse_x_post
 from app.schemas.content import NormalizedContent
 from app.services.classify import classify_content, load_rules
 from app.services.fingerprint import content_fingerprint
@@ -39,6 +40,7 @@ PARSERS: dict[str, tuple] = {
     "kuro_notices": (parse_notice, KURO_PARSER_VERSION),
     "miyoushe_posts": (parse_post, MIYOUSHE_PARSER_VERSION),
     "youtube_rss": (parse_rss_item, YOUTUBE_PARSER_VERSION),
+    "x_posts": (parse_x_post, X_PARSER_VERSION),
 }
 
 
@@ -190,6 +192,11 @@ async def _ingest_one(
 def _would_drop_dynamic_content(
     normalized: NormalizedContent, latest: ContentVersion | None
 ) -> bool:
+    if normalized.platform == "x" and latest is not None:
+        # 主页摘要不能把已经补全的相同原帖缩回半截。
+        previous = latest.normalized_json or {}
+        if normalized.extra.get("truncated") and not previous.get("extra", {}).get("truncated"):
+            return bool(latest.text and latest.text.startswith(normalized.text or ""))
     # B 站列表仍能返回动态 ID，但详情受限时正文和图片会同时缺失。
     # 保留已经补全的版本；只拦截全空结果，不将历史字段拼进真实的新内容。
     return bool(
@@ -316,7 +323,7 @@ async def reparse_contents(
     rules = await load_rules(session)
     checked = updated = failed = 0
     for content in rows:
-        kind = _REPARSE_KIND.get(content.content_type)
+        kind = "x_posts" if content.platform == "x" else _REPARSE_KIND.get(content.content_type)
         if kind is None or not content.raw_json:
             continue
         parse, parser_version = PARSERS[kind]
