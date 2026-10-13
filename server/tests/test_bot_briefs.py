@@ -138,6 +138,22 @@ async def test_shared_copy_does_not_repeat_old_facts_in_a_group_followup(session
     assert not fresh_group['items'][0]['is_followup']
 
 
+async def test_shared_copy_falls_back_when_the_editor_duplicates_a_character_name(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={
+        'api_key': 'fake', 'base_url': 'http://model', 'model': 'test',
+    }))
+    chat = AsyncMock(return_value=(json.dumps({'items': [{
+        'indices': [1], 'title': '夜行烛火新服饰',
+        'summary': '明日方舟煌和煌的新服饰「夜行烛火」是国家图书馆合作款。',
+    }]}, ensure_ascii=False), {}))
+    monkeypatch.setattr(briefs, 'chat', chat)
+    source = content(9580, title='【新增服饰】', community='arknights',
+                     text='//夜行烛火 - 烛煌\n国家图书馆合作服装/夜行烛火。煌在游历炎国各方异域时所穿的服装。')
+    copies = [await briefs.build_shared_brief(session, [source]) for _ in range(2)]
+    assert chat.await_count == 1
+    assert all('煌和煌' not in briefs.format_brief(copy) and '烛煌' in briefs.format_brief(copy) for copy in copies)
+
+
 def test_merging_keeps_official_and_community_claims_separate():
     official = briefs._source(content(1))
     community = briefs._source(content(2, identity='unknown'))

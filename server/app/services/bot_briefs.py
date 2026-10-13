@@ -546,16 +546,24 @@ async def build_shared_brief(session, items: list[dict], now=None, *, mode="upda
             digest = hashlib.sha256(json.dumps(facts, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:32]
             key = _COPY_PREFIX + digest
             cached = await get_setting(session, key)
-            if cached is None:
+            uncached = cached is None
+            if uncached:
                 edited = await select_brief_items(session, [source], now, limit=1)
-                fallback = not edited and (source["identity"] == "official" or item.get("importance"))
-                if fallback:
-                    edited = fallback_items([source], limit=1)
                 # 只缓存文案，来源、去重键和会话历史由本次输入提供。
                 cached = {"items": [{field: row[field] for field in ("title", "summary", "share_text") if field in row}
                                     for row in edited]}
+            # 实测模型偶发“煌和煌的……”这类重复主语，缓存命中也不能把它扩散。
+            repeated = any(re.search(r"(?P<name>[\u4e00-\u9fff]{1,12})(?:和|与|、)(?P=name)(?=的|[「《，。]|$)",
+                                     row.get("share_text") or row.get("summary") or "") for row in cached["items"])
+            if repeated:
+                cached = {"items": []}
+            fallback = not cached["items"] and (source["identity"] == "official" or item.get("importance"))
+            if fallback:
+                cached = {"items": [{field: row[field] for field in ("title", "summary")}
+                                    for row in fallback_items([source], limit=1)]}
+            if uncached or repeated:
                 await set_setting(session, key, cached)
-                logger.info("Bot shared copy content=%s selected=%d fallback=%s", item.get("id"), len(edited), bool(fallback))
+                logger.info("Bot shared copy content=%s selected=%d fallback=%s", item.get("id"), len(cached["items"]), bool(fallback))
             edited = [{**source, **copy, "sources": [source]} for copy in cached["items"]]
         for row in edited:
             row["published_label"] = publication_label(row)
