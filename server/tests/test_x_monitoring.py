@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 
 from app.clock import utcnow
 from app.collectors import x as x_module
-from app.collectors.base import CollectorError
+from app.collectors.base import CollectorDeferred, CollectorError
 from app.models import BotTarget, CollectTarget, ContentVersion, RawContent
 from app.parsers.x import normalize_account, parse_page, parse_post
 from app.services import collect, curation
@@ -108,6 +108,7 @@ async def test_x_collection_ingests_english_posts_and_queues_review(session, ses
     monkeypatch.setattr(x_module.httpx, "AsyncClient", lambda **kwargs: real_client(
         transport=httpx.MockTransport(lambda _: httpx.Response(200, text=entry())), **kwargs))
     monkeypatch.setattr(collect, "SessionLocal", session_factory)
+    monkeypatch.setattr(x_module, "_REQUEST_INTERVAL_SECONDS", 0.001)
     target = CollectTarget(platform="x", target_type="account_dynamics", target_value="openai",
                            community="ai", interval_minutes=60, enabled=True)
     session.add(target)
@@ -148,6 +149,7 @@ async def test_full_x_text_survives_later_profile_excerpt(session):
     short = parse_page(entry(text="Codex now supports Show more"))[0]
     full = {**short, "text": "Codex now supports a new API.", "truncated": False, "text_scope": "full_post"}
     await ingest_items(session, "x_posts", [short], community="ai")
+    await ingest_items(session, "x_posts", [{**short, "text": "", "truncated": False}], community="ai")
     await ingest_items(session, "x_posts", [full], community="ai")
     await ingest_items(session, "x_posts", [short], community="ai")
     latest = await session.scalar(select(ContentVersion).order_by(ContentVersion.version.desc()))
@@ -159,3 +161,48 @@ async def test_completed_flag_creates_a_new_version_even_when_text_is_unchanged(
     await ingest_items(session, "x_posts", [{**short, "truncated": True}], community="ai")
     result = await ingest_items(session, "x_posts", [short], community="ai")
     assert result.items_updated == 1
+
+
+async def test_access_refusal_pauses_other_accounts_and_honors_retry_after(monkeypatch):
+    requests = []
+    real_client = httpx.AsyncClient
+
+    def handle(request):
+        requests.append(request.url.path)
+        return httpx.Response(429, headers={"Retry-After": "7200"})
+
+    monkeypatch.setattr(x_module.httpx, "AsyncClient", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handle), **kwargs))
+    redis = LocalRedis()
+    first = x_module.XCollector()
+    first.redis = redis
+    with pytest.raises(CollectorError):
+        await first.fetch("account_dynamics", "openai", 20)
+    assert await redis.pttl(x_module._COOLDOWN_KEY) > 7_190_000
+    second = x_module.XCollector()
+    second.redis = redis
+    with pytest.raises(CollectorDeferred):
+        await second.fetch("account_dynamics", "deepseek_ai", 20)
+    assert requests == ["/openai"]
+
+
+async def test_long_post_is_not_repeatedly_expanded_within_one_day(monkeypatch):
+    requests = []
+    real_client = httpx.AsyncClient
+
+    def handle(request):
+        requests.append(request.url.path)
+        if request.url.path == "/openai":
+            return httpx.Response(200, text=entry(text="Codex new API Show more"))
+        return httpx.Response(200, text='<meta property="og:url" content="https://x.com/OpenAI/status/100">'
+            '<article><div dir="auto" class="whitespace-pre-wrap">Codex new API is available.</div></article>')
+
+    monkeypatch.setattr(x_module.httpx, "AsyncClient", lambda **kwargs: real_client(
+        transport=httpx.MockTransport(handle), **kwargs))
+    monkeypatch.setattr(x_module, "_REQUEST_INTERVAL_SECONDS", 0.001)
+    collector = x_module.XCollector()
+    collector.redis = LocalRedis()
+    first = await collector.fetch("account_dynamics", "openai", 20)
+    assert first.items[0]["truncated"] is False
+    await collector.fetch("account_dynamics", "openai", 20)
+    assert requests == ["/openai", "/OpenAI/status/100", "/openai"]

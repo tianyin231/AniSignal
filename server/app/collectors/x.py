@@ -2,26 +2,65 @@
 
 import asyncio
 import logging
+from datetime import timedelta
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
 
 import httpx
 
-from app.collectors.base import CollectorError, USER_AGENT
+from app.clock import to_naive_utc, utcnow
+from app.collectors.base import CollectorDeferred, CollectorError, USER_AGENT, platform_slot
 from app.config import get_settings
 from app.models.enums import Platform
 from app.parsers.x import normalize_account, parse_page
 from app.schemas.content import FetchResult
 
 logger = logging.getLogger(__name__)
+_COOLDOWN_KEY = "anisignal:x:cooldown"
+_REQUEST_INTERVAL_SECONDS = 30
+_DETAIL_CACHE_MS = 24 * 60 * 60 * 1000
 
 
 class XCollector:
     platform = Platform.X
 
+    def __init__(self):
+        self.redis = None
+
+    async def _check_cooldown(self):
+        if self.redis is not None:
+            ttl = await self.redis.pttl(_COOLDOWN_KEY)
+            if ttl and ttl > 0:
+                raise CollectorDeferred("X 平台处于访问限制冷却期", retry_at=utcnow() + timedelta(milliseconds=ttl))
+
+    async def _pause(self, retry_after=""):
+        if self.redis is None:
+            return
+        seconds = 3600
+        if retry_after.isdigit():
+            seconds = max(seconds, int(retry_after))
+        elif retry_after:
+            try:
+                seconds = max(seconds, int((to_naive_utc(parsedate_to_datetime(retry_after)) - utcnow()).total_seconds()))
+            except (TypeError, ValueError):
+                pass
+        ttl = max(seconds * 1000, await self.redis.pttl(_COOLDOWN_KEY) or 0)
+        await self.redis.set(_COOLDOWN_KEY, "1", px=ttl)
+
     async def _read(self, client, url):
-        response = await client.get(url)
+        await self._check_cooldown()
+        if self.redis is not None:
+            # 主页和全文共用 Redis 间隔，多 worker 也不会连发请求。
+            async with platform_slot(self.redis, "x", _REQUEST_INTERVAL_SECONDS):
+                await self._check_cooldown()
+                response = await client.get(url)
+        else:
+            response = await client.get(url)
+        if response.status_code in {401, 403, 429}:
+            await self._pause(response.headers.get("Retry-After", ""))
         response.raise_for_status()
         if urlsplit(str(response.url)).path.startswith(("/i/jf/onboarding", "/i/flow/login", "/login")):
+            await self._pause()
             raise CollectorError("X 公开页面要求登录，无法匿名采集")
         return response.text
 
@@ -39,7 +78,13 @@ class XCollector:
                 # 每轮最多补两篇，避免长帖或图片帖把低频账号监控放大成大量请求。
                 pending = [item for item in items if item["truncated"] or not item["text"]][:2]
                 for item in pending:
-                    await asyncio.sleep(3)
+                    if self.redis is not None:
+                        # 同一长帖一天最多尝试展开一次，不反复请求旧的截断帖。
+                        reserved = await self.redis.set(f"anisignal:x:detail:{item['id']}", "1", nx=True, px=_DETAIL_CACHE_MS)
+                        if not reserved:
+                            continue
+                    else:
+                        await asyncio.sleep(3)
                     try:
                         detail = await self._read(client, item["url"])
                         full = parse_page(detail, item["url"])

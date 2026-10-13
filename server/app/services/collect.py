@@ -261,12 +261,16 @@ async def run_collection(redis, target_id: int) -> dict:
             is_news = get_community(target.community).domain == "news"
             if is_news and isinstance(collector, BilibiliCollector):
                 collector.newest_first = True
-            async with platform_slot(
-                redis, target.platform, settings.platform_min_interval_seconds
-            ):
+            if isinstance(collector, XCollector):
+                collector.redis = redis
                 fetch_result = await collector.fetch(
                     target.target_type, target.target_value, settings.collect_limit
                 )
+            else:
+                async with platform_slot(redis, target.platform, settings.platform_min_interval_seconds):
+                    fetch_result = await collector.fetch(
+                        target.target_type, target.target_value, settings.collect_limit
+                    )
             items_fetched = len(fetch_result.items)
             fetch_result.items, filtered_out = filter_relevant(
                 fetch_result.items, target,
