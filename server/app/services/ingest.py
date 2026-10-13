@@ -193,6 +193,8 @@ def _would_drop_dynamic_content(
     normalized: NormalizedContent, latest: ContentVersion | None
 ) -> bool:
     if normalized.platform == "x" and latest is not None:
+        if not normalized.text and not normalized.media:
+            return bool(latest.text or (latest.normalized_json or {}).get("media"))
         # 主页摘要不能把已经补全的相同原帖缩回半截。
         previous = latest.normalized_json or {}
         if normalized.extra.get("truncated") and not previous.get("extra", {}).get("truncated"):
