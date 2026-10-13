@@ -4,6 +4,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import case, func, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
@@ -33,35 +35,6 @@ def beijing_date(value: datetime) -> date:
     return value.replace(tzinfo=timezone.utc).astimezone(BEIJING).date()
 
 
-async def _content_row(
-    session: AsyncSession,
-    stat_date: date,
-    platform: str,
-    identity: str,
-    keyword: str,
-) -> ContentDailyStat:
-    row = await session.get(
-        ContentDailyStat,
-        {
-            "stat_date": stat_date,
-            "platform": platform,
-            "identity": identity,
-            "keyword": keyword,
-        },
-    )
-    if row is None:
-        row = ContentDailyStat(
-            stat_date=stat_date,
-            platform=platform,
-            identity=identity,
-            keyword=keyword,
-            contents_new=0,
-            updated_at=utcnow(),
-        )
-        session.add(row)
-    return row
-
-
 async def record_content_stat(
     session: AsyncSession,
     *,
@@ -75,13 +48,25 @@ async def record_content_stat(
     day = beijing_date(collected_at)
     keys = {str(keyword).strip()[:255] for keyword in keywords if str(keyword).strip()}
     if include_base:
-        base = await _content_row(session, day, platform, identity, "")
-        base.contents_new += 1
-        base.updated_at = utcnow()
-    for keyword in sorted(keys):
-        row = await _content_row(session, day, platform, identity, keyword)
-        row.contents_new += 1
-        row.updated_at = utcnow()
+        keys.add("")
+    if not keys:
+        return
+    now = utcnow()
+    values = [dict(stat_date=day, platform=platform, identity=identity, keyword=keyword,
+                   contents_new=1, updated_at=now) for keyword in sorted(keys)]
+    # 多个账号同时首次入库时也必须能累加，不能先 SELECT 再 INSERT 或覆盖旧计数。
+    if session.get_bind().dialect.name == "sqlite":
+        statement = sqlite_insert(ContentDailyStat).values(values).on_conflict_do_update(
+            index_elements=["stat_date", "platform", "identity", "keyword"],
+            set_={"contents_new": ContentDailyStat.contents_new + 1, "updated_at": now})
+    else:
+        statement = mysql_insert(ContentDailyStat).values(values).on_duplicate_key_update(
+            contents_new=ContentDailyStat.contents_new + 1, updated_at=now)
+    await session.execute(statement)
+    # 本事务曾读过的统计对象也要与数据库保持一致，下一次查询重新加载。
+    for row in list(session.identity_map.values()):
+        if isinstance(row, ContentDailyStat):
+            session.expire(row)
 
 
 async def record_collection_stat(session: AsyncSession, run: CollectRun) -> None:
