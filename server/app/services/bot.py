@@ -14,8 +14,8 @@ from app.communities import COMMUNITIES
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Evidence, Product, RawContent, RedeemCode
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
-from app.services.bot_briefs import (UPDATE_ITEMS, _source, build_brief, changed_points, fallback_items, format_brief,
-                                    is_recent_item, news_points, point_key, publication_label, single_item_brief)
+from app.services.bot_briefs import (_source, build_brief, build_shared_brief, changed_points, fallback_items, format_brief,
+                                    is_recent_item, news_points, point_key, prune_shared_copies, publication_label, single_item_brief)
 from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 from app.services.bot_calendar import calendar_brief, upcoming_entries, refresh_calendar, scheduled_at, normalized_title
@@ -80,7 +80,9 @@ def _merge_setting_key(target_id: int) -> str:
 
 
 async def load_merge_buffer(session: AsyncSession, target_id: int) -> dict:
-    return (await get_setting(session, _merge_setting_key(target_id))) or {"items": [], "flush_at": None}
+    stored = (await get_setting(session, _merge_setting_key(target_id))) or {"items": [], "flush_at": None}
+    # JSON 字段原地改列表不会触发 SQLAlchemy 更新，返回独立缓冲后再显式保存。
+    return {**stored, "items": list(stored.get("items", []))}
 
 
 async def save_merge_buffer(session: AsyncSession, target_id: int, buffer: dict) -> None:
@@ -141,7 +143,8 @@ async def load_target_candidates(session, target, keywords, start_at, end_at, *,
     return candidates
 
 
-async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None) -> dict:
+async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None,
+                       *, shared_copy=False) -> dict:
     now = now or utcnow()
     config = target.config
     selected = subscribed_communities(target)
@@ -272,7 +275,8 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if not items:
             lines.append("当前范围内没有匹配的新资讯。")
         if not collected_after:
-            brief = await build_brief(session, items, now, mode="daily" if tool == "digest" else "updates")
+            editor = build_shared_brief if shared_copy else build_brief
+            brief = await editor(session, items, now, mode="daily" if tool == "digest" else "updates")
             items = brief["items"]
             lines = [format_brief(brief)]
     return {"text": "\n".join(lines), "items": items, "instructions": config.get("ai_prompt", ""),
@@ -563,11 +567,7 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
     if can_send:
         items = buffer["items"]
         fresh_official = [item for item in items if item.get("identity") == "official" and not item.get("is_followup")]
-        brief = await build_brief(session, items, now)
-        empty_editor = not brief["items"]
-        if empty_editor:
-            # 已通过通知条件的新官方消息不能因编辑模型选空而丢失；仍只使用原文事实。
-            brief = {**brief, "items": fallback_items(fresh_official, limit=UPDATE_ITEMS)}
+        brief = await build_shared_brief(session, items, now)
         brief = notification_brief(brief, items)
         if brief["items"]:
             selected_keys = set(brief["notification_keys"])
@@ -581,8 +581,8 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
         else:
             # 社区内容和重复续报仍可被编辑筛掉；无法生成原文短讯的官方新消息保留重试。
             remaining = fresh_official
-        logger.info("Bot merge target=%s candidates=%d selected=%d empty_editor=%s remaining=%d",
-                    target.id, len(items), len(brief["items"]), empty_editor, len(remaining))
+        logger.info("Bot merge target=%s candidates=%d selected=%d remaining=%d",
+                    target.id, len(items), len(brief["items"]), len(remaining))
         await save_merge_buffer(session, target.id, {
             "items": remaining, "flush_at": (now + timedelta(minutes=5)).isoformat() if remaining else None,
         })
@@ -597,6 +597,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
     # 进程在发送中退出时无法判定远端结果，绝不盲目自动重发。
     await session.execute(update(BotDelivery).where(BotDelivery.status == "sending", BotDelivery.updated_at < now - timedelta(minutes=5)).values(
         status="unknown", error="发送过程中进程中断，请核对收件端后再重发", updated_at=now))
+    await prune_shared_copies(session, now)
     await session.commit()
     ids = list(await session.scalars(select(BotTarget.id).where(BotTarget.enabled.is_(True))))
     processed = 0
@@ -605,7 +606,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
         config = target.config
         quiet = _is_quiet(local.hour, config)
         quiet_critical = bool(config.get("quiet_critical", False))
-        merge_minutes = int(config.get("merge_minutes", 30) or 0)
+        merge_minutes = int(config.get("merge_minutes", 0) or 0)
         hourly_limit = int(config.get("hourly_limit", 2) or 0)
         max_images = image_limit(config)
         if config.get("reminders_enabled"):
@@ -627,7 +628,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             if due <= now < due + timedelta(hours=2) and target.created_at <= due:
                 key = f"daily:{target.id}:{local.date()}"
                 if not await session.scalar(select(BotDelivery.id).where(BotDelivery.dedupe_key == key)):
-                    payload = await query_target(session, target, now=due)
+                    payload = await query_target(session, target, now=due, shared_copy=True)
                     items = payload.get("items") or []
                     style = config.get("daily_style", "compact")
                     covers = collect_images(items, max_images)
@@ -645,7 +646,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                                 brief={**single_item_brief(item), **lifespan},
                             )
                     else:
-                        brief = payload.get("brief") or await build_brief(session, items, due, mode="daily")
+                        brief = payload.get("brief") or await build_shared_brief(session, items, due, mode="daily")
                         identified = [await identify_item(session, item) for item in items if item.get("id")]
                         brief = notification_brief(brief, identified)
                         brief = {**brief, "scheduled_at": due.isoformat(), "expires_at": (due + timedelta(hours=2)).isoformat()}
@@ -675,7 +676,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     normal_items.append(item)
             for kind, immediate in (("critical", critical_items), ("updates", normal_items if merge_minutes <= 0 else [])):
                 for item in immediate:
-                    brief = notification_brief(await build_brief(session, [item], now), [item])
+                    brief = notification_brief(await build_shared_brief(session, [item], now), [item])
                     if brief["items"]:
                         await create_delivery(session, target, kind, format_brief(brief),
                                               f"{kind}:{target.id}:{item['dedupe']}",
@@ -701,6 +702,8 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                 await save_merge_buffer(session, target.id, buffer)
             target.last_scan_at = now
             await session.commit()
+            if merge_minutes <= 0 and buffer.get("items"):
+                buffer["flush_at"] = now.isoformat()
             await _flush_merge_buffer(
                 session, target, buffer, now,
                 quiet=quiet, quiet_critical=quiet_critical, hourly_limit=hourly_limit, max_images=max_images,

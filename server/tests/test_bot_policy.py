@@ -1,9 +1,11 @@
 """通知以仍可行动为前提，共享预算，不在恢复服务后补刷旧消息。"""
 
 import asyncio
+import json
 from datetime import timedelta
 from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow
@@ -47,7 +49,7 @@ async def test_merge_retains_news_not_selected_in_this_batch(session, monkeypatc
     async def one_item(session, candidates, *args, **kwargs):
         return {'mode': 'updates', 'items': bot.fallback_items(candidates[:1], limit=1)}
 
-    monkeypatch.setattr(bot, 'build_brief', one_item)
+    monkeypatch.setattr(bot, 'build_shared_brief', one_item)
     buffer = {'items': [{**bot._source(item), 'buffered_at': now.isoformat()} for item in items],
               'flush_at': now.isoformat()}
     for index in range(3):
@@ -71,7 +73,7 @@ async def test_empty_editor_does_not_force_community_news_or_followups(session, 
     async def empty(*args, **kwargs):
         return {'mode': 'updates', 'items': []}
 
-    monkeypatch.setattr(bot, 'build_brief', empty)
+    monkeypatch.setattr(bot, 'build_shared_brief', empty)
     buffer = {'items': [{**bot._source(item), 'buffered_at': now.isoformat()} for item in items],
               'flush_at': now.isoformat()}
     await bot._flush_merge_buffer(session, row, buffer, now, quiet=False, quiet_critical=False,
@@ -80,8 +82,65 @@ async def test_empty_editor_does_not_force_community_news_or_followups(session, 
     assert (await bot.load_merge_buffer(session, row.id))['items'] == []
 
 
-async def target(session, now, **config):
-    row = BotTarget(name="测试", umo="qq:GroupMessage:test", enabled=True, created_at=now - timedelta(days=1),
+@pytest.mark.parametrize('empty_editor', [False, True])
+async def test_shared_news_is_edited_once_and_dispatched_immediately(session, monkeypatch, empty_editor):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    targets = [await target(session, now, community='arknights', umo=f'qq:GroupMessage:shared-{i}') for i in range(3)]
+    item = {
+        'id': 9580, 'community': 'arknights', 'identity': 'official', 'title': '【新增服饰】',
+        'text': '【新增服饰】\n//夜行烛火 - 烛煌\n国家图书馆合作服装/夜行烛火。煌在游历炎国各方异域时所穿的服装。',
+        'published_at': now, 'url': 'https://example.com/costume',
+    }
+
+    async def query(*args, **kwargs):
+        return {'items': [item]}
+
+    response = {'items': [] if empty_editor else [{
+        'indices': [1], 'title': '夜行烛火新服饰',
+        'summary': '明日方舟公布烛煌的国家图书馆合作服饰「夜行烛火」。',
+    }]}
+    chat = AsyncMock(side_effect=[(json.dumps(response, ensure_ascii=False), {}), ('{"items":[]}', {})])
+    monkeypatch.setattr(bot, 'query_target', query)
+    monkeypatch.setattr('app.services.bot_briefs.get_ai_config', AsyncMock(return_value={
+        'api_key': 'fake', 'base_url': 'http://model', 'model': 'test',
+    }))
+    monkeypatch.setattr('app.services.bot_briefs.chat', chat)
+    await bot.run_bot_notifications(session, now)
+    deliveries = list(await session.scalars(select(BotDelivery).order_by(BotDelivery.id)))
+    assert chat.await_count == 1
+    assert [d.target_id for d in deliveries] == [t.id for t in targets]
+    assert all(d.kind == 'updates' and d.status == 'pending' for d in deliveries)
+    assert len({d.body for d in deliveries}) == 1
+    assert '夜行烛火' in deliveries[0].body and '烛煌' in deliveries[0].body
+    await bot.run_bot_notifications(session, now + timedelta(minutes=1))
+    assert chat.await_count == 1
+    assert len(list(await session.scalars(select(BotDelivery)))) == 3
+
+
+async def test_new_merge_items_are_persisted_before_the_scan_advances(session, session_factory, monkeypatch):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now, merge_minutes=10)
+    count = 0
+
+    async def query(*args, **kwargs):
+        nonlocal count
+        count += 1
+        return {'items': [{'id': count, 'community': 'wuwa', 'identity': 'official',
+                           'title': f'新增活动{count}', 'text': f'活动{count}将于10月15日开启。',
+                           'published_at': now}]}
+
+    monkeypatch.setattr(bot, 'query_target', query)
+    await bot.run_bot_notifications(session, now)
+    await bot.run_bot_notifications(session, now + timedelta(minutes=1))
+    async with session_factory() as restarted:
+        buffer = await bot.load_merge_buffer(restarted, row.id)
+        assert [item['id'] for item in buffer['items']] == [1, 2]
+        assert (await restarted.get(BotTarget, row.id)).last_scan_at == now + timedelta(minutes=1)
+    assert not list(await session.scalars(select(BotDelivery)))
+
+
+async def target(session, now, *, umo="qq:GroupMessage:test", **config):
+    row = BotTarget(name="测试", umo=umo, enabled=True, created_at=now - timedelta(days=1),
                     last_scan_at=now, config={"updates_enabled": True, "daily_enabled": False,
                     "delivery_mode": "astrbot", "community": "wuwa", "quiet_start": 23, "quiet_end": 8,
                     "hourly_limit": 2, "min_push_interval_minutes": 20, **config})

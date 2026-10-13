@@ -220,7 +220,7 @@ async def test_daily_digest_carries_cover_and_claim_returns_images(client, sessi
     session.add(row)
     await session.commit()
 
-    async def fake_query(session, target, tool='digest', query='', now=None, collected_after=None):
+    async def fake_query(session, target, tool='digest', query='', now=None, collected_after=None, *, shared_copy=False):
         return {'text': '今日速报', 'items': [{'id': i, 'title': f'官方新动态{i}', 'image': f'https://img/{i}.jpg', 'url': f'https://x/{i}', 'identity': 'official'} for i in range(7, 10)],
                 'instructions': '', 'grounding': ''}
 

@@ -91,6 +91,53 @@ async def test_editor_failure_and_invented_facts_keep_compact_fallback(session, 
     assert len(result['items']) == 3 and len(briefs.format_brief(result)) < 300
 
 
+async def test_shared_copy_survives_restart_and_tracks_source_facts(session, session_factory, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={
+        'api_key': 'fake', 'base_url': 'http://model', 'model': 'test',
+    }))
+    chat = AsyncMock(return_value=(json.dumps({'items': [{
+        'indices': [1], 'title': '4.6版本上线时间', 'summary': '星穹铁道4.6版本将在9月28日上线。',
+    }]}, ensure_ascii=False), {}))
+    monkeypatch.setattr(briefs, 'chat', chat)
+    source = content(1, dedupe='first')
+    first = await briefs.build_shared_brief(session, [source], datetime(2026, 9, 20))
+    async with session_factory() as restarted:
+        second = await briefs.build_shared_brief(restarted, [{**source, 'id': 2, 'dedupe': 'second'}],
+                                                 datetime(2026, 9, 20), mode='daily')
+        assert first['items'][0]['title'] == second['items'][0]['title']
+        assert first['items'][0]['summary'] == second['items'][0]['summary']
+        assert second['items'][0]['sources'][0]['id'] == 2
+        assert second['items'][0]['sources'][0]['dedupe'] == 'second'
+        assert chat.await_count == 1
+        changed = {**source, 'text': '4.6版本调整至9月29日上线，专题页已发布。'}
+        chat.return_value = (json.dumps({'items': [{
+            'indices': [1], 'title': '4.6版本时间调整', 'summary': '星穹铁道4.6版本调整至9月29日上线。',
+        }]}, ensure_ascii=False), {})
+        third = await briefs.build_shared_brief(restarted, [changed], datetime(2026, 9, 20))
+        assert chat.await_count == 2 and '9月29日' in third['items'][0]['summary']
+
+
+async def test_shared_copy_does_not_repeat_old_facts_in_a_group_followup(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={
+        'api_key': 'fake', 'base_url': 'http://model', 'model': 'test',
+    }))
+    chat = AsyncMock(return_value=(json.dumps({'items': [{
+        'indices': [1], 'title': '活动开放', 'summary': '星穹铁道活动开放，完成七日任务可获得换装。',
+    }]}, ensure_ascii=False), {}))
+    monkeypatch.setattr(briefs, 'chat', chat)
+    source = content(1, title='活动开放', text='活动开放，完成七日任务可获得换装。\n活动追加10月10日上线时间。')
+    first = await briefs.build_shared_brief(session, [source], datetime(2026, 9, 20))
+    followup = {**source, 'is_followup': True, 'new_points': ['活动追加10月10日上线时间。'],
+                'previous_points': ['活动开放，完成七日任务可获得换装。']}
+    updated = await briefs.build_shared_brief(session, [followup], datetime(2026, 9, 20))
+    fresh_group = await briefs.build_shared_brief(session, [source], datetime(2026, 9, 20))
+    assert chat.await_count == 1
+    assert '补充' in briefs.format_brief(updated) and '10月10日' in briefs.format_brief(updated)
+    assert '七日任务' not in briefs.format_brief(updated)
+    assert first['items'][0]['summary'] == fresh_group['items'][0]['summary']
+    assert not fresh_group['items'][0]['is_followup']
+
+
 def test_merging_keeps_official_and_community_claims_separate():
     official = briefs._source(content(1))
     community = briefs._source(content(2, identity='unknown'))

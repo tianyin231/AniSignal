@@ -1,6 +1,7 @@
 """动态保持短句，早报最多三个重点；来源快照留给追问。"""
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -9,17 +10,22 @@ import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import delete
+
 from app.clock import utcnow
 from app.communities import COMMUNITIES
+from app.models import SiteSetting
 from app.models.enums import COMMUNITY_LABELS
 from app.services.ai import _summary_supported, ai_available, chat, get_ai_config, record_usage
 from app.services.notifications import _is_low_signal_notification, _plain, _summary_respects_identity, is_empty_dynamic_item
+from app.services.settings import get_setting, set_setting
 
 logger = logging.getLogger(__name__)
 MAX_ITEMS = 3
 UPDATE_ITEMS = 2
 SUMMARY_LIMIT = 60
 UPDATE_MAX_AGE = timedelta(hours=24)
+_COPY_PREFIX = "bot_copy_v1_"
 _REWARD_CONDITION = re.compile(r"(?:完成|参与|达到|购买|付费|消耗|登录).*(?:可获得|可领取|领取奖励|获得.*换装)")
 # 先匹配作品名，避免把“明日方舟”里的“明日”当成相对日期。
 _GAME_NAMES = sorted({name for meta in COMMUNITIES.values() for name in meta.game_names}, key=len, reverse=True)
@@ -509,6 +515,55 @@ async def build_brief(session, items: list[dict], now=None, *, mode="updates") -
         item["published_label"] = publication_label(item)
         if item.get("is_supplement"):
             item["title"] = "补充 · " + item["title"]
+    return {"mode": mode, "title": "今日速报" if mode == "daily" else "刚刚的重点",
+            "date": (now + timedelta(hours=8)).strftime("%m/%d"), "items": selected}
+
+
+async def prune_shared_copies(session, now: datetime) -> None:
+    await session.execute(delete(SiteSetting).where(
+        SiteSetting.key.startswith(_COPY_PREFIX), SiteSetting.updated_at < now - timedelta(days=7),
+    ))
+
+
+async def build_shared_brief(session, items: list[dict], now=None, *, mode="updates") -> dict:
+    """自动推送按事实复用基础文案；会话订阅和已读历史不交给文案模型决定。"""
+    now = now or utcnow()
+    limit = MAX_ITEMS if mode == "daily" else UPDATE_ITEMS
+    selected = []
+    for item in items:
+        source = _source(item)
+        if source["is_followup"]:
+            # 本群续报只取可确认的新增事实，不套用完整公告或重新调用编辑模型。
+            edited = fallback_items([source], limit=1)
+        elif source.get("news"):
+            # AI 快讯已经统一审核成文，直接复用，并保留本条来源的链接和身份。
+            edited = await select_brief_items(session, [source], now, limit=1)
+        else:
+            facts = {key: source.get(key) for key in (
+                "title", "text", "key_points", "community", "identity", "published_at", "is_supplement", "news",
+            )}
+            facts["importance"] = bool(item.get("importance"))
+            digest = hashlib.sha256(json.dumps(facts, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:32]
+            key = _COPY_PREFIX + digest
+            cached = await get_setting(session, key)
+            if cached is None:
+                edited = await select_brief_items(session, [source], now, limit=1)
+                fallback = not edited and (source["identity"] == "official" or item.get("importance"))
+                if fallback:
+                    edited = fallback_items([source], limit=1)
+                # 只缓存文案，来源、去重键和会话历史由本次输入提供。
+                cached = {"items": [{field: row[field] for field in ("title", "summary", "share_text") if field in row}
+                                    for row in edited]}
+                await set_setting(session, key, cached)
+                logger.info("Bot shared copy content=%s selected=%d fallback=%s", item.get("id"), len(edited), bool(fallback))
+            edited = [{**source, **copy, "sources": [source]} for copy in cached["items"]]
+        for row in edited:
+            row["published_label"] = publication_label(row)
+            if row.get("is_supplement"):
+                row["title"] = "补充 · " + row["title"]
+            selected.append(row)
+        if len(selected) >= limit:
+            break
     return {"mode": mode, "title": "今日速报" if mode == "daily" else "刚刚的重点",
             "date": (now + timedelta(hours=8)).strftime("%m/%d"), "items": selected}
 
