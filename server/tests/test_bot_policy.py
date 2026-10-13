@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import timedelta
+from unittest.mock import AsyncMock
 
 from sqlalchemy import select
 
@@ -12,6 +13,71 @@ from app.services.bot_calendar import calendar_brief, upcoming_entries
 from app.services.bot_policy import reserve_delivery
 from app.services.extract import _push_to_targets
 from app.services.settings import set_setting
+
+
+async def test_empty_editor_does_not_lose_fresh_official_costume_news(session, monkeypatch):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now, community='arknights')
+    item = await bot.identify_item(session, {
+        'id': 9580, 'community': 'arknights', 'identity': 'official', 'title': '【新增服饰】',
+        'text': '【新增服饰】\n//夜行烛火 - 烛煌\n国家图书馆合作服装/夜行烛火。煌在游历炎国各方异域时所穿的服装。',
+        'published_at': now, 'url': 'https://example.com/costume',
+    })
+    monkeypatch.setattr('app.services.bot_briefs.get_ai_config', AsyncMock(return_value={
+        'api_key': 'fake', 'base_url': 'http://model', 'model': 'test',
+    }))
+    monkeypatch.setattr('app.services.bot_briefs.chat', AsyncMock(return_value=('{"items":[]}', {})))
+    buffer = {'items': [{**bot._source(item), 'buffered_at': now.isoformat()}], 'flush_at': now.isoformat()}
+    await bot._flush_merge_buffer(session, row, buffer, now, quiet=False, quiet_critical=False,
+                                  hourly_limit=0, max_images=1)
+    deliveries = list(await session.scalars(select(BotDelivery).where(BotDelivery.target_id == row.id)))
+    assert len(deliveries) == 1 and deliveries[0].status == 'pending'
+    assert '夜行烛火' in deliveries[0].body and '烛煌' in deliveries[0].body
+    assert (await bot.load_merge_buffer(session, row.id))['items'] == []
+
+
+async def test_merge_retains_news_not_selected_in_this_batch(session, monkeypatch):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    items = [await bot.identify_item(session, {
+        'id': index, 'community': 'wuwa', 'identity': 'official', 'title': f'新增活动{index}',
+        'text': f'活动{index}将于10月15日开启。', 'published_at': now,
+    }) for index in (1, 2, 3)]
+
+    async def one_item(session, candidates, *args, **kwargs):
+        return {'mode': 'updates', 'items': bot.fallback_items(candidates[:1], limit=1)}
+
+    monkeypatch.setattr(bot, 'build_brief', one_item)
+    buffer = {'items': [{**bot._source(item), 'buffered_at': now.isoformat()} for item in items],
+              'flush_at': now.isoformat()}
+    for index in range(3):
+        await bot._flush_merge_buffer(session, row, buffer, now + timedelta(minutes=index * 5),
+                                      quiet=False, quiet_critical=False, hourly_limit=0, max_images=1)
+        buffer = await bot.load_merge_buffer(session, row.id)
+        assert len(buffer['items']) == 2 - index
+    deliveries = list(await session.scalars(select(BotDelivery).where(BotDelivery.target_id == row.id)))
+    sent_ids = [cid for delivery in deliveries for item in delivery.brief['items'] for cid in item['content_ids']]
+    assert sorted(sent_ids) == [1, 2, 3]
+
+
+async def test_empty_editor_does_not_force_community_news_or_followups(session, monkeypatch):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    items = [await bot.identify_item(session, {
+        'id': index, 'community': 'wuwa', 'identity': identity, 'title': '活动体验',
+        'text': '活动体验有所变化。', 'published_at': now, 'is_followup': followup,
+    }) for index, identity, followup in [(1, 'user', False), (2, 'official', True)]]
+
+    async def empty(*args, **kwargs):
+        return {'mode': 'updates', 'items': []}
+
+    monkeypatch.setattr(bot, 'build_brief', empty)
+    buffer = {'items': [{**bot._source(item), 'buffered_at': now.isoformat()} for item in items],
+              'flush_at': now.isoformat()}
+    await bot._flush_merge_buffer(session, row, buffer, now, quiet=False, quiet_critical=False,
+                                  hourly_limit=0, max_images=1)
+    assert not list(await session.scalars(select(BotDelivery).where(BotDelivery.target_id == row.id)))
+    assert (await bot.load_merge_buffer(session, row.id))['items'] == []
 
 
 async def target(session, now, **config):

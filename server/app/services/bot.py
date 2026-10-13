@@ -1,6 +1,7 @@
 """AstrBot 消息通道、只读查询工具和按会话调度。"""
 
 import hashlib
+import logging
 from datetime import datetime, timedelta
 
 import httpx
@@ -13,12 +14,14 @@ from app.communities import COMMUNITIES
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Evidence, Product, RawContent, RedeemCode
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
-from app.services.bot_briefs import (_source, build_brief, changed_points, fallback_items, format_brief,
+from app.services.bot_briefs import (UPDATE_ITEMS, _source, build_brief, changed_points, fallback_items, format_brief,
                                     is_recent_item, news_points, point_key, publication_label, single_item_brief)
 from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 from app.services.bot_calendar import calendar_brief, upcoming_entries, refresh_calendar, scheduled_at, normalized_title
 from app.services.bot_policy import reserve_delivery
+
+logger = logging.getLogger(__name__)
 
 TOOLS = {
     "digest": "今日速报",
@@ -543,8 +546,7 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
             continue
         usable.append(item)
         known.update(key for key in (item.get("dedupe"),) if key)
-    buffer["items"] = usable
-    buffer["items"] = await prepare_update_items(session, target.id, usable, now, previously_known)
+    buffer = {**buffer, "items": await prepare_update_items(session, target.id, usable, now, previously_known)}
     if not buffer["items"]:
         await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
         return
@@ -559,15 +561,31 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
     elif hourly_limit and await _hourly_updates_count(session, target.id, now) >= hourly_limit:
         can_send = False
     if can_send:
-        brief = notification_brief(await build_brief(session, buffer["items"], now), buffer["items"])
-        images = collect_images(brief["items"], max_images)
-        text = format_brief(brief)
-        window_key = hashlib.sha256(
-            (f"merge:{target.id}:" + "".join(sorted(i["dedupe"] for i in buffer["items"]))).encode()
-        ).hexdigest()[:32]
+        items = buffer["items"]
+        fresh_official = [item for item in items if item.get("identity") == "official" and not item.get("is_followup")]
+        brief = await build_brief(session, items, now)
+        empty_editor = not brief["items"]
+        if empty_editor:
+            # 已通过通知条件的新官方消息不能因编辑模型选空而丢失；仍只使用原文事实。
+            brief = {**brief, "items": fallback_items(fresh_official, limit=UPDATE_ITEMS)}
+        brief = notification_brief(brief, items)
         if brief["items"]:
-            await create_delivery(session, target, "updates", text, f"updates:{target.id}:{window_key}", media=images, brief=brief)
-        await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
+            selected_keys = set(brief["notification_keys"])
+            window_key = hashlib.sha256(
+                (f"merge:{target.id}:" + "".join(sorted(i["dedupe"] for i in items if i["dedupe"] in selected_keys))).encode()
+            ).hexdigest()[:32]
+            await create_delivery(session, target, "updates", format_brief(brief), f"updates:{target.id}:{window_key}",
+                                  media=collect_images(brief["items"], max_images), brief=brief)
+            # 每批文案有条数上限，只移除实际入队的来源，其余消息留待下一批。
+            remaining = [item for item in items if item["dedupe"] not in selected_keys]
+        else:
+            # 社区内容和重复续报仍可被编辑筛掉；无法生成原文短讯的官方新消息保留重试。
+            remaining = fresh_official
+        logger.info("Bot merge target=%s candidates=%d selected=%d empty_editor=%s remaining=%d",
+                    target.id, len(items), len(brief["items"]), empty_editor, len(remaining))
+        await save_merge_buffer(session, target.id, {
+            "items": remaining, "flush_at": (now + timedelta(minutes=5)).isoformat() if remaining else None,
+        })
     else:
         buffer["flush_at"] = (now + timedelta(minutes=5)).isoformat()
         await save_merge_buffer(session, target.id, buffer)
