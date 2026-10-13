@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 from datetime import timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
@@ -17,7 +18,7 @@ from app.schemas.content import FetchResult
 
 logger = logging.getLogger(__name__)
 _COOLDOWN_KEY = "anisignal:x:cooldown"
-_REQUEST_INTERVAL_SECONDS = 30
+_REQUEST_INTERVAL_RANGE_SECONDS = (30, 90)
 _DETAIL_CACHE_MS = 24 * 60 * 60 * 1000
 
 
@@ -26,6 +27,7 @@ class XCollector:
 
     def __init__(self):
         self.redis = None
+        self._requested = False
 
     async def _check_cooldown(self):
         if self.redis is not None:
@@ -50,11 +52,14 @@ class XCollector:
     async def _read(self, client, url):
         await self._check_cooldown()
         if self.redis is not None:
-            # 主页和全文共用 Redis 间隔，多 worker 也不会连发请求。
-            async with platform_slot(self.redis, "x", _REQUEST_INTERVAL_SECONDS):
+            # 每次重新抽取间隔；主页和全文共用 Redis 槽位，多 worker 也不会连发。
+            async with platform_slot(self.redis, "x", random.uniform(*_REQUEST_INTERVAL_RANGE_SECONDS)):
                 await self._check_cooldown()
                 response = await client.get(url)
         else:
+            if self._requested:
+                await asyncio.sleep(random.uniform(*_REQUEST_INTERVAL_RANGE_SECONDS))
+            self._requested = True
             response = await client.get(url)
         if response.status_code in {401, 403, 429}:
             await self._pause(response.headers.get("Retry-After", ""))
@@ -83,8 +88,6 @@ class XCollector:
                         reserved = await self.redis.set(f"anisignal:x:detail:{item['id']}", "1", nx=True, px=_DETAIL_CACHE_MS)
                         if not reserved:
                             continue
-                    else:
-                        await asyncio.sleep(3)
                     try:
                         detail = await self._read(client, item["url"])
                         full = parse_page(detail, item["url"])

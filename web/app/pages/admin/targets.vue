@@ -227,7 +227,7 @@ onMounted(refreshRuns)
         :aria-label="form.platform === 'x' ? 'X 账号' : '目标值'"
         class="input px-3 py-2 text-sm"
       >
-      <input v-model.number="form.interval_minutes" aria-label="采集间隔（分钟）" type="number" :min="form.platform === 'x' ? 30 : 5" max="1440" class="input mono px-3 py-2 text-sm">
+      <input v-model.number="form.interval_minutes" :aria-label="form.platform === 'x' ? '基准采集间隔（分钟）' : '采集间隔（分钟）'" :title="form.platform === 'x' ? '每轮随机浮动 ±25%，至少间隔 30 分钟' : ''" type="number" :min="form.platform === 'x' ? 30 : 5" max="1440" class="input mono px-3 py-2 text-sm">
       <select v-model="form.tier" class="select px-3 py-2 text-sm sm:col-span-2" title="核心关键词：商品/联名等特定内容，全量入库强及时；泛关键词：社区泛话题，走共现词与热度门槛">
         <option value="core">准入分级：核心关键词（全量入库，强及时）</option>
         <option value="general">准入分级：泛关键词（走共现词与热度门槛）</option>
@@ -307,7 +307,7 @@ onMounted(refreshRuns)
               </button>
             </td>
             <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-slate-500 dark:text-zinc-400">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
-            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-zinc-300">{{ target.interval_minutes }}min</td>
+            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-zinc-300">{{ target.platform === 'x' ? '约 ' : '' }}{{ target.interval_minutes }}min{{ target.platform === 'x' ? ' · 随机' : '' }}</td>
             <td class="max-w-40 truncate px-3 py-2.5 text-xs text-slate-400" :title="target.last_error ?? ''">
               {{ target.last_error ?? '—' }}
             </td>

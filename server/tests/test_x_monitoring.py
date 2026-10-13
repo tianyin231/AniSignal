@@ -2,6 +2,7 @@
 
 from datetime import timedelta, timezone
 from html import escape
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -108,7 +109,7 @@ async def test_x_collection_ingests_english_posts_and_queues_review(session, ses
     monkeypatch.setattr(x_module.httpx, "AsyncClient", lambda **kwargs: real_client(
         transport=httpx.MockTransport(lambda _: httpx.Response(200, text=entry())), **kwargs))
     monkeypatch.setattr(collect, "SessionLocal", session_factory)
-    monkeypatch.setattr(x_module, "_REQUEST_INTERVAL_SECONDS", 0.001)
+    monkeypatch.setattr(x_module, "_REQUEST_INTERVAL_RANGE_SECONDS", (0.001, 0.001))
     target = CollectTarget(platform="x", target_type="account_dynamics", target_value="openai",
                            community="ai", interval_minutes=60, enabled=True)
     session.add(target)
@@ -199,10 +200,76 @@ async def test_long_post_is_not_repeatedly_expanded_within_one_day(monkeypatch):
 
     monkeypatch.setattr(x_module.httpx, "AsyncClient", lambda **kwargs: real_client(
         transport=httpx.MockTransport(handle), **kwargs))
-    monkeypatch.setattr(x_module, "_REQUEST_INTERVAL_SECONDS", 0.001)
+    monkeypatch.setattr(x_module, "_REQUEST_INTERVAL_RANGE_SECONDS", (0.001, 0.001))
     collector = x_module.XCollector()
     collector.redis = LocalRedis()
     first = await collector.fetch("account_dynamics", "openai", 20)
     assert first.items[0]["truncated"] is False
     await collector.fetch("account_dynamics", "openai", 20)
     assert requests == ["/openai", "/OpenAI/status/100", "/openai"]
+
+
+@pytest.mark.parametrize("interval,failures,minimum,maximum", [
+    (60, 0, 45, 75), (30, 0, 30, 37.5), (60, 2, 180, 300),
+])
+def test_x_schedule_varies_each_round_and_keeps_minimum_and_failure_backoff(interval, failures, minimum, maximum):
+    target = CollectTarget(platform="x", interval_minutes=interval, consecutive_failures=failures)
+    now = utcnow()
+    delays = [(collect.next_run_with_jitter(target, now) - now).total_seconds() / 60 for _ in range(20)]
+    assert all(minimum <= delay <= maximum for delay in delays)
+    assert len(set(delays)) > 1
+
+
+async def test_random_request_spacing_is_shared_by_profile_detail_and_other_accounts(monkeypatch):
+    elapsed = 0.0
+    requests, slots = [], []
+    monkeypatch.setattr("app.services.queue.time", SimpleNamespace(monotonic=lambda: elapsed))
+
+    async def advance(seconds):
+        nonlocal elapsed
+        elapsed += seconds
+
+    monkeypatch.setattr(x_module.asyncio, "sleep", advance)
+    delays = iter([30, 60, 90])
+    monkeypatch.setattr(x_module.random, "uniform", lambda *_: next(delays))
+
+    class Redis(LocalRedis):
+        async def set(self, key, value, nx=False, px=None):
+            acquired = await super().set(key, value, nx=nx, px=px)
+            if acquired:
+                slots.append((key, px))
+            return acquired
+
+    def handle(request):
+        assert "authorization" not in request.headers and "cookie" not in request.headers
+        requests.append((request.url.path, elapsed))
+        return httpx.Response(200, text="public page")
+
+    first, second = x_module.XCollector(), x_module.XCollector()
+    first.redis = second.redis = Redis()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        await first._read(client, "https://x.com/openai")
+        await first._read(client, "https://x.com/openai/status/100")
+        await second._read(client, "https://x.com/deepseek_ai")
+    assert [path for path, _ in requests] == ["/openai", "/openai/status/100", "/deepseek_ai"]
+    assert requests[1][1] - requests[0][1] >= 30
+    assert requests[2][1] - requests[1][1] >= 60
+    assert slots == [("anisignal:politeness:x", 30_000), ("anisignal:politeness:x", 60_000), ("anisignal:politeness:x", 90_000)]
+
+
+async def test_x_accounts_resume_at_different_times_after_shared_cooldown(session, session_factory, monkeypatch):
+    monkeypatch.setattr(collect, "SessionLocal", session_factory)
+    targets = [CollectTarget(platform="x", target_type="account_dynamics", target_value=account,
+                             community="ai", interval_minutes=60, consecutive_failures=0)
+               for account in ("openai", "deepseek_ai")]
+    session.add_all(targets)
+    await session.commit()
+    redis = LocalRedis()
+    await redis.set(x_module._COOLDOWN_KEY, "1", px=7_200_000)
+    results = [await collect.run_collection(redis, target.id) for target in targets]
+    for target in targets:
+        await session.refresh(target)
+        assert target.consecutive_failures == 0 and target.last_success_at is None
+        assert utcnow() + timedelta(minutes=120) < target.next_run_at < utcnow() + timedelta(minutes=130)
+    assert all(result["status"] == "skipped" for result in results)
+    assert targets[0].next_run_at != targets[1].next_run_at

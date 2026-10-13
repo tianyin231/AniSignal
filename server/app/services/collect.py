@@ -390,8 +390,14 @@ async def run_collection(redis, target_id: int) -> dict:
         all_parse_failed = bool(stats and stats.items_found and stats.parse_failed == stats.items_found)
         if retry_at is not None:
             run.status = RunStatus.SKIPPED
-            # 冷却不累加失败，也不绕过目标本身的正常间隔。
-            target.next_run_at = max(retry_at, now + timedelta(minutes=target.interval_minutes))
+            # 冷却不累加失败；X 在冷却结束后随机恢复，避免所有账号同时到期。
+            if target.platform == "x":
+                target.next_run_at = max(
+                    retry_at + timedelta(seconds=random.uniform(60, 600)),
+                    next_run_with_jitter(target, now),
+                )
+            else:
+                target.next_run_at = max(retry_at, now + timedelta(minutes=target.interval_minutes))
         elif stats is not None and not all_parse_failed:
             run.status = RunStatus.PARTIAL if errors or stats.parse_failed else RunStatus.SUCCESS
             target.last_success_at = now
@@ -424,7 +430,7 @@ async def run_collection(redis, target_id: int) -> dict:
 
 
 def next_run_with_jitter(target: CollectTarget, now: datetime | None = None) -> datetime:
-    """下次运行时间 = 间隔 × (1 ± jitter)；失败时按 2^n 退避（封顶 scheduler_failure_backoff_max）。"""
+    """每轮重新抽取间隔；X 抖动 ±25%、至少 30 分钟，失败仍按 2^n 退避。"""
     settings = get_settings()
     now = now or utcnow()
     backoff = 1.0
@@ -433,6 +439,8 @@ def next_run_with_jitter(target: CollectTarget, now: datetime | None = None) -> 
             2 ** min(target.consecutive_failures, settings.scheduler_failure_backoff_max)
         )
     base = target.interval_minutes * 60 * backoff
+    if target.platform == "x":
+        return now + timedelta(seconds=random.uniform(max(1800, base * 0.75), base * 1.25))
     jitter = random.uniform(
         1 - settings.scheduler_jitter_ratio, 1 + settings.scheduler_jitter_ratio
     )
