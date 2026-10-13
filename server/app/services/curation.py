@@ -641,6 +641,9 @@ async def _review_candidates(
                 "identity": source.identity if source else "unknown",
                 "title": (version.title or raw.external_id)[:240],
                 "text": text_plain[:3000] if get_community(community).domain == "news" else text_plain[:1200],
+                "text_truncated": bool((normalized.get("extra") or {}).get("truncated")) or (
+                    raw.platform == "x" and len(text_plain) > 3000),
+                "source_name": source.name if source else None,
                 "rule_category": version.category,
                 "metrics": metrics.get(raw.id),
                 "cover": None if get_community(community).domain == "news" else cover,

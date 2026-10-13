@@ -19,6 +19,7 @@ const combos: Record<string, string[]> = {
   kuro_cn: ['notices'],
   kuro_global: ['notices'],
   youtube: ['channel_rss'],
+  x: ['account_dynamics'],
 }
 
 const form = reactive({
@@ -34,6 +35,7 @@ const form = reactive({
 })
 const creating = ref(false)
 const formError = ref<string | null>(null)
+const editingId = ref<number | null>(null)
 
 const communityLabels: Record<string, string> = Object.fromEntries(
   ADMIN_COMMUNITIES.map(c => [c.key, c.label]),
@@ -47,7 +49,13 @@ const filteredTargets = computed(() =>
 const availableTypes = computed(() => combos[form.platform] ?? [])
 const supportsViews = computed(() => form.community !== 'ai' && form.platform === 'bilibili' && ['keyword_search', 'account_videos'].includes(form.target_type))
 const defaultMinViews = () => supportsViews.value ? 10000 : 0
-watch(() => form.platform, () => { form.target_type = availableTypes.value[0] ?? 'keyword_search' })
+watch(() => form.platform, () => {
+  if (!editingId.value) {
+    form.target_type = availableTypes.value[0] ?? 'keyword_search'
+    form.interval_minutes = form.platform === 'x' ? 60 : 30
+    if (form.platform === 'x') form.community = 'ai'
+  }
+})
 watch([() => form.target_type, () => form.community, supportsViews], () => { form.min_views = defaultMinViews() })
 
 async function refresh() {
@@ -64,8 +72,9 @@ async function create() {
   creating.value = true
   formError.value = null
   try {
-    await api('/api/admin/collect-targets', {
-      method: 'POST',
+    const wasEditing = editingId.value !== null
+    await api(wasEditing ? `/api/admin/collect-targets/${editingId.value}` : '/api/admin/collect-targets', {
+      method: wasEditing ? 'PUT' : 'POST',
       body: {
         platform: form.platform,
         target_type: form.target_type,
@@ -78,6 +87,8 @@ async function create() {
         community: form.community,
       },
     })
+    editingId.value = null
+    toast.ok(wasEditing ? '采集目标已保存' : '采集目标已创建')
     form.target_value = ''
     form.display_name = ''
     form.co_terms = ''
@@ -85,10 +96,32 @@ async function create() {
     form.tier = 'general'
     await refresh()
   } catch (exc: any) {
-    formError.value = exc?.statusCode === 409 ? '该目标已存在' : `创建失败：${exc?.data?.detail ?? exc?.message ?? exc}`
+    formError.value = exc?.statusCode === 409 ? '该目标已存在' : `保存失败：${exc?.data?.detail ?? exc?.message ?? exc}`
   } finally {
     creating.value = false
   }
+}
+
+async function edit(target: CollectTarget) {
+  editingId.value = target.id
+  formError.value = null
+  Object.assign(form, {
+    platform: target.platform, target_type: target.target_type, target_value: target.target_value,
+    display_name: target.display_name || '', interval_minutes: target.interval_minutes,
+    co_terms: (target.co_terms || []).join('，'), min_views: target.min_views || 0,
+    tier: target.tier, community: target.community,
+  })
+  await nextTick()
+  form.min_views = target.min_views || 0
+  document.getElementById('collect-target-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function cancelEdit() {
+  editingId.value = null
+  form.target_value = ''
+  form.display_name = ''
+  form.co_terms = ''
+  formError.value = null
 }
 
 async function toggle(target: CollectTarget) {
@@ -180,31 +213,35 @@ onMounted(refreshRuns)
       </p>
     </div>
 
-    <form class="panel grid gap-3 p-5 sm:grid-cols-[9rem_9rem_1fr_6rem_auto]" @submit.prevent="create">
-      <select v-model="form.platform" class="select px-3 py-2 text-sm">
+    <form id="collect-target-form" class="panel grid gap-3 p-5 sm:grid-cols-[9rem_9rem_1fr_6rem_auto]" @submit.prevent="create">
+      <p v-if="editingId" class="col-span-full text-sm font-medium">编辑采集目标 #{{ editingId }}</p>
+      <select v-model="form.platform" aria-label="平台" :disabled="editingId !== null" class="select px-3 py-2 text-sm">
         <option v-for="(label, value) in platformLabels" :key="value" :value="value">{{ label }}</option>
       </select>
-      <select v-model="form.target_type" class="select px-3 py-2 text-sm">
+      <select v-model="form.target_type" aria-label="采集类型" :disabled="editingId !== null" class="select px-3 py-2 text-sm">
         <option v-for="type in availableTypes" :key="type" :value="type">{{ targetTypeLabels[type] ?? type }}</option>
       </select>
       <input
         v-model="form.target_value"
-        placeholder="关键词 / 账号 UID / 频道 ID（公告类可留占位）"
+        :placeholder="form.platform === 'x' ? '@账号 或 https://x.com/账号' : '关键词 / 账号 UID / 频道 ID（公告类可留占位）'"
+        :aria-label="form.platform === 'x' ? 'X 账号' : '目标值'"
         class="input px-3 py-2 text-sm"
       >
-      <input v-model.number="form.interval_minutes" type="number" min="5" max="1440" class="input mono px-3 py-2 text-sm">
+      <input v-model.number="form.interval_minutes" aria-label="采集间隔（分钟）" type="number" :min="form.platform === 'x' ? 30 : 5" max="1440" class="input mono px-3 py-2 text-sm">
       <select v-model="form.tier" class="select px-3 py-2 text-sm sm:col-span-2" title="核心关键词：商品/联名等特定内容，全量入库强及时；泛关键词：社区泛话题，走共现词与热度门槛">
         <option value="core">准入分级：核心关键词（全量入库，强及时）</option>
         <option value="general">准入分级：泛关键词（走共现词与热度门槛）</option>
       </select>
-      <select v-model="form.community" class="select px-3 py-2 text-sm" title="所属游戏分区：决定内容与事件的归属">
+      <select v-model="form.community" aria-label="所属分区" class="select px-3 py-2 text-sm" title="所属分区：决定内容与事件的归属">
         <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
       </select>
+      <input v-model="form.display_name" aria-label="显示名称" placeholder="显示名称（可选）" class="input px-3 py-2 text-sm sm:col-span-2">
       <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="input px-3 py-2 text-sm sm:col-span-2">
       <label class="text-xs text-slate-500 dark:text-zinc-400">{{ supportsViews ? '最低播放量（0 不过滤）' : '此目标没有播放量门槛' }}<input v-model.number="form.min_views" type="number" min="0" :disabled="!supportsViews" class="input mono mt-1 w-full px-3 py-2 text-sm disabled:opacity-50"></label>
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
-        {{ creating ? '创建中…' : '新增目标' }}
+        {{ creating ? '保存中…' : editingId ? '保存修改' : '新增目标' }}
       </button>
+      <button v-if="editingId" type="button" class="px-3 py-2 text-sm text-slate-500" :disabled="creating" @click="cancelEdit">取消编辑</button>
       <p v-if="formError" class="col-span-full text-sm text-red-600 dark:text-red-400">{{ formError }}</p>
     </form>
 
@@ -275,6 +312,7 @@ onMounted(refreshRuns)
               {{ target.last_error ?? '—' }}
             </td>
             <td class="whitespace-nowrap px-3 py-2.5 text-right">
+              <button class="rounded px-1.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id || creating" @click="edit(target)">编辑</button>
               <button class="rounded px-1.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id" @click="runNow(target)">立即采集</button>
               <button class="rounded px-1.5 py-1 text-xs text-slate-500 hover:underline dark:text-zinc-400" :disabled="busyId === target.id" @click="toggle(target)">
                 {{ target.enabled ? '停用' : '启用' }}

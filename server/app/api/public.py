@@ -280,7 +280,7 @@ async def list_contents(
                 category=version.category,
                 metrics=None,
                 cover=media[0] if isinstance(media, list) and media else None,
-                preview_mode=_preview_mode(text, media if isinstance(media, list) else [], raw.url),
+                preview_mode="partial" if ((normalized or {}).get("extra") or {}).get("truncated") else _preview_mode(text, media if isinstance(media, list) else [], raw.url),
                 matched_keywords=(raw.matched_keywords or []),
                 community=(raw.community or DEFAULT_COMMUNITY),
             )
@@ -545,6 +545,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         title=(version.title if version else None) or raw.external_id,
         text=text or None,
         text_html=_sanitize_html(text) if text else None,
+        text_truncated=bool((normalized.get("extra") or {}).get("truncated")),
         published_at=raw.published_at,
         collected_at=raw.collected_at,
         last_seen_at=raw.last_seen_at,
@@ -558,7 +559,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         translation=translation,
         matched_keywords=(raw.matched_keywords or []),
         version=version.version if version else None,
-        preview_mode=_preview_mode(text, media, raw.url),
+        preview_mode="partial" if (normalized.get("extra") or {}).get("truncated") else _preview_mode(text, media, raw.url),
     )
 
 @router.get("/events", response_model=EventListOut)

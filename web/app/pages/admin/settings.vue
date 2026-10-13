@@ -56,6 +56,7 @@ const PLATFORM_MEDIA: { key: string; label: string }[] = [
   { key: 'kuro_cn', label: '库街区·国服' },
   { key: 'kuro_global', label: '库街区·国际服' },
   { key: 'miyoushe', label: '米游社' },
+  { key: 'x', label: 'X' },
 ]
 const mediaVisibility = reactive({
   default: { image: 'show', video: 'show' },

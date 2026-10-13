@@ -108,6 +108,7 @@ export const platformLabels: Record<string, string> = {
   kuro_cn: '库街区·国服',
   kuro_global: '库街区·国际服',
   youtube: 'YouTube',
+  x: 'X',
 }
 
 export const targetTypeLabels: Record<string, string> = {

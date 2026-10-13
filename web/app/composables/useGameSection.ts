@@ -77,7 +77,7 @@ export const PLATFORMS_BY_COMMUNITY: Record<GameCommunityKey, string[]> = {
   blhx: ['bilibili'],
   hsr: ['bilibili', 'youtube'],
   arknights: ['bilibili', 'youtube'],
-  ai: ['bilibili'],
+  ai: ['bilibili', 'x'],
 }
 
 export function platformsForCommunity(community: string): string[] {

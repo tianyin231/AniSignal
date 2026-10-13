@@ -11,6 +11,7 @@ class Platform(StrEnum):
     KURO_CN = "kuro_cn"
     KURO_GLOBAL = "kuro_global"
     YOUTUBE = "youtube"
+    X = "x"
 
 
 class Community(StrEnum):

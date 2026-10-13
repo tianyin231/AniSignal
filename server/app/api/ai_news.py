@@ -84,7 +84,7 @@ async def list_news(
             id=raw.id, headline=value["headline"], summary=value["summary"],
             original_title=version.title or "", kind=value["kind"], topics=value["topics"],
             platform=raw.platform, source_name=source.name if source and source.name else "来源未署名",
-            source_role="secondary", published_at=raw.published_at, url=raw.url,
+            source_role="original" if raw.platform == "x" else "secondary", published_at=raw.published_at, url=raw.url,
             references=reference_links(version.text or ""),
         ))
     targets = list(await session.scalars(select(CollectTarget).where(

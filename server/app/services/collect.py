@@ -24,6 +24,7 @@ from app.collectors.kuro import KuroCollector
 from app.collectors.miyoushe import MiyousheCollector
 from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
+from app.collectors.x import XCollector
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import CollectRun, CollectTarget, Platform, Product, RawContent, RunStatus
@@ -38,6 +39,7 @@ _COLLECTORS = {
     "bilibili": lambda: BilibiliCollector(),
     "miyoushe": lambda: MiyousheCollector(),
     "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
+    "x": XCollector,
     "kuro_cn": lambda: KuroCollector(Platform.KURO_CN),
     "kuro_global": lambda: KuroCollector(Platform.KURO_GLOBAL),
 }
@@ -104,7 +106,12 @@ def filter_relevant(
 
         kept = []
         for item in items:
-            if not is_news_candidate(str(item.get("title") or "")):
+            if target.platform == "x":
+                # 英文原帖没有视频标题；全文交给资讯审核，不套中文标题词表。
+                body = str(item.get("text") or "").casefold()
+                if co_terms and not any(term.casefold() in body for term in co_terms):
+                    continue
+            elif not is_news_candidate(str(item.get("title") or "")):
                 continue
             item["_matched_keywords"] = [target.target_value]
             kept.append(item)

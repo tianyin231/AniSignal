@@ -22,6 +22,7 @@ from app.models import (
     EventRevision,
     Evidence,
     MetricSnapshot,
+    Platform,
     Product,
     RawContent,
     Source,
@@ -77,6 +78,19 @@ async def get_queue(request: Request) -> BaseQueue:
 # ---------- 采集目标 ----------
 
 
+def _x_target_value(value: str, target_type: str, interval_minutes: int) -> str:
+    from app.parsers.x import normalize_account
+
+    if target_type != "account_dynamics":
+        raise HTTPException(422, "X 目前仅支持账号动态监控")
+    if interval_minutes < 30:
+        raise HTTPException(422, "X 账号采集间隔至少 30 分钟")
+    try:
+        return normalize_account(value)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @router.get("/collect-targets", response_model=list[CollectTargetOut])
 async def list_targets(
     community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
@@ -97,6 +111,8 @@ async def create_target(
 ):
     from app.clock import utcnow
 
+    if body.platform == "x":
+        body.target_value = _x_target_value(body.target_value, body.target_type, body.interval_minutes)
     duplicate = await session.scalar(
         select(CollectTarget).where(
             CollectTarget.platform == body.platform,
@@ -139,6 +155,9 @@ async def update_target(
     target = await session.get(CollectTarget, target_id)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "target not found")
+    if target.platform == "x":
+        body.target_value = _x_target_value(body.target_value or target.target_value, target.target_type,
+                                          body.interval_minutes if body.interval_minutes is not None else target.interval_minutes)
     bound_product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))
     if bound_product and body.community is not None and body.community != bound_product.community:
         raise HTTPException(status.HTTP_409_CONFLICT, "该目标已关联商品，请从商品管理修改所属分区")
@@ -158,6 +177,9 @@ async def update_target(
         if duplicate is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "target already exists")
         target.target_value = body.target_value
+        target.last_success_at, target.last_error, target.consecutive_failures = None, None, 0
+        if target.enabled:
+            target.next_run_at = utcnow()
     if body.tier is not None:
         target.tier = body.tier
     if body.community is not None:
@@ -1001,7 +1023,7 @@ async def reparse_all(
     from app.services.ingest import reparse_contents
 
     platforms = (
-        [platform] if platform else ["bilibili", "miyoushe", "kuro_cn", "kuro_global", "youtube"]
+        [platform] if platform else [item.value for item in Platform]
     )
     summary = {"checked": 0, "updated": 0, "failed": 0}
     for name in platforms:
