@@ -8,9 +8,14 @@ from urllib.parse import urlsplit
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"
 _STATUS_PATH = re.compile(r"/([A-Za-z0-9_]+)/status/(\d+)")
 _VOID = set("area base br col embed hr img input link meta param source track wbr".split())
+
+
+def _is_post(node):
+    # 匿名页改版后去掉了 data-timeline-entry，原帖与引用仍各有完整的 data-href。
+    return bool(_STATUS_PATH.fullmatch(node.attrs.get("data-href", "")))
 
 
 def normalize_account(value: str) -> str:
@@ -35,7 +40,7 @@ class _Node:
         yield self
         for child in self.children:
             if isinstance(child, _Node):
-                if own and "data-timeline-entry" in child.attrs:
+                if own and _is_post(child):
                     continue
                 yield from child.walk(own=own)
 
@@ -107,10 +112,10 @@ def parse_page(source: str, post_url: str | None = None) -> list[dict]:
         return [{**item, "text_scope": "full_post"}] if item else []
     rows = []
     for node in doc.root.walk():
-        if "data-timeline-entry" not in node.attrs:
+        if not _is_post(node):
             continue
         parent = node.parent
-        while parent and "data-timeline-entry" not in parent.attrs:
+        while parent and not _is_post(parent):
             parent = parent.parent
         if parent is None and (item := _item(node, node.attrs.get("data-href", ""))):
             rows.append(item)

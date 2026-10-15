@@ -513,6 +513,9 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     # 早报拆条和兑换码各自有有效期；普通即时消息不能用刚入队的时间续命。
     if row.kind in {"updates", "critical"} and not brief.get("scheduled_at") and brief.get("mode") != "notice":
         usable = [item for item in usable if is_recent_item(item, now)]
+    if any(item.get("news") for item in usable) and not brief.get("news_dedupe_checked"):
+        # 去重需要模型比较事实，在 worker 中完成，不能占着领取行锁等待模型。
+        return False
     if len(usable) == len(items) and (usable or row.brief.get("mode") == "notice"):
         return True
     if usable:
@@ -710,6 +713,9 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             )
         elif buffer.get("items"):
             await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
+        from app.services.bot_news import dedupe_pending_news
+
+        await dedupe_pending_news(session, target.id, now)
         pending = list(await session.scalars(select(BotDelivery).where(
             BotDelivery.target_id == target.id,
             BotDelivery.kind.in_(["daily", "updates", "critical", "reminder", "calendar"]),
