@@ -43,6 +43,17 @@ def test_account_and_post_preserve_original_author_time_and_media():
     assert post.extra["quoted_urls"] == ["https://x.com/someone_else/status/99"]
 
 
+def test_profile_without_timeline_marker_keeps_quotes_separate():
+    quote = entry("99", "Quoted news must not replace the original.", "someone_else", 1700000000)
+    page = entry(text="Original post.", stamp=1700000300, quote=quote)
+    page = page.replace('data-timeline-entry=""', 'role="link" data-navigation-stop=""')
+    rows = parse_page(page)
+    assert len(rows) == 1
+    assert rows[0]["author"] == "OpenAI" and rows[0]["text"] == "Original post."
+    assert rows[0]["published_at"] == "2023-11-14T22:18:20+00:00"
+    assert rows[0]["quoted_urls"] == ["https://x.com/someone_else/status/99"]
+
+
 async def test_admin_can_create_edit_pause_and_trigger_x_account(client, admin_headers, fake_queue):
     response = await client.post("/api/admin/collect-targets", headers=admin_headers, json={
         "platform": "x", "target_type": "account_dynamics", "target_value": "https://x.com/OpenAI",
