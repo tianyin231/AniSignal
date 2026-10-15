@@ -58,10 +58,13 @@ async def test_cross_source_duplicates_removed_but_recovery_and_new_version_kept
     assert len(seen) == 1
 
 
-async def test_compilation_only_keeps_new_fact_without_replacing_original_review(session, monkeypatch):
+@pytest.mark.parametrize("mode", ["daily", "single"])
+async def test_compilation_only_keeps_new_fact_without_replacing_original_review(session, monkeypatch, mode):
     t = await target(session, community="ai")
     await enqueue(session, t, "DeepSeek 服务恢复", "来源报道服务恢复。", status="unknown")
     row = await enqueue(session, t, "DeepSeek 恢复并补偿", "来源报道服务恢复，并退还 7 天费用。", raw_id=2, kind="daily")
+    row.brief = {**row.brief, "mode": mode}
+    await session.commit()
     original = row.brief["items"][0]["news"].copy()
     seen = []
     await model(session, monkeypatch, [{"index": 0, "action": "update", "covered_by": ["history:0"],

@@ -154,10 +154,8 @@ async def dedupe_pending_news(session, target_id: int, now) -> dict:
                           "share_text": share, "notification_news": news})
         brief = {**row.brief, "items": items, "news_dedupe_checked": True}
         if items:
-            from app.services.bot import format_short_update
-
             # 保留原去重键：被裁掉的旧事实也已覆盖，不能再以另一种排版入队。
-            body = format_short_update(items[0]) if brief.get("mode") == "single" else format_brief(brief)
+            body = format_brief({**brief, "mode": "updates"}) if brief.get("mode") == "single" else format_brief(brief)
             values = {"brief": brief, "body": body, "rendered_body": None, "error": None}
         else:
             cancelled += 1
