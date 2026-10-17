@@ -30,6 +30,8 @@ class CollectRun(Base):
     items_fetched: Mapped[int | None] = mapped_column(Integer)
     items_filtered: Mapped[int | None] = mapped_column(Integer)
     items_updated: Mapped[int | None] = mapped_column(Integer)
+    # 意图打标判为"忽略"而丢弃的条数：丢弃必须可见，不能静默
+    items_ignored: Mapped[int | None] = mapped_column(Integer)
     parse_failed: Mapped[int | None] = mapped_column(Integer)
     official_items: Mapped[int | None] = mapped_column(Integer)
     community_items: Mapped[int | None] = mapped_column(Integer)

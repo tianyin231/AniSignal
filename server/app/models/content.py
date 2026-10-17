@@ -54,6 +54,10 @@ class RawContent(Base):
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # 官方内容实体抽取（日程/兑换码）完成时间；NULL = 待抽取
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # 采集意图打标（AI 层产物，可重算）：important / normal / ignore + 依据
+    intent_tier: Mapped[str | None] = mapped_column(String(16), index=True)
+    intent_reason: Mapped[str | None] = mapped_column(String(300))
+    intent_labeled_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     versions: Mapped[list["ContentVersion"]] = relationship(
         back_populates="raw_content",

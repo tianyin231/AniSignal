@@ -30,6 +30,7 @@ const form = reactive({
   co_terms: '',
   min_views: 10000,
   tier: 'general',
+  intent: '',
   community: 'wuwa',
 })
 const creating = ref(false)
@@ -72,6 +73,7 @@ async function create() {
         co_terms: form.co_terms.split(/[,，]/).map((x: string) => x.trim()).filter(Boolean),
         min_views: Number(form.min_views) || 0,
         tier: form.tier,
+        intent: form.intent.trim() || null,
         community: form.community,
       },
     })
@@ -80,6 +82,7 @@ async function create() {
     form.co_terms = ''
     form.min_views = 10000
     form.tier = 'general'
+    form.intent = ''
     await refresh()
   } catch (exc: any) {
     formError.value = exc?.statusCode === 409 ? '该目标已存在' : `创建失败：${exc?.data?.detail ?? exc?.message ?? exc}`
@@ -155,6 +158,7 @@ interface RunItem {
   items_new: number | null
   items_fetched: number | null
   items_filtered: number | null
+  items_ignored: number | null
 }
 const runs = ref<RunItem[]>([])
 const targetName = (targetId: number) =>
@@ -198,6 +202,7 @@ onMounted(refreshRuns)
         <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
       </select>
       <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="input px-3 py-2 text-sm sm:col-span-2">
+      <input v-model="form.intent" placeholder="监控意图（自然语言，如 只在乎官方公告与发货信息；留空不送 AI 打标）" class="input px-3 py-2 text-sm sm:col-span-2">
       <input v-model.number="form.min_views" type="number" min="0" :placeholder="form.tier === 'core' ? '最低播放量（核心分级可选，0 不过滤）' : '最低播放量（默认 10000；0 不过滤）'" class="input mono px-3 py-2 text-sm">
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
         {{ creating ? '创建中…' : '新增目标' }}
@@ -241,6 +246,11 @@ onMounted(refreshRuns)
             <td class="px-3 py-2.5">
               <span class="font-medium">{{ target.display_name && target.display_name !== target.target_value ? target.display_name : target.target_value }}</span>
               <span v-if="target.display_name && target.display_name !== target.target_value" class="mono ml-1.5 text-xs text-slate-400">{{ target.target_value }}</span>
+              <span
+                v-if="target.intent"
+                class="chip ml-1.5 whitespace-nowrap bg-amber-500/10 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300"
+                :title="`监控意图：${target.intent}`"
+              >意图</span>
             </td>
             <td class="whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-zinc-300">
               {{ platformLabels[target.platform] ?? target.platform }}
@@ -300,7 +310,7 @@ onMounted(refreshRuns)
               <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-slate-500/10 text-slate-500'">{{ run.status }}</span>
             </td>
             <td class="mono px-4 py-2 text-slate-500 dark:text-zinc-400">
-              抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 入库 {{ run.items_new ?? 0 }}
+              抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 忽略 {{ run.items_ignored ?? 0 }} · 入库 {{ run.items_new ?? 0 }}
             </td>
           </tr>
           <tr v-if="!runs.length">

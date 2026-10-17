@@ -117,6 +117,7 @@ async def create_target(
         min_views=body.min_views,
         tier=body.tier,
         community=body.community,
+        intent=body.intent,
         next_run_at=utcnow() if body.enabled else None,
     )
     session.add(target)
@@ -161,6 +162,8 @@ async def update_target(
         target.min_views = body.min_views
     if body.co_terms is not None:
         target.co_terms = body.co_terms
+    if body.intent is not None:
+        target.intent = body.intent
     if body.enabled is not None:
         was_disabled = not target.enabled
         target.enabled = body.enabled
@@ -495,6 +498,7 @@ async def list_runs(
             "items_new": run.items_new,
             "items_fetched": run.items_fetched,
             "items_filtered": run.items_filtered,
+            "items_ignored": run.items_ignored,
             "parse_failed": run.parse_failed,
         }
         for run in result.scalars()

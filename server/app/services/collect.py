@@ -26,6 +26,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import CollectRun, CollectTarget, Platform, RunStatus
 from app.services.ingest import IngestStats, ingest_items
+from app.services.intent import persist_intent_tiers, triage_hits
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +181,8 @@ async def run_collection(redis, target_id: int) -> dict:
         error_text: str | None = None
         items_fetched = 0
         items_filtered = 0
+        items_ignored = 0
+        triage = None
         try:
             collector_factory = _COLLECTORS.get(target.platform)
             if collector_factory is None:
@@ -206,9 +209,47 @@ async def run_collection(redis, target_id: int) -> dict:
                     "target %s: %s items filtered by relevance rules",
                     target.id, filtered_out,
                 )
+            # 意图打标（目标配了自然语言意图才走 AI）：parser 归一化命中 → 三档判定
+            # → 忽略的丢弃、一般的入库、重要的入库并落 tier。AI 不可用时全部放行。
+            try:
+                triage = await triage_hits(
+                    session, target, fetch_result.items, fetch_result.fetch_kind
+                )
+            except Exception:  # noqa: BLE001 - 打标不得阻断采集主链路
+                logger.exception("intent triage failed for target %s", target.id)
+            if triage is not None:
+                items_ignored = triage.ignored
+                if triage.labeled:
+                    fetch_result.items = triage.kept
+                    logger.info(
+                        "target %s: %s items ignored by intent triage",
+                        target.id, triage.ignored,
+                    )
             stats = await ingest_items(
                 session, fetch_result.fetch_kind, fetch_result.items, community=target.community
             )
+            important_content_ids: list[int] = []
+            if triage is not None and triage.labeled:
+                # 三档结果写回内容（AI 层产物，可重算）；important 的留给机器人投递
+                tier_by_external = await persist_intent_tiers(
+                    session, target.platform, triage.hits
+                )
+                important_content_ids = [
+                    tier_by_external[external_id]
+                    for external_id in triage.important_ids
+                    if external_id in tier_by_external
+                ]
+                if important_content_ids:
+                    from app.services.bot import push_important_contents
+
+                    try:
+                        pushed = await push_important_contents(session, important_content_ids)
+                        logger.info(
+                            "intent push: %s critical deliveries for %s important contents",
+                            pushed, len(important_content_ids),
+                        )
+                    except Exception:  # noqa: BLE001 - 投递失败不影响采集结果
+                        logger.exception("push important contents failed")
             if fetch_result.fetch_kind == "bilibili_dynamics":
                 try:
                     await _backfill_empty_draw_dynamics(session, collector_factory())
@@ -260,6 +301,7 @@ async def run_collection(redis, target_id: int) -> dict:
         run.items_new = stats.items_new if stats else 0
         run.items_fetched = items_fetched
         run.items_filtered = items_filtered
+        run.items_ignored = items_ignored
         run.items_updated = stats.items_updated if stats else 0
         run.parse_failed = stats.parse_failed if stats else 0
         run.official_items = stats.official_items if stats else 0
@@ -290,6 +332,7 @@ async def run_collection(redis, target_id: int) -> dict:
             "status": run.status,
             "items_found": run.items_found,
             "items_new": run.items_new,
+            "items_ignored": run.items_ignored,
             "error": error_text,
         }
 

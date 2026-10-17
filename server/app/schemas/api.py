@@ -25,6 +25,8 @@ class CollectTargetCreate(BaseModel):
     min_views: int = Field(default=0, ge=0, le=10_000_000)
     tier: str = Field(default="general", pattern="^(core|general)$")
     community: str = Field(default=_DEFAULT_COMMUNITY, pattern=COMMUNITY_PATTERN)
+    # 监控意图：自然语言描述"这个目标到底在乎什么"（空 = 不送 AI 打标）
+    intent: str | None = Field(default=None, max_length=1000)
 
 
 class CollectTargetUpdate(BaseModel):
@@ -36,6 +38,7 @@ class CollectTargetUpdate(BaseModel):
     min_views: int | None = Field(default=None, ge=0, le=10_000_000)
     tier: str | None = Field(default=None, pattern="^(core|general)$")
     community: str | None = Field(default=None, pattern=COMMUNITY_PATTERN)
+    intent: str | None = Field(default=None, max_length=1000)
 
 
 class CollectTargetOut(BaseModel):
@@ -50,6 +53,7 @@ class CollectTargetOut(BaseModel):
     min_views: int = 0
     tier: str = "general"
     community: str = _DEFAULT_COMMUNITY
+    intent: str | None = None
     next_run_at: datetime | None
 
     @field_validator("co_terms", mode="before")

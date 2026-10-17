@@ -30,6 +30,8 @@ class CollectTarget(Base):
     tier: Mapped[str] = mapped_column(String(16), default="general")
     # 所属游戏分区（鸣潮/碧蓝航线），决定入库内容与事件的归属
     community: Mapped[str] = mapped_column(String(16), default=DEFAULT_COMMUNITY)
+    # 监控意图：自然语言描述"这个目标到底在乎什么"（空 = 不送 AI 打标）
+    intent: Mapped[str | None] = mapped_column(Text, default=None)
 
     # 调度字段（naive UTC）
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime)
