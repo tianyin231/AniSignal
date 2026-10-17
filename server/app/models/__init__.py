@@ -40,6 +40,21 @@ from app.models.output import (
     WebhookDelivery,
 )
 from app.models.product import FULFILLMENT_STAGES, Product
+from app.models.product_dossier import (
+    BRIEF_SECTIONS,
+    FEEDBACK_SENTIMENTS,
+    FEEDBACK_SENTIMENT_LABELS,
+    RELEASE_STATES,
+    RELEASE_STATE_LABELS,
+    TRACK_STATES,
+    TRACK_STATE_LABELS,
+    DailyBrief,
+    ProductFeedback,
+    ProductPriceAlert,
+    ProductPricePoint,
+    ProductProfile,
+    ProductTrackState,
+)
 from app.models.run import CollectRun
 from app.models.rules import (
     INTENT_TIERS,
@@ -102,6 +117,19 @@ __all__ = [
     "WEBHOOK_TIER_IMPORTANT",
     "Product",
     "FULFILLMENT_STAGES",
+    "ProductProfile",
+    "ProductPricePoint",
+    "ProductFeedback",
+    "ProductTrackState",
+    "ProductPriceAlert",
+    "RELEASE_STATES",
+    "RELEASE_STATE_LABELS",
+    "TRACK_STATES",
+    "TRACK_STATE_LABELS",
+    "FEEDBACK_SENTIMENTS",
+    "FEEDBACK_SENTIMENT_LABELS",
+    "DailyBrief",
+    "BRIEF_SECTIONS",
     "Rule",
     "RuleHit",
     "VolumeBaseline",

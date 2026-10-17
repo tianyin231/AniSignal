@@ -150,6 +150,29 @@ async def sweep_volume_alerts(ctx) -> dict:
         return result
 
 
+async def sweep_price_alerts(ctx) -> dict:
+    """到价提醒扫描：价格观测低于用户心理价位时按既有渠道通知。"""
+    from app.db import SessionLocal
+    from app.services.product_dossier import sweep_price_alerts as run
+
+    async with SessionLocal() as session:
+        result = await run(session)
+        if result.get("triggered"):
+            logger.info("price alert sweep -> %s", result)
+        return result
+
+
+async def generate_daily_brief(ctx) -> dict:
+    """每日情报简报：汇总昨日事件/命中/商品/声量，AI 写成简报后推送。"""
+    from app.db import SessionLocal
+    from app.services.briefing import run_daily_brief
+
+    async with SessionLocal() as session:
+        result = await run_daily_brief(session)
+        logger.info("daily brief -> %s", result)
+        return result
+
+
 class WorkerSettings:
     functions = [
         send_bot_notifications,
@@ -164,6 +187,8 @@ class WorkerSettings:
         collect_custom_feeds,
         extract_entities_sweep,
         sweep_volume_alerts,
+        sweep_price_alerts,
+        generate_daily_brief,
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4

@@ -281,6 +281,97 @@ export interface ApiProduct {
   updated_at: string | null
 }
 
+/** 商品档案（批次 3b）：一物一档的公开聚合视图。 */
+export interface ApiProductSeriesPoint {
+  date: string
+  price: number | null
+  heat: number | null
+  hits: number
+}
+
+export interface ApiProductFeedback {
+  id: number
+  sentiment: 'negative' | 'mixed' | 'positive'
+  sentiment_label: string
+  score: number
+  summary: string
+  quote: string | null
+  source_method: 'ai' | 'fallback'
+  reviewed: boolean
+  content_id: number | null
+  url: string | null
+  created_at: string | null
+}
+
+export interface ApiProductTimelineItem {
+  event_id: number
+  title: string
+  category: string | null
+  identity: string
+  importance: boolean
+  summary: string | null
+  first_seen_at: string | null
+  latest_evidence_at: string | null
+  evidence_count: number
+  manual_locked: boolean
+}
+
+export interface ApiProductDossier {
+  product_id: number
+  slug: string
+  name: string
+  publisher: string | null
+  community: string
+  skus: string[]
+  price_note: string | null
+  profile: {
+    cover_url: string | null
+    official_url: string | null
+    official_name: string | null
+    aliases: string[]
+    release_at: string | null
+    release_state: string
+    release_state_label: string
+    release_note: string | null
+    price_current: number | null
+    price_currency: string
+    price_source: string | null
+    price_observed_at: string | null
+    heat_score: number
+    note: string | null
+    updated_at: string | null
+  } | null
+  series: ApiProductSeriesPoint[]
+  timeline: ApiProductTimelineItem[]
+  feedback: ApiProductFeedback[]
+  calendar_entry: ApiReleaseCalendarEntry | null
+  fulfillment: { stage: number, stage_label: string }
+  generated_at: string
+}
+
+export interface ApiReleaseCalendarEntry {
+  product_id: number
+  slug: string
+  name: string
+  publisher: string | null
+  cover_url: string | null
+  official_url: string | null
+  release_at: string | null
+  presale_at: string | null
+  original_ship_at: string | null
+  release_state: string
+  release_state_label: string
+  release_note: string | null
+  community: string
+}
+
+export interface ApiReleaseCalendar {
+  generated_at: string
+  upcoming: ApiReleaseCalendarEntry[]
+  ongoing: ApiReleaseCalendarEntry[]
+  ended: ApiReleaseCalendarEntry[]
+}
+
 export interface ApiProductEvidence {
   content_id: number
   title: string | null

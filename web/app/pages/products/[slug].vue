@@ -19,6 +19,7 @@ const tabs = [
   { key: 'overview', label: '总览' },
   { key: 'timeline', label: '事件时间线' },
   { key: 'evidence', label: '信号证据' },
+  { key: 'dossier', label: '商品档案' },
 ]
 const view = computed({
   get: () => String(route.query.view || 'overview'),
@@ -117,12 +118,16 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
       <p v-if="!events.length" class="px-4 py-10 text-center text-sm text-slate-400">在已接入来源中暂无该商品的相关事件。</p>
     </section>
 
-    <section v-else class="panel p-4 sm:p-5">
+    <section v-else-if="view === 'evidence'" class="panel p-4 sm:p-5">
       <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约信号（{{ signals.length }}）</h2>
       <p class="mt-1 text-xs text-slate-400">公开结论只统计“已核验”；候选信号仅供查看，不参与状态计算。</p>
       <div class="mt-4">
         <ProductSignalList :items="signals" />
       </div>
+    </section>
+
+    <section v-else-if="view === 'dossier'">
+      <ProductDossierPanel :slug="product.slug" />
     </section>
   </div>
 </template>

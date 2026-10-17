@@ -115,6 +115,17 @@
     background-image: linear-gradient(180deg, rgb(37 99 235), rgb(29 78 216));
     box-shadow: inset 0 1px 2px rgb(23 37 84 / 0.35);
   }
+  /* 次级按钮：与主按钮同形制的描边款（管理端大量「刷新 / 试跑 / 重算」一类操作） */
+  .btn-secondary {
+    @apply rounded-md border border-slate-900/10 text-sm font-medium text-slate-600 dark:border-white/15 dark:text-zinc-300;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+  .btn-secondary:hover {
+    @apply bg-slate-900/5 dark:bg-white/10;
+  }
+  .btn-secondary:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
   /* 固定在页面底层的"壁纸"渐变：macOS 玻璃需要足够鲜艳的底色才可感知 */
   .aurora-bg {
     background:
