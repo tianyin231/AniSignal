@@ -16,6 +16,8 @@ const nav = [
   { to: '/admin/targets', label: '采集目标' },
   { to: '/admin/events', label: '事件审核' },
   { to: '/admin/products', label: '商品管理' },
+  { to: '/admin/product-dossiers', label: '商品档案' },
+  { to: '/admin/briefs', label: '每日简报' },
   { to: '/admin/rules', label: '分类词典' },
   { to: '/admin/rule-engine', label: '规则引擎' },
   { to: '/admin/ai', label: 'AI 层' },

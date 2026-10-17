@@ -536,6 +536,9 @@ async function changePassword() {
           </ul>
         </section>
 
+        <!-- 我的商品跟踪（状态标记 + 到价提醒） -->
+        <ProductTrackerPanel />
+
         <!-- 我的关注流 -->
         <section class="panel overflow-hidden">
           <div class="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5">

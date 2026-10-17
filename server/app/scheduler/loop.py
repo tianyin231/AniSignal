@@ -21,13 +21,23 @@ _SHANGHAI = timezone(timedelta(hours=8))
 _local_morning_date = None
 _local_custom_sweep_at = None
 _local_volume_sweep_at = None
+_local_price_sweep_at = None
+_local_brief_date = None
 _CUSTOM_SWEEP_INTERVAL = timedelta(minutes=5)
 _VOLUME_SWEEP_INTERVAL = timedelta(minutes=5)
+_PRICE_SWEEP_INTERVAL = timedelta(minutes=15)
+# 简报在早报之后半小时生成：早报先把当日关键词邮件发完，简报再回顾前一天
+_BRIEF_LOCAL_HOUR = 8
 
 
 def _morning_due(now: datetime) -> tuple[bool, str]:
     local = now.replace(tzinfo=timezone.utc).astimezone(_SHANGHAI)
     return local.hour >= 8, local.date().isoformat()
+
+
+def _brief_due(now: datetime) -> tuple[bool, str]:
+    local = now.replace(tzinfo=timezone.utc).astimezone(_SHANGHAI)
+    return local.hour >= _BRIEF_LOCAL_HOUR, local.date().isoformat()
 
 
 async def local_loop(queue) -> None:
@@ -72,6 +82,24 @@ async def local_loop(queue) -> None:
                     result = await sweep_volume(session, now)
                     if result.get("anomalies") or result.get("notified"):
                         logger.info("local volume sweep -> %s", result)
+                # 到价提醒扫描：价格观测低于心理价位即推送（比声量扫描稀疏，省额度）
+                global _local_price_sweep_at
+                if _local_price_sweep_at is None or now >= _local_price_sweep_at:
+                    from app.services.product_dossier import sweep_price_alerts
+
+                    _local_price_sweep_at = now + _PRICE_SWEEP_INTERVAL
+                    result = await sweep_price_alerts(session, now)
+                    if result.get("triggered"):
+                        logger.info("local price alert sweep -> %s", result)
+                # 每日情报简报：北京时间 08:30 之后跑一次，回顾前一天
+                global _local_brief_date
+                brief_due, brief_day = _brief_due(now)
+                if brief_due and _local_brief_date != brief_day:
+                    from app.services.briefing import run_daily_brief
+
+                    _local_brief_date = brief_day
+                    result = await run_daily_brief(session, now)
+                    logger.info("local daily brief -> %s", result)
         except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
             logger.exception("local scheduler tick failed")
         await asyncio.sleep(settings.scheduler_poll_seconds)
@@ -119,6 +147,19 @@ async def _enqueue_morning_if_due(redis, now: datetime) -> None:
     logger.info("enqueued morning notifications for %s job=%s", day, getattr(job, "job_id", None))
 
 
+async def _enqueue_daily_brief_if_due(redis, now: datetime) -> None:
+    """每日情报简报：北京时间 08:00 后跑一次（早报之后，回顾前一天）。"""
+    due, day = _brief_due(now)
+    if not due:
+        return
+    key = f"anisignal:brief-enqueued:{day}"
+    if await redis.get(key):
+        return
+    job = await redis.enqueue_job("generate_daily_brief", _job_id=f"brief:{day}")
+    await redis.set(key, "1", nx=True, px=36 * 60 * 60 * 1000)
+    logger.info("enqueued daily brief for %s job=%s", day, getattr(job, "job_id", None))
+
+
 async def main() -> None:
     settings = get_settings()
     logging.basicConfig(
@@ -151,6 +192,7 @@ async def main() -> None:
                             target.next_run_at,
                         )
                     await _enqueue_morning_if_due(redis, now)
+                    await _enqueue_daily_brief_if_due(redis, now)
                     await redis.enqueue_job("send_bot_notifications", _job_id=f"bot-sweep:{int(now.timestamp() // 60)}")
                     # Webhook 命中推送：与机器人推送同节奏，5 分钟桶去重
                     webhook_bucket = int(now.timestamp() // 300)
@@ -186,6 +228,15 @@ async def main() -> None:
                             f"anisignal:volume-sweep-enqueued:{bucket}", "1",
                             nx=True, px=6 * 60 * 60 * 1000)
                         logger.info("enqueued volume sweep job=%s", getattr(job, "job_id", None))
+                    # 到价提醒扫描：同 15 分钟桶去重（价格观测低于心理价位才推送）
+                    price_bucket = int(now.timestamp() // 900)
+                    if not await redis.get(f"anisignal:price-sweep-enqueued:{price_bucket}"):
+                        job = await redis.enqueue_job(
+                            "sweep_price_alerts", _job_id=f"price-sweep:{price_bucket}")
+                        await redis.set(
+                            f"anisignal:price-sweep-enqueued:{price_bucket}", "1",
+                            nx=True, px=6 * 60 * 60 * 1000)
+                        logger.info("enqueued price alert sweep job=%s", getattr(job, "job_id", None))
             except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
                 logger.exception("scheduler tick failed")
             await asyncio.sleep(settings.scheduler_poll_seconds)

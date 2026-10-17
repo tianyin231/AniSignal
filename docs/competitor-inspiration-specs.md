@@ -51,13 +51,57 @@
 - 测试 `server/tests/test_rules_engine.py` 47 条全绿：布尔解析（13 组参数化 + 容错 + 描述）、规则动作执行、
   异常告警触发/不触发边界（min_hits、min_samples、multiplier、cooldown）、信源分级、配置规范化、管理端接口
 
-## 批次 3b：商品档案页
+## 批次 3b（已完成）：商品档案页
 抄 MyFigureCollection + 什么值得买 + Keepa + 拆盒网字段范式。
 - 一物一档：档案头（名称/封面/官方链接）+ 官方公告时间线 + 价格/热度曲线 + AI 差评聚合 + 发售日历
 - 状态标记：已预订 / 已到货（用户手动）
 - 到价提醒：设心理价位，采集到低于该价触发通知（抄 SMZDM 降价提醒 + Distill 条件告警）
 
-## 批次 3c：每日情报简报
+落地：
+- 迁移 `0037_product_dossier_briefs`：新增 `product_profiles` / `product_price_points` / `product_feedbacks` /
+  `product_track_states` / `product_price_alerts` / `daily_briefs` 六表；`product_profiles` 与 `products` 一对一
+  （唯一外键 + CASCADE），价格点带 `(product_id, captured_at)` 复合索引，反馈按 `(product_id, content_id)` 唯一
+  （同一内容重复聚合只更新结论）；已在临时 sqlite 库上验证 `upgrade` 与 `downgrade -1` 双向干净
+- 档案头只增不改：`products` 的履约字段仍由 fulfillment 引擎负责，档案（封面/官方链接/别名/发售时间）单独一张表；
+  管理端 `PUT /api/admin/product-dossiers/{id}` 只更新显式给出的字段（空 payload 报 400）
+- 价格抽取是「保守策略」旁路观察（`services/product_dossier.py: extract_price`）：只认 `¥199` / `199元` /
+  `RMB 199` / `定价：199` 一类带货币符号、单位或明确前缀的数字，排除版本号、期数、阶段号上下文；
+  数字被更长数字截断时（"编号 123456 元"、"¥1234567"）判为非价格——到价提醒误报比漏报更烦人
+- 曲线按天聚合（同一天多个采样取最后一次观测，hits 取当日最大），`sweep_price_points` 每个商品单轮最多记 4 个点，
+  只记「比当前价更低」或「当前还没有价」的观测，避免同一条内容反复刷曲线；热度分 = 当日命中 + 近 7 日日均命中
+- AI 差评聚合复用既有 AI 通道（`ai.chat` + `ai.record_usage`），未配置 AI 或单条调用失败都回退原文片段，
+  本轮连续失败即停打省额度；结果可人工确认（`PATCH /api/admin/product-dossiers/feedback/{id}`）
+- 到价提醒按四条既有渠道通知，各自 try/except 互不影响：QQ 机器人（critical 穿透静默时段）、邮件
+  （`NotificationDelivery` 落库）、OnePush、Webhook；去重键 `price-alert:{alert_id}:{第几次}`，
+  重新设价视为新一轮提醒（计数复零，否则会和上一轮撞号）
+- 调度：`sweep_price_alerts` 走 arq `sweep_price_alerts` 任务，生产模式按 15 分钟桶去重（`price-sweep:{bucket}`），
+  本地模式直接跑；管理端可手动 sweep 与查台账
+- 接口分工：`/api/products/{slug}/dossier|series|feedback` 只读公开（`/api/release-calendar` 单独占路径，
+  因为 `/api/products/{slug}` 会吞掉同前缀静态路径）；`/api/account/product-tracker` 管用户自己的状态与心理价位
+- 测试 `server/tests/test_product_dossier_briefs.py`（3b 部分 33 条）全绿：价格抽取 13 组参数化、曲线窗口与按天聚合、
+  热度分计算（隐藏/跨社区不计）、采样扫描升降价边界、AI 聚合三态（未配置/正常/失败回退）与幂等、
+  状态与提醒 CRUD、到价触发与去重、日历分组（含状态推断与预售窗口回退）、档案聚合、管理端与账号中心接口含鉴权边界
+
+## 批次 3c（已完成）：每日情报简报
 抄 Readwise Reader + Brand24 每日洞察 + 识微商情。
 - 定时任务每日生成：昨日事件汇总 / 重要命中 Top / 商品进展 / 声量回顾，AI 写成简报
 - 经邮件 / QQ（AstrBot/NapCat）推送，管理端可预览历史简报
+
+落地：
+- 先结构化采集再交给 AI：`services/briefing.py: collect_sections` 四个分节都是确定性查询（可重复执行得到同样结果），
+  AI 只负责把结构化数据写成一段 200 字导读；AI 不可用/失败/编造数字时一律退回模板文——简报永远能生成
+- 分节口径：昨日事件=当日新增且 `is_active` 的归并事件（按重要度排序，带证据条数）；重要命中 Top=意图打标
+  `important` 的采集内容（依赖批次 1）；商品进展=昨日有新证据的商品（带当前价观测与履约阶段）；
+  声量回顾=命中总数/平台分布/关键词 Top，已标记 `ignore` 的不计入（与机器人推送同一口径）
+- 防幻觉：`_summary_supported` 校验 AI 摘要里出现的每个数字都必须能在结构化事实里找到，找不到就整段退回模板文
+- 口径是「北京时间昨天」：`_brief_day` 用 `Asia/Shanghai(+8)` 换算，早 8 点后生成时覆盖的是前一日
+- 推送复用既有渠道：邮件给「启用通知 + 已验证 + active」的用户（`NotificationDelivery` 落库，去重键
+  `brief:{id}:{user_id}`），QQ 推给每个启用的机器人目标（critical 穿透静默时段，去重键 `brief:{id}`）；
+  单渠道失败不影响另一渠道，结果写回 `brief.delivered`
+- 调度：arq `generate_daily_brief` 任务，生产模式按天去重（`brief:{day}`，Redis key `anisignal:brief-enqueued:{day}`），
+  本地模式北京时间 08:00 后跑一次；同一天重复跑不重复生成也不重复发
+- 管理端 `/api/admin/briefs`：历史列表/详情（含渲染好的邮件标题与正文，预览与真实邮件共用 `render_brief_text`）、
+  `preview` 试跑不落库不推送、`generate` 手动补某一天、`send` 手动重推
+- 测试（3c 部分 34 条）全绿：四节采集（隐藏/忽略过滤、空数据安全）、AI 摘要三态与数字校验、
+  生成幂等与 force、渲染分节完整性、邮件与 QQ 推送及去重、无渠道时标记 failed、调度入口（含时区口径）、
+  管理端列表/详情/预览/补生成/重推与未授权边界

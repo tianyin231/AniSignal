@@ -9,15 +9,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from app.api.account import router as account_router
+from app.api.account_products import router as account_products_router
 from app.api.account_webhooks import router as account_webhooks_router
 from app.api.admin import router as admin_router
+from app.api.admin_briefs import router as admin_briefs_router
 from app.api.admin_ai import router as admin_ai_router
+from app.api.admin_dossiers import router as admin_dossiers_router
 from app.api.admin_users import router as admin_users_router
 from app.api.admin_custom import router as admin_custom_router
 from app.api.admin_output import feeds_router, webhooks_router as admin_webhooks_router
 from app.api.admin_rules import router as admin_rules_router
 from app.api.admin_settings import router as admin_settings_router
 from app.api.auth import router as auth_router
+from app.api.product_dossier import router as product_dossier_router
 from app.api.public import router as public_router
 from app.config import get_settings
 
@@ -65,7 +69,11 @@ app.include_router(admin_router)
 app.include_router(public_router)
 app.include_router(auth_router)
 app.include_router(account_router)
+app.include_router(account_products_router)
 app.include_router(account_webhooks_router)
+app.include_router(product_dossier_router)
+app.include_router(admin_dossiers_router)
+app.include_router(admin_briefs_router)
 app.include_router(admin_settings_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_users_router)
