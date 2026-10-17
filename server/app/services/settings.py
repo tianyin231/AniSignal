@@ -143,3 +143,65 @@ def onepush_public_view(onepush: dict) -> dict:
         "provider": provider,
         "fields": sorted(str(key) for key in config if key != "provider"),
     }
+
+
+# ---------- 规则引擎与声量告警（批次 3a） ----------
+
+# 声量异常判定与信源分级阈值（管理端可改，落 site_settings 的 "rules" 键）
+DEFAULT_RULES_CONFIG = {
+    # 规则引擎总开关
+    "enabled": True,
+    # 声量异常：新窗口命中数超过基线均值 N 倍即预警（默认 3 倍）
+    "anomaly_multiplier": 3.0,
+    # 统计窗口（分钟）与保留的历史窗口数（滑动基线样本）
+    "window_minutes": 60,
+    "history_windows": 24,
+    # 基线样本不足或命中数太少时不告警，避免刚上线就刷屏
+    "min_samples": 5,
+    "min_hits": 5,
+    # 同一分组两次预警的最小间隔（分钟）
+    "cooldown_minutes": 120,
+    # 信源分级阈值（粉丝量）：10w 起中权重，100w 以上高权重
+    "source_tiers": {"mid": 100_000, "high": 1_000_000},
+}
+
+
+def _clamp_number(value, default: float, low: float, high: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number:  # NaN
+        return default
+    return max(low, min(high, number))
+
+
+def _clamp_int(value, default: int, low: int, high: int) -> int:
+    return int(_clamp_number(value, default, low, high))
+
+
+def normalize_rules_config(stored: dict | None) -> dict:
+    """合并默认值并夹紧数值：脏配置不能让告警失真或把循环打挂。"""
+    merged = {**DEFAULT_RULES_CONFIG, **(stored or {})}
+    return {
+        "enabled": bool(merged.get("enabled", True)),
+        "anomaly_multiplier": _clamp_number(merged.get("anomaly_multiplier"), 3.0, 1.5, 20.0),
+        "window_minutes": _clamp_int(merged.get("window_minutes"), 60, 5, 24 * 60),
+        "history_windows": _clamp_int(merged.get("history_windows"), 24, 3, 24 * 7),
+        "min_samples": _clamp_int(merged.get("min_samples"), 5, 1, 200),
+        "min_hits": _clamp_int(merged.get("min_hits"), 5, 1, 10_000),
+        "cooldown_minutes": _clamp_int(merged.get("cooldown_minutes"), 120, 0, 24 * 60),
+        "source_tiers": normalize_source_tiers(merged.get("source_tiers")),
+    }
+
+
+def normalize_source_tiers(raw: dict | None) -> dict[str, int]:
+    """信源分级阈值（复用 source_tier 的清洗规则，避免两处口径）。"""
+    from app.services.source_tier import normalize_thresholds
+
+    return normalize_thresholds(raw if isinstance(raw, dict) else None)
+
+
+async def get_rules_config(session: AsyncSession) -> dict:
+    stored = await get_setting(session, "rules") or {}
+    return normalize_rules_config(stored)

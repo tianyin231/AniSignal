@@ -1,5 +1,6 @@
 """Admin API 的请求/响应 DTO。"""
 
+import re
 from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
@@ -510,3 +511,166 @@ class EventMergeRequest(BaseModel):
 
 class EventSplitRequest(BaseModel):
     content_ids: list[int] = Field(min_length=1)
+
+
+# ---------- 规则引擎（批次 3a） ----------
+
+RULE_ACTION_PATTERN = "^(tag|promote_event|notify|mark_read)$"
+RULE_CHANNEL_PATTERN = "^(webhook|email|qq)$"
+RULE_TIER_PATTERN = "^(important|normal|ignore)$"
+
+
+def _string_list(value, limit: int = 32) -> list[str]:
+    """把入参收敛成去重的字符串列表（None → 空列表，标量 → 单元素）。"""
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    result: list[str] = []
+    for item in items:
+        text = str(item).strip()
+        if text and text not in result:
+            result.append(text[:limit])
+    return result
+
+
+class RuleEngineAction(BaseModel):
+    """规则动作：tag 需要 value，notify 需要 channels，其余类型不带参数。"""
+
+    type: str = Field(pattern=RULE_ACTION_PATTERN)
+    value: str | None = Field(default=None, max_length=32)
+    channels: list[str] = Field(default_factory=list)
+
+
+class RuleEngineCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    enabled: bool = True
+    priority: int = Field(default=100, ge=0, le=1000)
+    # Mention 风格布尔表达式；空 = 不限关键词
+    keyword_expr: str | None = Field(default=None, max_length=1000)
+    platforms: list[str] = Field(default_factory=list)
+    communities: list[str] = Field(default_factory=list)
+    intent_tiers: list[str] = Field(default_factory=list)
+    actions: list[RuleEngineAction] = Field(default_factory=list)
+    note: str | None = Field(default=None, max_length=255)
+
+    @field_validator("platforms", "communities")
+    @classmethod
+    def _fold_scope(cls, value):
+        return _string_list(value)
+
+    @field_validator("intent_tiers")
+    @classmethod
+    def _check_tiers(cls, value):
+        tiers = _string_list(value, 16)
+        for tier in tiers:
+            if not re.fullmatch(RULE_TIER_PATTERN, tier):
+                raise ValueError("intent_tiers 只支持 important / normal / ignore")
+        return tiers
+
+    @field_validator("actions")
+    @classmethod
+    def _check_actions(cls, value):
+        for action in value:
+            if action.type == "tag" and not (action.value or "").strip():
+                raise ValueError("打标签动作必须提供 value")
+            if action.type == "notify":
+                for channel in action.channels:
+                    if not re.fullmatch(RULE_CHANNEL_PATTERN, str(channel).strip()):
+                        raise ValueError("notify 渠道只支持 webhook / email / qq")
+        return value
+
+
+class RuleEngineUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    enabled: bool | None = None
+    priority: int | None = Field(default=None, ge=0, le=1000)
+    keyword_expr: str | None = Field(default=None, max_length=1000)
+    platforms: list[str] | None = None
+    communities: list[str] | None = None
+    intent_tiers: list[str] | None = None
+    actions: list[RuleEngineAction] | None = None
+    note: str | None = Field(default=None, max_length=255)
+
+    @field_validator("platforms", "communities")
+    @classmethod
+    def _fold_scope(cls, value):
+        return None if value is None else _string_list(value)
+
+    @field_validator("intent_tiers")
+    @classmethod
+    def _check_tiers(cls, value):
+        if value is None:
+            return None
+        tiers = _string_list(value, 16)
+        for tier in tiers:
+            if not re.fullmatch(RULE_TIER_PATTERN, tier):
+                raise ValueError("intent_tiers 只支持 important / normal / ignore")
+        return tiers
+
+    @field_validator("actions")
+    @classmethod
+    def _check_actions(cls, value):
+        if value is None:
+            return None
+        return RuleEngineCreate._check_actions(value)
+
+
+class RuleEngineOut(BaseModel):
+    id: int
+    name: str
+    enabled: bool
+    priority: int
+    keyword_expr: str | None = None
+    platforms: list[str] = Field(default_factory=list)
+    communities: list[str] = Field(default_factory=list)
+    intent_tiers: list[str] = Field(default_factory=list)
+    actions: list[dict] = Field(default_factory=list)
+    note: str | None = None
+    hit_count: int = 0
+    last_hit_at: datetime | None = None
+    last_error: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    # 解析后的布尔式（管理端展示"这条规则实际在匹配什么"）
+    parsed_expr: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class RuleEngineListOut(BaseModel):
+    items: list[RuleEngineOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class RuleHitOut(BaseModel):
+    id: int
+    rule_id: int
+    rule_name: str | None = None
+    content_id: int
+    content_title: str | None = None
+    actions: list[dict] = Field(default_factory=list)
+    detail: str | None = None
+    error: str | None = None
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class RuleHitListOut(BaseModel):
+    items: list[RuleHitOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class RuleEngineConfigUpdate(BaseModel):
+    enabled: bool | None = None
+    anomaly_multiplier: float | None = Field(default=None, ge=1.5, le=20.0)
+    window_minutes: int | None = Field(default=None, ge=5, le=1440)
+    history_windows: int | None = Field(default=None, ge=3, le=168)
+    min_samples: int | None = Field(default=None, ge=1, le=200)
+    min_hits: int | None = Field(default=None, ge=1, le=10000)
+    cooldown_minutes: int | None = Field(default=None, ge=0, le=1440)
+    source_tiers: dict | None = None

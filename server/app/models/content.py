@@ -58,6 +58,11 @@ class RawContent(Base):
     intent_tier: Mapped[str | None] = mapped_column(String(16), index=True)
     intent_reason: Mapped[str | None] = mapped_column(String(300))
     intent_labeled_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # 规则引擎产物：命中的规则标签（打标签动作写入，可重算）
+    rule_tags: Mapped[list] = mapped_column(JSON, default=list)
+    # 规则引擎产物：标记已读动作置位（规则自身通知据此去重）
+    rule_acked: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    rule_acked_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     versions: Mapped[list["ContentVersion"]] = relationship(
         back_populates="raw_content",
