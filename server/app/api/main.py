@@ -15,6 +15,7 @@ from app.api.admin_ai import router as admin_ai_router
 from app.api.admin_users import router as admin_users_router
 from app.api.admin_custom import router as admin_custom_router
 from app.api.admin_output import feeds_router, webhooks_router as admin_webhooks_router
+from app.api.admin_rules import router as admin_rules_router
 from app.api.admin_settings import router as admin_settings_router
 from app.api.auth import router as auth_router
 from app.api.public import router as public_router
@@ -71,6 +72,7 @@ app.include_router(admin_users_router)
 app.include_router(admin_custom_router)
 app.include_router(feeds_router)
 app.include_router(admin_webhooks_router)
+app.include_router(admin_rules_router)
 from app.api.feeds import router as feed_reader_router
 app.include_router(feed_reader_router)
 from app.api.custom import router as custom_router

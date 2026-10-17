@@ -138,6 +138,18 @@ async def dispatch_webhooks(ctx) -> dict:
         return result
 
 
+async def sweep_volume_alerts(ctx) -> dict:
+    """声量异常扫描：更新滑动窗口基线，超过阈值发 critical 热度预警。"""
+    from app.db import SessionLocal
+    from app.services.volume import sweep_volume
+
+    async with SessionLocal() as session:
+        result = await sweep_volume(session)
+        if result.get("anomalies") or result.get("notified"):
+            logger.info("volume sweep -> %s", result)
+        return result
+
+
 class WorkerSettings:
     functions = [
         send_bot_notifications,
@@ -151,6 +163,7 @@ class WorkerSettings:
         send_admin_emails,
         collect_custom_feeds,
         extract_entities_sweep,
+        sweep_volume_alerts,
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4

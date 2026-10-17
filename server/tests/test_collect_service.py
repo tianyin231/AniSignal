@@ -6,9 +6,11 @@ import pytest
 
 import app.services.collect as collect_module
 from app.clock import utcnow
-from app.models import CollectionDailyStat, CollectRun, CollectTarget, RunStatus
+from app.models import CollectionDailyStat, CollectRun, CollectTarget, RawContent, Rule, RuleHit, RunStatus
 from app.schemas.content import FetchResult
+from app.services.intent import TIER_IMPORTANT, TriageHit, TriageOutcome
 from app.services.statistics import beijing_date
+from sqlalchemy import select
 
 from tests.test_parsers_bilibili import VIDEO_RAW
 
@@ -59,6 +61,46 @@ async def _make_target(session) -> CollectTarget:
     session.add(target)
     await session.commit()
     return target
+
+
+async def test_rules_run_after_intent_tier_persisted(session, patched_collect, monkeypatch):
+    """规则引擎必须在意图打标写回之后跑，否则带「重要性档」的条件看不到本轮新 tier。"""
+    from app.models import RawContent, Rule
+    from app.services.intent import TriageHit, TriageOutcome, TIER_IMPORTANT
+
+    async def _stub_triage(session, target, items, fetch_kind):
+        return TriageOutcome(
+            hits=[TriageHit(raw=dict(VIDEO_RAW), external_id=VIDEO_RAW["bvid"], tier=TIER_IMPORTANT)],
+            labeled=1,
+        )
+
+    monkeypatch.setattr(collect_module, "triage_hits", _stub_triage)
+
+    target = await _make_target(session)
+    target.intent = "只要重要公告"
+    session.add(
+        Rule(
+            name="重要命中打标",
+            enabled=True,
+            priority=10,
+            keyword_expr="视频",
+            intent_tiers=["important"],
+            actions=[{"type": "tag", "value": "重点"}],
+        )
+    )
+    await session.commit()
+
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    assert result["status"] == "success"
+
+    content = await session.scalar(select(RawContent).where(RawContent.external_id == VIDEO_RAW["bvid"]))
+    assert content is not None
+    assert content.intent_tier == "important"
+    assert content.rule_tags == ["重点"]
+
+    hit = await session.scalar(select(RuleHit))
+    assert hit is not None
+    assert hit.error is None
 
 
 async def test_run_collection_success(session, patched_collect):

@@ -239,17 +239,35 @@ async def run_collection(redis, target_id: int) -> dict:
                     for external_id in triage.important_ids
                     if external_id in tier_by_external
                 ]
-                if important_content_ids:
-                    from app.services.bot import push_important_contents
+            # 规则引擎：命中入库后、通知分发前执行（失败不影响采集与既有推送链路）。
+            # 必须放在意图打标写回之后，否则带「重要性档」条件的规则看不到本轮新 tier。
+            if stats.touched_content_ids:
+                from app.services.rules import apply_rules
 
-                    try:
-                        pushed = await push_important_contents(session, important_content_ids)
+                try:
+                    rule_stats = await apply_rules(session, stats.touched_content_ids)
+                    if rule_stats.matched or rule_stats.errors:
                         logger.info(
-                            "intent push: %s critical deliveries for %s important contents",
-                            pushed, len(important_content_ids),
+                            "rules engine: contents=%s matched=%s actions=%s events=%s errors=%s",
+                            rule_stats.contents,
+                            rule_stats.matched,
+                            rule_stats.actions,
+                            rule_stats.events,
+                            rule_stats.errors,
                         )
-                    except Exception:  # noqa: BLE001 - 投递失败不影响采集结果
-                        logger.exception("push important contents failed")
+                except Exception:  # noqa: BLE001 - 规则引擎不得阻断采集主链路
+                    logger.exception("rules engine failed for target %s", target.id)
+            if important_content_ids:
+                from app.services.bot import push_important_contents
+
+                try:
+                    pushed = await push_important_contents(session, important_content_ids)
+                    logger.info(
+                        "intent push: %s critical deliveries for %s important contents",
+                        pushed, len(important_content_ids),
+                    )
+                except Exception:  # noqa: BLE001 - 投递失败不影响采集结果
+                    logger.exception("push important contents failed")
             if fetch_result.fetch_kind == "bilibili_dynamics":
                 try:
                     await _backfill_empty_draw_dynamics(session, collector_factory())

@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 _SHANGHAI = timezone(timedelta(hours=8))
 _local_morning_date = None
 _local_custom_sweep_at = None
+_local_volume_sweep_at = None
 _CUSTOM_SWEEP_INTERVAL = timedelta(minutes=5)
+_VOLUME_SWEEP_INTERVAL = timedelta(minutes=5)
 
 
 def _morning_due(now: datetime) -> tuple[bool, str]:
@@ -61,6 +63,15 @@ async def local_loop(queue) -> None:
                 if _local_custom_sweep_at is None or now >= _local_custom_sweep_at:
                     await queue.enqueue_custom_sweep()
                     _local_custom_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
+                # 声量异常扫描：本地模式直接跑（与 webhook 推送同节奏）
+                global _local_volume_sweep_at
+                if _local_volume_sweep_at is None or now >= _local_volume_sweep_at:
+                    from app.services.volume import sweep_volume
+
+                    _local_volume_sweep_at = now + _VOLUME_SWEEP_INTERVAL
+                    result = await sweep_volume(session, now)
+                    if result.get("anomalies") or result.get("notified"):
+                        logger.info("local volume sweep -> %s", result)
         except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
             logger.exception("local scheduler tick failed")
         await asyncio.sleep(settings.scheduler_poll_seconds)
@@ -167,6 +178,14 @@ async def main() -> None:
                             f"anisignal:extract-sweep-enqueued:{bucket}", "1",
                             nx=True, px=6 * 60 * 60 * 1000)
                         logger.info("enqueued extract sweep job=%s", getattr(job, "job_id", None))
+                    # 声量异常扫描：同 5 分钟桶去重（窗口基线 + 热度预警）
+                    if not await redis.get(f"anisignal:volume-sweep-enqueued:{bucket}"):
+                        job = await redis.enqueue_job(
+                            "sweep_volume_alerts", _job_id=f"volume-sweep:{bucket}")
+                        await redis.set(
+                            f"anisignal:volume-sweep-enqueued:{bucket}", "1",
+                            nx=True, px=6 * 60 * 60 * 1000)
+                        logger.info("enqueued volume sweep job=%s", getattr(job, "job_id", None))
             except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
                 logger.exception("scheduler tick failed")
             await asyncio.sleep(settings.scheduler_poll_seconds)

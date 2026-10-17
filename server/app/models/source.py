@@ -23,6 +23,9 @@ class Source(Base):
     official_title: Mapped[str | None] = mapped_column(String(255))
     follower_count: Mapped[int | None] = mapped_column(BigInteger)
     identity: Mapped[str] = mapped_column(String(16), default="unknown")
+    # 信源分级（按粉丝量档位，由 services.source_tier 重算）：
+    # high / mid / low / unknown。与 CollectTarget.tier 的采集分级不是一回事。
+    tier: Mapped[str] = mapped_column(String(16), default="unknown", index=True)
     raw_json: Mapped[dict | None] = mapped_column(JSON)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(
