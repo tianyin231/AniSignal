@@ -12,7 +12,7 @@ from app.api.deps import require_admin
 from app.clock import utcnow
 from app.communities import community_pattern
 from app.db import get_session
-from app.models import AiUsage
+from app.models import AiUsage, CollectRun, ContentVersion, RawContent, Source
 from app.services import settings as settings_service
 from app.services.ai import (
     _public_view,
@@ -268,3 +268,59 @@ async def translate_missing(session: AsyncSession = Depends(get_session)):
         else:
             failed += 1
     return {"candidates": len(ids), "pending": len(targets), "ok": done, "skipped": skipped, "failed": failed}
+
+
+@router.get("/intent-results")
+async def intent_results(
+    limit: int = Query(default=20, ge=1, le=100),
+    session: AsyncSession = Depends(get_session),
+):
+    """意图打标结果：三档计数 + 最近打标内容（tier/理由/时间/来源）。
+
+    判忽略的内容不入库，因此 ignore 计数来自采集运行的 items_ignored——
+    丢弃必须可见，不能静默。
+    """
+    tier_rows = await session.execute(
+        select(RawContent.intent_tier, func.count(RawContent.id)).group_by(RawContent.intent_tier)
+    )
+    counts = {tier: 0 for tier in ("important", "normal")}
+    for tier, count in tier_rows:
+        if tier in counts:
+            counts[tier] = count
+    counts["ignored"] = await session.scalar(select(func.sum(CollectRun.items_ignored))) or 0
+
+    latest_sq = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("version"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
+    rows = await session.execute(
+        select(RawContent, ContentVersion.title, Source.name)
+        .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest_sq.c.rid)
+            & (ContentVersion.version == latest_sq.c.version),
+        )
+        .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .where(RawContent.intent_labeled_at.is_not(None))
+        .order_by(RawContent.intent_labeled_at.desc(), RawContent.id.desc())
+        .limit(limit)
+    )
+    items = [
+        {
+            "content_id": raw.id,
+            "tier": raw.intent_tier,
+            "reason": raw.intent_reason,
+            "labeled_at": raw.intent_labeled_at,
+            "platform": raw.platform,
+            "source": source_name or raw.platform,
+            "title": (title or raw.external_id)[:120],
+            "url": raw.url,
+        }
+        for raw, title, source_name in rows
+    ]
+    return {"counts": counts, "items": items}

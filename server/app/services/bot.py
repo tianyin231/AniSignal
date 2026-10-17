@@ -1,6 +1,7 @@
 """AstrBot 消息通道、只读查询工具和按会话调度。"""
 
 import hashlib
+import re
 from datetime import datetime, timedelta
 
 import httpx
@@ -10,8 +11,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.models.enums import COMMUNITY_LABELS
-from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Product, RawContent, RedeemCode
-from app.services.notifications import group_candidates, load_candidates
+from app.models import (
+    BotDelivery,
+    BotReminder,
+    BotTarget,
+    ContentSchedule,
+    ContentVersion,
+    Event,
+    Evidence,
+    Product,
+    RawContent,
+    RedeemCode,
+)
+from app.services.notifications import _bot_image_url, group_candidates, load_candidates
 from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 
@@ -286,6 +298,129 @@ async def send_message(bridge: dict, umo: str, content: str) -> tuple[str, str |
         return "unknown", "网关连接或响应异常；请核对收件端后再重发"
 
 
+async def _events_for_contents(session: AsyncSession, content_ids: list[int]) -> dict[int, Event]:
+    """内容 → 关联事件（与周期扫描同一套归属：保证 critical 去重键完全一致）。"""
+    if not content_ids:
+        return {}
+    rows = await session.execute(
+        select(Evidence.raw_content_id, Event)
+        .join(Event, Event.id == Evidence.event_id)
+        .where(
+            Evidence.raw_content_id.in_(content_ids),
+            Evidence.role != "excluded",
+            Event.is_active.is_(True),
+        )
+        .order_by(Event.importance.desc(), Event.last_updated_at.desc())
+    )
+    events: dict[int, Event] = {}
+    for content_id, event in rows:
+        events.setdefault(content_id, event)
+    return events
+
+
+def _critical_key(target_id: int, identity: str) -> str:
+    """critical 投递去重键：与周期扫描同一套算法，直推与扫描天然互斥。"""
+    return f"critical:{target_id}:{hashlib.sha256(identity.encode()).hexdigest()[:32]}"
+
+
+async def _event_for(session: AsyncSession, item: dict):
+    return await session.get(Event, item["event_id"]) if item.get("event_id") else None
+
+
+def _item_identity(event, item: dict) -> str:
+    """内容身份：绑定事件时随结论变化，否则按内容 id 稳定去重。"""
+    return f"event:{event.id}:{event.conclusion}" if event is not None else f"content:{item['id']}"
+
+
+async def _contents_for_push(session: AsyncSession, content_ids: list[int]) -> list[dict]:
+    """按内容 id 取最新版本，组装成 format_short_update 需要的短讯结构。"""
+    latest_sq = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("version"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
+    rows = await session.execute(
+        select(RawContent, ContentVersion)
+        .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest_sq.c.rid)
+            & (ContentVersion.version == latest_sq.c.version),
+        )
+        .where(RawContent.id.in_(content_ids), RawContent.hidden.is_(False))
+        .order_by(RawContent.id)
+    )
+    found = list(rows)
+    events = await _events_for_contents(session, [raw.id for raw, _ in found])
+    items: list[dict] = []
+    for raw, version in found:
+        normalized = version.normalized_json or {}
+        media = normalized.get("media") if isinstance(normalized, dict) else []
+        image = next(
+            (
+                safe
+                for value in (media if isinstance(media, list) else [])
+                if isinstance(value, str) and (safe := _bot_image_url(value))
+            ),
+            None,
+        )
+        items.append({
+            "id": raw.id,
+            "community": raw.community,
+            "title": version.title or raw.external_id,
+            "summary": re.sub(r"\s+", " ", (version.text or "")).strip()[:200],
+            "url": raw.url,
+            "image": image,
+            "published_at": raw.published_at or raw.collected_at,
+            # 身份与周期扫描一致：绑事件时随结论变化，否则按内容 id 稳定去重
+            "identity": _item_identity(events.get(raw.id), {"id": raw.id}),
+        })
+    return items
+
+
+async def push_important_contents(session: AsyncSession, content_ids: list[int]) -> int:
+    """意图打标为 important 的内容 → 为每个启用的机器人目标建 critical 投递。
+
+    dedupe key 按内容去重（与周期扫描的 critical 语义一致），静默时段默认穿透
+    （quiet_critical 默认开启）；实际发送仍由 run_bot_notifications 的投递循环负责。
+    """
+    if not content_ids:
+        return 0
+    items = await _contents_for_push(session, content_ids)
+    if not items:
+        return 0
+    targets = list(
+        await session.scalars(select(BotTarget).where(BotTarget.enabled.is_(True)))
+    )
+    created = 0
+    for target in targets:
+        for item in items:
+            key = _critical_key(target.id, item["identity"])
+            if await session.scalar(select(BotDelivery.id).where(BotDelivery.dedupe_key == key)):
+                continue  # 已投递过：按内容去重，不重复打扰
+            await create_delivery(
+                session, target, "critical", format_short_update(item), key,
+                media=[item["image"]] if item.get("image") else None,
+            )
+            created += 1
+    return created
+
+
+async def _intent_ignored_ids(session: AsyncSession, content_ids: list[int]) -> set[int]:
+    """意图打标记为 ignore 的内容 id：机器人不再推送它们。"""
+    if not content_ids:
+        return set()
+    rows = await session.scalars(
+        select(RawContent.id).where(
+            RawContent.id.in_(content_ids), RawContent.intent_tier == "ignore"
+        )
+    )
+    return set(rows)
+
+
 async def create_delivery(session, target, kind, text, key, media=None):
     row = await session.scalar(select(BotDelivery).where(BotDelivery.dedupe_key == key))
     if row:
@@ -435,26 +570,41 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     critical_items.append(item)
                 else:
                     normal_items.append(item)
+            # 守卫：意图打标记为 ignore 的内容不再推送（采集阶段已判定为噪声）
+            ignored_ids = await _intent_ignored_ids(
+                session, [item["id"] for item in payload["items"]]
+            )
+            if ignored_ids:
+                critical_items = [i for i in critical_items if i["id"] not in ignored_ids]
+                normal_items = [i for i in normal_items if i["id"] not in ignored_ids]
+            # 守卫：已打标/已直推过的内容不重复推送（critical 去重键与采集直推一致）
+            critical_keys: dict[int, str] = {}
             for item in critical_items:
-                event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
-                if event is not None:
-                    identity = f"event:{event.id}:{event.conclusion}"
-                else:
-                    identity = f"content:{item['id']}"
-                digest = hashlib.sha256(identity.encode()).hexdigest()[:32]
+                critical_keys[item["id"]] = _critical_key(
+                    target.id, _item_identity(await _event_for(session, item), item)
+                )
+            delivered: set[str] = set()
+            if critical_keys:
+                delivered = set(
+                    await session.scalars(
+                        select(BotDelivery.dedupe_key).where(
+                            BotDelivery.dedupe_key.in_(list(critical_keys.values()))
+                        )
+                    )
+                )
+            for item in critical_items:
+                key = critical_keys[item["id"]]
+                if key in delivered:
+                    continue
+                delivered.add(key)
                 await create_delivery(
-                    session, target, "critical", format_short_update(item),
-                    f"critical:{target.id}:{digest}",
+                    session, target, "critical", format_short_update(item), key,
                     media=[item["image"]] if item.get("image") else None,
                 )
             if normal_items and merge_minutes <= 0:
                 for item in normal_items:
-                    event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
-                    if event is not None:
-                        identity = f"event:{event.id}:{event.conclusion}"
-                    else:
-                        identity = f"content:{item['id']}"
-                    digest = hashlib.sha256(identity.encode()).hexdigest()[:32]
+                    event = await _event_for(session, item)
+                    digest = hashlib.sha256(_item_identity(event, item).encode()).hexdigest()[:32]
                     await create_delivery(
                         session, target, "updates", format_short_update(item),
                         f"updates:{target.id}:{digest}",
@@ -463,12 +613,8 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             elif normal_items:
                 known = {entry.get("dedupe") for entry in buffer.get("items", [])}
                 for item in normal_items:
-                    event = await session.get(Event, item["event_id"]) if item.get("event_id") else None
-                    if event is not None:
-                        identity = f"event:{event.id}:{event.conclusion}"
-                    else:
-                        identity = f"content:{item['id']}"
-                    digest = hashlib.sha256(identity.encode()).hexdigest()[:32]
+                    event = await _event_for(session, item)
+                    digest = hashlib.sha256(_item_identity(event, item).encode()).hexdigest()[:32]
                     if digest in known:
                         continue
                     published = item.get("published_at")

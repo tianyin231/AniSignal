@@ -13,6 +13,8 @@ export interface CollectTarget {
   community: string
   co_terms: string[]
   min_views: number
+  /** 监控意图：自然语言描述这个目标在乎什么；空 = 不送 AI 打标 */
+  intent: string | null
   next_run_at: string | null
   last_run_at: string | null
   last_success_at: string | null
