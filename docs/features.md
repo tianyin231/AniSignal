@@ -80,6 +80,16 @@ AniSignal 的主线是**配置关注范围 → 采集与降噪 → 浏览和追�
 
 实现参考：[通知服务](../server/app/services/notifications.py)、[定制推送](../server/app/services/custom_feeds.py)、[机器人服务](../server/app/services/bot.py)、[AstrBot 插件](../integrations/astrbot_plugin_anisignal/)。
 
+## RSS 订阅与 Webhook 输出
+
+监控任务和归并事件各自生成一份只读 RSS 2.0 订阅源，链接形如 `/api/feeds/{target|event}/{id}?token=...`，可直接放进任意阅读器。地址按 token 鉴权：token 可重建（换新址、旧址立即失效）或撤销（链接停止输出，记录保留）；订阅内容只包含该任务/事件下的最新条目（标题/链接/时间/来源），被隐藏或标记为忽略的内容不会出现。
+
+Webhook 是邮件之外的一种通知渠道：账号中心可配置最多 5 个只读推送地址，命中关注词时以 JSON 推送（字段 `title/link/content/source/timestamp/tier`，兼容 n8n 一类自动化工具），失败自动重试 3 次，投递结果可在账号中心和管理端查看，失败的投递可手动重推。推送范围可选「全部命中」或「只推重要命中」（后者依赖 AI 打标）。
+
+Webhook 地址只接受 http/https，不允许指向本机或内网；地址属于凭据，泄露后可直接在账号中心删除或停用。订阅源 token 同理。
+
+实现参考：[feed 服务](../server/app/services/feeds.py)、[webhook 服务](../server/app/services/webhooks.py)、[订阅接口](../server/app/api/feeds.py)、[账号中心接口](../server/app/api/account_webhooks.py)、[管理端接口](../server/app/api/admin_output.py)。
+
 ## 管理与反馈
 
 管理端提供采集目标、分类规则、内容、事件、商品、用户、定制监控、站点设置、AI 和机器人相关入口。管理员配置决定公共内容范围；个人关注与独立监控不应被描述为自动改变整个站点的采集策略。

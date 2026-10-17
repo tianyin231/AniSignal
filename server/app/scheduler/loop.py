@@ -50,7 +50,9 @@ async def local_loop(queue) -> None:
                     )
                 due_now, day = _morning_due(now)
                 from app.services.bot import run_bot_notifications
+                from app.services.webhooks import run_webhook_dispatch
                 await run_bot_notifications(session, now)
+                await run_webhook_dispatch(session)
                 if due_now and _local_morning_date != day:
                     await queue.enqueue_morning()
                     _local_morning_date = day
@@ -139,6 +141,15 @@ async def main() -> None:
                         )
                     await _enqueue_morning_if_due(redis, now)
                     await redis.enqueue_job("send_bot_notifications", _job_id=f"bot-sweep:{int(now.timestamp() // 60)}")
+                    # Webhook 命中推送：与机器人推送同节奏，5 分钟桶去重
+                    webhook_bucket = int(now.timestamp() // 300)
+                    if not await redis.get(f"anisignal:webhook-sweep-enqueued:{webhook_bucket}"):
+                        job = await redis.enqueue_job(
+                            "dispatch_webhooks", _job_id=f"webhook-sweep:{webhook_bucket}")
+                        await redis.set(
+                            f"anisignal:webhook-sweep-enqueued:{webhook_bucket}", "1",
+                            nx=True, px=6 * 60 * 60 * 1000)
+                        logger.info("enqueued webhook sweep job=%s", getattr(job, "job_id", None))
                     # 定制监控轮询：5 分钟桶去重，worker 内部再按 next_run_at 限速
                     bucket = int(now.timestamp() // 300)
                     if not await redis.get(f"anisignal:custom-sweep-enqueued:{bucket}"):

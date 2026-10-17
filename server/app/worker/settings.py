@@ -126,9 +126,22 @@ async def send_bot_notifications(ctx):
         await ctx["redis"].eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0", 1, "anisignal:bot-sweep-lock", token)
 
 
+async def dispatch_webhooks(ctx) -> dict:
+    """Webhook 命中推送：为启用中的渠道 POST JSON（n8n 兼容），失败重试并记录。"""
+    from app.db import SessionLocal
+    from app.services.webhooks import run_webhook_dispatch
+
+    async with SessionLocal() as session:
+        result = await run_webhook_dispatch(session)
+        if result.get("sent") or result.get("failed"):
+            logger.info("webhook dispatch -> %s", result)
+        return result
+
+
 class WorkerSettings:
     functions = [
         send_bot_notifications,
+        dispatch_webhooks,
         collect_target,
         summarize_event,
         translate_content,

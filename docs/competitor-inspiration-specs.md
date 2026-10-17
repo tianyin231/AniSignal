@@ -9,11 +9,14 @@
 - 监控任务配自然语言「意图描述」；命中经 AI 打标：重要 / 一般 / 忽略
 - 重要→推送，一般→仅入库，忽略→丢弃
 
-## 批次 2：RSS + Webhook 万物输出（低难度）
+## 批次 2（已完成）：RSS + Webhook 万物输出（低难度）
 抄 Inoreader「过滤结果再输出 RSS」+ Google Alerts + camelcamelcamel。
 - 每个监控任务、每个事件自动生成带 token 的 RSS 2.0 feed（只读、token 鉴权、可撤销）
 - 通知渠道新增通用 Webhook：POST JSON（n8n 兼容格式：title/link/content/source/timestamp）
 - 管理端可查看/复制 feed 地址、webhook 投递记录
+- 落地：feed token 按 kind+ref_id 唯一、`token_urlsafe(32)` 生成、`compare_digest` 校验，撤销/重建后旧链接 404；
+  webhook 每用户最多 5 个、超时 10 秒、失败重试 3 次、按 `webhook:{id}:content:{id}` 去重；
+  调度每 5 分钟扫描一次命中（未配置 webhook 时零开销），管理端与账号中心均可查看投递记录
 
 ## 批次 3a：规则引擎 + 声量异常告警
 抄 Inoreader Rules + Brand24 Anomaly Detector + Mention 布尔语法。
