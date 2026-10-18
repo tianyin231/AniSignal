@@ -35,7 +35,7 @@ const shown = computed(() => (expanded.value ? all.value : all.value.slice(0, LI
 
 <template>
   <section v-if="all.length" aria-labelledby="ongoing-title" class="mt-10">
-    <header class="wall-surface mb-3.5 flex items-baseline justify-between gap-4">
+    <header class="wall-heading mb-3.5 flex items-baseline justify-between gap-4">
       <h2 id="ongoing-title" class="text-xl font-bold text-ink">
         进行中<span class="num ml-2 text-base font-medium text-faint">{{ all.length }}</span>
       </h2>

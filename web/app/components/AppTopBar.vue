@@ -6,16 +6,15 @@ const route = useRoute()
 // 顶栏只有一层：品牌旁的"频道"组（首页/鸣潮/碧蓝航线…）+ 右侧工具；
 // 栏目导航（官方动态/活动日历/商品/事件/内容库）由 SectionNav 放在内容区首行。
 const channels = [
-  { key: 'home', label: '首页', dot: communityClasses('blue').dot, nav: communityClasses('blue').nav },
+  { key: 'home', label: '首页', nav: communityClasses('blue').nav },
   ...GAME_COMMUNITIES.map(c => ({
     key: c.key,
     label: c.key === 'ai' ? 'AI 快讯' : c.label,
-    dot: communityClasses(c.color).dot,
     nav: communityClasses(c.color).nav,
     to: c.key === 'ai' ? '/ai' : undefined,
   })),
   // 定制化频道固定最后：用户自建监控（UID/关键词）的公开目录
-  { key: 'custom', label: '定制化', dot: 'bg-faint', nav: communityClasses('blue').nav, to: '/custom' },
+  { key: 'custom', label: '定制化', nav: communityClasses('blue').nav, to: '/custom' },
 ]
 
 const { rememberRouteCommunity } = useGameSection()
@@ -78,11 +77,10 @@ async function handleLogout() {
           v-for="ch in channels"
           :key="ch.key"
           :to="ch.to ?? (ch.key === 'home' ? '/' : { path: '/', query: { community: ch.key } })"
-          class="flex items-center gap-2 whitespace-nowrap border-b-2 px-3 text-sm transition-colors"
+          class="flex items-center whitespace-nowrap border-b-2 px-3 text-sm transition-colors"
           :class="activeChannel === ch.key ? `${ch.nav} font-semibold` : 'border-transparent text-muted hover:text-ink'"
           :aria-current="activeChannel === ch.key ? 'page' : undefined"
         >
-          <span class="size-[7px] shrink-0 rounded-full" :class="ch.dot" aria-hidden="true" />
           {{ ch.label }}
         </NuxtLink>
       </nav>

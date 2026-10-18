@@ -121,8 +121,11 @@ const sourcesRequest = useLazyAsyncData(
 )
 
 const requests = [feedRequest, eventsRequest, highlightsRequest, trendingRequest, calendarRequest, codesRequest, pulseRequest, sourcesRequest]
+// 频道入口与其他首屏数据并行预取，客户端挂载时直接复用缓存，避免头图二次展开。
+const { fetchOnce: fetchOfficialLinks } = useOfficialLinks(homeCommunity)
+const officialLinksRequest = import.meta.server && !aggregate.value ? fetchOfficialLinks() : Promise.resolve()
 // 服务端首屏等全部数据；客户端切换频道时先渲染结构、各区块随数据到达再填充
-await Promise.all(requests)
+await Promise.all([...requests, officialLinksRequest])
 const { data: feedData, status: feedStatus } = feedRequest
 const { data: eventsData } = eventsRequest
 const { data: highlightsData } = highlightsRequest

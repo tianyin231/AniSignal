@@ -25,7 +25,7 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 </script>
 
 <template>
-  <div class="aurora-bg min-h-screen">
+  <div class="aurora-bg flex min-h-dvh flex-col">
     <WallpaperBackdrop />
   <header class="glass sticky top-0 z-20">
       <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
@@ -41,7 +41,7 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
     </header>
     <AnnouncementBanner />
 
-    <main class="mx-auto grid max-w-5xl items-center gap-8 px-6 py-10 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:py-20">
+    <main class="mx-auto grid w-full max-w-5xl flex-1 items-center gap-8 px-6 py-10 lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)] lg:py-20">
       <div class="w-full max-w-sm justify-self-center lg:justify-self-start">
         <slot />
       </div>
@@ -73,7 +73,7 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
       </section>
     </main>
 
-    <footer class="mx-auto max-w-5xl px-6 pb-8 text-xs text-slate-400 dark:text-zinc-500">
+    <footer class="mx-auto w-full max-w-5xl px-6 pb-8 text-xs text-slate-400 dark:text-zinc-500">
       <NuxtLink to="/about" class="hover:text-slate-600 dark:hover:text-zinc-300">关于 AniSignal 与数据边界</NuxtLink>
     </footer>
   </div>

@@ -16,6 +16,13 @@ export function shiftCalendarMonth(month: string, offset: number) {
   return new Date(Date.UTC(year!, number! - 1 + offset, 1)).toISOString().slice(0, 7)
 }
 
+export interface CalendarMilestone {
+  entry: CalendarEntry
+  date: string
+  at: string
+  phase: 'start' | 'end' | 'single' | 'deadline'
+}
+
 export function calendarDays(month: string, entries: CalendarEntry[]) {
   const first = new Date(`${month}-01T00:00:00Z`)
   const gridStart = first.getTime() - ((first.getUTCDay() + 6) % 7) * DAY
@@ -27,6 +34,15 @@ export function calendarDays(month: string, entries: CalendarEntry[]) {
       : start
     return { ...entry, startDay: beijingDay(start), endDay: beijingDay(end) }
   })
+  // 月历只铺开始、结束和截止节点；持续活动仍保留在 items，供当天详情展开查看。
+  const milestones = dated.flatMap((entry): CalendarMilestone[] => {
+    const start = { entry, date: entry.startDay, at: entry.start_at! }
+    if (entry.kind === 'deadline') return [{ ...start, phase: 'deadline' }]
+    if (!entry.end_at) return [{ ...start, phase: 'start' }]
+    const endDate = beijingDay(entry.end_at)
+    if (endDate === entry.startDay) return [{ ...start, phase: 'single' }]
+    return [{ ...start, phase: 'start' }, { entry, date: endDate, at: entry.end_at, phase: 'end' }]
+  })
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(gridStart + index * DAY).toISOString().slice(0, 10)
     // 日期格先展示当天的开始 / 结束节点，长周期活动不会挤占整个月的预览。
@@ -36,6 +52,7 @@ export function calendarDays(month: string, entries: CalendarEntry[]) {
       number: Number(date.slice(-2)),
       inMonth: date.startsWith(month),
       items: dated.filter(entry => entry.startDay <= date && entry.endDay >= date).sort((a, b) => dayOrder(a) - dayOrder(b)),
+      milestones: milestones.filter(point => point.date === date).sort((a, b) => timestamp(a.at) - timestamp(b.at) || a.entry.id - b.entry.id),
     }
   })
 }
