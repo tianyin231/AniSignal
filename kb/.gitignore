@@ -1,0 +1,7 @@
+# 数据产物留云电脑，不进 git
+data/
+# 本地依赖/二进制（Qdrant 单二进制、模型缓存）
+vendor/
+.venv/
+__pycache__/
+*.pyc
