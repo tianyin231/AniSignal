@@ -154,8 +154,8 @@ class TorchEncoder(BaseEncoder):
                 emb = torch.nn.functional.normalize(emb, p=2, dim=1)
                 outs.append(emb.cpu().numpy().astype(np.float32))
         if not outs:
-            return np.zeros((0, self.dim), dtype=np.float32)
-        return np.vstack(outs)
+            return []
+        return np.vstack(outs).astype(np.float32).tolist()
 
 
 class OnnxEncoder(BaseEncoder):
@@ -222,8 +222,8 @@ class OnnxEncoder(BaseEncoder):
             norms = np.linalg.norm(emb, axis=1, keepdims=True)
             outs.append(emb / np.clip(norms, 1e-9, None))
         if not outs:
-            return np.zeros((0, self.dim), dtype=np.float32)
-        return np.vstack(outs).astype(np.float32)
+            return []
+        return np.vstack(outs).astype(np.float32).tolist()
 
 
 def get_encoder(backend: str = "torch") -> BaseEncoder:
