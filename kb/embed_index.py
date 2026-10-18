@@ -95,7 +95,7 @@ def main() -> int:
         points = [
             {
                 "id": next_id + i,
-                "vector": vecs[i].tolist(),
+                "vector": vecs[i],
                 "payload": {
                     "chunk_id": c["chunk_id"], "text": c["text"],
                     "source_title": c["source_title"], "source_url": c["source_url"],
