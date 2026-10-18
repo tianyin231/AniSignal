@@ -4,32 +4,25 @@ import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection
 
 const route = useRoute()
 // 顶栏只有一层：品牌旁的"频道"组（首页/鸣潮/碧蓝航线…）+ 右侧工具；
-// 栏目导航（官方动态/活动日历/商品/事件/内容库）放在首页内容区的操作行里，不单独占一层。
+// 栏目导航（官方动态/活动日历/商品/事件/内容库）由 SectionNav 放在内容区首行。
 const channels = [
-  { key: 'home', label: '首页', color: 'blue' as const },
-  ...GAME_COMMUNITIES.map(c => ({ key: c.key, label: c.label, color: c.color, to: c.key === 'ai' ? '/ai' : undefined })),
+  { key: 'home', label: '首页', dot: communityClasses('blue').dot, nav: communityClasses('blue').nav },
+  ...GAME_COMMUNITIES.map(c => ({
+    key: c.key,
+    label: c.key === 'ai' ? 'AI 快讯' : c.label,
+    dot: communityClasses(c.color).dot,
+    nav: communityClasses(c.color).nav,
+    to: c.key === 'ai' ? '/ai' : undefined,
+  })),
   // 定制化频道固定最后：用户自建监控（UID/关键词）的公开目录
-  { key: 'custom', label: '定制化', color: 'blue' as const, to: '/custom' },
+  { key: 'custom', label: '定制化', dot: 'bg-faint', nav: communityClasses('blue').nav, to: '/custom' },
 ]
 
-const { community, rememberRouteCommunity } = useGameSection()
+const { rememberRouteCommunity } = useGameSection()
 onMounted(rememberRouteCommunity)
 watch(() => [route.path, route.query.community], rememberRouteCommunity)
 
-// 选中频道：聚合首页 → 首页；分区首页 → 该分区；栏目页 → 当前分区
-const activeChannel = computed<string | null>(() => {
-  if (route.path === '/ai') return 'ai'
-  if (route.path.startsWith('/custom')) return 'custom'
-  if (route.path === '/') {
-    const q = String(route.query.community || '')
-    if (GAME_COMMUNITIES.some(c => c.key === q)) return q
-    return 'home'
-  }
-  // 栏目页处于聚合视角（community=all）时不高亮任何分区频道
-  if (route.path === '/calendar' && !GAME_COMMUNITIES.some(c => c.key === route.query.community)) return null
-  if (String(route.query.community || '') === 'all') return null
-  return community.value
-})
+const { active: activeChannel } = useActiveChannel()
 const channelNav = ref<HTMLElement | null>(null)
 let navObserver: ResizeObserver | undefined
 function revealActiveChannel() {
@@ -70,56 +63,55 @@ async function handleLogout() {
 
 <template>
   <header class="glass sticky top-0 z-40">
-    <div class="mx-auto flex h-14 max-w-[1280px] items-center gap-4 px-4 lg:px-6">
-      <NuxtLink to="/" class="flex shrink-0 items-center gap-2 self-center">
-        <img src="/icon.png" alt="" class="size-7 shrink-0">
-        <span class="text-[15px] font-semibold tracking-tight text-slate-900 dark:text-zinc-50">AniSignal</span>
+    <div class="mx-auto flex h-16 max-w-[1280px] items-center gap-3 px-4 lg:gap-6 lg:px-8">
+      <NuxtLink to="/" class="flex shrink-0 items-center gap-2.5" aria-label="AniSignal 首页">
+        <img src="/icon.png" alt="" class="size-8 shrink-0 rounded-[9px]">
+        <span class="num hidden text-[19px] font-bold tracking-tight text-ink sm:inline">AniSignal</span>
       </NuxtLink>
-      <nav ref="channelNav" class="flex min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto text-sm [scrollbar-width:none]">
+      <nav ref="channelNav" aria-label="频道" class="flex min-w-0 flex-1 items-stretch self-stretch overflow-x-auto [scrollbar-width:none]">
         <NuxtLink
           v-for="ch in channels"
           :key="ch.key"
           :to="ch.to ?? (ch.key === 'home' ? '/' : { path: '/', query: { community: ch.key } })"
-          class="flex items-center whitespace-nowrap border-b-2 px-3 transition-colors"
-          :class="
-            activeChannel === ch.key
-              ? communityClasses(ch.color).nav
-              : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-100'
-          "
+          class="flex items-center gap-2 whitespace-nowrap border-b-2 px-3 text-sm transition-colors"
+          :class="activeChannel === ch.key ? `${ch.nav} font-semibold` : 'border-transparent text-muted hover:text-ink'"
           :aria-current="activeChannel === ch.key ? 'page' : undefined"
         >
+          <span class="size-[7px] shrink-0 rounded-full" :class="ch.dot" aria-hidden="true" />
           {{ ch.label }}
         </NuxtLink>
       </nav>
-      <div class="flex shrink-0 items-center gap-1 self-center">
+      <div class="flex shrink-0 items-center gap-1">
         <SearchBox />
         <WallpaperToggle />
         <ThemeToggle />
         <NuxtLink
           v-if="!user"
           to="/login"
-          class="btn-primary ml-1 hidden px-3.5 py-1.5 text-xs sm:block"
+          class="btn-primary ml-1 hidden h-9 items-center px-4 sm:inline-flex"
         >
           登录
         </NuxtLink>
         <div v-else ref="menuRoot" class="relative">
           <button
-            class="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-slate-200/70 dark:hover:bg-zinc-800/70"
+            class="flex h-10 items-center gap-2 rounded-[10px] px-2 text-sm transition-colors hover:bg-chip"
+            :aria-expanded="menuOpen"
+            aria-haspopup="menu"
             @click="menuOpen = !menuOpen"
           >
-            <span class="grid size-6 place-items-center rounded-full bg-gradient-to-b text-[11px] font-semibold text-white" :class="avatarGradient(user.avatar)">
+            <span class="grid size-7 place-items-center rounded-full bg-gradient-to-b text-xs font-semibold text-white" :class="avatarGradient(user.avatar)">
               {{ displayName(user)[0]!.toUpperCase() }}
             </span>
-            <span class="hidden max-w-32 truncate text-xs text-slate-600 sm:block dark:text-zinc-300">{{ displayName(user) }}</span>
+            <span class="hidden max-w-32 truncate text-[13px] text-ink-2 sm:block">{{ displayName(user) }}</span>
           </button>
-          <div v-if="menuOpen" class="popover absolute right-0 top-full z-50 mt-1.5 w-44 p-1.5">
-            <NuxtLink to="/account" class="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-500/10 dark:text-zinc-200" @click="menuOpen = false">
+          <div v-if="menuOpen" class="popover absolute right-0 top-full z-50 mt-1.5 w-44 p-1.5" role="menu">
+            <NuxtLink to="/account" class="block rounded-lg px-3 py-2 text-sm text-ink-2 hover:bg-chip" role="menuitem" @click="menuOpen = false">
               账号中心
             </NuxtLink>
-            <NuxtLink to="/watch" class="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-500/10 dark:text-zinc-200" @click="menuOpen = false">
+            <NuxtLink to="/watch" class="block rounded-lg px-3 py-2 text-sm text-ink-2 hover:bg-chip" role="menuitem" @click="menuOpen = false">
               订阅中心
             </NuxtLink>
-            <button class="block w-full rounded-md px-3 py-2 text-left text-sm text-red-500 hover:bg-red-500/10 dark:text-red-400" @click="handleLogout">
+            <button class="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-500/10 dark:text-red-400" role="menuitem" @click="handleLogout">
               退出登录
             </button>
           </div>

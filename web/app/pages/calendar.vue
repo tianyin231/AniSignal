@@ -52,6 +52,7 @@ function timeRange(item: CalendarEntry) {
 
 <template>
   <div>
+    <SectionNav />
     <header class="mb-5 flex flex-wrap items-center justify-between gap-3 px-1">
       <div>
         <h1 class="text-xl font-semibold text-slate-900 dark:text-zinc-50">活动日历</h1>

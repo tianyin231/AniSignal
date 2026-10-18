@@ -16,7 +16,7 @@ const title = computed(() => ({
 const icon = computed<{ comp: Component; class: string }>(() => ({
   off: { comp: ImageOff, class: '' },
   loading: { comp: Loader2, class: 'animate-spin' },
-  on: { comp: WallpaperIcon, class: 'text-blue-600 dark:text-blue-300' },
+  on: { comp: WallpaperIcon, class: 'text-brand-ink' },
   failed: { comp: ImageOff, class: 'text-amber-500' },
 })[status.value]!)
 
@@ -38,10 +38,10 @@ function onToggle() {
       :aria-label="title"
       :title="title"
       :disabled="status === 'loading'"
-      class="grid size-8 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-200/70 hover:text-slate-900 disabled:cursor-wait dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
+      class="grid size-10 place-items-center rounded-[10px] text-muted transition-colors hover:bg-chip hover:text-ink disabled:cursor-wait"
       @click="onToggle"
     >
-      <component :is="icon.comp" :size="16" :class="icon.class" />
+      <component :is="icon.comp" :size="18" :class="icon.class" />
     </button>
     <a
       v-if="status === 'on'"
@@ -50,9 +50,9 @@ function onToggle() {
       download="anisignal-wallpaper"
       title="下载当前背景原图"
       aria-label="下载当前背景原图"
-      class="grid size-8 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-200/70 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
+      class="grid size-10 place-items-center rounded-[10px] text-muted transition-colors hover:bg-chip hover:text-ink"
     >
-      <Download :size="15" />
+      <Download :size="17" />
     </a>
   </div>
 </template>

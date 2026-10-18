@@ -9,6 +9,8 @@ export interface OfficialLinkItem {
   url: string
   category: string
   title: string
+  /** AI 审核时提取的链接名称（如"鸣潮官网"），缺失时回退 title */
+  label?: string
   platform: string
   published_at: string | null
 }

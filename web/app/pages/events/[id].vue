@@ -14,6 +14,8 @@ if (!raw.value)
   throw createError({ statusCode: 404, statusMessage: '事件不存在', fatal: true })
 
 const event = computed(() => toAppEvent(raw.value!))
+// 顶栏高亮事件所属分区，而不是上次浏览的分区
+usePageCommunity(() => raw.value?.community)
 const detail = computed(() => raw.value!)
 const evidenceView = ref<'timeline' | 'table'>('timeline')
 

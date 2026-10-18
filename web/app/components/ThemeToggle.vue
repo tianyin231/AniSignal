@@ -22,10 +22,10 @@ function toggle() {
   <button
     type="button"
     :aria-label="theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'"
-    class="grid size-8 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-200/70 hover:text-slate-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
+    class="grid size-10 place-items-center rounded-[10px] text-muted transition-colors hover:bg-chip hover:text-ink"
     @click="toggle"
   >
-    <Sun v-if="theme === 'dark'" :size="16" />
-    <Moon v-else :size="16" />
+    <Sun v-if="theme === 'dark'" :size="18" />
+    <Moon v-else :size="18" />
   </button>
 </template>

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { Building2, ShieldAlert, Users } from 'lucide-vue-next'
-import type { ApiProductList } from '~/composables/usePublicApi'
+import type { ApiProductList, FulfillmentAxis } from '~/composables/usePublicApi'
+import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { fmtTime } from '~/utils/admin-types'
 import { sortProductsBySignal } from '~/utils/product-utils'
 
-const props = defineProps<{ mobile?: boolean }>()
+const props = defineProps<{ mobile?: boolean, embedded?: boolean }>()
 const { api } = usePublicApi()
 const route = useRoute()
 const { community } = useGameSection()
@@ -38,63 +38,100 @@ watch([scope, () => route.params.slug], () => { selectedSlug.value = null })
 const product = computed(
   () => products.value.find((p) => p.slug === (selectedSlug.value || route.params.slug)) ?? products.value[0],
 )
+const productCommunity = computed(() => communityMeta(product.value?.community))
 useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () =>
-  status.value !== 'pending' && window.matchMedia('(min-width: 1280px)').matches !== Boolean(props.mobile),
+  status.value !== 'pending' && (props.embedded || window.matchMedia('(min-width: 1280px)').matches !== Boolean(props.mobile)),
 )
 
-// 右栏只做粗略速览：三轴状态行 + 跟踪数，细节进详情页
-const axisMeta = [
-  { key: 'official', icon: Building2 },
-  { key: 'consumer', icon: Users },
-  { key: 'quality', icon: ShieldAlert },
-] as const
+// 三轴速览：每轴一段色条（灰=暂无 / 蓝=有官方动态 / 绿=正向样本 / 橙=需关注 / 红=多源问题），细节在商品详情页
+type Tone = 'neutral' | 'brand' | 'ok' | 'warn' | 'hot'
+const TONE_BAR: Record<Tone, string> = {
+  neutral: 'bg-line',
+  brand: 'bg-brand',
+  ok: 'bg-ok',
+  warn: 'bg-warn',
+  hot: 'bg-hot',
+}
+function axisTone(axis: FulfillmentAxis): Tone {
+  switch (axis.state) {
+    case 'no_verified_signal':
+    case 'no_verified_receipt':
+      return 'neutral'
+    case 'no_verified_issue':
+      return 'ok'
+    case 'seeded_samples':
+      return 'brand'
+    case 'isolated_issue':
+    case 'candidate_attention':
+      return 'warn'
+    case 'repeated_issue':
+      return 'hot'
+    default:
+      if (axis.key === 'consumer') return 'ok'
+      return /delay/.test(axis.state) ? 'warn' : 'brand'
+  }
+}
+const axes = computed(() =>
+  product.value
+    ? (['official', 'consumer', 'quality'] as const).map((key) => {
+        const axis = product.value!.fulfillment[key]
+        return { key, label: axis.label, state: axis.state_label, bar: TONE_BAR[axisTone(axis)] }
+      })
+    : [],
+)
+const footLine = computed(() => {
+  const f = product.value?.fulfillment
+  if (!f) return ''
+  return [
+    f.automated_count ? `${f.automated_count} 条已采纳` : '',
+    f.candidate_total ? `${f.candidate_total} 条跟踪中` : '',
+    f.updated_at ? fmtTime(f.updated_at) : '',
+  ].filter(Boolean).join(' · ')
+})
 </script>
 
 <template>
-  <section class="panel-glass min-w-0 p-4">
+  <!-- 首页内嵌时，分区没有追踪商品就整卡隐藏，不留空状态 -->
+  <section v-if="!(embedded && status === 'success' && !products.length)" class="panel min-w-0 p-5">
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100"><NuxtLink :to="overviewTo" class="inline-flex min-h-11 items-center hover:text-blue-600 dark:hover:text-blue-300 xl:min-h-0">履约信号</NuxtLink></h2>
-      <NuxtLink :to="overviewTo" class="link inline-flex min-h-11 shrink-0 items-center text-xs xl:min-h-0">商品总览</NuxtLink>
+      <h2 class="text-base font-bold text-ink">
+        <NuxtLink :to="overviewTo" class="inline-flex min-h-11 items-center hover:text-brand-ink xl:min-h-0">履约追踪</NuxtLink>
+      </h2>
+      <NuxtLink :to="overviewTo" class="link inline-flex min-h-11 shrink-0 items-center text-[13px] xl:min-h-0">全部商品</NuxtLink>
     </div>
     <p v-if="error" role="alert" class="mt-2 text-xs text-amber-700 dark:text-amber-300">履约信号暂时更新失败。<button class="ml-1 underline" type="button" @click="refresh()">重试</button></p>
     <template v-if="product">
-    <!-- 多商品按最近信号更新排序，切换只影响当前预览。 -->
-    <div v-if="products.length > 1" class="mt-2 flex flex-wrap gap-1">
-      <button
-        v-for="p in products"
-        :key="p.slug"
-        type="button"
-        class="min-h-9 max-w-full truncate rounded-md px-2 py-1 text-xs transition-colors"
-        :aria-pressed="p.slug === product.slug"
-        :class="p.slug === product.slug
-          ? 'bg-blue-500/10 font-medium text-blue-700 dark:bg-blue-400/15 dark:text-blue-300'
-          : 'text-slate-500 hover:bg-slate-200/70 dark:text-zinc-400 dark:hover:bg-zinc-800/70'"
-        @click="selectedSlug = p.slug"
-      >
-        {{ p.name }}
-      </button>
-    </div>
-    <NuxtLink :to="{ path: `/products/${product.slug}`, query: { community: scope } }" class="mt-1 block py-1 text-sm font-medium text-slate-800 hover:text-blue-600 dark:text-zinc-100 dark:hover:text-blue-300 [overflow-wrap:anywhere]">{{ product.name }}</NuxtLink>
-    <div class="mt-3 space-y-1.5">
-      <div
-        v-for="axis in axisMeta"
-        :key="axis.key"
-        class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-lg border border-slate-900/5 bg-white/40 px-2.5 py-2 dark:border-white/10 dark:bg-white/5"
-      >
-        <span class="flex shrink-0 items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-zinc-300">
-          <component :is="axis.icon" :size="13" /> {{ product.fulfillment[axis.key].label }}
-        </span>
-        <span class="min-w-0 text-xs font-medium text-slate-700 dark:text-zinc-200 [overflow-wrap:anywhere]">{{ product.fulfillment[axis.key].state_label }}</span>
+      <!-- 多商品按最近信号更新排序，切换只影响当前预览。 -->
+      <div v-if="products.length > 1" class="mt-2 flex flex-wrap gap-1">
+        <button
+          v-for="p in products"
+          :key="p.slug"
+          type="button"
+          class="min-h-9 max-w-full truncate rounded-lg px-2.5 py-1 text-xs transition-colors"
+          :aria-pressed="p.slug === product.slug"
+          :class="p.slug === product.slug ? 'bg-brand-soft font-semibold text-brand-ink' : 'text-muted hover:bg-chip'"
+          @click="selectedSlug = p.slug"
+        >
+          {{ p.name }}
+        </button>
       </div>
-    </div>
-    <div class="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-900/5 pt-2.5 dark:border-white/10">
-      <span v-if="product.fulfillment.candidate_total" class="chip bg-amber-500/10 text-amber-800 dark:text-amber-300">{{ product.fulfillment.candidate_total }} 条自动跟踪</span>
-      <span v-if="product.fulfillment.automated_count" class="chip bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">{{ product.fulfillment.automated_count }} 条自动采纳</span>
-      <span v-if="product.fulfillment.updated_at" class="mono text-[11px] text-slate-500 dark:text-zinc-400">信号更新 {{ fmtTime(product.fulfillment.updated_at) }}</span>
-    </div>
-    <NuxtLink :to="{ path: `/products/${product.slug}`, query: { community: scope } }" class="link mt-1 inline-flex min-h-11 items-center text-xs">查看商品详情 →</NuxtLink>
+      <NuxtLink
+        :to="{ path: `/products/${product.slug}`, query: { community: scope } }"
+        class="mt-2 flex flex-wrap items-center gap-2 text-[15px] font-semibold text-ink hover:text-brand-ink [overflow-wrap:anywhere]"
+      >
+        {{ product.name }}
+        <span v-if="productCommunity" class="rounded-md px-1.5 py-0.5 text-[11px] font-semibold" :class="communityClasses(productCommunity.color).chip">{{ productCommunity.label }}</span>
+      </NuxtLink>
+      <div class="mt-4 grid grid-cols-3 gap-3">
+        <div v-for="axis in axes" :key="axis.key" class="min-w-0">
+          <div class="h-1 rounded-full" :class="axis.bar" />
+          <p class="mt-2 text-xs text-muted">{{ axis.label }}</p>
+          <p class="mt-0.5 line-clamp-2 text-[13px] font-semibold leading-snug text-ink-2">{{ axis.state }}</p>
+        </div>
+      </div>
+      <p v-if="footLine" class="mono mt-4 text-[11px] text-faint">{{ footLine }}</p>
     </template>
-    <p v-else-if="status === 'pending'" class="mt-2 text-xs text-slate-600 dark:text-zinc-400">正在加载商品…</p>
-    <p v-else-if="!error" class="mt-2 text-xs leading-relaxed text-slate-600 dark:text-zinc-400">当前分区暂无追踪中的商品。</p>
+    <p v-else-if="status === 'pending'" class="mt-2 text-xs text-muted">正在加载商品…</p>
+    <p v-else-if="!error" class="mt-2 text-xs leading-relaxed text-muted">当前分区暂无追踪中的商品。</p>
   </section>
 </template>

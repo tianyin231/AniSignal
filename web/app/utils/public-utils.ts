@@ -1,6 +1,7 @@
 /** 公开站共享工具：平台→区域、类目元数据、API→UI 适配 */
 
 import { fmtTime } from '~/utils/admin-types'
+import { decodeEntities } from '~/utils/text'
 import { type Identity, type Platform, type RawItem, type Region, type AppEvent, type SourceRef } from '~/utils/data'
 import type { ApiEvent, ApiProduct, PublicContentItem } from '~/composables/usePublicApi'
 
@@ -37,7 +38,7 @@ const CONFIDENCE_LABEL: Record<string, '高' | '中' | '低'> = {
 export function toAppEvent(e: ApiEvent): AppEvent {
   return {
     id: String(e.id),
-    title: e.title,
+    title: decodeEntities(e.title),
     summary: e.summary ?? e.conclusion ?? '',
     category: categoryMeta[e.category]?.label ?? e.category,
     identity: e.identity as Identity,
@@ -77,12 +78,12 @@ export function toRawItem(item: PublicContentItem): RawItem {
     platform: item.platform as Platform,
     account: item.source_name ?? '—',
     region: regionOf(item.platform),
-    title: item.title || item.external_id,
+    title: decodeEntities(item.title || item.external_id),
     publishedAt: item.published_at ? fmtTime(item.published_at) : '发布时间未知',
     identity: item.identity as Identity,
     category: item.category ? (categoryMeta[item.category]?.label ?? item.category) : undefined,
     keywords: item.matched_keywords ?? [],
-    excerpt: item.text_excerpt ?? undefined,
+    excerpt: item.text_excerpt ? decodeEntities(item.text_excerpt) : undefined,
     cover: item.cover ?? undefined,
     originalUrl: item.url ?? undefined,
     metrics: item.metrics ?? undefined,

@@ -24,7 +24,7 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
 
 <template>
   <div class="min-w-0">
-    <BackToChannelHome />
+    <SectionNav />
     <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">商品总览</h1>
     <p class="mb-4 mt-1 text-sm text-slate-600 dark:text-zinc-400">{{ isAll ? '全部分区' : '当前分区' }}的商品履约动态，按最近信号更新排序。</p>
 

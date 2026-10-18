@@ -9,18 +9,17 @@ const emit = defineEmits<{ (e: 'update:modelValue', value: string): void }>()
 
 <template>
   <div class="sticky top-16 z-30 mb-4">
-    <div class="panel-glass flex max-w-full items-center justify-between gap-2 rounded-[14px] p-1">
-      <div class="inline-flex gap-0.5 overflow-x-auto [scrollbar-width:none]">
+    <div class="panel flex max-w-full items-center justify-between gap-2 rounded-[14px] p-1">
+      <div class="inline-flex gap-0.5 overflow-x-auto [scrollbar-width:none]" role="tablist">
+        <!-- 选中态用频道强调色：进入游戏频道后随该游戏品牌色变化 -->
         <button
           v-for="t in tabs"
           :key="t.key"
           type="button"
-          class="whitespace-nowrap rounded-[10px] px-3 py-1.5 text-sm transition-all"
-          :class="
-            modelValue === t.key
-              ? 'bg-white/85 font-medium text-blue-700 shadow-sm dark:bg-white/10 dark:text-blue-300'
-              : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200'
-          "
+          role="tab"
+          :aria-selected="modelValue === t.key"
+          class="h-9 whitespace-nowrap rounded-[10px] px-3.5 text-sm transition-colors"
+          :class="modelValue === t.key ? 'bg-accent-soft font-semibold text-accent-ink' : 'text-muted hover:bg-chip hover:text-ink'"
           @click="emit('update:modelValue', t.key)"
         >
           {{ t.label }}
