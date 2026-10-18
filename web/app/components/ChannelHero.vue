@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ArrowUpRight } from 'lucide-vue-next'
 import { channelThemeClass, communityClasses, communityMeta } from '~/composables/useGameSection'
+import { imageSrcset, imageUrl } from '~/utils/image'
 
 /**
  * 游戏频道头图：深色底 + 右侧主视觉（最新精选封面），左侧游戏名、核心数字与官方入口。
@@ -36,8 +37,12 @@ const quickLinks = computed(() => links.value.slice(0, 6))
   >
     <img
       v-if="cover && !coverFailed"
-      :src="cover"
+      :src="imageUrl(cover, 1600)"
+      :srcset="imageSrcset(cover, [640, 960, 1600])"
+      sizes="(min-width: 1280px) 827px, (min-width: 640px) 68vw, 100vw"
       alt=""
+      decoding="async"
+      fetchpriority="high"
       referrerpolicy="no-referrer"
       class="absolute inset-y-0 right-0 -z-10 h-full w-full object-cover opacity-70 sm:w-[68%]"
       @error="coverFailed = true"

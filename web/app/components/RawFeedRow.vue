@@ -2,6 +2,7 @@
 import { ArrowUpRight, BadgeCheck, ImageIcon } from 'lucide-vue-next'
 import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
+import { imageSrcset, imageUrl } from '~/utils/image'
 
 const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean; deltaView?: number | null }>()
 const { mediaMode } = useSiteConfig()
@@ -49,10 +50,13 @@ const excerpt = computed(() => (showCover.value ? '' : props.item.excerpt?.repla
     <NuxtLink :to="detailTo" class="group flex min-w-0 flex-1 gap-4 px-4 py-3.5 transition-colors hover:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-5">
       <div v-if="showCover" class="relative aspect-video w-28 shrink-0 overflow-hidden rounded-[10px] bg-chip sm:w-40">
         <img
-          :src="item.cover"
+          :src="imageUrl(item.cover, 320)"
+          :srcset="imageSrcset(item.cover, [160, 320])"
+          sizes="(min-width: 640px) 160px, 112px"
           alt=""
           referrerpolicy="no-referrer"
           loading="lazy"
+          decoding="async"
           class="size-full object-cover"
           @error="coverFailed = true"
         >
