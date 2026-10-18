@@ -15,6 +15,8 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # 直接跑本文件时能找到 kblib
+
 from kblib.config import RAW_DIR, SPIKE_DIR
 
 
