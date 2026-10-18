@@ -20,7 +20,7 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
 
 <template>
   <section class="mb-5 flex flex-wrap items-end justify-between gap-4">
-    <div class="wall-surface">
+    <div class="wall-heading">
       <p class="mono mb-1.5 text-xs tracking-wide text-muted">{{ dateLine }}</p>
       <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">今日信号</h1>
     </div>

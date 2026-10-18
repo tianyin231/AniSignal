@@ -41,3 +41,28 @@ test('当天开始和结束的安排先于贯穿整月的活动显示', () => {
   ]).find(day => day.date === '2026-09-21')!
   assert.deepEqual(day.items.map(item => item.id), [3, 2, 1])
 })
+
+test('跨周活动只在起止日显示节点，期间仍能查到完整活动', () => {
+  const days = calendarDays('2026-10', [entry(1, '2026-10-02T02:00:00', '2026-10-22T03:59:00')])
+  const points = days.flatMap(day => day.milestones)
+  assert.deepEqual(points.map(point => [point.date, point.phase]), [['2026-10-02', 'start'], ['2026-10-22', 'end']])
+  const middle = days.find(day => day.date === '2026-10-18')!
+  assert.equal(middle.milestones.length, 0)
+  assert.deepEqual(middle.items.map(item => item.id), [1])
+})
+
+test('零点结束的节点标在实际截止日，进行中列表不延长一天', () => {
+  const day = calendarDays('2026-10', [entry(1, '2026-09-30T16:00:00', '2026-10-01T16:00:00')])
+    .find(day => day.date === '2026-10-02')!
+  assert.equal(day.items.length, 0)
+  assert.deepEqual(day.milestones.map(point => [point.entry.id, point.phase, point.at]), [[1, 'end', '2026-10-01T16:00:00']])
+})
+
+test('截止事项和单日活动只显示一次，同日节点按实际时间排序', () => {
+  const day = calendarDays('2026-10', [
+    entry(1, '2026-10-22T02:00:00', '2026-10-22T04:00:00'),
+    entry(2, '2026-10-21T20:00:00', null),
+    entry(3, '2026-10-21T19:59:00', '2026-10-24T10:00:00', { kind: 'deadline' }),
+  ]).find(day => day.date === '2026-10-22')!
+  assert.deepEqual(day.milestones.map(point => [point.entry.id, point.phase]), [[3, 'deadline'], [2, 'start'], [1, 'single']])
+})

@@ -286,40 +286,79 @@
 
 /*
  * 随机壁纸开启时（WallpaperBackdrop 给 <html> 挂 data-wallpaper）：
- * 卡片与顶栏切换为毛玻璃，让壁纸透出来——这是站点的特色背景，实底卡片只是默认态。
+ * 用壁纸透色与柔和模糊统一界面，弱化白框、硬阴影和标题底板。
+ * 小字通过字色保持对比，标题用无硬边的局部柔光承托。
  */
+html[data-wallpaper] {
+  /* 小字号时间与说明也要能承受壁纸透色，不能沿用实底上的浅灰。 */
+  --sd-muted: #34465c;
+  --sd-faint: #3c4e65;
+  --sd-line: rgb(29 46 70 / 0.12);
+  --sd-line-soft: rgb(29 46 70 / 0.08);
+  --sd-wall-card: color-mix(in srgb, var(--sd-bg) 62%, transparent);
+  --sd-wall-chrome: color-mix(in srgb, var(--sd-bg) 58%, transparent);
+  --sd-wall-surface: color-mix(in srgb, var(--sd-bg) 48%, transparent);
+  --sd-wall-heading: color-mix(in srgb, var(--sd-bg) 58%, transparent);
+  --sd-wall-veil: color-mix(in srgb, var(--sd-bg) 32%, transparent);
+  --sd-wall-border: rgb(255 255 255 / 0.26);
+  --sd-wall-highlight: rgb(255 255 255 / 0.24);
+  --sd-wall-shadow: 0 8px 24px -16px rgb(15 23 42 / 0.18);
+}
+html.dark[data-wallpaper] {
+  --sd-muted: #c1cbd8;
+  --sd-faint: #b3bfd0;
+  --sd-line: rgb(229 235 247 / 0.12);
+  --sd-line-soft: rgb(229 235 247 / 0.08);
+  --sd-wall-card: color-mix(in srgb, var(--sd-card) 64%, transparent);
+  --sd-wall-chrome: color-mix(in srgb, var(--sd-card) 70%, transparent);
+  --sd-wall-surface: color-mix(in srgb, var(--sd-card) 46%, transparent);
+  --sd-wall-heading: color-mix(in srgb, var(--sd-card) 55%, transparent);
+  --sd-wall-veil: color-mix(in srgb, var(--sd-bg) 50%, transparent);
+  --sd-wall-border: rgb(255 255 255 / 0.09);
+  --sd-wall-highlight: rgb(255 255 255 / 0.05);
+  --sd-wall-shadow: 0 10px 28px -16px rgb(0 0 0 / 0.35);
+}
+.wallpaper-veil {
+  background: var(--sd-wall-veil);
+}
+html[data-wallpaper] :is(.panel, .panel-glass, .glass, .wall-surface) {
+  -webkit-backdrop-filter: blur(20px) saturate(1.1);
+  backdrop-filter: blur(20px) saturate(1.1);
+}
 html[data-wallpaper] .panel,
 html[data-wallpaper] .panel-glass {
-  background: color-mix(in srgb, var(--sd-card) 72%, transparent);
-  -webkit-backdrop-filter: blur(20px) saturate(1.6);
-  backdrop-filter: blur(20px) saturate(1.6);
-  border-color: rgb(255 255 255 / 0.55);
+  background: var(--sd-wall-card);
+  border-color: var(--sd-wall-border);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.6),
-    0 12px 32px -10px rgb(15 23 42 / 0.18);
-}
-html.dark[data-wallpaper] .panel,
-html.dark[data-wallpaper] .panel-glass {
-  background: color-mix(in srgb, var(--sd-card) 66%, transparent);
-  border-color: rgb(255 255 255 / 0.12);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.08),
-    0 12px 32px -10px rgb(0 0 0 / 0.5);
+    inset 0 1px 0 var(--sd-wall-highlight),
+    var(--sd-wall-shadow);
 }
 html[data-wallpaper] .glass {
-  background: color-mix(in srgb, var(--sd-card) 62%, transparent);
+  background: var(--sd-wall-chrome);
+  border-color: var(--sd-wall-border);
 }
 /* 直接压在背景上的标题 / 栏目条：默认透明，开启壁纸后垫一层毛玻璃保证可读 */
 html[data-wallpaper] .wall-surface {
-  background: color-mix(in srgb, var(--sd-card) 72%, transparent);
-  -webkit-backdrop-filter: blur(16px) saturate(1.5);
-  backdrop-filter: blur(16px) saturate(1.5);
-  border: 1px solid rgb(255 255 255 / 0.55);
+  background: var(--sd-wall-surface);
+  border: 1px solid transparent;
   border-radius: 16px;
   padding: 6px 12px;
 }
-html.dark[data-wallpaper] .wall-surface {
-  border-color: rgb(255 255 255 / 0.12);
+/* 标题直接融入壁纸；柔光向外渐隐，避免出现独立的白色标题牌。 */
+html[data-wallpaper] .wall-heading {
+  position: relative;
+  isolation: isolate;
+  padding: 7px 13px;
+}
+html[data-wallpaper] .wall-heading::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 24px;
+  background: var(--sd-wall-heading);
+  filter: blur(16px);
 }
 
 /* 履约阶梯当前节点的雷达脉冲 */
