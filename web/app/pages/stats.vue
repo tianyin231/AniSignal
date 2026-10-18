@@ -222,7 +222,7 @@ useSeoMeta({ title: '数据统计' })
   <div class="space-y-5">
     <header class="flex flex-col gap-4 px-1 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h1 class="text-xl font-semibold text-slate-900 dark:text-zinc-50">数据统计</h1>
+        <h1 class="text-2xl font-bold text-ink">数据统计</h1>
         <p v-if="data?.totals.latest_collection_at" class="mono mt-1 text-xs text-slate-500 dark:text-zinc-400">
           最近采集 {{ fmtTime(data.totals.latest_collection_at) }}
         </p>
@@ -297,42 +297,42 @@ useSeoMeta({ title: '数据统计' })
 
       <section class="grid gap-4 xl:grid-cols-2">
         <article class="panel min-w-0 p-4">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">新入库趋势</h2>
+          <h2 class="text-base font-bold text-ink">新入库趋势</h2>
           <ClientOnly>
             <StatisticsChart :option="trendOption" aria-label="官方与社区新入库趋势图" />
             <template #fallback><div class="h-72" aria-hidden="true" /></template>
           </ClientOnly>
         </article>
         <article class="panel min-w-0 p-4">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">平台对比</h2>
+          <h2 class="text-base font-bold text-ink">平台对比</h2>
           <ClientOnly>
             <StatisticsChart :option="platformOption" aria-label="各平台官方与社区入库对比图" />
             <template #fallback><div class="h-72" aria-hidden="true" /></template>
           </ClientOnly>
         </article>
         <article class="panel min-w-0 p-4">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">平台占比</h2>
+          <h2 class="text-base font-bold text-ink">平台占比</h2>
           <ClientOnly>
             <StatisticsChart :option="shareOption" aria-label="各平台入库占比图" />
             <template #fallback><div class="h-72" aria-hidden="true" /></template>
           </ClientOnly>
         </article>
         <article class="panel min-w-0 p-4">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">采集效率</h2>
+          <h2 class="text-base font-bold text-ink">采集效率</h2>
           <ClientOnly>
             <StatisticsChart :option="collectionOption" aria-label="采集命中与新入库趋势图" />
             <template #fallback><div class="h-72" aria-hidden="true" /></template>
           </ClientOnly>
         </article>
         <article class="panel min-w-0 p-4">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">采集目标</h2>
+          <h2 class="text-base font-bold text-ink">采集目标</h2>
           <ClientOnly>
             <StatisticsChart :option="targetOption" aria-label="采集目标命中与新增对比图" />
             <template #fallback><div class="h-72" aria-hidden="true" /></template>
           </ClientOnly>
         </article>
         <article class="panel min-w-0 p-4">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">内容关键词</h2>
+          <h2 class="text-base font-bold text-ink">内容关键词</h2>
           <ClientOnly v-if="data.keywords.length">
             <StatisticsChart :option="keywordOption" aria-label="内容关键词入库排行图" />
             <template #fallback><div class="h-72" aria-hidden="true" /></template>
@@ -343,7 +343,7 @@ useSeoMeta({ title: '数据统计' })
 
       <section class="panel overflow-hidden">
         <header class="flex items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3 dark:border-zinc-800">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">最近采集</h2>
+          <h2 class="text-base font-bold text-ink">最近采集</h2>
           <span v-if="data.details_since" class="mono text-[11px] text-slate-400">明细始于 {{ fmtTime(data.details_since) }}</span>
         </header>
         <div class="overflow-x-auto">

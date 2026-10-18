@@ -13,11 +13,11 @@ const choices = [
 
 <template>
   <div class="space-y-4">
-    <h1 class="px-1 text-lg font-semibold text-slate-900 dark:text-zinc-50">订阅中心</h1>
+    <h1 class="px-1 text-2xl font-bold text-ink">订阅中心</h1>
     <section v-for="choice in choices" :key="choice.title" class="panel flex flex-wrap items-center gap-4 p-4 sm:p-5">
       <component :is="choice.icon" :size="22" class="shrink-0 text-blue-600 dark:text-blue-300" aria-hidden="true" />
       <div class="min-w-0 flex-1 basis-48">
-        <h2 class="font-semibold text-slate-900 dark:text-zinc-100">{{ choice.title }}</h2>
+        <h2 class="text-base font-bold text-ink">{{ choice.title }}</h2>
         <p class="mt-1 text-sm leading-relaxed text-slate-600 dark:text-zinc-400">{{ choice.description }}</p>
       </div>
       <NuxtLink :to="choice.to" class="btn-primary px-3 py-2 text-sm">{{ choice.action }}</NuxtLink>
@@ -25,7 +25,7 @@ const choices = [
     <section class="panel p-4 sm:p-5">
       <div class="flex items-center gap-3">
         <Rss :size="22" class="text-blue-600 dark:text-blue-300" aria-hidden="true" />
-        <h2 class="font-semibold text-slate-900 dark:text-zinc-100">RSS 订阅</h2>
+        <h2 class="text-base font-bold text-ink">RSS 订阅</h2>
       </div>
       <div class="mt-3 flex flex-wrap gap-2">
         <select v-model="community" aria-label="RSS 游戏范围" class="select px-3 py-2 text-sm">

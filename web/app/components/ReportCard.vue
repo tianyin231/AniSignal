@@ -5,7 +5,7 @@
 <template>
   <section class="panel-glass p-4">
     <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">每日早报</h2>
+      <h2 class="text-base font-bold text-ink">每日早报</h2>
       <span class="chip bg-slate-500/10 text-slate-500 dark:text-zinc-400">规划中</span>
     </div>
     <p class="mt-2 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">

@@ -18,7 +18,7 @@ const boundaries = [
 <template>
   <div class="space-y-4">
     <section class="panel p-5 sm:p-6">
-      <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">关于 AniSignal</h1>
+      <h1 class="text-2xl font-bold text-ink">关于 AniSignal</h1>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         AniSignal 不是资讯聚合器，也不是新的社区。它把分散在多个平台的信息归并为可追溯的「事件」，
         帮你减少跨平台搜集、翻译、去重和判断信息的成本——订阅一个关注目标后，不再每天蹲评论区。
@@ -29,7 +29,7 @@ const boundaries = [
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">工作方式</h2>
+      <h2 class="text-base font-bold text-ink">工作方式</h2>
       <div class="mt-3 grid gap-3 sm:grid-cols-2">
         <div v-for="s in steps" :key="s.n" class="rounded-[10px] border border-slate-200/70 p-3 dark:border-zinc-800">
           <p class="mono text-xs text-blue-600 dark:text-blue-300">{{ s.n }}</p>
@@ -40,7 +40,7 @@ const boundaries = [
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">边界与承诺</h2>
+      <h2 class="text-base font-bold text-ink">边界与承诺</h2>
       <ul class="mt-2.5 space-y-2">
         <li v-for="b in boundaries" :key="b" class="flex gap-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
           <span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" />
@@ -50,7 +50,7 @@ const boundaries = [
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">相关入口</h2>
+      <h2 class="text-base font-bold text-ink">相关入口</h2>
       <div class="mt-2.5 flex flex-wrap gap-4 text-sm">
         <NuxtLink to="/sources" class="link">已接入来源与健康状态</NuxtLink>
         <NuxtLink to="/watch" class="link">订阅中心</NuxtLink>

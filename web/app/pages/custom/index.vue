@@ -40,7 +40,7 @@ const kindLabel = (kind: string) => (kind === 'uid' ? 'UID 监控' : '关键词�
 <template>
   <div>
     <div class="mb-4 flex items-center justify-between gap-2">
-      <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">定制化</h1>
+      <h1 class="text-2xl font-bold text-ink">定制化</h1>
       <NuxtLink to="/account" class="link shrink-0 text-xs">创建我的监控 →</NuxtLink>
     </div>
 
@@ -62,7 +62,7 @@ const kindLabel = (kind: string) => (kind === 'uid' ? 'UID 监控' : '关键词�
             </span>
             <span class="mono text-[11px] text-slate-400">{{ feed.item_count }} 条</span>
           </div>
-          <h2 class="mt-2 truncate font-semibold text-slate-900 dark:text-zinc-50">{{ feed.name }}</h2>
+          <h2 class="mt-2 truncate text-base font-bold text-ink">{{ feed.name }}</h2>
           <p class="mt-1 truncate text-xs text-slate-500 dark:text-zinc-400">监控目标：{{ feed.target_value }}</p>
           <p class="mt-1 truncate text-xs text-slate-400 dark:text-zinc-500">
             {{ feed.owner_name || '匿名' }} · 持续抓取中

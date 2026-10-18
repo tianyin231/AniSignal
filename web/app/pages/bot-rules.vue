@@ -86,7 +86,7 @@ const lines = computed(() => [
 
     <section class="panel p-5 sm:p-6">
       <p class="mono text-xs text-blue-600 dark:text-blue-300">ROBOTS</p>
-      <h1 class="mt-1 text-lg font-semibold text-slate-900 dark:text-zinc-50">机器人守则</h1>
+      <h1 class="mt-1 text-2xl font-bold text-ink">机器人守则</h1>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         与
         <a href="/robots.txt" class="link mono" target="_blank" rel="noopener">/robots.txt</a>
@@ -123,7 +123,7 @@ const lines = computed(() => [
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">说明</h2>
+      <h2 class="text-base font-bold text-ink">说明</h2>
       <ul class="mt-2 space-y-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         <li class="flex gap-2">
           <span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" />

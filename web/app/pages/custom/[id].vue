@@ -65,7 +65,7 @@ const goPage = (value: number) => router.replace({ query: { ...route.query, page
     <template v-else>
       <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
-          <h1 class="truncate text-lg font-semibold text-slate-900 dark:text-zinc-50">{{ data.name }}</h1>
+          <h1 class="truncate text-2xl font-bold text-ink">{{ data.name }}</h1>
           <p class="mt-0.5 truncate text-xs text-slate-400 dark:text-zinc-500">
             {{ data.kind === 'uid' ? 'UID 监控' : '关键词监控' }} · {{ data.target_value }}
             <template v-if="data.min_views > 0"> · 播放量 ≥ {{ data.min_views.toLocaleString('zh-CN') }}</template>

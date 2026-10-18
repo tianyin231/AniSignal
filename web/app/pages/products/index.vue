@@ -25,7 +25,7 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
 <template>
   <div class="min-w-0">
     <SectionNav />
-    <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">商品总览</h1>
+    <h1 class="text-2xl font-bold text-ink">商品总览</h1>
     <p class="mb-4 mt-1 text-sm text-slate-600 dark:text-zinc-400">{{ isAll ? '全部分区' : '当前分区' }}的商品履约动态，按最近信号更新排序。</p>
 
     <section v-if="status === 'pending' && !data" class="panel px-4 py-10 text-center text-sm text-slate-600 dark:text-zinc-400">

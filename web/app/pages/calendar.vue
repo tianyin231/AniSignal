@@ -55,7 +55,7 @@ function timeRange(item: CalendarEntry) {
     <SectionNav />
     <header class="mb-5 flex flex-wrap items-center justify-between gap-3 px-1">
       <div>
-        <h1 class="text-xl font-semibold text-slate-900 dark:text-zinc-50">活动日历</h1>
+        <h1 class="text-2xl font-bold text-ink">活动日历</h1>
         <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">北京时间 · 点选日期查看日程</p>
       </div>
       <div class="flex items-center gap-2">
@@ -72,7 +72,7 @@ function timeRange(item: CalendarEntry) {
     <div class="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
       <section class="panel min-w-0 overflow-hidden" :aria-label="`${monthLabel}月历`" :aria-busy="status === 'pending'">
         <div class="flex items-center justify-between gap-2 px-3 py-3 sm:px-4">
-          <h2 class="text-lg font-semibold tabular-nums text-slate-900 dark:text-zinc-50">{{ monthLabel }}</h2>
+          <h2 class="num text-xl font-bold text-ink">{{ monthLabel }}</h2>
           <nav aria-label="月份切换" class="flex shrink-0 items-center gap-0.5">
             <button type="button" class="btn-ghost grid size-11 place-items-center" aria-label="上个月" :disabled="month === '1900-01'" @click="changeMonth(-1)"><ChevronLeft :size="18" /></button>
             <button type="button" class="btn-ghost min-h-11 px-2 text-sm" @click="goToToday">今天</button>
@@ -122,7 +122,7 @@ function timeRange(item: CalendarEntry) {
 
       <section class="panel min-w-0 overflow-hidden xl:sticky xl:top-[72px]" aria-labelledby="selected-date-title" aria-live="polite">
         <div class="border-b border-slate-900/5 px-4 py-4 dark:border-white/10">
-          <h2 id="selected-date-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">{{ selectedLabel }}</h2>
+          <h2 id="selected-date-title" class="text-base font-bold text-ink">{{ selectedLabel }}</h2>
           <p v-if="status === 'success'" class="mt-1 text-xs text-slate-500 dark:text-zinc-400">{{ selectedItems.length }} 项日程</p>
         </div>
         <p v-if="status === 'pending'" class="px-4 py-6 text-sm text-slate-500 dark:text-zinc-400">正在加载…</p>

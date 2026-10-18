@@ -38,7 +38,7 @@ const targetTypeLabels: Record<string, string> = {
 <template>
   <div class="space-y-4">
     <section class="panel p-4 sm:p-5">
-      <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">来源健康</h1>
+      <h1 class="text-2xl font-bold text-ink">来源健康</h1>
     </section>
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>

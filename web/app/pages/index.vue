@@ -161,8 +161,11 @@ const latestEvent = computed(() => {
 const refreshing = ref(false)
 const homeError = computed(() => requests.some(request => request.error.value))
 
-function goPage(p: number) {
-  router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
+const feedSection = ref<HTMLElement | null>(null)
+async function goPage(p: number) {
+  await router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
+  // 翻页按钮在列表底部：换页后回到内容流顶部，而不是停在新一页的末尾
+  feedSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 function selectTab(key: FeedTab) {
   router.replace({ query: { ...route.query, feed: key === 'all' ? undefined : key, page: undefined } })
@@ -314,7 +317,7 @@ onBeforeUnmount(() => {
     />
 
     <div class="mt-10 grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <section class="panel min-w-0 overflow-hidden" aria-labelledby="feed-title">
+      <section ref="feedSection" class="panel min-w-0 scroll-mt-28 overflow-hidden md:scroll-mt-20" aria-labelledby="feed-title">
         <header class="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-5">
           <h2 id="feed-title" class="text-lg font-bold text-ink">最新 · 最热</h2>
           <div role="tablist" aria-label="内容筛选" class="flex gap-0.5 rounded-[10px] bg-chip p-[3px]">

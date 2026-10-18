@@ -10,7 +10,7 @@ const updated = '2026-09-13'
 
     <section class="panel p-5 sm:p-6">
       <p class="mono text-xs text-blue-600 dark:text-blue-300">PRIVACY · 更新于 {{ updated }}</p>
-      <h1 class="mt-1 text-lg font-semibold text-slate-900 dark:text-zinc-50">隐私政策</h1>
+      <h1 class="mt-1 text-2xl font-bold text-ink">隐私政策</h1>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         本政策说明 AniSignal 在提供采集展示、账号订阅与消息送达时，如何收集、使用与保护个人信息。
         我们尽量少收集，并只为提供服务而处理数据。
@@ -18,7 +18,7 @@ const updated = '2026-09-13'
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">1. 我们收集什么</h2>
+      <h2 class="text-base font-bold text-ink">1. 我们收集什么</h2>
       <div class="mt-3 overflow-x-auto">
         <table class="w-full text-left text-sm">
           <thead>
@@ -63,7 +63,7 @@ const updated = '2026-09-13'
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">2. 我们如何使用</h2>
+      <h2 class="text-base font-bold text-ink">2. 我们如何使用</h2>
       <ul class="mt-2 space-y-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         <li class="flex gap-2"><span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" />验证身份、维护会话安全（登录、改密吊销会话）。</li>
         <li class="flex gap-2"><span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" />按你的关注词与监控配置筛选站内内容，生成关注流。</li>
@@ -76,7 +76,7 @@ const updated = '2026-09-13'
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">3. 第三方与外发</h2>
+      <h2 class="text-base font-bold text-ink">3. 第三方与外发</h2>
       <ul class="mt-2 space-y-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         <li class="flex gap-2"><span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" /><strong>邮件</strong>：通过你部署或本站配置的 SMTP 发送；服务商可见收件地址与邮件正文。</li>
         <li class="flex gap-2"><span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" /><strong>机器人</strong>：消息经 AstrBot 与所选平台（如 QQ）投递；平台侧可见会话内消息。</li>
@@ -86,7 +86,7 @@ const updated = '2026-09-13'
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">4. 保存与安全</h2>
+      <h2 class="text-base font-bold text-ink">4. 保存与安全</h2>
       <div class="mt-2 space-y-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         <p>密码使用不可逆哈希存储；会话令牌为随机值。传输层建议在正式部署启用 HTTPS。</p>
         <p>投递与审计记录会保留一段时间以便排障；账号注销或删除请求后，我们将删除或匿名化可识别个人的数据（法律要求保留的除外）。</p>
@@ -95,7 +95,7 @@ const updated = '2026-09-13'
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">5. 你的权利</h2>
+      <h2 class="text-base font-bold text-ink">5. 你的权利</h2>
       <ul class="mt-2 space-y-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         <li class="flex gap-2"><span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" />在账号中心查看、修改关注词、定制监控与通知设置。</li>
         <li class="flex gap-2"><span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" />关闭邮件或机器人推送；从会话中移除机器人。</li>
@@ -105,14 +105,14 @@ const updated = '2026-09-13'
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">6. Cookie 与本地存储</h2>
+      <h2 class="text-base font-bold text-ink">6. Cookie 与本地存储</h2>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         登录使用 httpOnly Cookie 保存会话；主题、壁纸等偏好可能存在浏览器 localStorage。清除 Cookie 会导致退出登录。
       </p>
     </section>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">7. 联系我们</h2>
+      <h2 class="text-base font-bold text-ink">7. 联系我们</h2>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         隐私相关请求请邮件：
         <a href="mailto:admin@anisignal.nanamiyako.cn" class="link">admin@anisignal.nanamiyako.cn</a>

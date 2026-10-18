@@ -36,9 +36,11 @@ const sourceNames = computed(() => {
       <h3 class="min-w-0 flex-1 text-[15px] font-semibold leading-normal text-ink transition-colors group-hover:text-brand-ink">
         {{ event.title }}
       </h3>
-      <span class="mono shrink-0 pt-0.5 text-xs text-faint" :title="`首次出现 ${event.firstSeenAt}`">{{ event.latestEvidenceAt }}</span>
+      <span class="mono hidden shrink-0 pt-0.5 text-xs text-faint sm:block" :title="`首次出现 ${event.firstSeenAt}`">{{ event.latestEvidenceAt }}</span>
     </div>
     <div class="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-muted">
+      <!-- 手机端时间并入元信息行，给标题让出整行宽度 -->
+      <span class="mono text-faint sm:hidden">{{ event.latestEvidenceAt }}</span>
       <span class="font-semibold" :class="identity.text">{{ identity.label }}</span>
       <span v-if="community" class="inline-flex items-center gap-1.5 text-ink-2">
         <span class="size-[7px] rounded-full" :class="community.dot" aria-hidden="true" />{{ community.label }}
