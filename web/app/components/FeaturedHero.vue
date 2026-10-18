@@ -2,6 +2,7 @@
 import { BadgeCheck, Flame, ImageIcon } from 'lucide-vue-next'
 import { platformMeta, type RawItem } from '~/utils/data'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
+import { imageSrcset, imageUrl } from '~/utils/image'
 
 /**
  * 首页精选大图：整卡封面 + 底部压暗标题，右下角缩略图切换（手机端为圆点）。
@@ -14,6 +15,8 @@ const reducedMotion = ref(false)
 const pageHidden = ref(false)
 const touchStartX = ref<number | null>(null)
 const failedCoverIds = ref<string[]>([])
+// 首屏只准备当前图和下一张，已看过的图保留，保证切换时仍有淡出画面。
+const requestedCoverIds = ref(new Set(props.items.slice(0, 2).map(item => item.id)))
 let timer: ReturnType<typeof setInterval> | undefined
 
 const current = computed(() => props.items[active.value])
@@ -37,6 +40,9 @@ const meta = computed(() => {
 function goTo(index: number) {
   if (!props.items.length) return
   active.value = (index + props.items.length) % props.items.length
+  for (const offset of [0, 1]) {
+    requestedCoverIds.value.add(props.items[(active.value + offset) % props.items.length]!.id)
+  }
   restartTimer()
 }
 const next = () => hasMultiple.value && goTo(active.value + 1)
@@ -75,6 +81,7 @@ function markCoverFailed(id: string) {
 watch(() => props.items.map(item => item.id).join(','), () => {
   active.value = 0
   failedCoverIds.value = []
+  requestedCoverIds.value = new Set(props.items.slice(0, 2).map(item => item.id))
   restartTimer()
 })
 watch([paused, reducedMotion, pageHidden], restartTimer)
@@ -111,6 +118,7 @@ onBeforeUnmount(() => {
       v-for="(item, index) in items"
       :key="item.id"
       :to="`/contents/${item.id}`"
+      prefetch-on="interaction"
       class="absolute inset-0 transition-opacity duration-500 ease-out motion-reduce:transition-none"
       :class="index === active ? 'z-[1] opacity-100' : 'pointer-events-none opacity-0'"
       :tabindex="index === active ? undefined : -1"
@@ -118,12 +126,15 @@ onBeforeUnmount(() => {
       :aria-label="item.title"
     >
       <img
-        v-if="item.cover && !failedCoverIds.includes(item.id)"
-        :src="item.cover"
+        v-if="item.cover && requestedCoverIds.has(item.id) && !failedCoverIds.includes(item.id)"
+        :src="imageUrl(item.cover, 1600)"
+        :srcset="imageSrcset(item.cover, [640, 960, 1600])"
+        sizes="(min-width: 1280px) 795px, (min-width: 1024px) 66vw, 100vw"
         alt=""
+        decoding="async"
         referrerpolicy="no-referrer"
-        :loading="index === 0 ? 'eager' : 'lazy'"
-        :fetchpriority="index === 0 ? 'high' : 'auto'"
+        :loading="index === active ? 'eager' : 'lazy'"
+        :fetchpriority="index === active ? 'high' : 'low'"
         class="size-full object-cover"
         @error="markCoverFailed(item.id)"
       >
@@ -162,7 +173,7 @@ onBeforeUnmount(() => {
             :aria-current="index === active ? 'true' : undefined"
             @click="goTo(index)"
           >
-            <img v-if="item.cover && !failedCoverIds.includes(item.id)" :src="item.cover" alt="" referrerpolicy="no-referrer" loading="lazy" class="size-full object-cover">
+            <img v-if="item.cover && !failedCoverIds.includes(item.id)" :src="imageUrl(item.cover, 160)" alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="size-full object-cover">
           </button>
         </div>
         <div v-if="hasMultiple" class="pointer-events-auto flex gap-0.5 sm:hidden" role="group" aria-label="切换精选">
