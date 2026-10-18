@@ -38,6 +38,18 @@ def iter_chunks(path: Path, limit: int = 0):
                 yield json.loads(line)
 
 
+def load_sorted(path: Path, limit: int = 0) -> list[dict]:
+    """全部读进来按文本长度排序，让每批 padding 浪费最小。
+
+    BERT 按批内最长序列 padding，随机顺序下长尾 chunk（有的上万 token）会把
+    整批顶到 512，实测多花 ~1.5x 算力。排序后每批长度接近；CLS 池化不受顺序
+    影响，向量按 chunk_id 回填，检索结果与顺序无关。
+    """
+    chunks = list(iter_chunks(path, limit))
+    chunks.sort(key=lambda c: len(c["text"]))
+    return chunks
+
+
 def dir_size(path: Path) -> int:
     if not path.exists():
         return 0
@@ -99,7 +111,7 @@ def main() -> int:
         log.info("已写入 %d 条（累计 %d）", n, next_id)
         return n
 
-    for chunk in iter_chunks(args.chunks, args.limit):
+    for chunk in load_sorted(args.chunks, args.limit):
         buf.append(chunk)
         if len(buf) >= args.batch:
             total += flush()
