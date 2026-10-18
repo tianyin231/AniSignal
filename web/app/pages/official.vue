@@ -47,7 +47,7 @@ useSeoMeta({ title: '官方动态' })
 
 <template>
   <div>
-    <BackToChannelHome />
+    <SectionNav />
     <TabNav v-model="tab" :tabs="visibleTabs" />
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">

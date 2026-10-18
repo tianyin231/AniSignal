@@ -15,22 +15,22 @@ function go() {
 </script>
 
 <template>
-  <form class="relative hidden md:block" @submit.prevent="go">
-    <Search :size="14" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+  <form class="relative mr-1 hidden md:block" role="search" @submit.prevent="go">
+    <Search :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" aria-hidden="true" />
     <input
       v-model="q"
       type="search"
       aria-label="站内搜索"
-      :placeholder="isAi ? '搜索 AI 快讯' : '搜索事件 / 主题'"
-      class="input w-40 py-1.5 pl-8 pr-2 text-xs transition-all focus:w-56 dark:text-zinc-200"
+      :placeholder="isAi ? '搜索 AI 快讯' : '搜索事件、角色、活动'"
+      class="input h-10 w-48 bg-canvas pl-9 pr-3 text-[13px] lg:w-60"
       @keydown.enter.prevent="go"
     />
   </form>
   <NuxtLink
     :to="{ path: searchPath, query: searchQuery }"
     aria-label="搜索"
-    class="grid size-8 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-200/70 hover:text-slate-900 md:hidden dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
+    class="grid size-10 place-items-center rounded-[10px] text-muted transition-colors hover:bg-chip hover:text-ink md:hidden"
   >
-    <Search :size="16" />
+    <Search :size="18" />
   </NuxtLink>
 </template>

@@ -1,10 +1,139 @@
 @import "tailwindcss";
+/* 数字、品牌字标用的拉丁字体：本地打包（Google Fonts 在国内不稳定），只取 latin 子集两档字重 */
+@import "@fontsource/space-grotesk/latin-500.css";
+@import "@fontsource/space-grotesk/latin-700.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --font-display: "Space Grotesk", ui-sans-serif, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/*
+ * 信号台设计令牌：所有语义色都是 CSS 变量，深色模式与频道主题只改变量。
+ * - 中性色：canvas 底 / card 卡片 / line 分隔 / ink 正文 / muted、faint 次要文字
+ * - brand：站点主色（论坛蓝），按钮与链接
+ * - accent：当前频道强调色，默认等于 brand；进入游戏频道后切换为该游戏的品牌色
+ * - 游戏色：每个分区一组 base（色块/进度条）、ink（浅底上的文字）、soft（浅底）
+ */
+:root {
+  --sd-bg: #f3f5f9;
+  --sd-card: #ffffff;
+  --sd-line: #e3e8ef;
+  --sd-line-soft: #eef1f6;
+  --sd-ink: #0d1b2a;
+  --sd-ink-2: #2e3d52;
+  --sd-muted: #56657a;
+  --sd-faint: #74828f;
+  --sd-brand: #2354f0;
+  --sd-brand-ink: #1c45d0;
+  --sd-brand-soft: #e9efff;
+  --sd-chip: #eef2f7;
+  --sd-ok: #139a63;
+  --sd-warn: #c9761f;
+  --sd-hot: #d6492a;
+  --sd-shadow: 0 1px 2px rgb(13 27 42 / 0.04), 0 10px 28px -14px rgb(13 27 42 / 0.16);
+
+  --sd-wuwa: #d4a21c;
+  --sd-wuwa-ink: #80600f;
+  --sd-wuwa-soft: #faf1d8;
+  --sd-blhx: #1e93d8;
+  --sd-blhx-ink: #0b64a0;
+  --sd-blhx-soft: #e4f2fb;
+  --sd-hsr: #7a5ae8;
+  --sd-hsr-ink: #5134c0;
+  --sd-hsr-soft: #eee9fd;
+  --sd-arknights: #ec741c;
+  --sd-arknights-ink: #a04b0b;
+  --sd-arknights-soft: #fceee2;
+  --sd-ai: #12a08e;
+  --sd-ai-ink: #0a6e62;
+  --sd-ai-soft: #e2f5f2;
+
+  --sd-accent: var(--sd-brand);
+  --sd-accent-ink: var(--sd-brand-ink);
+  --sd-accent-soft: var(--sd-brand-soft);
+}
+
+.dark {
+  --sd-bg: #0a0d13;
+  --sd-card: #121721;
+  --sd-line: #232b38;
+  --sd-line-soft: #1a212c;
+  --sd-ink: #edf1f7;
+  --sd-ink-2: #c2cbd8;
+  --sd-muted: #98a3b3;
+  --sd-faint: #7a8698;
+  --sd-brand: #5c87ff;
+  --sd-brand-ink: #9db6ff;
+  --sd-brand-soft: rgb(92 135 255 / 0.14);
+  --sd-chip: #1a2130;
+  --sd-ok: #34c88a;
+  --sd-warn: #f0a04b;
+  --sd-hot: #ff7a55;
+  --sd-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 30px -14px rgb(0 0 0 / 0.6);
+
+  --sd-wuwa: #e5b536;
+  --sd-wuwa-ink: #f2cc66;
+  --sd-wuwa-soft: rgb(229 181 54 / 0.14);
+  --sd-blhx: #3aa8ea;
+  --sd-blhx-ink: #7cc8f5;
+  --sd-blhx-soft: rgb(58 168 234 / 0.14);
+  --sd-hsr: #9277f2;
+  --sd-hsr-ink: #bba8fb;
+  --sd-hsr-soft: rgb(146 119 242 / 0.16);
+  --sd-arknights: #f2883a;
+  --sd-arknights-ink: #f7ae74;
+  --sd-arknights-soft: rgb(242 136 58 / 0.15);
+  --sd-ai: #2cc0ac;
+  --sd-ai-ink: #6fdbcb;
+  --sd-ai-soft: rgb(44 192 172 / 0.14);
+}
+
+/* 频道主题：布局根节点挂 .ch-<分区>，强调色随频道切换 */
+.ch-wuwa { --sd-accent: var(--sd-wuwa); --sd-accent-ink: var(--sd-wuwa-ink); --sd-accent-soft: var(--sd-wuwa-soft); }
+.ch-blhx { --sd-accent: var(--sd-blhx); --sd-accent-ink: var(--sd-blhx-ink); --sd-accent-soft: var(--sd-blhx-soft); }
+.ch-hsr { --sd-accent: var(--sd-hsr); --sd-accent-ink: var(--sd-hsr-ink); --sd-accent-soft: var(--sd-hsr-soft); }
+.ch-arknights { --sd-accent: var(--sd-arknights); --sd-accent-ink: var(--sd-arknights-ink); --sd-accent-soft: var(--sd-arknights-soft); }
+.ch-ai { --sd-accent: var(--sd-ai); --sd-accent-ink: var(--sd-ai-ink); --sd-accent-soft: var(--sd-ai-soft); }
+
+@theme inline {
+  --color-canvas: var(--sd-bg);
+  --color-card: var(--sd-card);
+  --color-line: var(--sd-line);
+  --color-line-soft: var(--sd-line-soft);
+  --color-ink: var(--sd-ink);
+  --color-ink-2: var(--sd-ink-2);
+  --color-muted: var(--sd-muted);
+  --color-faint: var(--sd-faint);
+  --color-brand: var(--sd-brand);
+  --color-brand-ink: var(--sd-brand-ink);
+  --color-brand-soft: var(--sd-brand-soft);
+  --color-chip: var(--sd-chip);
+  --color-ok: var(--sd-ok);
+  --color-warn: var(--sd-warn);
+  --color-hot: var(--sd-hot);
+  --color-accent: var(--sd-accent);
+  --color-accent-ink: var(--sd-accent-ink);
+  --color-accent-soft: var(--sd-accent-soft);
+  --color-wuwa: var(--sd-wuwa);
+  --color-wuwa-ink: var(--sd-wuwa-ink);
+  --color-wuwa-soft: var(--sd-wuwa-soft);
+  --color-blhx: var(--sd-blhx);
+  --color-blhx-ink: var(--sd-blhx-ink);
+  --color-blhx-soft: var(--sd-blhx-soft);
+  --color-hsr: var(--sd-hsr);
+  --color-hsr-ink: var(--sd-hsr-ink);
+  --color-hsr-soft: var(--sd-hsr-soft);
+  --color-arknights: var(--sd-arknights);
+  --color-arknights-ink: var(--sd-arknights-ink);
+  --color-arknights-soft: var(--sd-arknights-soft);
+  --color-ai: var(--sd-ai);
+  --color-ai-ink: var(--sd-ai-ink);
+  --color-ai-soft: var(--sd-ai-soft);
+  --shadow-card: var(--sd-shadow);
 }
 
 @layer base {
@@ -22,17 +151,13 @@
     opacity: 0.55;
   }
   body {
-    background: var(--color-slate-100);
-    color: var(--color-slate-900);
+    background: var(--sd-bg);
+    color: var(--sd-ink);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
-  .dark body {
-    background: var(--color-zinc-950);
-    color: var(--color-zinc-100);
-  }
   :focus-visible {
-    outline: 2px solid var(--color-blue-500);
+    outline: 2px solid var(--sd-brand);
     outline-offset: 2px;
   }
   ::selection {
@@ -44,122 +169,94 @@
 }
 
 @layer components {
-  /* 吸顶导航用 .glass；内容卡片与侧栏统一使用 .panel / .panel-glass 毛玻璃材质。 */
+  /* 吸顶导航：近实底，开启壁纸后才透出背景 */
   .glass {
-    background: rgb(255 255 255 / 0.55);
-    -webkit-backdrop-filter: blur(24px) saturate(1.6);
-    backdrop-filter: blur(24px) saturate(1.6);
-    border-bottom: 1px solid rgb(15 23 42 / 0.06);
-    box-shadow: 0 1px 12px rgb(15 23 42 / 0.04);
+    background: color-mix(in srgb, var(--sd-card) 92%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    backdrop-filter: blur(20px) saturate(1.5);
+    border-bottom: 1px solid var(--sd-line);
   }
-  .dark .glass {
-    background: rgb(10 10 18 / 0.6);
-    border-bottom-color: rgb(255 255 255 / 0.08);
-  }
-  /* macOS 材质：大圆角浮窗 + 顶部内高光 + 柔和多层投影 */
+  /*
+   * 内容卡片：信号台风格用实底卡片，层级靠边框 + 柔和投影。
+   * .panel-glass 保留为同义类，旧模板无需改名。
+   */
   .panel,
   .panel-glass {
-    border-radius: 14px;
-    background: rgb(255 255 255 / 0.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.6);
-    backdrop-filter: blur(20px) saturate(1.6);
-    border: 1px solid rgb(255 255 255 / 0.6);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.65),
-      inset 0 -1px 0 rgb(15 23 42 / 0.04),
-      0 1px 2px rgb(15 23 42 / 0.04),
-      0 12px 32px -8px rgb(15 23 42 / 0.1);
+    border-radius: 16px;
+    background: var(--sd-card);
+    border: 1px solid var(--sd-line);
+    box-shadow: var(--sd-shadow);
   }
-  .dark .panel,
-  .dark .panel-glass {
-    background: rgb(255 255 255 / 0.06);
-    border-color: rgb(255 255 255 / 0.12);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.1),
-      0 12px 32px -8px rgb(0 0 0 / 0.45);
-  }
-  /* 悬浮菜单专用：比面板玻璃更实的底，保证文字可读 */
+  /* 悬浮菜单 */
   .popover {
     border-radius: 14px;
-    background: rgb(255 255 255 / 0.92);
-    -webkit-backdrop-filter: blur(24px) saturate(1.5);
-    backdrop-filter: blur(24px) saturate(1.5);
-    border: 1px solid rgb(255 255 255 / 0.7);
+    background: var(--sd-card);
+    border: 1px solid var(--sd-line);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.7),
-      0 8px 28px -6px rgb(15 23 42 / 0.18),
-      0 24px 48px -12px rgb(15 23 42 / 0.15);
+      0 8px 28px -6px rgb(13 27 42 / 0.18),
+      0 24px 48px -12px rgb(13 27 42 / 0.15);
   }
   .dark .popover {
-    background: rgb(24 24 32 / 0.92);
-    border-color: rgb(255 255 255 / 0.12);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.08),
       0 8px 28px -6px rgb(0 0 0 / 0.5),
       0 24px 48px -12px rgb(0 0 0 / 0.4);
   }
-  /* macOS 风主按钮：纵向高光渐变 + 按压态内阴影 */
+  /* 主按钮：实色论坛蓝 */
   .btn-primary {
-    @apply rounded-md text-sm font-medium text-white;
-    background-image: linear-gradient(180deg, rgb(96 140 250 / 0.9), rgb(37 99 235));
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.22),
-      0 1px 2px rgb(23 37 84 / 0.4);
-    transition: background-image 0.15s ease, box-shadow 0.15s ease;
+    @apply rounded-[10px] text-sm font-semibold text-white;
+    background: var(--sd-brand);
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
   }
   .btn-primary:hover {
-    background-image: linear-gradient(180deg, rgb(118 158 252 / 0.95), rgb(47 112 249));
+    background: var(--sd-brand-ink);
+  }
+  .dark .btn-primary:hover {
+    background: #4a76f0;
   }
   .btn-primary:active {
-    background-image: linear-gradient(180deg, rgb(37 99 235), rgb(29 78 216));
-    box-shadow: inset 0 1px 2px rgb(23 37 84 / 0.35);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.25);
   }
-  /* 固定在页面底层的"壁纸"渐变：macOS 玻璃需要足够鲜艳的底色才可感知 */
+  /* 页面底色层（account / auth 布局沿用这个类名） */
   .aurora-bg {
-    background:
-      radial-gradient(1200px 700px at 15% -10%, rgb(37 99 235 / 0.16), transparent 60%),
-      radial-gradient(1000px 600px at 92% -5%, rgb(6 182 212 / 0.13), transparent 60%),
-      radial-gradient(900px 700px at 55% 115%, rgb(20 184 166 / 0.1), transparent 65%),
-      radial-gradient(700px 500px at -5% 55%, rgb(251 191 36 / 0.05), transparent 60%);
-  }
-  .dark .aurora-bg {
-    background:
-      radial-gradient(1200px 700px at 15% -10%, rgb(59 130 246 / 0.22), transparent 60%),
-      radial-gradient(1000px 600px at 92% -5%, rgb(8 145 178 / 0.14), transparent 60%),
-      radial-gradient(900px 700px at 55% 118%, rgb(45 212 191 / 0.08), transparent 65%);
+    background: var(--sd-bg);
   }
   .link {
-    @apply text-blue-600 hover:underline dark:text-blue-300;
+    color: var(--sd-brand-ink);
+  }
+  .link:hover {
+    text-decoration: underline;
   }
   .mono {
     @apply font-mono tabular-nums;
   }
+  /* 大号数字与品牌字标 */
+  .num {
+    font-family: var(--font-display);
+    font-variant-numeric: tabular-nums;
+  }
   .chip {
     @apply inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs;
   }
-  /* 表单基础件：输入框 / 下拉 / 文本域（统一玻璃质感 + 聚焦光环） */
+  /* 表单基础件：输入框 / 下拉 / 文本域（实底 + 聚焦光环） */
   .input,
   .select,
   .textarea {
-    @apply rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm text-slate-900 outline-none transition
-      placeholder:text-slate-400
-      dark:border-white/15 dark:bg-white/5 dark:text-zinc-100 dark:placeholder:text-zinc-500;
-    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+    @apply rounded-[10px] border px-3 py-2 text-sm outline-none transition;
+    border-color: var(--sd-line);
+    background: var(--sd-card);
+    color: var(--sd-ink);
+  }
+  .input::placeholder,
+  .textarea::placeholder {
+    color: var(--sd-faint);
   }
   .input:focus,
   .select:focus,
-  .text-area:focus,
   .textarea:focus {
-    border-color: rgb(96 140 250 / 0.8);
-    box-shadow: 0 0 0 3px rgb(59 130 246 / 0.15);
+    border-color: var(--sd-brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sd-brand) 18%, transparent);
   }
-  .dark .input:focus,
-  .dark .select:focus,
-  .dark .textarea:focus {
-    border-color: rgb(118 158 252 / 0.6);
-    box-shadow: 0 0 0 3px rgb(59 130 246 / 0.2);
-  }
-  /* 下拉：appearance:none + 自绘箭头（灰箭头在亮暗玻璃底上都可读） */
+  /* 下拉：appearance:none + 自绘箭头（灰箭头在亮暗底上都可读） */
   .select {
     @apply cursor-pointer appearance-none pr-8;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -185,6 +282,44 @@
     outline: 2px solid rgb(59 130 246 / 0.5);
     outline-offset: 2px;
   }
+}
+
+/*
+ * 随机壁纸开启时（WallpaperBackdrop 给 <html> 挂 data-wallpaper）：
+ * 卡片与顶栏切换为毛玻璃，让壁纸透出来——这是站点的特色背景，实底卡片只是默认态。
+ */
+html[data-wallpaper] .panel,
+html[data-wallpaper] .panel-glass {
+  background: color-mix(in srgb, var(--sd-card) 72%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  backdrop-filter: blur(20px) saturate(1.6);
+  border-color: rgb(255 255 255 / 0.55);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.6),
+    0 12px 32px -10px rgb(15 23 42 / 0.18);
+}
+html.dark[data-wallpaper] .panel,
+html.dark[data-wallpaper] .panel-glass {
+  background: color-mix(in srgb, var(--sd-card) 66%, transparent);
+  border-color: rgb(255 255 255 / 0.12);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 12px 32px -10px rgb(0 0 0 / 0.5);
+}
+html[data-wallpaper] .glass {
+  background: color-mix(in srgb, var(--sd-card) 62%, transparent);
+}
+/* 直接压在背景上的标题 / 栏目条：默认透明，开启壁纸后垫一层毛玻璃保证可读 */
+html[data-wallpaper] .wall-surface {
+  background: color-mix(in srgb, var(--sd-card) 72%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  backdrop-filter: blur(16px) saturate(1.5);
+  border: 1px solid rgb(255 255 255 / 0.55);
+  border-radius: 16px;
+  padding: 6px 12px;
+}
+html.dark[data-wallpaper] .wall-surface {
+  border-color: rgb(255 255 255 / 0.12);
 }
 
 /* 履约阶梯当前节点的雷达脉冲 */
@@ -226,7 +361,7 @@
   }
 }
 
-/* 统一滚动条：细、圆角、半透明，贴合玻璃主题。
+/* 统一滚动条：细、圆角、半透明。
    放在 base 层：元素上单独声明 scrollbar-width:none 的工具类（如 tab 横滑区）仍能覆盖。 */
 @layer base {
   * {

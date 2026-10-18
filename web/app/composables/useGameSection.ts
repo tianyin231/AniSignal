@@ -14,17 +14,19 @@
 export interface GameCommunity {
   key: 'wuwa' | 'blhx' | 'hsr' | 'arknights' | 'ai'
   label: string
+  /** 频道头图上的英文名 */
+  en: string
   /** 分区语义色键，映射 COMMUNITY_CLASSES 的 Tailwind 类组（不用动态拼接，避免被 purge） */
   color: 'yellow' | 'sky' | 'violet' | 'orange' | 'teal'
 }
 
 // 分区主题色对齐各游戏品牌色：鸣潮金 / 碧蓝天蓝 / 星穹铁道紫 / 明日方舟橙
 export const GAME_COMMUNITIES: GameCommunity[] = [
-  { key: 'wuwa', label: '鸣潮', color: 'yellow' },
-  { key: 'blhx', label: '碧蓝航线', color: 'sky' },
-  { key: 'hsr', label: '崩坏星穹铁道', color: 'violet' },
-  { key: 'arknights', label: '明日方舟', color: 'orange' },
-  { key: 'ai', label: 'AI', color: 'teal' },
+  { key: 'wuwa', label: '鸣潮', en: 'Wuthering Waves', color: 'yellow' },
+  { key: 'blhx', label: '碧蓝航线', en: 'Azur Lane', color: 'sky' },
+  { key: 'hsr', label: '崩坏星穹铁道', en: 'Honkai: Star Rail', color: 'violet' },
+  { key: 'arknights', label: '明日方舟', en: 'Arknights', color: 'orange' },
+  { key: 'ai', label: 'AI', en: 'AI News', color: 'teal' },
 ]
 
 export type GameCommunityKey = GameCommunity['key']
@@ -34,41 +36,34 @@ const VALID_KEYS = new Set(GAME_COMMUNITIES.map(item => item.key))
 
 /**
  * 分区色 → Tailwind 类组（全部字面量写出，只保留实际消费的键）。
- * chip：内容行/事件行/轮播卡的分区徽章；nav：顶栏频道 tab 选中态（分区色文字+下划线）。
+ * 色值来自 main.css 的信号台令牌（--sd-<分区>），深色模式自动切换。
+ * chip：分区徽章；nav：顶栏频道选中态（正文色 + 分区色下划线）；dot：分区色点 / 色块；text：分区色文字。
  */
 const COMMUNITY_CLASSES: Record<
   GameCommunity['color'] | 'blue',
-  { chip: string, nav: string }
+  { chip: string, nav: string, dot: string, text: string }
 > = {
   // blue = 站点主色：非分区频道（首页/定制化）与兜底用
-  blue: {
-    chip: 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300',
-    nav: 'border-blue-500 text-blue-700 dark:text-blue-300',
-  },
-  yellow: {
-    chip: 'bg-yellow-500/15 text-yellow-700 dark:bg-yellow-400/15 dark:text-yellow-300',
-    nav: 'border-yellow-500 text-yellow-700 dark:text-yellow-300',
-  },
-  sky: {
-    chip: 'bg-sky-500/10 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300',
-    nav: 'border-sky-500 text-sky-700 dark:text-sky-300',
-  },
-  violet: {
-    chip: 'bg-violet-500/10 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300',
-    nav: 'border-violet-500 text-violet-700 dark:text-violet-300',
-  },
-  orange: {
-    chip: 'bg-orange-500/10 text-orange-700 dark:bg-orange-400/15 dark:text-orange-300',
-    nav: 'border-orange-500 text-orange-700 dark:text-orange-300',
-  },
-  teal: {
-    chip: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
-    nav: 'border-teal-500 text-teal-700 dark:text-teal-300',
-  },
+  blue: { chip: 'bg-brand-soft text-brand-ink', nav: 'border-brand text-ink', dot: 'bg-brand', text: 'text-brand-ink' },
+  yellow: { chip: 'bg-wuwa-soft text-wuwa-ink', nav: 'border-wuwa text-ink', dot: 'bg-wuwa', text: 'text-wuwa-ink' },
+  sky: { chip: 'bg-blhx-soft text-blhx-ink', nav: 'border-blhx text-ink', dot: 'bg-blhx', text: 'text-blhx-ink' },
+  violet: { chip: 'bg-hsr-soft text-hsr-ink', nav: 'border-hsr text-ink', dot: 'bg-hsr', text: 'text-hsr-ink' },
+  orange: { chip: 'bg-arknights-soft text-arknights-ink', nav: 'border-arknights text-ink', dot: 'bg-arknights', text: 'text-arknights-ink' },
+  teal: { chip: 'bg-ai-soft text-ai-ink', nav: 'border-ai text-ink', dot: 'bg-ai', text: 'text-ai-ink' },
 }
 
 export function communityClasses(color: string) {
   return COMMUNITY_CLASSES[color as GameCommunity['color'] | 'blue'] ?? COMMUNITY_CLASSES.blue
+}
+
+/** 分区 key → 元数据（未知 key 返回 undefined）。 */
+export function communityMeta(key?: string | null): GameCommunity | undefined {
+  return GAME_COMMUNITIES.find(c => c.key === key)
+}
+
+/** 频道主题类：挂在布局根节点上，把 accent 令牌切成该分区的品牌色（main.css .ch-*）。 */
+export function channelThemeClass(key?: string | null): string {
+  return communityMeta(key) ? `ch-${key}` : ''
 }
 
 /** 各分区可用的平台筛选（/api/contents 的 platform 参数值）。 */
@@ -101,6 +96,53 @@ export function useCommunityScope() {
   })
   return { scope, isAll: computed(() => scope.value === 'all') }
 }
+
+type PageCommunity = { path: string, key: GameCommunityKey } | null
+
+/**
+ * 详情页声明"本页内容属于哪个分区"（内容 / 事件详情；商品详情会把分区重定向进 URL，无需声明）。
+ * 这类页面 URL 里通常没有 community，若不声明，频道高亮会回退到上次浏览的分区（曾把 AI 内容标成鸣潮）。
+ */
+export function usePageCommunity(source: () => string | null | undefined) {
+  const route = useRoute()
+  const state = useState<PageCommunity>('page-community', () => null)
+  watch(source, (key) => {
+    state.value = key && VALID_KEYS.has(key as GameCommunityKey) ? { path: route.path, key: key as GameCommunityKey } : null
+  }, { immediate: true })
+}
+
+/**
+ * 当前高亮的频道：聚合首页 → home；分区首页 → 该分区；/ai → ai；定制化 → custom；
+ * 详情页优先用 usePageCommunity 声明的分区；聚合视角（community=all）不高亮任何分区。
+ * 顶栏选中态与布局的频道主题色（accent）都以此为准。
+ */
+export function useActiveChannel() {
+  const route = useRoute()
+  const { community } = useGameSection()
+  const pageCommunity = useState<PageCommunity>('page-community', () => null)
+  // 顶栏与布局先于页面的异步 setup 渲染，SSR 时还不知道详情内容属于哪个分区；
+  // 详情页在挂载前不高亮任何频道，挂载后再切到页面声明的分区（避免先闪出错误分区）。
+  const mounted = useState('active-channel-mounted', () => false)
+  if (import.meta.client) onMounted(() => { mounted.value = true })
+  const active = computed<string | null>(() => {
+    if (route.path === '/ai') return 'ai'
+    if (route.path.startsWith('/custom')) return 'custom'
+    const query = String(route.query.community || '')
+    const queryKey = VALID_KEYS.has(query as GameCommunityKey) ? query : null
+    if (route.path === '/') return queryKey ?? 'home'
+    if (DETAIL_PATH.test(route.path)) {
+      if (!mounted.value) return null
+      if (pageCommunity.value?.path === route.path) return pageCommunity.value.key
+    }
+    if (queryKey) return queryKey
+    if (query === 'all' || route.path === '/calendar') return null
+    return community.value
+  })
+  return { active }
+}
+
+/** 内容 / 事件详情页：URL 不带分区，由页面 usePageCommunity 声明 */
+const DETAIL_PATH = /^\/(contents|events)\/[^/]+$/
 
 export function useGameSection() {
   const route = useRoute()

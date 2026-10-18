@@ -58,14 +58,21 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 - **批量重审**：`POST /api/admin/ai/review-community?community=X&limit≤500`（清该分区 content_reviews
   后按 50/块入队）；管理端内容页选分区筛选后出现「重审本分区」按钮。2026-09-05 用它修正了 blhx
   存量 84+ 条按 wuwa 语境误判"与鸣潮无关"而下架的内容——分区归属/提示词调整后必须重审存量。
-- **前端视觉与信息架构（2026-09-05 三改定稿：频道式导航）**：顶栏品牌旁是**频道组**
-  「首页 / 鸣潮 / 碧蓝航线 / …」（下划线选中态：选中项分区色文字+2px 下划线，无底色容器，
-  类组在 COMMUNITY_CLASSES.nav）。**首页频道 = 跨分区聚合**（`/` 无 community 参数 → 后端以
-  community=all 查询），分区频道 = `/?community=key`（显式写参数，与聚合首页区分；点击调
-  useGameSection.selectCommunity 会写 localStorage）。**吸顶只有顶栏一层**；站点栏目导航（官方动态/商品/事件/内容库，带 communityQuery）放在
-  首页内容区首行（panel-glass 磨砂条，与刷新同处一行，随内容滚动、不吸顶）。分区指示不带通栏强调条（2026-09-05 评估后删除：频道下划线已足够表达），
-  悬停一律纯文字变色（容器内不放灰底 hover 块）。类组全部字面量写在 COMMUNITY_CLASSES（动态拼接会被 Tailwind purge）。
-- **系统级工具页**：侧栏"数据统计/来源健康/订阅中心"不跟随顶栏分区——statistics 本就无分区过滤；
+- **前端视觉与信息架构（2026-10-18「信号台」改版，分支 feat/signal-deck-ui）**：顶栏品牌旁是**频道组**
+  「首页 / 鸣潮 / 碧蓝航线 / …」（色点 + 选中项正文色加粗 + 分区色 2px 下划线，类组在 COMMUNITY_CLASSES.nav/dot）。
+  **首页频道 = 跨分区聚合**（`/` 无 community 参数 → 后端以 community=all 查询），分区频道 = `/?community=key`
+  （显式写参数，与聚合首页区分）。**吸顶只有顶栏一层**；栏目导航 `SectionNav`（总览/官方动态/活动日历/事件/商品追踪/内容库）
+  放在内容区首行、随内容滚动，首页与各栏目页共用（取代原 BackToChannelHome）。**已取消左侧栏**：数据统计/来源健康/订阅中心
+  收进页脚，手机端底部有 `MobileTabBar`。频道高亮与频道主题色统一走 `useActiveChannel()`；
+  内容/事件详情 URL 不带分区，页面用 `usePageCommunity()` 声明所属分区（SSR 时不高亮，挂载后再高亮，避免闪错分区）。
+- **设计令牌（main.css）**：语义色全是 `--sd-*` CSS 变量，经 `@theme inline` 暴露为 Tailwind 色名
+  （bg-canvas/bg-card/border-line/text-ink/text-ink-2/text-muted/text-faint/bg-brand/text-brand-ink/bg-chip/
+  text-ok|warn|hot、游戏色 bg-wuwa/text-wuwa-ink/bg-wuwa-soft…），深色模式只改变量。`accent` = 当前频道强调色：
+  布局根节点挂 `.ch-<分区>`（`channelThemeClass`）后 accent 变为该游戏品牌色（进度条、选中 tab、底栏高亮随之变色）；
+  `ChannelHero` 根节点固定 `.dark` + `.ch-*`，不论站点明暗都用深色头图。`.panel`/`.panel-glass` 现为实底卡片；
+  **随机壁纸是用户特意设计的保留功能**：开启时 `WallpaperBackdrop` 给 `<html>` 挂 `data-wallpaper`，卡片与 `.wall-surface`
+  （直接压在背景上的标题/栏目条）自动切为毛玻璃。数字/品牌字标用本地打包的 Space Grotesk（@fontsource，只取 latin 500/700）。
+- **系统级工具页**：页脚"数据统计/来源健康/订阅中心"不跟随顶栏分区——statistics 本就无分区过滤；
   sources 接受 `community=all`（页面固定拉 all 并逐行带分区徽章）；订阅中心是静态页。
 - **聚合查询与聚合视角**：/api/contents、/api/events、/api/highlights、/api/products、/api/sources 接受
   `community=all`（`COMMUNITY_AGGREGATE_QUERY`；sources/official-links 仍严格单分区）。
@@ -75,10 +82,13 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
   聚合内容行（RawFeedRow `show-community`）、事件行、轮播卡都带分区徽章。
   `useGameSection.ts` 仍是分区唯一状态源（URL query 优先 → localStorage → 默认 wuwa），集中
   `PLATFORMS_BY_COMMUNITY`（平台筛选随分区收敛：blhx 只有 B站）。
-- **首页信息架构（2026-09-05 定稿）**：官方精选轮播 → 近期聚合结论（5 条速览）→ 「最新·最热」
-  混合流：官方+社区每页 15:30 双请求，页内按"有效时间"排序（官方 +36h、播放≥1 万 +12h），
-  RawFeedRow 播放量≥1 万自动带 🔥热门徽章与播放数。右栏履约信号卡只做粗略速览（三轴状态行+待核验
-  数），细节在商品详情页。
+- **首页信息架构（2026-10-18 信号台）**：聚合首页 `HomeBriefing`（今日信号 + 24h 新内容/进行中活动/来源健康），
+  分区首页换成 `ChannelHero`（深色头图 + 官方入口按钮）→ SectionNav → 大图精选 `FeaturedHero` + 右侧「即将到来」
+  `UpNextCard` 与履约 `StatusCard embedded`（分区无商品时整卡隐藏）→ 进行中活动卡片 `ActivityStrip`（进度条 + 剩余时间，
+  不足 4 天标红，默认 10 条）→ 「最新·最热」流（全部/官方/社区/热门 四个标签：全部 = 官方+社区每页 15:30 双请求、
+  页内按"有效时间"排序，官方 +36h、播放≥1 万 +12h；热门 = `sort=hot`）+ 侧栏（24h 飙升 / 聚合事件 / 兑换码 / 来源健康点阵 / 邮件早报）。
+  日程纯计算在 `utils/schedule.ts`、HTML 实体还原在 `utils/text.ts`，均有 `node --test web/tests/*.test.ts` 单测。
+  首页布局自带侧栏，`default.vue` 对 `/` 不渲染右栏 RightRail。
   **各数据页 key/参数/watch 都要带 community**（auth 布局事件预览曾是漏网）。跨分区场景（首页聚合、
   账号中心关注流）逐条显示分区徽章。
 - 管理端：分区选项/徽章单一来源 `web/app/utils/admin-communities.ts`（targets/contents/events/
@@ -206,7 +216,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 
 - **时间**：存储 UTC（naive），展示北京时间；全站格式 `YYYY/MM/DD HH:mm`（`utils/admin-types.ts fmtTime`）。
 - **MySQL**：utf8mb4；新表迁移必须给存量行回填默认值（0007 漏回填曾致 /api/admin/overview 500）。
-- **前端**（web/README.md）：三栏论坛布局、macOS 玻璃材质、论坛蓝、无紫色系、mono 时间戳；身份标签色系见 data.ts identityMeta。页面文案走 site-config（`useSiteConfig().t(key)` 带默认值）。品牌图标是 Q 版看板娘（`web/public/icon.png`，favicon 32px / apple-touch-icon 180px 同源图），顶栏与 account/auth 布局品牌位用 `<img src="/icon.png">`，favicon 配置在 nuxt.config `app.head.link`。
+- **前端**（web/README.md）：「信号台」设计令牌（实底卡片 + 频道强调色，开启壁纸时切毛玻璃）、论坛蓝主按钮/链接、mono 时间戳；身份标签色系见 data.ts identityMeta。页面文案走 site-config（`useSiteConfig().t(key)` 带默认值）。品牌图标是 Q 版看板娘（`web/public/icon.png`，favicon 32px / apple-touch-icon 180px 同源图），顶栏与 account/auth 布局品牌位用 `<img src="/icon.png">`，favicon 配置在 nuxt.config `app.head.link`。
 - **管理端交互**：所有异步按钮必须有 busy 文案+toast（useAdminToast，右下角带时间戳）；禁止 alert()。
 - **禁止解释性填充小字**（2026-09-05 用户明确要求）：吸顶导航/列表区不放"××按分区独立组织""当前分区：××"
   这类灰色说明 caption——无价值小字加大信息密度、显得低级没有活人感；状态信息用视觉载体表达

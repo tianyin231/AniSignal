@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { RefreshCw } from 'lucide-vue-next'
-import type { ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto } from '~/composables/usePublicApi'
+import type { ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto, PublicSource } from '~/composables/usePublicApi'
 import { toRawItem, utcTimestamp } from '~/utils/public-utils'
-import { fmtTime } from '~/utils/admin-types'
+import { ongoingActivities, upNextItems } from '~/utils/schedule'
 
 useSeoMeta({ title: '首页 · AniSignal' })
 definePageMeta({ middleware: [(to) => { if (to.query.community === 'ai') return navigateTo('/ai') }] })
@@ -11,66 +11,82 @@ const route = useRoute()
 const router = useRouter()
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const referenceTime = useState('home-reference-time', () => Date.now())
-// 官方内容在混合流中占约 1/3（官方:社区 = 15:30 每页），官方比重由此保证
+// "全部"标签下官方内容在混合流中占约 1/3（官方:社区 = 15:30 每页），官方比重由此保证
 const OFFICIAL_PER_PAGE = 15
 const COMMUNITY_PER_PAGE = 30
+const TAB_PER_PAGE = 30
 const OFFICIAL_BOOST_HOURS = 36
 const HOT_BOOST_HOURS = 12
+
+const FEED_TABS = [
+  { key: 'all', label: '全部' },
+  { key: 'official', label: '官方' },
+  { key: 'community', label: '社区' },
+  { key: 'hot', label: '热门' },
+] as const
+type FeedTab = typeof FEED_TABS[number]['key']
+const feedTab = computed<FeedTab>(() =>
+  FEED_TABS.some(t => t.key === route.query.feed) ? route.query.feed as FeedTab : 'all',
+)
 
 const { community } = useGameSection()
 const { api } = usePublicApi()
 
-// 站点栏目导航：与刷新同处一行（顶栏只有频道一层）
-const sectionLinks = [
-  { to: '/official', label: '官方动态' },
-  { to: '/calendar', label: '活动日历' },
-  { to: '/products', label: '商品' },
-  { to: '/events', label: '事件' },
-  { to: '/contents', label: '内容库' },
-]
-// 聚合首页进栏目保持"全部分区"视角；分区首页则锁定该分区
-const sectionQuery = computed(() => ({ community: homeCommunity.value }))
-const isActive = (to: string) => route.path.startsWith(to)
 // 首页频道语义：/ 无 community 参数 = 跨分区聚合（community=all）；带参数 = 该分区首页
 const aggregate = computed(() => !route.query.community || route.query.community === 'all')
 const homeCommunity = computed(() => (aggregate.value ? 'all' : community.value))
+const sectionQuery = computed(() => ({ community: homeCommunity.value }))
+
+// 最新·最热混合流：官方内容视作更新 36h、高播放内容视作更新 12h，
+// 页内按"有效时间"排序——同一屏里最新、最热、官方三者兼顾。
+function effectiveTs(item: PublicContentItem): number {
+  let ts = utcTimestamp(item.published_at || item.collected_at)
+  if (item.identity === 'official') ts += OFFICIAL_BOOST_HOURS * 3_600_000
+  if ((item.metrics?.view ?? 0) >= 10_000) ts += HOT_BOOST_HOURS * 3_600_000
+  return ts
+}
+
+interface FeedResult {
+  items: PublicContentItem[]
+  total: number
+  pages: number
+  /** 官方 / 社区两侧列表头（仅"全部"标签），用于新内容探测 */
+  heads: [string | null, string | null]
+}
+const headId = (list: PublicContentList) => (list.items[0]?.id != null ? String(list.items[0].id) : null)
 
 // 客户端先切换频道并显示加载状态；服务端首屏仍等待数据。
+const feedRequest = useLazyAsyncData(
+  () => `home-feed-${homeCommunity.value}-${feedTab.value}-${page.value}`,
+  async (_app, { signal }): Promise<FeedResult> => {
+    const base = { community: homeCommunity.value, published_within_hours: 168 }
+    if (feedTab.value === 'all') {
+      const [official, rest] = await Promise.all([
+        api<PublicContentList>('/api/contents', { signal, query: { ...base, identity: 'official', limit: OFFICIAL_PER_PAGE, offset: (page.value - 1) * OFFICIAL_PER_PAGE } }),
+        api<PublicContentList>('/api/contents', { signal, query: { ...base, exclude_identity: 'official', limit: COMMUNITY_PER_PAGE, offset: (page.value - 1) * COMMUNITY_PER_PAGE } }),
+      ])
+      return {
+        items: [...official.items, ...rest.items].sort((a, b) => effectiveTs(b) - effectiveTs(a)),
+        total: official.total + rest.total,
+        pages: Math.max(Math.ceil(official.total / OFFICIAL_PER_PAGE), Math.ceil(rest.total / COMMUNITY_PER_PAGE), 1),
+        heads: [headId(official), headId(rest)],
+      }
+    }
+    const filter = feedTab.value === 'official'
+      ? { identity: 'official' }
+      : feedTab.value === 'community' ? { exclude_identity: 'official' } : { sort: 'hot' }
+    const res = await api<PublicContentList>('/api/contents', {
+      signal,
+      query: { ...base, ...filter, limit: TAB_PER_PAGE, offset: (page.value - 1) * TAB_PER_PAGE },
+    })
+    return { items: res.items, total: res.total, pages: Math.max(1, Math.ceil(res.total / TAB_PER_PAGE)), heads: [null, null] }
+  },
+  { watch: [homeCommunity, page, feedTab] },
+)
 const eventsRequest = useLazyAsyncData(
   () => `home-events-${homeCommunity.value}`,
-  (_app, { signal }) => api<ApiEventList>('/api/events', {
-    signal,
-    query: { community: homeCommunity.value, published_within_hours: 24, limit: 10 },
-  }),
+  (_app, { signal }) => api<ApiEventList>('/api/events', { signal, query: { community: homeCommunity.value, limit: 6 } }),
   { watch: [homeCommunity] },
-)
-const officialRequest = useLazyAsyncData(
-  () => `home-official-${homeCommunity.value}-${page.value}`,
-  (_app, { signal }) => api<PublicContentList>('/api/contents', {
-    signal,
-    query: {
-      community: homeCommunity.value,
-      identity: 'official',
-      published_within_hours: 168,
-      limit: OFFICIAL_PER_PAGE,
-      offset: (page.value - 1) * OFFICIAL_PER_PAGE,
-    },
-  }),
-  { watch: [homeCommunity, page] },
-)
-const communityRequest = useLazyAsyncData(
-  () => `home-community-${homeCommunity.value}-${page.value}`,
-  (_app, { signal }) => api<PublicContentList>('/api/contents', {
-    signal,
-    query: {
-      community: homeCommunity.value,
-      exclude_identity: 'official',
-      published_within_hours: 168,
-      limit: COMMUNITY_PER_PAGE,
-      offset: (page.value - 1) * COMMUNITY_PER_PAGE,
-    },
-  }),
-  { watch: [homeCommunity, page] },
 )
 const highlightsRequest = useLazyAsyncData(
   () => `home-highlights-${homeCommunity.value}`,
@@ -92,82 +108,64 @@ const codesRequest = useLazyAsyncData(
   (_app, { signal }) => api<CodesDto>('/api/codes', { query: { community: homeCommunity.value }, signal }),
   { watch: [homeCommunity] },
 )
+// 页头数字：近 24 小时新内容数只取 total
+const pulseRequest = useLazyAsyncData(
+  () => `home-pulse-${homeCommunity.value}`,
+  (_app, { signal }) => api<PublicContentList>('/api/contents', { query: { community: homeCommunity.value, published_within_hours: 24, limit: 1 }, signal }),
+  { watch: [homeCommunity] },
+)
+const sourcesRequest = useLazyAsyncData(
+  () => `home-sources-${homeCommunity.value}`,
+  (_app, { signal }) => api<{ items: PublicSource[] }>('/api/sources', { query: { community: homeCommunity.value }, signal }),
+  { watch: [homeCommunity] },
+)
 
-const [
-  { data: eventsData, status: eventsStatus },
-  { data: officialData, status: officialStatus },
-  { data: communityData, status: communityStatus },
-  { data: highlightsData },
-  { data: trendingData },
-  { data: calendarData },
-  { data: codesData },
-] = await Promise.all([
-  eventsRequest,
-  officialRequest,
-  communityRequest,
-  highlightsRequest,
-  trendingRequest,
-  calendarRequest,
-  codesRequest,
-])
+const requests = [feedRequest, eventsRequest, highlightsRequest, trendingRequest, calendarRequest, codesRequest, pulseRequest, sourcesRequest]
+// 服务端首屏等全部数据；客户端切换频道时先渲染结构、各区块随数据到达再填充
+await Promise.all(requests)
+const { data: feedData, status: feedStatus } = feedRequest
+const { data: eventsData } = eventsRequest
+const { data: highlightsData } = highlightsRequest
+const { data: trendingData } = trendingRequest
+const { data: calendarData } = calendarRequest
+const { data: codesData } = codesRequest
+const { data: pulseData } = pulseRequest
+const { data: sourcesData } = sourcesRequest
 
 const featuredHighlights = computed(() => (highlightsData.value?.items ?? []).map(toRawItem))
 const trendingList = computed(() => (trendingData.value?.items ?? []).map(toRawItem))
 const trendingDelta = computed(() =>
   new Map((trendingData.value?.items ?? []).map(item => [String(item.id), item.delta_view ?? 0])),
 )
-const codesList = computed(() => codesData.value?.items ?? [])
-const copiedCode = ref('')
-async function copyCode(code: string) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(code)
-    } else {
-      // HTTP 部署下没有异步剪贴板 API，回退到隐藏文本域 + execCommand
-      const box = document.createElement('textarea')
-      box.value = code
-      box.style.position = 'fixed'
-      box.style.opacity = '0'
-      document.body.appendChild(box)
-      box.select()
-      document.execCommand('copy')
-      box.remove()
-    }
-    copiedCode.value = code
-    setTimeout(() => (copiedCode.value = ''), 1500)
-  } catch {}
-}
+const feedItems = computed(() => (feedData.value?.items ?? []).map(toRawItem))
+const totalPages = computed(() => feedData.value?.pages ?? 1)
+const feedTotal = computed(() => feedData.value?.total ?? 0)
 
-// 最新最热混合流：官方内容视作更新 36h、高播放内容视作更新 12h，
-// 页内按"有效时间"排序——同一屏里最新、最热、官方三者兼顾。
-function effectiveTs(item: PublicContentItem): number {
-  const base = utcTimestamp(item.published_at || item.collected_at)
-  let ts = base
-  if (item.identity === 'official') ts += OFFICIAL_BOOST_HOURS * 3_600_000
-  if ((item.metrics?.view ?? 0) >= 10_000) ts += HOT_BOOST_HOURS * 3_600_000
-  return ts
-}
-const feedItems = computed(() =>
-  [...(officialData.value?.items ?? []), ...(communityData.value?.items ?? [])]
-    .sort((a, b) => effectiveTs(b) - effectiveTs(a))
-    .map(toRawItem),
-)
-const totalPages = computed(() =>
-  Math.max(
-    Math.ceil((officialData.value?.total ?? 0) / OFFICIAL_PER_PAGE),
-    Math.ceil((communityData.value?.total ?? 0) / COMMUNITY_PER_PAGE),
-    1,
-  ),
-)
-const feedTotal = computed(() => (officialData.value?.total ?? 0) + (communityData.value?.total ?? 0))
-const loading = computed(() =>
-  [eventsStatus, officialStatus, communityStatus].some((s) => s.value === 'pending'),
-)
+// 页头 / 频道头图数字
+const newCount = computed(() => pulseData.value?.total ?? null)
+const ongoingCount = computed(() => ongoingActivities(calendarData.value?.ongoing ?? [], referenceTime.value).length)
+const upcomingCount = computed(() => upNextItems(calendarData.value, codesData.value?.items, referenceTime.value, 99).length)
+const enabledSources = computed(() => (sourcesData.value?.items ?? []).filter(s => s.enabled))
+const sourcesOk = computed(() => enabledSources.value.filter(s => s.consecutive_failures === 0).length)
+// 频道头图用精选里的另一张图，避免与下方精选大图首帧重复
+const heroCover = computed(() => {
+  const items = featuredHighlights.value
+  const rest = items.slice(1)
+  return (rest.find(i => i.identity === 'official' && i.cover) ?? rest.find(i => i.cover) ?? items.find(i => i.cover))?.cover
+})
+const latestEvent = computed(() => {
+  const event = eventsData.value?.items[0]
+  return event ? { title: event.title, to: `/events/${event.id}` } : null
+})
+
 const refreshing = ref(false)
-const homeError = computed(() => [eventsRequest, officialRequest, communityRequest, highlightsRequest, trendingRequest, calendarRequest, codesRequest].some(request => request.error.value))
+const homeError = computed(() => requests.some(request => request.error.value))
 
 function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
+}
+function selectTab(key: FeedTab) {
+  router.replace({ query: { ...route.query, feed: key === 'all' ? undefined : key, page: undefined } })
 }
 
 async function refreshHome() {
@@ -176,13 +174,7 @@ async function refreshHome() {
   referenceTime.value = Date.now()
   try {
     await Promise.all([
-      eventsRequest.refresh(),
-      officialRequest.refresh(),
-      communityRequest.refresh(),
-      highlightsRequest.refresh(),
-      trendingRequest.refresh(),
-      calendarRequest.refresh(),
-      codesRequest.refresh(),
+      ...requests.map(request => request.refresh()),
       refreshNuxtData(`status-product-${homeCommunity.value}`),
     ])
   }
@@ -191,20 +183,11 @@ async function refreshHome() {
   }
 }
 
-// 温和的新内容探测：绝不自动改写正在看的列表，只在后台对比当前分区两侧列表头，
+// 温和的新内容探测：绝不自动改写正在看的列表，只在后台对比"全部"流两侧列表头，
 // 有差异时亮出「有新内容」提示，由用户决定何时更新。
 const pendingNewContent = ref(false)
 let updateTimer: ReturnType<typeof setInterval> | undefined
 let probeController: AbortController | undefined
-
-function currentHeads(): [string | null, string | null] {
-  const officialHead = officialData.value?.items[0]?.id
-  const communityHead = communityData.value?.items[0]?.id
-  return [
-    officialHead == null ? null : String(officialHead),
-    communityHead == null ? null : String(communityHead),
-  ]
-}
 
 async function probeHead(identity: 'official' | 'community', scope: string, signal: AbortSignal): Promise<string | null> {
   const res = await api<PublicContentList>('/api/contents', {
@@ -216,12 +199,13 @@ async function probeHead(identity: 'official' | 'community', scope: string, sign
       ...(identity === 'official' ? { identity } : { exclude_identity: 'official' }),
     },
   })
-  return res.items[0]?.id != null ? String(res.items[0].id) : null
+  return headId(res)
 }
 
 async function checkForUpdates() {
   if (document.visibilityState !== 'visible') return
-  if (page.value !== 1 || pendingNewContent.value || loading.value || refreshing.value || homeError.value || probeController) return
+  if (feedTab.value !== 'all' || page.value !== 1 || pendingNewContent.value) return
+  if (feedStatus.value === 'pending' || refreshing.value || homeError.value || probeController) return
   const scope = homeCommunity.value
   const controller = new AbortController()
   probeController = controller
@@ -230,8 +214,8 @@ async function checkForUpdates() {
       probeHead('official', scope, controller.signal),
       probeHead('community', scope, controller.signal),
     ])
-    if (controller.signal.aborted || scope !== homeCommunity.value || page.value !== 1) return
-    const [currentOfficial, currentCommunity] = currentHeads()
+    if (controller.signal.aborted || scope !== homeCommunity.value || page.value !== 1 || feedTab.value !== 'all') return
+    const [currentOfficial, currentCommunity] = feedData.value?.heads ?? [null, null]
     const changed
       = (officialHead && officialHead !== currentOfficial)
         || (communityHead && communityHead !== currentCommunity)
@@ -252,7 +236,7 @@ async function applyUpdates() {
   await refreshHome()
 }
 
-watch([page, homeCommunity], () => {
+watch([page, homeCommunity, feedTab], () => {
   probeController?.abort()
   pendingNewContent.value = false
 })
@@ -270,138 +254,106 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <!-- 栏目导航与刷新同处一行（磨砂玻璃质感，沿用原 Tab 条容器），顶部只有一层吸顶栏 -->
-    <div class="panel-glass mb-4 flex max-w-full items-center justify-between gap-2 rounded-[14px] p-1">
-      <nav class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto text-sm [scrollbar-width:none]" aria-label="站点栏目">
-        <NuxtLink
-          v-for="l in sectionLinks"
-          :key="l.to"
-          :to="{ path: l.to, query: sectionQuery }"
-          class="whitespace-nowrap rounded-[10px] px-3 py-1.5 text-sm transition-all"
-          :class="
-            isActive(l.to)
-              ? 'bg-white/85 font-medium text-blue-700 shadow-sm dark:bg-white/10 dark:text-blue-300'
-              : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200'
-          "
-        >
-          {{ l.label }}
-        </NuxtLink>
-      </nav>
-      <div class="flex shrink-0 items-center gap-2">
-        <button
-          v-if="pendingNewContent"
-          type="button"
-          class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-blue-600/10 px-3 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-600/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-blue-400/15 dark:text-blue-300"
-          @click="applyUpdates"
-        >
-          <span class="size-1.5 animate-pulse rounded-full bg-blue-500" aria-hidden="true" />
-          有新内容
-        </button>
-        <button
-          type="button"
-          :disabled="refreshing"
-          class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 py-1.5 text-xs text-slate-500 transition-colors hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-wait disabled:opacity-60 dark:text-zinc-400 dark:hover:text-blue-300"
-          @click="pendingNewContent ? applyUpdates() : refreshHome()"
-        >
-          <RefreshCw :size="13" :class="{ 'animate-spin': refreshing }" aria-hidden="true" />
-          {{ refreshing ? '刷新中…' : '刷新' }}
-        </button>
+    <ChannelHero
+      v-if="!aggregate"
+      :community-key="homeCommunity"
+      :cover="heroCover"
+      :new-count="newCount"
+      :ongoing="ongoingCount"
+      :upcoming="upcomingCount"
+      :latest="latestEvent"
+    />
+    <HomeBriefing
+      v-else
+      :now="referenceTime"
+      :new-count="newCount"
+      :ongoing="ongoingCount"
+      :sources-ok="sourcesOk"
+      :sources-total="enabledSources.length"
+    />
+
+    <SectionNav>
+      <button
+        v-if="pendingNewContent"
+        type="button"
+        class="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-full bg-brand-soft px-3 text-xs font-semibold text-brand-ink transition-colors hover:bg-brand/20"
+        @click="applyUpdates"
+      >
+        <span class="size-1.5 animate-pulse rounded-full bg-brand" aria-hidden="true" />
+        有新内容
+      </button>
+      <button
+        type="button"
+        :disabled="refreshing"
+        class="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] text-muted transition-colors hover:bg-chip hover:text-ink disabled:cursor-wait"
+        @click="pendingNewContent ? applyUpdates() : refreshHome()"
+      >
+        <RefreshCw :size="14" :class="{ 'animate-spin': refreshing }" aria-hidden="true" />
+        {{ refreshing ? '刷新中…' : '刷新' }}
+      </button>
+    </SectionNav>
+
+    <section v-if="homeError" role="alert" class="panel mb-5 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+      部分内容暂时加载失败。<button type="button" class="ml-1 underline" :disabled="refreshing" @click="refreshHome">重新加载</button>
+    </section>
+
+    <div class="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <FeaturedHero v-if="featuredHighlights.length" :items="featuredHighlights" :show-community="aggregate" />
+      <div v-else class="panel grid min-h-[340px] place-items-center text-sm text-muted">近 7 天暂无精选内容。</div>
+      <div class="flex min-w-0 flex-col gap-5">
+        <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" />
+        <StatusCard embedded />
       </div>
     </div>
 
-    <OfficialLinks variant="strip" />
-    <section v-if="homeError" role="alert" class="panel mb-4 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-      部分内容暂时加载失败。<button type="button" class="ml-1 underline" :disabled="refreshing" @click="refreshHome">重新加载</button>
-    </section>
-    <section v-if="loading" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
+    <ActivityStrip
+      :entries="calendarData?.ongoing ?? []"
+      :now="referenceTime"
+      :calendar-scope="homeCommunity"
+      :show-community="aggregate"
+    />
 
-    <template v-else>
-      <TodayBrief :events="eventsData?.items ?? []" :calendar="calendarData" :codes="codesData" :now="referenceTime" :show-community="aggregate" />
-
-      <!-- 官方精选轮播：官方内容的第一呈现位 -->
-      <section aria-labelledby="official-latest-title" class="mb-6">
-        <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <h1 id="official-latest-title" class="text-lg font-semibold text-slate-900 dark:text-zinc-50">精选动态</h1>
-          <NuxtLink :to="{ path: '/official', query: sectionQuery }" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-            全部官方动态
-          </NuxtLink>
-        </header>
-        <FeaturedCarousel v-if="featuredHighlights.length" :items="featuredHighlights" :show-community="aggregate" />
-        <div v-else class="panel px-4 py-10 text-center text-sm text-slate-400">
-          近 7 天暂无精选内容。
-        </div>
-      </section>
-
-      <ActivityCalendar :data="calendarData" :show-community="aggregate" :calendar-scope="homeCommunity" />
-
-      <!-- 兑换码：官方内容抽取，点击复制 -->
-      <section v-if="codesList.length" aria-labelledby="codes-title" class="mb-6">
-        <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <h2 id="codes-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">兑换码</h2>
-        </header>
-        <div class="panel overflow-hidden">
-          <div v-for="c in codesList" :key="c.code" class="flex flex-wrap items-center gap-x-3 border-b border-slate-900/5 px-4 py-2.5 text-sm last:border-b-0 dark:border-white/5">
+    <div class="mt-10 grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <section class="panel min-w-0 overflow-hidden" aria-labelledby="feed-title">
+        <header class="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-5">
+          <h2 id="feed-title" class="text-lg font-bold text-ink">最新 · 最热</h2>
+          <div role="tablist" aria-label="内容筛选" class="flex gap-0.5 rounded-[10px] bg-chip p-[3px]">
             <button
-              class="mono rounded bg-blue-500/10 px-2.5 py-1 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-500/20 dark:text-blue-300"
-              :title="copiedCode === c.code ? '已复制' : '点击复制'"
-              @click="copyCode(c.code)"
+              v-for="tab in FEED_TABS"
+              :key="tab.key"
+              type="button"
+              role="tab"
+              :aria-selected="feedTab === tab.key"
+              class="h-8 rounded-lg px-3.5 text-[13px] transition-colors"
+              :class="feedTab === tab.key ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
+              @click="selectTab(tab.key)"
             >
-              {{ copiedCode === c.code ? '已复制 ✓' : c.code }}
+              {{ tab.label }}
             </button>
-            <span class="text-xs text-slate-400 dark:text-zinc-500">
-              {{ c.expires_at ? `${fmtTime(c.expires_at)} 前有效` : '有效期待公布' }}
-            </span>
-            <a v-if="c.url" :href="c.url" target="_blank" rel="noopener" class="ml-auto link text-xs">来源 ↗</a>
           </div>
-        </div>
-      </section>
-
-      <!-- 热度飙升：窗口内播放增量最高的内容（快照增量，非绝对播放量） -->
-      <section v-if="trendingList.length" aria-labelledby="trending-title" class="mb-6">
-        <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <h2 id="trending-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">🔥 热度飙升</h2>
-          <NuxtLink :to="{ path: '/contents', query: { ...sectionQuery, tab: 'trending' } }" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-            查看内容库
-          </NuxtLink>
         </header>
-        <div class="panel overflow-hidden">
-          <RawFeedRow
-            v-for="row in trendingList"
-            :key="`trend-${row.id}`"
-            :item="row"
-            :show-community="aggregate"
-            :delta-view="trendingDelta.get(row.id) ?? 0"
-          />
-        </div>
-      </section>
-
-      <!-- 最新最热混合流：官方 + 社区按有效时间混排，官方加权、热门置前 -->
-      <section aria-labelledby="feed-title">
-        <header class="mb-3 flex items-end justify-between gap-4 px-1">
-          <h2 id="feed-title" class="text-base font-semibold text-slate-900 dark:text-zinc-50">最新 · 最热</h2>
-          <NuxtLink :to="{ path: '/contents', query: sectionQuery }" class="link shrink-0 rounded-md px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
-            查看内容库
-          </NuxtLink>
-        </header>
-        <div class="panel overflow-hidden">
+        <p v-if="feedStatus === 'pending' && !feedItems.length" class="px-4 py-16 text-center text-sm text-muted">加载中…</p>
+        <div v-else :class="{ 'opacity-60 transition-opacity': feedStatus === 'pending' }">
           <RawFeedRow v-for="row in feedItems" :key="row.id" :item="row" :show-community="aggregate" />
-          <p v-if="!feedItems.length" class="px-4 py-10 text-center text-sm text-slate-400">
-            近 7 天暂无内容。
-          </p>
-          <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
-            <span>共 {{ feedTotal }} 条</span>
-            <div class="flex items-center gap-3">
-              <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page - 1)">« 上一页</button>
-              <span class="mono">{{ page }} / {{ totalPages }}</span>
-              <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="goPage(page + 1)">下一页 »</button>
-            </div>
-          </div>
+          <p v-if="!feedItems.length" class="px-4 py-16 text-center text-sm text-muted">近 7 天暂无内容。</p>
         </div>
+        <footer class="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-2.5 text-xs text-muted sm:px-5">
+          <span>近 7 天共 <span class="num text-[13px] font-semibold text-ink-2">{{ feedTotal }}</span> 条</span>
+          <div v-if="totalPages > 1" class="flex items-center gap-1">
+            <button :disabled="page <= 1" class="h-9 rounded-[10px] px-3 transition-colors hover:bg-chip hover:text-ink disabled:opacity-40" @click="goPage(page - 1)">上一页</button>
+            <span class="mono px-1.5">{{ page }} / {{ totalPages }}</span>
+            <button :disabled="page >= totalPages" class="h-9 rounded-[10px] px-3 transition-colors hover:bg-chip hover:text-ink disabled:opacity-40" @click="goPage(page + 1)">下一页</button>
+          </div>
+        </footer>
       </section>
-    </template>
 
-    <div class="mt-6 space-y-4 xl:hidden">
-      <StatusCard mobile />
-      </div>
+      <aside class="flex min-w-0 flex-col gap-5" aria-label="首页侧栏">
+        <TrendingCard :items="trendingList" :deltas="trendingDelta" :more-to="{ path: '/contents', query: { ...sectionQuery, tab: 'trending' } }" />
+        <EventsCard :events="eventsData?.items ?? []" :show-community="aggregate" :more-to="{ path: '/events', query: sectionQuery }" />
+        <CodesCard :codes="codesData?.items ?? []" :show-community="aggregate" />
+        <SourceHealthCard :sources="sourcesData?.items ?? []" />
+        <SubscribeCta />
+      </aside>
+    </div>
   </div>
 </template>

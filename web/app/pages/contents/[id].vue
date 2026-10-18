@@ -16,6 +16,8 @@ const { data: detail, error } = await useAsyncData(() => `content-${route.params
 if (error.value) throw createError({ statusCode: error.value.statusCode || 503, statusMessage: error.value.statusCode === 404 ? '内容不存在' : '内容暂时加载失败，请稍后重试', fatal: true })
 if (!detail.value)
   throw createError({ statusCode: 404, statusMessage: '内容不存在', fatal: true })
+// 顶栏高亮内容所属分区，而不是上次浏览的分区（曾把 AI 快讯内容标成鸣潮）
+usePageCommunity(() => detail.value?.community)
 
 const d = computed(() => detail.value!)
 const { mediaMode } = useSiteConfig()
