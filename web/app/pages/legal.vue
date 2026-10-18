@@ -41,7 +41,7 @@ const docs = [
 
     <section class="panel p-5 sm:p-6">
       <p class="mono text-xs text-blue-600 dark:text-blue-300">LEGAL</p>
-      <h1 class="mt-1 text-lg font-semibold text-slate-900 dark:text-zinc-50">条款、隐私与合规</h1>
+      <h1 class="mt-1 text-2xl font-bold text-ink">条款、隐私与合规</h1>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         AniSignal 为试运行中的信息采集与订阅工具。以下文书说明服务能做什么、不能做什么，以及你如何控制自己的数据。
         与页面展示冲突时，以本站实际功能与本页文书为准。
@@ -55,14 +55,14 @@ const docs = [
         :to="doc.to"
         class="panel block p-5 transition hover:border-blue-300/80 dark:hover:border-blue-500/40"
       >
-        <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">{{ doc.title }}</h2>
+        <h2 class="text-base font-bold text-ink">{{ doc.title }}</h2>
         <p class="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">{{ doc.desc }}</p>
         <span class="mt-3 inline-block text-xs text-blue-600 dark:text-blue-300">阅读 →</span>
       </NuxtLink>
     </div>
 
     <section class="panel p-5 sm:p-6">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">数据边界一览</h2>
+      <h2 class="text-base font-bold text-ink">数据边界一览</h2>
       <ul class="mt-2.5 space-y-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         <li class="flex gap-2"><span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" />站内内容以已配置采集目标与公开来源为准，不是全网镜像。</li>
         <li class="flex gap-2"><span class="mt-2 size-1 shrink-0 rounded-full bg-blue-500" />原始链接指向源站；本站保存必要摘要与解析结果，用于检索、归并与订阅。</li>

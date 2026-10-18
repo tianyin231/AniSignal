@@ -71,7 +71,7 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
     <section class="panel p-4 sm:p-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
-          <h1 class="flex flex-wrap items-center gap-2 text-lg font-semibold text-slate-900 dark:text-zinc-50">{{ product.name }}<span v-if="communityMeta" class="chip text-xs" :class="communityClasses(communityMeta.color).chip">{{ communityMeta.label }}</span></h1>
+          <h1 class="flex flex-wrap items-center gap-2 text-2xl font-bold text-ink">{{ product.name }}<span v-if="communityMeta" class="chip text-xs" :class="communityClasses(communityMeta.color).chip">{{ communityMeta.label }}</span></h1>
           <p class="mt-0.5 text-xs text-slate-600 dark:text-zinc-400">
             {{ product.publisher || '—' }}<template v-if="product.skus.length"> · {{ product.skus.join(' / ') }}</template>
           </p>
@@ -130,7 +130,7 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
       </div>
       <section class="panel p-4 sm:p-5">
         <div class="flex items-center justify-between gap-3">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">最近履约信号</h2>
+          <h2 class="text-base font-bold text-ink">最近履约信号</h2>
           <button type="button" class="link min-h-11 text-xs" @click="view = 'evidence'">查看全部</button>
         </div>
         <p v-if="signalsError" role="alert" class="mt-3 text-sm text-amber-700 dark:text-amber-300">信号暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshSignals()">重试</button></p>
@@ -145,7 +145,7 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
     </section>
 
     <section v-else class="panel p-4 sm:p-5">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">履约信号（{{ signals.length }}）</h2>
+      <h2 class="text-base font-bold text-ink">履约信号（{{ signals.length }}）</h2>
       <p class="mt-1 text-xs leading-relaxed text-slate-600 dark:text-zinc-400">结论依据已采纳信号，并区分自动采纳、官方来源与人工确认。证据不足的信号继续自动跟踪；实物开箱不等于已确认自购。</p>
       <div class="mt-4">
         <p v-if="signalsError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">信号暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshSignals()">重试</button></p>

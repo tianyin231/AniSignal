@@ -28,13 +28,13 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
   <div class="aurora-bg min-h-screen">
     <WallpaperBackdrop />
   <header class="glass sticky top-0 z-20">
-      <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
+      <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
         <NuxtLink to="/" class="flex items-center gap-2">
-          <img src="/icon.png" alt="" class="size-7 shrink-0">
-          <span class="text-[15px] font-semibold tracking-tight">AniSignal</span>
-          <span class="chip ml-1 bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300">游戏事件雷达</span>
+          <img src="/icon.png" alt="" class="size-8 shrink-0 rounded-[9px]">
+          <span class="num text-[19px] font-bold tracking-tight text-ink">AniSignal</span>
+          <span class="ml-1 hidden rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-ink sm:inline">游戏事件雷达</span>
         </NuxtLink>
-        <NuxtLink to="/" class="text-sm text-slate-500 transition-colors hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+        <NuxtLink to="/" class="text-sm text-muted transition-colors hover:text-ink">
           直接浏览 →
         </NuxtLink>
       </div>
@@ -49,7 +49,7 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
       <!-- 站点内容预览：不用登录就能看到的价值 -->
       <section class="panel-glass hidden space-y-4 p-5 lg:block">
         <div>
-          <h2 class="text-sm font-semibold">正在发生的事</h2>
+          <h2 class="text-base font-bold text-ink">正在发生的事</h2>
         </div>
         <ul class="space-y-2.5">
           <li v-for="e in events" :key="e.id">

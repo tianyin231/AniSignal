@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Search } from 'lucide-vue-next'
+import { Flame, Search } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { toRawItem } from '~/utils/public-utils'
 import { platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
@@ -71,36 +71,44 @@ function applyQuery(patch: Record<string, string | undefined>) {
 <template>
   <div>
     <SectionNav />
-    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <form v-if="tab !== 'trending'" class="flex items-center gap-2" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
-        <div class="flex items-center gap-1.5 rounded-md border border-slate-900/10 bg-white/70 px-2.5 py-1.5 dark:border-white/15 dark:bg-white/5">
-          <Search :size="13" class="text-slate-400" />
-          <input v-model="searchInput" placeholder="标题关键词" class="w-36 bg-transparent text-xs outline-none placeholder:text-slate-400 sm:w-48" >
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <form v-if="tab !== 'trending'" class="flex items-center gap-2" role="search" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
+        <div class="relative">
+          <Search :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" aria-hidden="true" />
+          <input v-model="searchInput" type="search" aria-label="标题关键词" placeholder="标题关键词" class="input h-10 w-44 pl-9 text-[13px] sm:w-60">
         </div>
-        <button type="submit" class="btn-primary px-3 py-1.5 text-xs">搜索</button>
+        <button type="submit" class="btn-primary h-10 px-4">搜索</button>
       </form>
-      <div class="flex gap-1.5">
+      <div class="flex gap-0.5 rounded-[10px] bg-chip p-[3px]" role="tablist" aria-label="排序">
         <button
-          class="rounded-full px-3 py-1 text-xs transition-colors"
-          :class="tab !== 'trending' ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
+          type="button"
+          role="tab"
+          :aria-selected="tab !== 'trending'"
+          class="h-8 rounded-lg px-3.5 text-[13px] transition-colors"
+          :class="tab !== 'trending' ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
           @click="applyQuery({ tab: undefined })"
         >
           最新
         </button>
         <button
-          class="rounded-full px-3 py-1 text-xs transition-colors"
-          :class="tab === 'trending' ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
+          type="button"
+          role="tab"
+          :aria-selected="tab === 'trending'"
+          class="inline-flex h-8 items-center gap-1 rounded-lg px-3.5 text-[13px] transition-colors"
+          :class="tab === 'trending' ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
           @click="applyQuery({ tab: 'trending' })"
         >
-          🔥 热度飙升
+          <Flame :size="14" class="text-hot" aria-hidden="true" />热度飙升
         </button>
       </div>
     </div>
 
-    <div v-if="tab !== 'trending'" class="mb-3 flex flex-wrap gap-1.5">
+    <div v-if="tab !== 'trending'" class="mb-4 flex flex-wrap gap-1.5" aria-label="平台筛选">
       <button
-        class="rounded-full px-3 py-1 text-xs transition-colors"
-        :class="!platform ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
+        type="button"
+        class="h-8 rounded-full px-3.5 text-[13px] transition-colors"
+        :class="!platform ? 'bg-ink font-semibold text-card' : 'bg-chip text-ink-2 hover:text-ink'"
+        :aria-pressed="!platform"
         @click="applyQuery({ platform: undefined })"
       >
         全部平台
@@ -108,8 +116,10 @@ function applyQuery(patch: Record<string, string | undefined>) {
       <button
         v-for="key in visiblePlatformTabs"
         :key="key"
-        class="rounded-full px-3 py-1 text-xs transition-colors"
-        :class="platform === key ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
+        type="button"
+        class="h-8 rounded-full px-3.5 text-[13px] transition-colors"
+        :class="platform === key ? 'bg-ink font-semibold text-card' : 'bg-chip text-ink-2 hover:text-ink'"
+        :aria-pressed="platform === key"
         @click="applyQuery({ platform: key })"
       >
         {{ platformMeta[key as Platform]?.label }}

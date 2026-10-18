@@ -452,7 +452,7 @@ async function changePassword() {
         </span>
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
-            <h1 class="truncate text-lg font-semibold">{{ displayName(overview ?? user) }}</h1>
+            <h1 class="truncate text-xl font-bold text-ink">{{ displayName(overview ?? user) }}</h1>
             <button class="chip bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400" @click="startEditProfile">
               <Pencil :size="11" /> 编辑资料
             </button>
@@ -500,7 +500,7 @@ async function changePassword() {
         <!-- 关键词监控 + 关注流（点击关键词筛选）-->
         <section id="keyword-monitor" class="panel scroll-mt-20 p-5">
           <div class="flex items-center justify-between gap-2">
-            <h2 class="text-sm font-semibold">关键词监控</h2>
+            <h2 class="text-base font-bold text-ink">关键词监控</h2>
             <span v-if="!sectionLoading.keywords && !sectionError.keywords" class="text-xs text-slate-400">{{ enabledKeywordCount }} 个启用中<span v-if="enabledKeywordCount" class="ml-1 hidden sm:inline">· 点击关键词可筛选下方关注流</span></span>
           </div>
           <form class="mt-3 flex gap-2" @submit.prevent="addKeyword">
@@ -556,7 +556,7 @@ async function changePassword() {
 
         <!-- 定制监控（UID/关键词，可公开可推送） -->
         <section id="custom-monitors" class="panel scroll-mt-20 p-5">
-          <h2 class="text-sm font-semibold">定制监控</h2>
+          <h2 class="text-base font-bold text-ink">定制监控</h2>
           <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">
             自建 UID / 关键词抓取源；公开后出现在"定制化"频道，不公开仅自己可见。
           </p>
@@ -660,7 +660,7 @@ async function changePassword() {
         <section class="panel overflow-hidden">
           <div class="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5">
             <div class="flex items-center gap-2">
-              <h2 class="text-sm font-semibold">我的关注流</h2>
+              <h2 class="text-base font-bold text-ink">我的关注流</h2>
               <button
                 v-if="selectedKeyword"
                 type="button"
@@ -703,7 +703,7 @@ async function changePassword() {
         <section id="email-notifications" class="panel scroll-mt-20 p-5">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <h2 class="flex items-center gap-2 text-sm font-semibold"><BellRing :size="15" /> 邮件通知</h2>
+              <h2 class="flex items-center gap-2 text-base font-bold text-ink"><BellRing :size="15" /> 邮件通知</h2>
               <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">{{ notificationInfo?.schedule ?? '每天 08:00（北京时间）' }}</p>
             </div>
             <button
@@ -801,7 +801,7 @@ async function changePassword() {
 
         <section class="panel p-5">
           <div class="flex items-center justify-between gap-2">
-            <h2 class="flex items-center gap-2 text-sm font-semibold"><KeyRound :size="15" /> 安全设置</h2>
+            <h2 class="flex items-center gap-2 text-base font-bold text-ink"><KeyRound :size="15" /> 安全设置</h2>
             <button
               type="button"
               class="rounded-md border border-slate-900/10 px-3 py-1.5 text-xs text-slate-600 transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"

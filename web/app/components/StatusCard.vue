@@ -8,10 +8,13 @@ const props = defineProps<{ mobile?: boolean, embedded?: boolean }>()
 const { api } = usePublicApi()
 const route = useRoute()
 const { community } = useGameSection()
-// 履约信号跟随页面视角：community=all（首页聚合）时展示全部分区商品
-const scope = computed(() =>
-  route.query.community === 'all' || (route.path === '/' && !route.query.community) ? 'all' : community.value,
-)
+const { active } = useActiveChannel()
+// 履约信号跟随页面视角：community=all（首页聚合）时展示全部分区商品；
+// 其余页面跟随当前高亮的频道（详情页即内容所属分区），避免在星铁事件旁展示鸣潮商品
+const scope = computed(() => {
+  if (route.query.community === 'all' || (route.path === '/' && !route.query.community)) return 'all'
+  return communityMeta(active.value) ? active.value! : community.value
+})
 const overviewTo = computed(() => ({ path: '/products', query: { community: scope.value } }))
 const fetchedAt = useState<Record<string, number>>('status-products-fetched-at', () => ({}))
 const { data, error, status, refresh } = await useLazyAsyncData(
@@ -91,8 +94,8 @@ const footLine = computed(() => {
 </script>
 
 <template>
-  <!-- 首页内嵌时，分区没有追踪商品就整卡隐藏，不留空状态 -->
-  <section v-if="!(embedded && status === 'success' && !products.length)" class="panel min-w-0 p-5">
+  <!-- 当前分区没有追踪商品就整卡隐藏，不留空状态 -->
+  <section v-if="!(status === 'success' && !products.length)" class="panel min-w-0 p-5">
     <div class="flex items-center justify-between gap-2">
       <h2 class="text-base font-bold text-ink">
         <NuxtLink :to="overviewTo" class="inline-flex min-h-11 items-center hover:text-brand-ink xl:min-h-0">履约追踪</NuxtLink>

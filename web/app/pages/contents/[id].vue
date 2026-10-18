@@ -68,7 +68,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
 
     <section v-if="d.community === 'ai'" class="panel p-4 sm:p-5">
       <p class="text-xs font-medium text-amber-700 dark:text-amber-300">{{ d.news?.kind === 'rumor' ? '传闻线索' : '二手报道' }} · 待核实</p>
-      <h2 v-if="d.news" class="mt-2 text-lg font-semibold">{{ d.news.headline }}</h2>
+      <h2 v-if="d.news" class="mt-2 text-2xl font-bold leading-snug text-ink">{{ d.news.headline }}</h2>
       <p v-if="d.news" class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">{{ d.news.summary }}</p>
       <p class="mt-3 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">摘要仅依据来源标题与简介整理，未核对完整视频及一手消息。下方保留原始标题和简介；视频发布时间不代表事件发生时间。</p>
     </section>
@@ -87,7 +87,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         <span class="chip" :class="d.preview_mode === 'external_only' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'">{{ previewLabel }}</span>
         <span v-if="d.version" class="mono ml-auto text-slate-400">v{{ d.version }}</span>
       </div>
-      <h1 class="mt-2.5 text-lg font-semibold leading-snug">{{ d.title }}</h1>
+      <h1 class="mt-3 text-2xl font-bold leading-snug text-ink">{{ d.title }}</h1>
       <div v-if="d.matched_keywords?.length" class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
         <span class="text-slate-400 dark:text-zinc-500">命中关键词</span>
         <span v-for="k in d.matched_keywords" :key="k" class="rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">{{ k }}</span>
@@ -116,7 +116,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
 
         <!-- 正文（站内解析预览） -->
         <section class="panel p-4 sm:p-5 lg:col-span-2">
-          <h2 class="text-sm font-semibold">内容解析</h2>
+          <h2 class="text-base font-bold text-ink">内容解析</h2>
           <p v-if="d.text_truncated" class="mt-3 text-sm text-amber-700 dark:text-amber-300">当前仅取得部分原文，完整内容请查看来源。</p>
           <div
             v-if="d.text_html"
@@ -142,14 +142,14 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
       <div class="space-y-4">
         <!-- 机翻（外语内容） -->
         <section v-if="d.translation" class="panel p-4 sm:p-5">
-          <h2 class="flex items-center gap-2 text-sm font-semibold">机翻（简体中文）</h2>
+          <h2 class="flex items-center gap-2 text-base font-bold text-ink">机翻（简体中文）</h2>
           <p class="mt-2 text-xs text-slate-400 dark:text-zinc-500">模型 {{ d.translation.model }} 生成，仅供参考，以原文为准。</p>
           <p class="mt-2 whitespace-pre-wrap text-[14px] leading-relaxed text-slate-700 dark:text-zinc-300">{{ d.translation.text }}</p>
         </section>
 
         <!-- 媒体 -->
         <section v-if="d.media.length && imageMode !== 'hide'" class="panel p-4 sm:p-5">
-          <h2 class="text-sm font-semibold">媒体（{{ d.media.length }}）</h2>
+          <h2 class="text-base font-bold text-ink">媒体（{{ d.media.length }}）</h2>
           <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
             <template v-for="m in d.media" :key="m">
               <button v-if="imageMode === 'show'" type="button" class="group relative overflow-hidden rounded-lg border border-slate-900/5 dark:border-white/10" @click="lightbox = m">
@@ -163,7 +163,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
 
         <!-- 指标历史 -->
         <section v-if="metricRows.length" class="panel p-4 sm:p-5">
-          <h2 class="text-sm font-semibold">指标</h2>
+          <h2 class="text-base font-bold text-ink">指标</h2>
           <div class="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
             <div v-for="m in metricRows" :key="m.key" class="rounded-lg bg-slate-500/5 px-3 py-2 dark:bg-white/5">
               <p class="text-xs text-slate-500 dark:text-zinc-400">{{ m.label }}</p>
@@ -187,7 +187,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
       <!-- 侧栏 -->
       <div class="space-y-4">
         <section v-if="d.event" class="panel p-4">
-          <h2 class="text-sm font-semibold">关联事件</h2>
+          <h2 class="text-base font-bold text-ink">关联事件</h2>
           <NuxtLink :to="`/events/${d.event.id}`" class="group mt-2.5 block rounded-lg border border-slate-900/5 p-3 transition-colors hover:bg-slate-500/5 dark:border-white/10">
             <p class="text-sm font-medium transition-colors group-hover:text-blue-600 dark:group-hover:text-blue-300">{{ d.event.title }}</p>
             <p class="mt-1 flex items-center gap-2 text-xs text-slate-400">
@@ -198,7 +198,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         </section>
 
         <section class="panel p-4">
-          <h2 class="text-sm font-semibold">原始出处</h2>
+          <h2 class="text-base font-bold text-ink">原始出处</h2>
           <a
             v-if="d.url"
             :href="d.url"

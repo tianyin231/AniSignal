@@ -13,17 +13,17 @@ async function handleLogout() {
   <div class="aurora-bg min-h-screen">
     <WallpaperBackdrop />
   <header class="glass sticky top-0 z-20">
-      <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
+      <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
         <NuxtLink to="/" class="flex items-center gap-2">
-          <img src="/icon.png" alt="" class="size-7 shrink-0">
-          <span class="text-[15px] font-semibold tracking-tight">AniSignal</span>
-          <span class="chip ml-1 bg-blue-600/10 text-blue-700 dark:bg-blue-400/10 dark:text-blue-300">账号中心</span>
+          <img src="/icon.png" alt="" class="size-8 shrink-0 rounded-[9px]">
+          <span class="num text-[19px] font-bold tracking-tight text-ink">AniSignal</span>
+          <span class="ml-1 rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-ink">账号中心</span>
         </NuxtLink>
         <div class="flex items-center gap-3 text-sm">
-          <NuxtLink to="/" class="text-slate-500 transition-colors hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+          <NuxtLink to="/" class="text-muted transition-colors hover:text-ink">
             返回站点
           </NuxtLink>
-          <button class="rounded-md border border-slate-900/10 px-3 py-1.5 text-slate-600 transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10" @click="handleLogout">
+          <button class="h-9 rounded-[10px] border border-line px-3.5 text-ink-2 transition-colors hover:bg-chip" @click="handleLogout">
             退出登录
           </button>
         </div>

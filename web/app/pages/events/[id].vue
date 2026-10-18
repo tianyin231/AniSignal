@@ -42,10 +42,10 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
         <span class="chip bg-slate-500/10 text-slate-600 dark:text-zinc-300">{{ event.category }}</span>
         <span v-if="event.important" class="chip bg-red-500/10 font-medium text-red-600 dark:text-red-400">重要</span>
       </div>
-      <h1 class="mt-2.5 text-lg font-semibold leading-snug text-slate-900 dark:text-zinc-50">
+      <h1 class="mt-3 text-2xl font-bold leading-snug text-ink">
         {{ event.title }}
       </h1>
-      <p class="mono mt-2 text-xs text-slate-400 dark:text-zinc-500">
+      <p class="mono mt-2 text-xs text-faint">
         首次发现 {{ event.firstSeenAt }} · 最近更新 {{ event.updatedAt }} · 证据 {{ event.evidenceCount }} 条
       </p>
       <div class="mt-3">
@@ -54,7 +54,7 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
     </section>
 
     <section v-if="detail.facts?.length" class="panel p-4 sm:p-5">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">关键事实</h2>
+      <h2 class="text-base font-bold text-ink">关键事实</h2>
       <dl class="mt-3 grid grid-cols-2 gap-x-6 gap-y-2.5 sm:grid-cols-3">
         <div v-for="f in detail.facts" :key="f.label">
           <dt class="text-xs text-slate-400 dark:text-zinc-500">{{ f.label }}</dt>
@@ -64,7 +64,7 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
     </section>
 
     <section class="panel p-4 sm:p-5">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">当前结论</h2>
+      <h2 class="text-base font-bold text-ink">当前结论</h2>
       <p class="mt-2 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
         {{ detail.summary || event.conclusion || '结论整理中' }}
       </p>
@@ -78,7 +78,7 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
 
     <section class="panel p-4 sm:p-5">
       <div class="flex items-center justify-between gap-2">
-        <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">证据链</h2>
+        <h2 class="text-base font-bold text-ink">证据链</h2>
         <div class="flex gap-1 text-xs">
           <button
             class="rounded-md px-2 py-1 transition-colors"
@@ -138,7 +138,7 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
     </section>
 
     <section v-if="event.corrections.length" class="panel p-4 sm:p-5">
-      <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">更新记录</h2>
+      <h2 class="text-base font-bold text-ink">更新记录</h2>
       <ol class="mt-3 space-y-2 border-l border-slate-200 pl-4 dark:border-zinc-800">
         <li v-for="(c, i) in event.corrections" :key="i" class="relative text-sm">
           <span class="absolute -left-[21px] top-2 size-1.5 rounded-full bg-blue-400" />
@@ -148,6 +148,7 @@ useSeoMeta({ title: () => `${event.value.title} · 事件` })
       </ol>
     </section>
 
-    <SubscribeCta />
+    <!-- 右栏只在 xl 以上出现，窄屏在正文末尾补订阅入口 -->
+    <SubscribeCta class="xl:hidden" />
   </div>
 </template>

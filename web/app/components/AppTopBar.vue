@@ -63,12 +63,17 @@ async function handleLogout() {
 
 <template>
   <header class="glass sticky top-0 z-40">
-    <div class="mx-auto flex h-16 max-w-[1280px] items-center gap-3 px-4 lg:gap-6 lg:px-8">
-      <NuxtLink to="/" class="flex shrink-0 items-center gap-2.5" aria-label="AniSignal 首页">
+    <!-- 手机端两行：品牌 + 工具一行，频道独占一行横滑；md 起合并为一行 -->
+    <div class="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-3 px-4 md:h-16 md:flex-nowrap lg:gap-6 lg:px-8">
+      <NuxtLink to="/" class="flex h-14 shrink-0 items-center gap-2.5 md:h-auto" aria-label="AniSignal 首页">
         <img src="/icon.png" alt="" class="size-8 shrink-0 rounded-[9px]">
-        <span class="num hidden text-[19px] font-bold tracking-tight text-ink sm:inline">AniSignal</span>
+        <span class="num text-[19px] font-bold tracking-tight text-ink">AniSignal</span>
       </NuxtLink>
-      <nav ref="channelNav" aria-label="频道" class="flex min-w-0 flex-1 items-stretch self-stretch overflow-x-auto [scrollbar-width:none]">
+      <nav
+        ref="channelNav"
+        aria-label="频道"
+        class="order-last -mx-4 flex h-11 w-[calc(100%+2rem)] min-w-0 items-stretch overflow-x-auto border-t border-line px-1 [scrollbar-width:none] md:order-none md:mx-0 md:h-auto md:w-auto md:flex-1 md:self-stretch md:border-t-0 md:px-0"
+      >
         <NuxtLink
           v-for="ch in channels"
           :key="ch.key"
@@ -81,7 +86,7 @@ async function handleLogout() {
           {{ ch.label }}
         </NuxtLink>
       </nav>
-      <div class="flex shrink-0 items-center gap-1">
+      <div class="ml-auto flex shrink-0 items-center gap-1 md:ml-0">
         <SearchBox />
         <WallpaperToggle />
         <ThemeToggle />
