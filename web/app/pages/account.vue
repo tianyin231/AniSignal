@@ -279,11 +279,18 @@ async function addKeyword() {
   }
 }
 
+// QUAL-078：这两个原先只有 finally 没有 catch——请求失败时异常穿过 finally 变成
+// unhandled rejection，页面表现是"什么都没发生"（按钮恢复、列表不动、零提示），
+// 用户无法区分"停用成功了"和"停用失败了"。账号页没有管理端的 toast 挂载点，
+// 复用上面加关键词时那个 keywordError 行内提示。
 async function toggleKeyword(k: Keyword) {
   busy.value = true
+  keywordError.value = ''
   try {
     await $fetch(`/api/account/keywords/${k.id}`, { method: 'PUT', body: { enabled: !k.enabled } })
     await refresh()
+  } catch (exc: any) {
+    keywordError.value = exc?.data?.detail ?? exc?.message ?? '操作失败，请稍后重试'
   } finally {
     busy.value = false
   }
@@ -291,9 +298,12 @@ async function toggleKeyword(k: Keyword) {
 
 async function removeKeyword(k: Keyword) {
   busy.value = true
+  keywordError.value = ''
   try {
     await $fetch(`/api/account/keywords/${k.id}`, { method: 'DELETE' })
     await refresh()
+  } catch (exc: any) {
+    keywordError.value = exc?.data?.detail ?? exc?.message ?? '删除失败，请稍后重试'
   } finally {
     busy.value = false
   }
