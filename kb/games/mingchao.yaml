@@ -207,10 +207,12 @@ parse:
               table: mc_resonator_innate
               columns: {index: '{0}', name: '@key',
                         description: '固有技能{0}描述', cost: '固有技能{0}激活消耗'}
+              const: {category: 固有技能}
             - pattern: '^属性加成(\d+)$'
               table: mc_resonator_innate
               columns: {index: '{0}', name: '@key',
                         description: '属性加成{0}描述', cost: '属性加成{0}激活消耗'}
+              const: {category: 属性加成}
         # 共鸣链（命之座等价物）1~6
         - template: 共鸣者/共鸣链
           table: mc_resonator_chains
@@ -221,10 +223,14 @@ parse:
         - template: 共鸣者/档案
           table: mc_resonator_stories
           rows_from:
+        # 角色故事/珍贵之物。两条 pattern 的 index 都从 1 起，必须用 const 带一列
+        # category 区分——否则 `where index=1` 取到故事1 还是珍贵之物1 全看 sort
             - pattern: '^故事(\d+)$'
               columns: {index: '{0}', name: '@key', detail: '故事{0}详情'}
+              const: {category: 故事}
             - pattern: '^珍贵之物(\d+)$'
               columns: {index: '{0}', name: '@key', detail: '珍贵之物{0}详情'}
+              const: {category: 珍贵之物}
 
     weapon:                         # 武器，121 页
       name_fields: [名称]
