@@ -1,0 +1,50 @@
+{"id": "t01", "kind": "table", "q": "阿米娅的职业是什么", "probe": "entity_attr", "args": {"title": "阿米娅", "attr": "职业"}, "expect": "术师"}
+{"id": "t02", "kind": "table", "q": "阿米娅的分支是什么", "probe": "entity_attr", "args": {"title": "阿米娅", "attr": "分支"}, "expect": "中坚术师"}
+{"id": "t03", "kind": "table", "q": "阿米娅的稀有度是几星", "probe": "entity_attr", "args": {"title": "阿米娅", "attr": "稀有度"}, "expect": "4"}
+{"id": "t04", "kind": "table", "q": "夜刀的分支是什么", "probe": "entity_attr", "args": {"title": "夜刀", "attr": "分支"}, "expect": "尖兵"}
+{"id": "t05", "kind": "table", "q": "夜刀的特性是什么", "probe": "entity_attr", "args": {"title": "夜刀", "attr": "特性"}, "expect": "能够阻挡两个敌人"}
+{"id": "t06", "kind": "table", "q": "阿米娅精英0 1级的生命上限是多少", "probe": "child", "args": {"table": "ark_operator_stats", "title": "阿米娅", "column": "value", "where": {"stage": "0", "level": "1级", "stat": "生命上限"}}, "expect": "699"}
+{"id": "t07", "kind": "table", "q": "阿米娅精英2满级的攻击是多少", "probe": "child", "args": {"table": "ark_operator_stats", "title": "阿米娅", "column": "value", "where": {"stage": "2", "level": "满级", "stat": "攻击"}}, "expect": "612"}
+{"id": "t08", "kind": "table", "q": "夜刀精英0 1级的防御是多少", "probe": "child", "args": {"table": "ark_operator_stats", "title": "夜刀", "column": "value", "where": {"stage": "0", "level": "1级", "stat": "防御"}}, "expect": "134"}
+{"id": "t09", "kind": "table", "q": "阿米娅第一天赋在精英2时叫什么", "probe": "child", "args": {"table": "ark_operator_talents", "title": "阿米娅", "column": "name", "where": {"block": "1", "index": "2"}}, "expect": "情绪吸收"}
+{"id": "t10", "kind": "table", "q": "夜刀的天赋快速重新部署的解锁条件是什么", "probe": "child", "args": {"table": "ark_operator_talents", "title": "夜刀", "column": "condition", "where": {"index": "1"}}, "expect": "30级"}
+{"id": "t11", "kind": "table", "q": "阿米娅一技能的名字是什么", "probe": "child", "args": {"table": "ark_operator_skills", "title": "阿米娅", "column": "name", "where": {"sort": "1"}}, "expect": "战术咏唱·γ型"}
+{"id": "t12", "kind": "table", "q": "阿米娅一技能7级的初始技力是多少", "probe": "child", "args": {"table": "ark_operator_skill_levels", "title": "阿米娅", "column": "initial", "where": {"block": "1", "level": "7"}}, "expect": "10"}
+{"id": "t13", "kind": "table", "q": "阿米娅一技能1级的描述是什么", "probe": "child", "args": {"table": "ark_operator_skill_levels", "title": "阿米娅", "column": "description", "where": {"block": "1", "level": "1"}}, "expect": "攻击速度+30"}
+{"id": "t14", "kind": "table", "q": "夜刀有哪些后勤技能", "probe": "child_list", "args": {"table": "ark_operator_ri_skill", "title": "夜刀", "column": "name"}, "expect": "订单分发·β；标准化·α"}
+{"id": "t15", "kind": "table", "q": "源石虫的地位级别是什么", "probe": "entity_attr", "args": {"title": "源石虫", "attr": "地位级别"}, "expect": "普通"}
+{"id": "t16", "kind": "table", "q": "源石虫0级的最大生命值是多少", "probe": "child", "args": {"table": "ark_enemy_levels", "title": "源石虫", "column": "hp", "where": {"index": "0"}}, "expect": "550"}
+{"id": "t17", "kind": "table", "q": "霜星0级的防御力是多少", "probe": "child", "args": {"table": "ark_enemy_levels", "title": "霜星", "column": "def", "where": {"index": "0"}}, "expect": "250"}
+{"id": "t18", "kind": "table", "q": "霜星0级的重量等级是几", "probe": "child", "args": {"table": "ark_enemy_levels", "title": "霜星", "column": "weight", "where": {"index": "0"}}, "expect": "5"}
+{"id": "t19", "kind": "table", "q": "霜星的技能冰环初始消耗是多少", "probe": "child", "args": {"table": "ark_enemy_skills", "title": "霜星", "column": "initial", "where": {"block": "1", "index": "0"}}, "expect": "8.5"}
+{"id": "t20", "kind": "table", "q": "至纯源石的分类是什么", "probe": "entity_attr", "args": {"title": "至纯源石", "attr": "分类"}, "expect": "基础道具"}
+{"id": "t21", "kind": "table", "q": "装置在加工站合成需要多少龙门币", "probe": "child", "args": {"table": "ark_item_recipe_workshop", "title": "装置", "column": "lmd_cost"}, "expect": "100"}
+{"id": "t22", "kind": "table", "q": "装置合成需要几个破损装置", "probe": "child", "args": {"table": "ark_item_ingredients", "title": "装置", "column": "count", "where": {"index": "1"}}, "expect": "3"}
+{"id": "t23", "kind": "table", "q": "0-1 坍塌的敌人数量是多少", "probe": "entity_attr", "args": {"title": "0-1 坍塌", "attr": "敌人数量"}, "expect": "11"}
+{"id": "t24", "kind": "table", "q": "0-1 坍塌普通难度的推荐等级是什么", "probe": "entity_attr", "args": {"title": "0-1 坍塌", "attr": "推荐等级"}, "expect": "LV.1"}
+{"id": "t25", "kind": "table", "q": "0-1 坍塌里士兵的数量是多少", "probe": "child", "args": {"table": "ark_stage_enemies", "title": "0-1 坍塌", "column": "count", "where": {"index": "2"}}, "expect": "1"}
+{"id": "t26", "kind": "table", "q": "龙门外环剿灭里暴徒的数量是多少", "probe": "child", "args": {"table": "ark_stage_enemies", "title": "炎国 龙门外环", "column": "count", "where": {"index": "3"}}, "expect": "115"}
+{"id": "t27", "kind": "table", "q": "欢乐时光茶几的氛围是多少", "probe": "entity_attr", "args": {"title": "“欢乐时光”茶几", "attr": "氛围"}, "expect": "290"}
+{"id": "t28", "kind": "table", "q": "轰隆隆先生的部署费用是多少", "probe": "entity_attr", "args": {"title": "轰隆隆先生", "attr": "部署费用"}, "expect": "5"}
+{"id": "t29", "kind": "table", "q": "Castle-3的第一条语音标题是什么", "probe": "child", "args": {"table": "ark_voice_lines", "title": "Castle-3/语音记录", "column": "title", "where": {"index": "1"}}, "expect": "任命助理"}
+{"id": "t30", "kind": "table", "q": "073号安全试剂在傀影与猩红孤钻的售价是多少", "probe": "child", "args": {"table": "ark_collectible_themes", "title": "073号安全试剂", "column": "price", "where": {"index": "1"}}, "expect": "12"}
+{"id": "q01", "kind": "qa", "q": "阿米娅的天赋情绪吸收有什么效果", "expect_keywords": ["情绪吸收", "技力"], "source_title": "阿米娅"}
+{"id": "q02", "kind": "qa", "q": "阿米娅的中文配音是谁", "expect_keywords": ["陶典"], "source_title": "阿米娅"}
+{"id": "q03", "kind": "qa", "q": "阿米娅的时装播种者属于哪个系列", "expect_keywords": ["忒斯特收藏"], "source_title": "阿米娅"}
+{"id": "q04", "kind": "qa", "q": "阿米娅是什么种族的干员", "expect_keywords": ["卡特斯"], "source_title": "阿米娅"}
+{"id": "q05", "kind": "qa", "q": "夜刀的信物描述写了什么", "expect_keywords": ["漆盒", "刀术"], "source_title": "夜刀"}
+{"id": "q06", "kind": "qa", "q": "12F是什么种族的干员", "expect_keywords": ["萨弗拉"], "source_title": "12F"}
+{"id": "q07", "kind": "qa", "q": "源石虫是什么生物", "expect_keywords": ["感染生物"], "source_title": "源石虫"}
+{"id": "q08", "kind": "qa", "q": "霜星被击倒后会发生什么", "expect_keywords": ["重生"], "source_title": "霜星"}
+{"id": "q09", "kind": "qa", "q": "霜星是整合运动的什么人", "expect_keywords": ["整合运动", "术师"], "source_title": "霜星"}
+{"id": "q10", "kind": "qa", "q": "燃烧瓶投掷者的攻击方式是什么", "expect_keywords": ["远程"], "source_title": "燃烧瓶投掷者"}
+{"id": "q11", "kind": "qa", "q": "轰隆隆先生的技能坏脾气有什么效果", "expect_keywords": ["晕眩"], "source_title": "轰隆隆先生"}
+{"id": "q12", "kind": "qa", "q": "Mon3tr 的攻击范围是多少", "expect_keywords": ["0-1"], "source_title": "Mon3tr(装置)"}
+{"id": "q13", "kind": "qa", "q": "装置可以通过什么方式获得", "expect_keywords": ["加工站"], "source_title": "装置"}
+{"id": "q14", "kind": "qa", "q": "至纯源石的描述说了什么", "expect_keywords": ["源石结晶"], "source_title": "至纯源石"}
+{"id": "q15", "kind": "qa", "q": "闪灵的信物是做什么用的", "expect_keywords": ["潜能"], "source_title": "闪灵的信物"}
+{"id": "q16", "kind": "qa", "q": "0-1 坍塌的关卡描述是什么", "expect_keywords": ["近战干员"], "source_title": "0-1 坍塌"}
+{"id": "q17", "kind": "qa", "q": "龙门外环剿灭的关卡描述里提到了什么特殊条件", "expect_keywords": ["部署费用"], "source_title": "炎国 龙门外环"}
+{"id": "q18", "kind": "qa", "q": "欢乐时光茶几属于哪个套装", "expect_keywords": ["兔兔欢声"], "source_title": "“欢乐时光”茶几"}
+{"id": "q19", "kind": "qa", "q": "073号安全试剂的描述写了什么", "expect_keywords": ["严谨实验", "不会爆炸"], "source_title": "073号安全试剂"}
+{"id": "q20", "kind": "qa", "q": "Castle-3 任命助理时说了什么", "expect_keywords": ["助理"], "source_title": "Castle-3/语音记录"}

@@ -64,7 +64,8 @@ def _resolve(fields: dict[str, str], alias: str, groups: Sequence[str],
 
       @key   当前匹配到的字段名本身（模式拆行时用来取"值就是这个字段"）
       @index 模板第几次出现（occurrence 行）
-      {0}    正则捕获组，`技能{0}初始` → `技能1初始`
+      {0}    正则捕获组，`技能{0}初始` → `技能1初始`；整个别名就一个 `{N}` 时
+             直接返回该组本身（YAML 里 `stage: '{0}'` 写的就是这个意思）
     """
     alias = str(alias)
     if alias == "@key":
@@ -72,6 +73,12 @@ def _resolve(fields: dict[str, str], alias: str, groups: Sequence[str],
     if alias == "@index":
         return str(index)
     if "{" in alias:
+        # 别名整个就是 `{N}`：值 = 第 N 个捕获组，别 format 完再去 fields 里
+        # 找一个叫 "0" 的字段（那只会拿到 None，且不报错，极难发现）
+        only_group = re.fullmatch(r"\{(\d+)\}", alias)
+        if only_group:
+            gi = int(only_group.group(1))
+            return groups[gi] if gi < len(groups) else None
         try:
             alias = alias.format(*groups)
         except (IndexError, KeyError):
