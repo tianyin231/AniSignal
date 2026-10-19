@@ -1,0 +1,50 @@
+{"id": "t01", "kind": "table", "q": "今汐的属性是什么", "probe": "entity_attr", "args": {"title": "共鸣者/今汐", "attr": "属性"}, "expect": "衍射"}
+{"id": "t02", "kind": "table", "q": "长离使用什么武器", "probe": "entity_attr", "args": {"title": "共鸣者/长离", "attr": "武器"}, "expect": "迅刀"}
+{"id": "t03", "kind": "table", "q": "忌炎的势力是哪一方", "probe": "entity_attr", "args": {"title": "共鸣者/忌炎", "attr": "势力"}, "expect": "瑝珑"}
+{"id": "t04", "kind": "table", "q": "卡卡罗的共鸣能力叫什么", "probe": "entity_attr", "args": {"title": "共鸣者/卡卡罗", "attr": "共鸣能力"}, "expect": "幻影猎兵"}
+{"id": "t05", "kind": "table", "q": "维里奈的战斗风格定位是什么", "probe": "entity_attr", "args": {"title": "共鸣者/维里奈", "attr": "战斗风格"}, "expect": "生存治疗,协同攻击,伤害加深"}
+{"id": "t06", "kind": "table", "q": "今汐的实装日期是哪天", "probe": "entity_attr", "args": {"title": "共鸣者/今汐", "attr": "实装日期"}, "expect": "20240628"}
+{"id": "t07", "kind": "table", "q": "今汐的品质是几星", "probe": "entity_attr", "args": {"title": "共鸣者/今汐", "attr": "品质"}, "expect": "5"}
+{"id": "t08", "kind": "table", "q": "散华的共鸣能力叫什么", "probe": "entity_attr", "args": {"title": "共鸣者/散华", "attr": "共鸣能力"}, "expect": "雪舞芳华"}
+{"id": "t09", "kind": "table", "q": "今汐的英文名是什么", "probe": "entity_json", "args": {"title": "共鸣者/今汐", "key": "英文名"}, "expect": "jinxi"}
+{"id": "t10", "kind": "table", "q": "克里斯托弗的日文名称是什么", "probe": "entity_json", "args": {"title": "简介/克里斯托弗", "key": "日文名称"}, "expect": "クリストフォロ"}
+{"id": "t11", "kind": "table", "q": "阿维狄亚的英文名称是什么", "probe": "entity_json", "args": {"title": "简介/阿维狄亚", "key": "英文名称"}, "expect": "Avidius"}
+{"id": "t12", "kind": "table", "q": "今汐1级的生命是多少", "probe": "child", "args": {"table": "mc_resonator_stats", "title": "共鸣者/今汐", "column": "value", "where": {"level": "基础", "stat": "生命"}}, "expect": "866"}
+{"id": "t13", "kind": "table", "q": "今汐90级的攻击是多少", "probe": "child", "args": {"table": "mc_resonator_stats", "title": "共鸣者/今汐", "column": "value", "where": {"level": "90", "stat": "攻击"}}, "expect": "412"}
+{"id": "t14", "kind": "table", "q": "长离90级的防御是多少", "probe": "child", "args": {"table": "mc_resonator_stats", "title": "共鸣者/长离", "column": "value", "where": {"level": "90", "stat": "防御"}}, "expect": "1099"}
+{"id": "t15", "kind": "table", "q": "忌炎20级的生命是多少", "probe": "child", "args": {"table": "mc_resonator_stats", "title": "共鸣者/忌炎", "column": "value", "where": {"level": "20", "stat": "生命"}}, "expect": "2182"}
+{"id": "t16", "kind": "table", "q": "维里奈90级的攻击是多少", "probe": "child", "args": {"table": "mc_resonator_stats", "title": "共鸣者/维里奈", "column": "value", "where": {"level": "90", "stat": "攻击"}}, "expect": "337"}
+{"id": "t17", "kind": "table", "q": "维里奈50级的防御是多少", "probe": "child", "args": {"table": "mc_resonator_stats", "title": "共鸣者/维里奈", "column": "value", "where": {"level": "50", "stat": "防御"}}, "expect": "570"}
+{"id": "t18", "kind": "table", "q": "永夜长明20级突破需要什么材料", "probe": "child", "args": {"table": "mc_weapon_ascension", "title": "武器/永夜长明", "column": "materials", "where": {"level": "20"}}, "expect": "低频呓语声核*5,贝币*8k"}
+{"id": "t19", "kind": "table", "q": "永夜长明50级突破需要什么材料", "probe": "child", "args": {"table": "mc_weapon_ascension", "title": "武器/永夜长明", "column": "materials", "where": {"level": "50"}}, "expect": "海蚀嵌合体226*7,高频呓语声核*4,贝币*3w2"}
+{"id": "t20", "kind": "table", "q": "万物持存的注释70级突破需要什么材料", "probe": "child", "args": {"table": "mc_weapon_ascension", "title": "武器/万物持存的注释", "column": "materials", "where": {"level": "70"}}, "expect": "全频啸叫声核*4,声律花蕾*8,贝币*80000"}
+{"id": "t21", "kind": "table", "q": "今汐的共鸣链1叫什么", "probe": "child", "args": {"table": "mc_resonator_chains", "title": "共鸣者/今汐", "column": "name", "where": {"index": "1"}}, "expect": "沉海洄天溯"}
+{"id": "t22", "kind": "table", "q": "今汐的共鸣链3叫什么", "probe": "child", "args": {"table": "mc_resonator_chains", "title": "共鸣者/今汐", "column": "name", "where": {"index": "3"}}, "expect": "天定神子身"}
+{"id": "t23", "kind": "table", "q": "长离的共鸣链2叫什么", "probe": "child", "args": {"table": "mc_resonator_chains", "title": "共鸣者/长离", "column": "name", "where": {"index": "2"}}, "expect": "循我所望"}
+{"id": "t24", "kind": "table", "q": "今汐的常态攻击叫什么", "probe": "child", "args": {"table": "mc_resonator_skills", "title": "共鸣者/今汐", "column": "basic_attack", "where": {}}, "expect": "浮光霁寒"}
+{"id": "t25", "kind": "table", "q": "卡卡罗的共鸣解放叫什么", "probe": "child", "args": {"table": "mc_resonator_skills", "title": "共鸣者/卡卡罗", "column": "liberation", "where": {}}, "expect": "幻影蚀刻"}
+{"id": "t26", "kind": "table", "q": "今汐的故事1叫什么", "probe": "child", "args": {"table": "mc_resonator_stories", "title": "共鸣者/今汐", "column": "name", "where": {"index": "1"}}, "expect": "令尹之名"}
+{"id": "t27", "kind": "table", "q": "今汐的珍贵之物1叫什么", "probe": "child", "args": {"table": "mc_resonator_stories", "title": "共鸣者/今汐", "column": "name", "where": {"index": null, "template": "共鸣者/档案"}}, "expect": "令尹之名"}
+{"id": "t28", "kind": "table", "q": "中曲台地50%探索报告的标题是什么", "probe": "child", "args": {"table": "mc_exploration_reports", "title": "探索报告/中曲台地", "column": "title", "where": {"percent": "50"}}, "expect": "孤独索拉·中曲台地篇·其一"}
+{"id": "t29", "kind": "table", "q": "云陵谷100%探索报告的标题是什么", "probe": "child", "args": {"table": "mc_exploration_reports", "title": "探索报告/云陵谷", "column": "title", "where": {"percent": "100"}}, "expect": "关外金铃·其二"}
+{"id": "t30", "kind": "table", "q": "今汐的六条共鸣链分别叫什么", "probe": "child_list", "args": {"table": "mc_resonator_chains", "title": "共鸣者/今汐", "column": "name", "where": {}, "sep": "；"}, "expect": "沉海洄天溯；绒雪凝屏息；天定神子身；自甘佑凡尘；流光化霜雪；寒尽又逢春"}
+{"id": "q01", "kind": "qa", "q": "今汐的共鸣能力是什么", "expect_keywords": ["寒尽觉春生"], "source_title": "共鸣者/今汐"}
+{"id": "q02", "kind": "qa", "q": "今汐的共鸣链1有什么效果", "expect_keywords": ["惊蛰"], "source_title": "共鸣者/今汐"}
+{"id": "q03", "kind": "qa", "q": "今汐的故事令尹之名讲了什么", "expect_keywords": ["今州城"], "source_title": "共鸣者/今汐"}
+{"id": "q04", "kind": "qa", "q": "长离的属性是什么", "expect_keywords": ["热熔"], "source_title": "共鸣者/长离"}
+{"id": "q05", "kind": "qa", "q": "长离的特殊料理是什么", "expect_keywords": ["雀翎辣肉"], "source_title": "共鸣者/长离"}
+{"id": "q06", "kind": "qa", "q": "卡卡罗的共鸣解放叫什么", "expect_keywords": ["幻影蚀刻"], "source_title": "共鸣者/卡卡罗"}
+{"id": "q07", "kind": "qa", "q": "永夜长明的武器技能有什么效果", "expect_keywords": ["变奏技能"], "source_title": "武器/永夜长明"}
+{"id": "q08", "kind": "qa", "q": "聚械机偶的声骸技能造成什么伤害", "expect_keywords": ["导电"], "source_title": "声骸/聚械机偶"}
+{"id": "q09", "kind": "qa", "q": "不绝余音五件套效果是什么", "expect_keywords": ["延奏技能伤害"], "source_title": "声骸合鸣/不绝余音"}
+{"id": "q10", "kind": "qa", "q": "无妄者是什么样的敌人", "expect_keywords": ["呓语种残象"], "source_title": "敌人/无妄者"}
+{"id": "q11", "kind": "qa", "q": "罗蕾莱原本是什么生物", "expect_keywords": ["回音生物"], "source_title": "敌人/罗蕾莱"}
+{"id": "q12", "kind": "qa", "q": "清芬鱼汤是做什么用的", "expect_keywords": ["耐力"], "source_title": "道具/清芬鱼汤"}
+{"id": "q13", "kind": "qa", "q": "辉萤军势是如何诱捕猎物的", "expect_keywords": ["诱捕者"], "source_title": "敌人/辉萤军势"}
+{"id": "q14", "kind": "qa", "q": "阿维狄亚的身份是什么", "expect_keywords": ["准英雄王"], "source_title": "简介/阿维狄亚"}
+{"id": "q15", "kind": "qa", "q": "今汐的变奏技能叫什么", "expect_keywords": ["蟠龙清辉"], "source_title": "共鸣者/今汐"}
+{"id": "q16", "kind": "qa", "q": "今汐的特殊料理是什么", "expect_keywords": ["雪莲酥"], "source_title": "共鸣者/今汐"}
+{"id": "q17", "kind": "qa", "q": "凝夜白霜两件套效果是什么", "expect_keywords": ["冷凝伤害提升10%"], "source_title": "声骸合鸣/凝夜白霜"}
+{"id": "q18", "kind": "qa", "q": "中曲台地50%探索报告写了什么", "expect_keywords": ["瑞狮会馆"], "source_title": "探索报告/中曲台地"}
+{"id": "q19", "kind": "qa", "q": "名词注释里的冰棘描述了什么", "expect_keywords": ["冷凝伤害"], "source_title": "名词注释/冰棘"}
+{"id": "q20", "kind": "qa", "q": "道具战地记录6010再出发写了什么", "expect_keywords": ["新兵"], "source_title": "道具/战地记录6010：再出发"}
