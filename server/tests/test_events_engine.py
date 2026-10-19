@@ -1,7 +1,10 @@
 """事件聚合引擎与分类单测。"""
 
+from datetime import timedelta
+
 from sqlalchemy import func, select
 
+from app.clock import utcnow
 from app.models import (
     ClassificationRule,
     ContentMatch,
@@ -380,6 +383,9 @@ async def test_high_confidence_cross_language_match_merges_official_contents(
         "ai",
         {"base_url": "https://api.example.com/v1", "model": "test-model", "api_key": "x"},
     )
+    # 发布时间取「7 天前」：similarity 只回看 45 天、配对窗口 72 小时，硬编码绝对
+    # 时间会随时间滑出窗口导致候选集为空（QUAL-064；kuro 解析器测试踩过同一个坑）
+    published_at = (utcnow() - timedelta(days=7)).replace(microsecond=0)
     bili = dict(
         VIDEO_RAW,
         bvid="BVofficial",
@@ -387,13 +393,13 @@ async def test_high_confidence_cross_language_match_merges_official_contents(
         description="清宵角色音乐现已发布",
         owner_mid=1955897084,
         owner_name="鸣潮",
-        pubdate=1787193000,
+        pubdate=int(published_at.timestamp()),
     )
     youtube = dict(
         YOUTUBE_ITEM,
         id="qaVli_4qiVs",
         title='Wuthering Waves EP3.6 — Qingxiao - "Outside the Mountain"',
-        published="2026-08-20T02:30:04+00:00",
+        published=published_at.isoformat(),
     )
     await ingest_items(session, "bilibili_search", [bili])
     await ingest_items(session, "youtube_rss", [youtube])
