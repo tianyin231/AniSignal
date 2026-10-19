@@ -180,11 +180,17 @@ parse:
                       频谱检验报告, 超频诊断报告]
       child_templates:
         # 各级属性：生命/攻击/防御 + 20生命/90+攻击…（44 页有完整等级表）
+        # {N} 是**从 0 开始**数 m.groups() 的下标（{0}=第一个捕获组），写成 {1}/{2}
+        # 会把整表错位一格：level 收进"生命"、stat 恒为 NULL，1657 行全是废数据。
+        # 没有等级前缀的那一行（1 级基础值）另起一条模式，用 const 补 level。
         - template: 共鸣者/基础属性
           table: mc_resonator_stats
           rows_from:
-            - pattern: '^(\d*\+?)(生命|攻击|防御)$'
-              columns: {level: '{1}', stat: '{2}', value: '@key'}
+            - pattern: '^(\d+\+?)(生命|攻击|防御)$'
+              columns: {level: '{0}', stat: '{1}', value: '@key'}
+            - pattern: '^(生命|攻击|防御)$'
+              columns: {stat: '{0}', value: '@key'}
+              const: {level: '基础'}
         # 五个基础技能 + 延奏，一页一块。倍率字段几十 KB 不进表，正文路和
         # template_dump 会兜住
         - template: 共鸣者/技能
