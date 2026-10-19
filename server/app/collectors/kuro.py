@@ -4,12 +4,21 @@
 失败由重试与来源健康机制兜底。
 """
 
+import logging
+import re
+
 import httpx
 
 from app.collectors.base import USER_AGENT, CollectorError, extract_items, get_json
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+
+logger = logging.getLogger(__name__)
+
+# 公告 ID 的白名单形态：库洛 notice.json 里实测是纯数字；留出字母/下划线/连字符的余量，
+# 但不接受 `/` `.` `?` `#` `%` `@` `:` 这些会改变出站 URL 语义的字符。
+_NOTICE_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 KURO_CONFIG = {
     Platform.KURO_CN: {
@@ -61,7 +70,15 @@ class KuroCollector:
                 notice_id = str(
                     entry.get("noticeId") or entry.get("id") or entry.get("notice_id") or ""
                 )
-                if not notice_id:
+                # SEC-027：notice_id 原样插进出站 URL 的 path 段。上游 notice.json 一旦
+                # 被污染（CDN 被入侵/中间人/配置错误返回了别的内容），`../`、`?`、`#`
+                # 就会把请求指到同一 host 的任意路径——httpx 只归一化字面 `..`，不解码
+                # `..%2f`，也不阻止 `?`/`#` 截断后续路径段。这里按白名单收敛：非法的
+                # 整条跳过（列表信息仍可入库，由版本机制补详情），并留一条 warning。
+                if not _NOTICE_ID_RE.fullmatch(notice_id):
+                    logger.warning(
+                        "kuro notice_id 形态非法，跳过详情抓取：%r", notice_id[:64]
+                    )
                     continue
                 detail_url = (
                     f"{conf['base']}/gamenotice/content/{conf['game']}/"
