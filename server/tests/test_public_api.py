@@ -606,3 +606,70 @@ async def test_official_links_ai_path_requires_official_identity(client, session
     by_url = {item["url"]: item for item in items}
     assert by_url["https://wutheringwaves.kurogames.com/en/main/news/detail/999"]["label"] != "information"
     assert by_url["https://wutheringwaves.kurogames.com/en/main/news/detail/999"]["title"]
+
+
+async def test_public_output_drops_non_http_urls(client, session):
+    """SEC-035：采集来的 javascript:/data:/内网 URL 不得原样进公开响应。
+
+    这些字段前端有 19 处裸 `<a :href>` / `<img :src>` 直接绑定，采集层与解析层都不校验
+    scheme，schema 是最后一个统一收口的点。
+    """
+    await _seed(session)
+    from sqlalchemy import update
+
+    from app.models import ContentVersion, RawContent
+
+    # 直接改库，模拟"上游返回了脏 URL"（复现思路与审计报告一致）。
+    # url 在 raw_contents 上，media/封面在 content_versions.normalized_json 上。
+    dirty = {
+        "title": "脏 URL 公告",
+        "url": "javascript:alert(document.cookie)",
+        "media": [
+            "https://example.com/banner.png",  # 正常项必须保留
+            "data:text/html,<script>alert(1)</script>",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "//evil.com/x.png",
+        ],
+    }
+    await session.execute(
+        update(RawContent)
+        .where(RawContent.external_id == "50553")
+        .values(url="javascript:alert(document.cookie)")
+    )
+    await session.execute(
+        update(ContentVersion)
+        .where(ContentVersion.raw_content_id == RawContent.id)
+        .where(RawContent.external_id == "50553")
+        .values(normalized_json=dirty)
+    )
+    await session.commit()
+
+    resp = await client.get("/api/contents")
+    assert resp.status_code == 200
+    blob = str(resp.json())
+    assert "javascript:" not in blob, "内容流不得下发 javascript: URL"
+    assert "data:text/html" not in blob, "内容流不得下发 data: URL"
+    assert "file:" not in blob
+    item = next(i for i in resp.json()["items"] if i["external_id"] == "50553")
+    assert item["url"] is None, "非法 url 必须置 None，不能留原值"
+    # cover 取自 media[0]，正常项应照旧作为封面（不能被校验误杀）
+    assert item["cover"] == "https://example.com/banner.png"
+
+    detail = (await client.get(f"/api/contents/{item['id']}")).json()
+    assert detail["url"] is None
+    assert detail["media"] == ["https://example.com/banner.png"], "非法媒体项逐个丢掉，正常项保留"
+
+
+async def test_public_output_keeps_normal_urls(client, session):
+    """SEC-035 的正面：正常 http(s) URL 一个都不能被误杀。"""
+    await _seed(session)
+    detail = (await client.get("/api/contents/1")).json()
+    if detail.get("url"):
+        assert detail["url"].startswith("https://")
+    resp = await client.get("/api/contents")
+    for item in resp.json()["items"]:
+        if item["url"]:
+            assert item["url"].startswith("https://"), item["url"]
+        if item["cover"]:
+            assert item["cover"].startswith("http"), item["cover"]
