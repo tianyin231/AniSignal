@@ -5,7 +5,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import CollectTarget, MetricSnapshot, RawContent
+from app.models import CollectTarget, ContentVersion, MetricSnapshot, RawContent
 from app.services.ingest import ingest_items
 
 from tests.test_parsers_bilibili import DYNAMIC_RAW, VIDEO_RAW
@@ -70,6 +70,71 @@ async def test_public_trending_ranks_by_view_delta(client, session):
     await session.commit()
     resp = await client.get("/api/trending", params={"hours": 24})
     assert [i["id"] for i in resp.json()["items"]] == [raw_id]
+
+
+async def test_public_trending_prescreens_candidates(client, session):
+    """候选超过预筛下限时仍能取到真正的飙升项，且不再全窗口载入 ORM（PERF-013）。"""
+    from app.services.curation import PRESCREEN_FLOOR
+
+    await _seed(session)
+    now = utcnow()
+    rows: list[MetricSnapshot] = []
+    # 灌满预筛下限的普通候选：每条 2 个快照、增量 10
+    for index in range(PRESCREEN_FLOOR + 10):
+        raw = RawContent(
+            platform="bilibili",
+            content_type="video",
+            external_id=f"BVprescreen{index}",
+            url=f"https://www.bilibili.com/video/BVprescreen{index}",
+            community="wuwa",
+        )
+        session.add(raw)
+        await session.flush()
+        session.add(
+            ContentVersion(
+                raw_content_id=raw.id, version=1, title=f"预筛候选 {index}", text="正文"
+            )
+        )
+        rows.append(
+            MetricSnapshot(
+                raw_content_id=raw.id, metrics={"view": 100},
+                captured_at=now - timedelta(hours=5, minutes=index),
+            )
+        )
+        rows.append(
+            MetricSnapshot(
+                raw_content_id=raw.id, metrics={"view": 110},
+                captured_at=now - timedelta(hours=4, minutes=index),
+            )
+        )
+    # 真正的飙升项：快照最新（排在预筛结果前面），增量远超其他候选
+    spike = RawContent(
+        platform="bilibili",
+        content_type="video",
+        external_id="BVspike",
+        url="https://www.bilibili.com/video/BVspike",
+        community="wuwa",
+    )
+    session.add(spike)
+    await session.flush()
+    session.add(
+        ContentVersion(raw_content_id=spike.id, version=1, title="真正飙升的内容", text="正文")
+    )
+    rows.append(
+        MetricSnapshot(raw_content_id=spike.id, metrics={"view": 10}, captured_at=now - timedelta(hours=3))
+    )
+    rows.append(
+        MetricSnapshot(raw_content_id=spike.id, metrics={"view": 90000}, captured_at=now - timedelta(minutes=1))
+    )
+    session.add_all(rows)
+    await session.commit()
+
+    resp = await client.get("/api/trending", params={"hours": 24, "limit": 5})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 5
+    assert body["items"][0]["id"] == spike.id
+    assert body["items"][0]["delta_view"] == 89990
 
 
 async def test_public_rss_feed(client, session):
