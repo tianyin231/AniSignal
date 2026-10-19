@@ -178,3 +178,40 @@ async def test_send_rate_limit(client, session):
         "/api/auth/register", json={"email": "rate0@r.com", "password": "password123"}
     )
     assert resp.status_code == 429
+
+
+async def test_admin_email_codes_never_returns_plaintext_code(client, session, admin_headers):
+    """SEC-011：管理端验证码排障端点不得回传 code 本体，也不得列出密码重置类。
+
+    这个端点原先把全站最近 50 条注册/找回密码验证码连邮箱一起列出，读到它即可对任意
+    账号走完「忘记密码 → 读码 → 重置密码」的接管链。回归面：响应体任何一层都不能
+    出现 code 值，且 `reset` 行整条不返回。
+    """
+    resp = await client.post(
+        "/api/auth/register", json={"email": "leak@y.com", "password": "password123"}
+    )
+    assert resp.status_code == 200
+    code = await _latest_code(session, "leak@y.com", "register")
+    await client.post("/api/auth/verify", json={"email": "leak@y.com", "code": code})
+    # 再造一条密码重置码：它才是接管链真正的入口（重置码只发给已验证账号）
+    from app.services.auth import _send_times
+
+    _send_times.clear()
+    resp = await client.post("/api/auth/password/forgot", json={"email": "leak@y.com"})
+    assert resp.status_code == 200
+    reset_code = await _latest_code(session, "leak@y.com", "reset")
+
+    resp = await client.get("/api/admin/email-codes", headers=admin_headers)
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert rows, "注册码应出现在排障列表里（只回投递状态）"
+    blob = repr(rows)
+    assert code not in blob, "注册验证码明文不得出现在响应里"
+    assert reset_code not in blob, "密码重置验证码明文不得出现在响应里"
+    assert "code_plain" not in blob
+    for row in rows:
+        assert "code" not in row
+        assert row["purpose"] != "reset", "密码重置类验证码一律不列"
+        # 排障真正需要的信息仍在
+        assert set(row) >= {"id", "email", "purpose", "expires_at", "used", "attempts", "sent_via_smtp"}
+        assert row["sent_via_smtp"] is False, "SMTP 未配置时应如实反映未发信"
