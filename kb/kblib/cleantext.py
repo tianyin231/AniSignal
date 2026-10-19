@@ -60,6 +60,9 @@ _VALUE_TEMPLATES = {
 # 别在多线程里改它——真要并发就改成 ContextVar。
 _PLAIN_DISPLAY: dict[str, tuple[str, ...]] = {}
 _STRIP_NAME_COMMENTS = False
+# 解析函数预删开关（见 parse_wikitext）。默认关：碧蓝/明日方舟的 wikitext 里
+# 没有 mwparserfromhell 解析不动的解析函数，别为它们改一行行为。
+_STRIP_PARSER_FNS = False
 
 
 @contextmanager
@@ -87,15 +90,37 @@ def template_name_comments(strip: bool):
 
 
 @contextmanager
+def strip_parser_functions(strip: bool):
+    """to_plain 之前是否先用正则删掉解析函数（见 to_plain 的说明）。"""
+    global _STRIP_PARSER_FNS
+    old = _STRIP_PARSER_FNS
+    _STRIP_PARSER_FNS = bool(strip)
+    try:
+        yield
+    finally:
+        _STRIP_PARSER_FNS = old
+
+
+@contextmanager
 def wiki_style(display: dict[str, tuple[str, ...]] | None = None,
-               strip_name_comments: bool = False):
+               strip_name_comments: bool = False,
+               parser_functions: bool = False):
     """一次设好这款 wiki 的段落文本风格（parse.py 进 run() 时调）。"""
-    with plain_display(display), template_name_comments(strip_name_comments):
+    with plain_display(display), template_name_comments(strip_name_comments), \
+            strip_parser_functions(parser_functions):
         yield
 
 
 def parse_wikitext(text: str) -> mwparserfromhell.wikicode.Wikicode | None:
-    """容错解析：个别页面语法太歪，失败就退回 None（调用方走正则兜底）。"""
+    """容错解析：个别页面语法太歪，失败就退回 None（调用方走正则兜底）。
+
+    开了 `strip_parser_functions` 的游戏（原神）在进解析器之前先用正则把
+    解析函数删掉——它的 SMW 查询 mwparserfromhell 拆不出一棵完整的模板树，
+    漏出来的 DSL 会同时污染正文 chunk、卡片摘要和图鉴字段三条路，只有在
+    这唯一的解析入口删一次才能全堵上。默认关，碧蓝/明日方舟一个字节不变。
+    """
+    if _STRIP_PARSER_FNS:
+        text = _drop_parser_functions(text)
     try:
         return mwparserfromhell.parse(text)
     except Exception:
@@ -104,6 +129,16 @@ def parse_wikitext(text: str) -> mwparserfromhell.wikicode.Wikicode | None:
 
 # ---------------------------------------------------------------- 模板名归一化
 _NAME_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+# mwparserfromhell 解析不了、整个退化成 Text 的解析函数（见 _plain 的注释）
+_UNPARSED_PARSER_FN = re.compile(r"\{\{#[\w-]+:.*?\}\}", re.S)
+
+# 进 to_plain 之前正则删解析函数用。两种形状各扫一遍、扫到不动为止：
+#   ① 参数里没有花括号：{{#ask:[[分类:X]]\n|?名称\n…}}
+#   ② 参数里嵌了一层普通模板：{{#arraymap:{{#ask:…{{PAGENAME}}…}}|,|@| }}
+#      原神的 SMW 查询十个有九个带 {{PAGENAME}}，只扫 ① 删不掉它
+_PARSER_FN = re.compile(r"\{\{#[\w-]+:[^{}]*\}\}")
+_PARSER_FN_NESTED = re.compile(r"\{\{#[\w-]+:(?:[^{}]|\{\{[^{}]*\}\})*\}\}")
 
 
 def template_name(tpl: Any, strip_comments: bool | None = None) -> str:
@@ -114,13 +149,22 @@ def template_name(tpl: Any, strip_comments: bool | None = None) -> str:
     模板名里，`str(t.name).strip()` 匹配不上任何白名单——开这个开关才剥得掉。
     碧蓝航线不开：它那边唯一的样例是"地图需要模板"这张模板定义页，剥了会从
     other 变成关卡图鉴，v2/v3 那批向量就白对齐了。
+
+    解析函数（`{{#ask: ?名称 …}}`）在 mwparserfromhell 里没有管道符分隔，
+    第一个冒号之后全被算进 name——`#ask: ?名称 ?稀有度 sort=…`。冒号后面
+    是参数不是名字，砍掉才认得出这是 #ask，display_templates 里的
+    `"#ask": []` 也才挡得住（原神一页能有好几个 SMW 查询，不砍就是一坨 DSL
+    原文漏进正文）。普通模板名不含冒号，这条只动解析函数。
     """
     if strip_comments is None:
         strip_comments = _STRIP_NAME_COMMENTS
     n = str(tpl.name)
     if strip_comments:
         n = _NAME_COMMENT.sub("", n)
-    return re.sub(r"^模板:", "", n.strip()).strip()
+    n = re.sub(r"^模板:", "", n.strip()).strip()
+    if n.startswith("#") and ":" in n:
+        n = n.split(":", 1)[0]
+    return n
 
 
 # ---------------------------------------------------------------- 纯文本化
@@ -131,7 +175,17 @@ def _plain(node: Any, depth: int = 0) -> str:
     name = type(node).__name__
 
     if name == "Text":
-        return str(node)
+        # mwparserfromhell 有一种解析不出来的形状：解析函数的"名字"里带
+        # `<`（SMW 查询 `{{#ask:[[开始时间::<]][[结束时间::>]] |?期数=期数 …}}`），
+        # 整个模板会退化成一个大 Text 节点，_plain_template 根本轮不到，
+        # 一大坨 DSL 原文就这么漏进正文。这里兜底删掉。
+        # 只在文本里确实出现 `{{#` 时才动手，且非贪婪匹配到第一个 `}}`——
+        # 能正常解析的嵌套（`{{#arraymap:{{#ask:…}}|…}}`）走的是 Template
+        # 分支，到不了这儿，所以不会被误伤。
+        text = str(node)
+        if "{{#" in text:
+            text = _UNPARSED_PARSER_FN.sub("", text)
+        return text
 
     if name == "Comment":
         return ""
@@ -191,6 +245,16 @@ def _plain_template(tpl: Any, depth: int) -> str:
     name = template_name(tpl)
     params = {str(p.name).strip(): p.value for p in tpl.params}
 
+    # 游戏配置声明的展示型模板（PRTS 的 color/术语/+/*…）优先于内置 _VALUE_TEMPLATES：
+    # 内置表是"没有配置时的兜底默认值"，配置是这款 wiki 的实情。原神的
+    # `{{颜色|蓝|100%/125%/150%/175%/200%}}` 色值在 1、给人看的数字在 2，
+    # 按内置表取 1 会渲染出"额外造成蓝攻击力的伤害"。已核对：碧蓝没有
+    # display_templates，明日方舟声明的 30 个名字和内置表零重叠，两边行为不变。
+    spec = _PLAIN_DISPLAY.get(name)
+    if spec is not None:
+        parts = [_plain(params.get(p, ""), depth + 1).strip() for p in spec]
+        return " ".join(p for p in parts if p)
+
     if name in _VALUE_TEMPLATES:
         if name in ("强化值", "营养价值"):
             parts = [f"{k}{_plain(v, depth + 1).strip()}" for k, v in params.items()]
@@ -208,17 +272,27 @@ def _plain_template(tpl: Any, depth: int) -> str:
         if name == "模板":
             return _plain(params.get("1", ""), depth + 1).strip()
 
-    # 游戏配置声明的展示型模板（PRTS 的 color/术语/+/*…），优先于通用兜底
-    spec = _PLAIN_DISPLAY.get(name)
-    if spec is not None:
-        parts = [_plain(params.get(p, ""), depth + 1).strip() for p in spec]
-        return " ".join(p for p in parts if p)
-
     # 通用兜底：展示型模板第一个无名参数通常就是正文
     unnamed = _plain(params.get("1", ""), depth + 1).strip()
     if unnamed:
         return unnamed
     return ""
+
+
+def _drop_parser_functions(text: str) -> str:
+    """正则删解析函数，反复删到不动为止（内层先删，外层跟着消失）。
+
+    `{{#ask:[[分类:奇偶互动]]\\n|?名称\\n|?稀有度\\n…}}` 这种 mwparserfromhell
+    解析不出来——它会把模板拆成 Text('{{#ask:') + Wikilink + Text('\\n|?名称…')
+    一串碎片，_plain_template 一次都轮不到，DSL 原文整坨漏进正文。与其在
+    节点层面缝，不如进解析器之前先把没有花括号嵌套的解析函数删干净。
+    """
+    prev = None
+    while prev != text:
+        prev = text
+        text = _PARSER_FN.sub("", text)
+        text = _PARSER_FN_NESTED.sub("", text)
+    return text
 
 
 def to_plain(text: str) -> str:
@@ -294,6 +368,38 @@ def tables_to_lines(text: str) -> str:
 
 
 # ---------------------------------------------------------------- infobox
+def iter_templates(wc: Any, descend_tags: bool = False) -> list[Any]:
+    """页面上的模板，按文档顺序。
+
+    descend_tags=False（默认）：只算直接挂在页面根上的模板——即老行为
+    `wc.filter_templates(recursive=False)`，一个字都不变。
+
+    descend_tags=True：穿透 `<div>`/`<span>` 这类 HTML 容器，但【不穿透其它
+    模板】。BWIKI 原神把实体模板全裹在 `<div class="row"><div class="col-sm-8">`
+    里，`{{角色}}`、`{{角色/属性数据}}`、`{{天赋技能}}` 按老算法一个都算"顶层"
+    （实测优菈页：根上只有 面包屑/角色导航/… 5 个，递归有 76 个）。开了这个
+    开关，子模板归子模板、外层容器照穿，正好是"页级模板"的语义。
+    """
+    if not descend_tags:
+        return list(wc.filter_templates(recursive=False))
+    out: list[Any] = []
+
+    def walk(node: Any, in_template: bool) -> None:
+        for child in getattr(node, "nodes", None) or ():
+            if type(child).__name__ == "Template":
+                if not in_template:
+                    out.append(child)
+                walk(child, True)      # 模板内部不再展开
+            else:
+                walk(child, in_template)
+                contents = getattr(child, "contents", None)   # HTML 标签的内容
+                if contents is not None and contents is not child:
+                    walk(contents, in_template)
+
+    walk(wc, False)
+    return out
+
+
 def find_templates(wc: Any, names: Iterable[str]) -> list[Any]:
     want = set(names)
     return [t for t in wc.filter_templates(recursive=True) if template_name(t) in want]
@@ -324,12 +430,15 @@ def infobox_fields(tpl: Any) -> dict[str, str]:
 
 def find_top_level_infobox(src: Any, names: Iterable[str],
                            legacy_names: Iterable[str] = (),
-                           prefixes: Iterable[str] = ()) -> Any | None:
+                           prefixes: Iterable[str] = (),
+                           descend_tags: bool = False) -> Any | None:
     """在顶层模板里找 infobox，返回模板节点（不给正文，省一次字符串替换）。
 
     三段匹配，顺序即优先级：老家族（legacy_names）→ 白名单全量（names）→
     前缀家族（塞壬图鉴/*）。先老后新是为了让 azurlane v3 的 chunk_id 和 v2 完全
     对齐——见 games/azurlane.yaml 的 legacy_infobox_template_names 注释。
+
+    descend_tags 见 iter_templates：原神这类把实体模板裹在 div 里的 wiki 要开。
 
     src 可以是 wikitext 字符串或已解析的 Wikicode（parse.py 一页只解析一次，
     这里复用，别反复 parse）。
@@ -337,7 +446,7 @@ def find_top_level_infobox(src: Any, names: Iterable[str],
     wc = src if not isinstance(src, str) else parse_wikitext(src)
     if wc is None:
         return None
-    templates = list(wc.filter_templates(recursive=False))
+    templates = iter_templates(wc, descend_tags)
     for want in (set(legacy_names), set(names)):
         for tpl in templates:
             if template_name(tpl) in want:
@@ -447,13 +556,15 @@ def hidden_lines(wikitext: str) -> list[str]:
 
 
 def template_dump(src: Any, exclude: Any = None,
-                  nav_prefixes=None) -> list[str]:
+                  nav_prefixes=None, descend_tags: bool = False) -> list[str]:
     """数据型模板的全参数转存。
 
     `_plain_template` 的通用兜底只取无名参数 1，像 `{{世界巡游|1=物资|1n=…}}`
     （整页是 100 级奖励表）、`{{每月签到}}`（116KB）、`{{InfoBox}}`、
     `{{META图鉴}}`（介绍字段几千字）这种"参数即正文"的模板就只剩两个字。
     这里把这类模板的所有参数摊平，交给调用方另切 chunk。
+
+    descend_tags 见 iter_templates：原神的 section 模板全在 div 里，不开就一个都捞不到。
     """
     wc = src if not isinstance(src, str) else parse_wikitext(src)
     if wc is None:
@@ -462,7 +573,7 @@ def template_dump(src: Any, exclude: Any = None,
     if nav_prefixes is None:
         nav_prefixes = load_game(DEFAULT_GAME).nav_template_prefixes
     out: list[str] = []
-    for tpl in wc.filter_templates(recursive=False):
+    for tpl in iter_templates(wc, descend_tags):
         raw = str(tpl)
         if skip and raw == skip:
             continue

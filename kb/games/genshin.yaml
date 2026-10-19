@@ -1,0 +1,1123 @@
+# 原神（BWIKI 基岩 wiki）——第三款游戏，验证"一游戏一配置"在中文大 wiki 上零代码成立。
+#
+# 结构化路全部走 parse.kinds 的通用实体路（entities + entity_attrs + 本文件声明的
+# 子表）：角色/武器图鉴/怪物信息栏/素材图鉴/NPC/任务/书籍/卡牌/秘境副本… 44 个页级
+# 实体模板 → 36 个 kind，kblib/extractors/azurlane.py 那种专用抽取器一行都没写。
+#
+# 字段名全是 BWIKI wikitext 里的原样参数名。来源：
+#   * ~/workspace/proactivity/burners/genshin-research-REPORT.md（11 节预研）
+#   * ~/workspace/proactivity/burners/genshin.yaml.draft（v0.4 映射草稿）
+#   * genshin-scratch/template_merged_params.json（607 模板 declared/used_in_articles）
+# 全量抓完再用 tools/audit_pages.py 复核一遍。
+#
+# 和明日方舟配置的三处关键差异（都落在通用开关上，没为原神加分支）：
+#   1. descend_html_tags: true —— BWIKI 把实体模板全裹在
+#      `<div class="row"><div class="col-sm-8">{{角色 …}}</div></div>` 里，
+#      老算法只认挂在页面根上的模板，优菈页根上只有 5 个（面包屑/角色导航/…），
+#      递归有 76 个。开这个开关穿透 HTML 容器但不穿透其它模板。
+#   2. strip_template_name_comments: true —— 有作者写成
+#      `{{系列任务<!-- 森林书等嵌套系列任务可将模板名改为多重系列任务 -->|…}}`，
+#      注释整个落在模板名里，不剥一个都匹配不上。
+#   3. title_patterns 的 `skip: true` —— `^Data:` 是 32,561 篇地图数据页
+#      （SMW 的 Data: 伪命名空间，全在 ns0 的 allpages 里），fetch 直接不抓。
+name: genshin
+label: 原神
+wiki_base: https://wiki.biligame.com/ys
+api_url: https://wiki.biligame.com/ys/api.php
+user_agent: anisignal-kb/0.1 (offline knowledge-base build; polite 1.2 req/s)
+data_dir: data/genshin
+eval_dir: eval/genshin
+chunk_id_prefix: genshin
+collection: genshin_kb
+namespaces: [0]
+
+fetch:
+  rps: 1.2                 # 实测 0.8s 延时无 429；Tengine+Varnish 前端，无限流响应头
+  batch_titles: 50         # 实测 50 篇/批稳定（最大响应 ~500KB）。碧蓝那边 20 是因为有
+                           # MB 级大页；原神页宽中位 1.3KB，只有 邮件(213KB)/北陆图书馆(41KB)
+                           # 两个超大页，50 稳
+  timeout: 180             # 单次 curl 超时（秒）
+  max_retries: 6           # 超时/5xx/429 的重试次数
+  backoff_cap: 60          # 指数退避上限（秒）
+  shard_pages: 500
+  # 注意：走本机 egress 代理时 urllib 必挂（CONNECT 隧道超时），抓取必须用 curl 子进程
+  # 注意：prop=revisions 不能带 rvlimit（invalidparammix），最新修订是默认行为
+
+chunk:
+  min: 60
+  target: 420
+  max: 900
+  # 碧蓝用 voice_field_suffix 认 infobox 里的台词字段；原神台词不在 infobox 里，
+  # 在独立的「X语音」页（129 篇），由 infobox_templates 的 角色语音表头/角色/语音1 认 kind，
+  # 所以这个后缀在原神一个字段都不命中——保留默认值，语音内容走模板数据 chunk。
+  voice_field_suffix: 台词
+  fields_chunk_min: 60
+  max_images_per_page: 16
+
+parse:
+  min_infobox_fields: 3    # 成就集相关名片 只有 1 参、风之翼图鉴 6 参，门槛高了白瞎一类
+
+  # 实体模板裹在 div 里（见文件头第 1 条）
+  descend_html_tags: true
+  # 模板名里嵌 HTML 注释（见文件头第 2 条）
+  strip_template_name_comments: true
+  # to_plain 之前先用正则删解析函数。原神的 SMW 查询
+  # `{{#ask:[[分类:奇偶互动]]\n|?名称\n|?稀有度\n…}}` mwparserfromhell 拆不出
+  # 完整模板树（拆成 Text('{{#ask:') + Wikilink + Text('\\n|?名称…') 一串碎片），
+  # 一页能有好几个，不删就是一坨 DSL 原文漏进正文 chunk
+  strip_parser_functions: true
+
+  # 展示型模板：参数顺序是给机器用的，通用兜底只会掏出机器值。
+  #   {{卡牌图标|UI|元素|冰}}                UI/元素 是 key，冰 在 3（200 次）
+  #   {{player|钟离_初次见面…}}              音频播放器壳，一个字符都不该出现（5,985 次）
+  # 值 = 按顺序渲染哪几个参数；空列表 = 渲染成空。
+  #
+  #   {{颜色|蓝|100%/125%/150%/175%/200%}}   色值在1、正文在2（2,171 次）
+  #   {{卡牌图标|UI|元素|冰}}                UI/元素 是 key，冰 在 3（200 次）
+  #   {{player|钟离_初次见面…}}              音频播放器壳，一个字符都不该出现（5,985 次）
+  #   {{图标|…}}                            双约定，见下
+  # 值 = 按顺序渲染哪几个参数；空列表 = 渲染成空。
+  #
+  # {{图标}} 有两套并存的参数约定（实测 174 篇里 1,692 : 418，前者 4 倍）：
+  #   {{图标|雷史莱姆|5}}        默认分支 `|{{{1|}}}=`，1=名字、2=数量
+  #   {{图标|材料|摩拉|1575}}    显式类型分支，1=类型 key、2=名字、3=数量
+  # 类型 key 只有 19 个（圣遗物小/圣遗物大/食物/材料/材料小/材料大/书籍/小/中/大/
+  # 风之翼/命之座/生物*/任务/邀约任务/名片/名片小）。"渲染 1、2" 对两种约定都是
+  # 严格变好：前者多带上数量，后者至少把名字留下（只多个"材料"字样）；反过来
+  # 只渲染 2 会让占多数的名字派整段消失。
+  display_templates:
+    颜色: ["2"]              # 色值在 1，给人看的文字在 2（{{颜色|冰|冰元素伤害}}）
+    图标: ["1", "2"]         # 见下面的双约定说明
+    图标/小: ["2"]
+    卡牌图标: ["3"]
+    角色推荐: ["1", "2"]     # {{角色推荐|{{图标/角色|…}}|推荐语}}
+    星期: []                 # {{星期|1}} 星期图标，渲染出来就是个光秃秃的数字
+    筛选项: []                # {{筛选项|1|5|…}} 筛选器状态，正文里只剩编号
+    提示: ["2"]              # {{提示|蓝色|[[链接]]}}
+    折叠: ["标题"]            # 折叠块标题是真内容，"开始"不是
+    折叠面板: ["标题"]
+    角色技能: []              # {{角色技能|开始}}/{{角色技能|内容1开始}} 纯 UI 状态
+    切换板: []                # {{切换板|开始}}/{{切换板|默认显示|…}}
+    面包屑: []                # 面包屑在 payload 的 source_title 里已经有
+    # SMW 查询/解析函数：正文里原样留着就是一大坨 DSL。列表页靠 nav 前缀在
+    # 模板数据 chunk 里挡掉了，但 to_plain 走正文路，得在这儿再挡一次
+    "#ask": []
+    "#show": []
+    "#info": []
+    "#set": []
+    "#tag": []
+    "#arraymap": []
+    "#loop": []
+    "#invoke": []
+    "#lsth": []
+    "#css": []
+    player: []
+    Player: []
+    player1: []
+    Player1: []
+    player2: []
+    Player2: []
+    "#section-h": []          # {{#section-h:角色贺图/节日贺图|2022情人节·优菈}} 转含标记
+
+  # infobox 白名单：模板名 → (kind, category)。命名空间 10 下的模板名（不带"模板:"）。
+  # 一个页命中哪个 kind 由【文档顺序里第一个】白名单模板决定，所以子模板（角色/属性数据、
+  # 怪物技能、剧情选项…）故意不进来——它们在父实体后面出现，进来只会抢戏。
+  # 唯一的例外是语音页：角色语音表头 和 角色/语音1 都是 voice，谁先出现都是 voice。
+  # 页数 = list=embeddedin 精确计数（叶子实体模板的计数等于直接调用数）。
+  infobox_templates:
+    # ---- 角色（页 = 角色 + 属性数据 + 信息 + 故事 + 命之座 + 突破简 + 天赋技能 拼成）----
+    角色: {kind: character, category: character}          # 133 页
+    角色新: {kind: character, category: character}         # 0 页，新版未普及，留作兜底
+    旅行者/通用: {kind: character, category: character}     # wrapper，不是独立页
+    # ---- 武器 ----
+    武器图鉴: {kind: weapon, category: weapon}              # 252 页；47 参含等级网格
+    武器图鉴旧: {kind: weapon, category: weapon}            # 2 页（昆吾断虹/琥珀玥），14 参
+    # ---- 圣遗物 ----
+    圣遗物套装: {kind: artifact, category: artifact_set}    # 66 页；套装级 9 参 + 五部位各 3
+    # ---- 敌人 ----
+    怪物信息栏: {kind: enemy, category: enemy}              # 572 页；111 参（8 元素×8 段抗性、5 段血量）
+    # ---- 材料/道具/食物 ----
+    素材图鉴: {kind: material, category: material}          # 815 页；20 参
+    消耗品图鉴: {kind: consumable, category: consumable}    # 700 页；16 参（旋曜玉帛/小道具/兑换券）
+    食物图鉴新: {kind: food, category: food}                # 457 页；28 参（正常/完美/失败/特殊+食谱）
+    任务道具: {kind: quest_item, category: quest_item}      # 1,278 页；16 参
+    # ---- 野生生物 ----
+    野生生物图鉴: {kind: wildlife, category: wildlife}      # 223 页；实体页标题是「生物志：X」
+    # ---- NPC / 任务 ----
+    NPC: {kind: npc, category: npc}                         # 2,810 页（最大实体类）；38 参
+    任务: {kind: quest, category: quest}                    # 2,100 页（第二大）；传说/魔神/世界/委托
+                                                            #   全走这个模板，用 任务类型 字段区分
+    系列任务: {kind: quest_series, category: quest_series}  # 379 页
+    多重系列任务: {kind: quest_series, category: quest_series}  # 93 页（森林书等嵌套系列）
+    传说任务: {kind: quest, category: legend_quest}         # 仅 4 页
+    邀约事件: {kind: quest, category: date_quest}           # 仅 18 个 hub 页，每日委托正文在页内
+    # ---- 书籍 ----
+    书籍: {kind: book, category: book}                      # 105 页；57 参 = 卷1-12 × 4
+    # ---- 七圣召唤 ----
+    卡牌: {kind: tcg_card, category: tcg_card}              # 650 页；实体页标题「卡牌：X」
+    卡牌/词条解释: {kind: tcg_term, category: tcg_term}     # 527 页；标题「卡牌：词条解释/X」
+                                                            #   ⚠️ 正文写成 {{模板:卡牌/词条解释}}，
+                                                            #   template_name() 会剥掉 模板: 前缀
+    卡牌通用道具: {kind: tcg_prop, category: tcg_prop}      # 47 页（牌背/台面）
+    # ---- 尘歌壶 / 装扮 ----
+    摆设图鉴: {kind: furnishing, category: furnishing}      # 2,417 页；17 参
+    摆设套装图鉴: {kind: furnishing_set, category: furnishing_set}  # 109 页；13 参
+    # 角色衣装是"老版衣装"（芭芭拉海风之梦那种），和 奇偶装扮（千星奇域单件）、
+    # 装扮套装（千星奇域整套）是三代并存的三套模板，参数名大同小异，都归 costume
+    角色衣装: {kind: costume, category: costume}            # 119 页
+    装扮套装: {kind: costume, category: qiyu_costume_set}   # 119 页（千星奇域整套）
+    奇偶装扮: {kind: costume, category: qiyu_costume}       # 2,204 页（千星奇域单件）
+    风之翼图鉴: {kind: glider, category: glider}            # 18 页；6 参
+    名片: {kind: namecard, category: namecard}              # 291 页；13 参
+    成就集相关名片: {kind: achievement_namecard, category: achievement_namecard}  # 71 页；1 参
+    # ---- 千星奇域 / 秘境 / 其它 ----
+    大厅设施: {kind: lobby_facility, category: lobby_facility}  # 169 页；9 参
+    奇偶互动: {kind: qiyu_interaction, category: qiyu_interaction}  # 119 页；8 参
+    角色攻略头: {kind: character_guide, category: character_guide}  # 128 页「X/攻略」子页，0 参纯渲染头
+    角色/家园信息: {kind: character_home, category: character_home}  # 119 页「X/家园」子页
+    角色/幻想真境剧诗: {kind: mimegrand_character, category: mimegrand_character}  # 116 页
+    秘境副本: {kind: domain, category: domain}              # 52 页；88 参 = 难度1-6 × 12 字段
+    秘境关卡: {kind: domain_level, category: domain_level}  # 仅 3 个列表页
+    游迹图鉴: {kind: travel_trace, category: travel_trace}  # 23 页；标题「游迹·X」
+    讨伐列表: {kind: hunt_list, category: hunt_list}        # 10 页；18 参（三层深渊）
+    纪行: {kind: battlepass, category: battlepass}          # 仅 1 页；228 参（奖励格子 01-/01-a- 编号）
+    活动信息: {kind: event, category: event}                # 525 页（历史活动 hub）
+    文章模板: {kind: article, category: article}            # 245 页（攻略/公告/搬运文章）
+    教程: {kind: tutorial, category: tutorial}              # 688 页；标题「教程：X」
+    # ---- 角色语音页（129 篇「X语音」）----
+    # 语音页的模板顺序：需要帮助角色语音 → 面包屑 → 角色导航 → 语音tab样式 → 角色语音表头
+    #   → 一堆 角色/语音1/角色/语音。前四个都是导航噪音，所以表头总是第一个白名单命中。
+    # 旅行者语音/空 等 4 页没有表头，落到 角色/语音1，一样是 voice。
+    角色语音表头: {kind: voice, category: voice}            # 123 页；4 参（四语 CV）
+    角色/语音1: {kind: voice, category: voice}              # 7,399 次调用 / 120 页（主力）
+    角色/语音: {kind: voice, category: voice}               # 1,509 次 / 28 页（旧版，四语分开填）
+
+  infobox_template_prefixes: {}
+
+  legacy_infobox_template_names: []
+
+  # 没有 infobox 的页按标题兜底判 kind；`skip: true` 的条目 fetch 阶段直接不抓。
+  # 顺序即优先级：具体的排前面（^卡牌：词条解释/ 要在 ^卡牌： 前面）。
+  title_patterns:
+    - {regex: '^Data:', skip: true}                    # 32,561 篇地图数据页，全跳
+    - {regex: '^生物志：', kind: wildlife}              # 222 页，野生生物实体页标题前缀
+    - {regex: '^卡牌：词条解释/', kind: tcg_term}       # 532 页
+    - {regex: '^卡牌：', kind: tcg_card}                # 650 页七圣召唤卡牌
+    - {regex: '^牌背：|^台面：', kind: tcg_prop}
+    - {regex: '^教程[:：]', kind: tutorial}
+    - {regex: '/攻略$', kind: character_guide}
+    - {regex: '/家园$', kind: character_home}
+    - {regex: '/幻想真境剧诗$', kind: mimegrand_character}
+    - {regex: '^游迹·', kind: travel_trace}
+    - {regex: '^邀约事件·', kind: quest}
+    - {regex: '^旅行者语音/', kind: voice}              # 4 个漏网的语音页
+    - {regex: '语音$', kind: voice}                     # 133 个 X语音 页（兜底）
+    - {regex: '^摆设：', kind: furnishing}
+    - {regex: '^图纸|^套装图纸', kind: furnishing}       # 501 页摆设图纸
+
+  # 原神所有 kind 都是新的，card 一律走 x 前缀 chunk_id 计数器，不挤占任何老 id
+  new_kinds: [character, weapon, artifact, enemy, material, consumable, food, wildlife,
+              npc, quest, quest_series, book, tcg_card, tcg_term, tcg_prop,
+              furnishing, furnishing_set, costume, glider, namecard, achievement_namecard,
+              battlepass, event, domain, domain_level, travel_trace, hunt_list,
+              quest_item, tutorial, article, lobby_facility, character_guide,
+              character_home, qiyu_interaction, mimegrand_character, voice]
+
+  card_field_keys: {}
+
+  # PRTS/BWIKI 的导航/样板模板（切 chunk 时整段丢弃）。按前缀收，子页名自动归队。
+  # ⚠️ 三个名字故意不在列表里，它们是实体模板：文章模板、角色语音表头、卡牌/词条解释。
+  # ⚠️ 也不放裸 卡牌/角色/秘境/素材/图标 这种会吞实体名的前缀——is_nav_template 是
+  #    "等于 或 前缀+/" 匹配，但 卡牌通用道具/角色攻略头 经不起手滑。
+  nav_template_prefixes:
+    - 原神WIKI导航
+    - 导航
+    - 导航栏
+    - 面包屑
+    - 图鉴导航
+    - 角色导航
+    - 角色图鉴导航
+    - 武器导航
+    - 圣遗物导航
+    - 怪物图鉴导航
+    - 生物志导航
+    - 图书馆导航栏
+    - 卡牌图鉴导航
+    - 筛选
+    - 筛选项
+    - 列表筛选
+    - 图鉴筛选
+    - 轮播图
+    - 配色
+    - 颜色
+    - 突破颜色
+    - 字体图标
+    - 小图标
+    - 图标
+    - 图标大
+    - M图标
+    - 头像
+    - 展开折叠
+    - 折叠
+    - 折叠框
+    - 折叠面板
+    - 切换板
+    - 选项卡
+    - 子页面选项卡切换
+    - 施工中
+    - 待补充
+    - 待更新
+    - 待审核
+    - 待完善
+    - 尚未公布
+    - 未实装
+    - 消歧义
+    - 多义词
+    - 视频
+    - B站视频
+    - B站音频
+    - 音乐播放器
+    - 更新日志
+    - 更新计划
+    - 版本历史
+    - 公告
+    - 提示
+    - 提示消息
+    - 注意
+    - 注释
+    - 引用
+    - 引用说明
+    - 外部链接
+    - 文章水印
+    - 允许编辑
+    - 免除CC协议
+    - 需要帮助
+    - 需要图片
+    - 需要内容
+    - 图片缺失查找
+    - 主观提示
+    - 创作体验服提醒
+    - 黑幕
+    - 假黑幕
+    - 隐藏评论
+    - 禁用评论区
+    - 分隔线
+    - 分割线
+    - 分栏
+    - 缩进
+    - 排版
+    - 板块
+    - 框
+    - 背景
+    - 表格
+    - 重复
+    - 条件项
+    - 模板
+    - 模板文档
+    - 模板说明
+    - 模板测试
+    - 测试
+    - 沙盒
+    - 点击复制
+    - 图片外链
+    - 图片放大
+    - 刮刮卡
+    - 歌词引号
+    - 文案引号
+    - 双引号
+    - 注音
+    - 下注音
+    - ResourceLoader
+    - JS
+    - CSS
+    - EmbedSVG
+    - 悬浮框
+    - 悬浮面板
+    - 悬浮目录
+    - 左侧目录
+    - 按钮
+    - 角标
+    - 标签
+    - 效果
+    - 效果介绍
+    # 注意：不能放裸「系列」——它是前缀匹配，会把 379 篇的实体模板 系列任务
+    # 一起吞掉（多重系列任务 因为不以它开头反而躲过）。宁可漏一个近乎没人用的
+    # 系列材料挂件，也不能让一个实体类在模板数据 chunk 里整段消失。
+    - 信息
+    - 文本导航
+    - 翻页
+    - 相册
+    - 视频卡片
+    - 嵌入地图
+    - 大地图导航
+    - 小地图
+    - 螺旋地图
+    - 地图
+    - 动态查询
+    - Extension DPL
+    - PrefixIndex
+    - Ifexist
+    - ASK文件路径
+    - PointGrid
+    - Anchor
+    - Tl
+    - Swiper
+    - Tab
+    - Columns
+    - P
+    - Vporder
+    - Key
+    - LVConvert
+    - LVConvertRVS
+    - 元素
+    - 稀有度
+    - 星期
+    - 计时
+    - 新计时
+    - 活动计时
+    - 卡池计时器
+    - 卡池间隔计时器
+    - 伤害评分器
+    - 精通数据速查器
+    - 配装伤害期望
+    - 角色计算器
+    - 简易配装
+    - 随机背景
+    - 角色表情
+    - 人员头像
+    - 特殊NPC立绘
+    - 角色立绘
+    - 角色头像
+    - 角色衣装
+    - 角色节日贺图板
+    - 角色生日贺图板
+    - 角色消息框
+    - 角色BOX
+    - 角色筛选
+    - 角色一览
+    - 首页内容管理
+    - 首页功能BOX
+    - 首页工具BOX
+    - 首页攻略BOX
+    - 首页角色
+    - 首页角色BOX
+    - 首页任务
+    - 首页活动
+    - 首页祈愿
+    - 近期活动BOX
+    - 试做主页
+    - 文章归类
+    - 文章归类首页
+    - 文章需要内容
+    - 用户
+    - MarkInfo
+    - Main
+    - Player
+    - 语音tab样式
+    - 语音测试
+    - 语音表头
+    - 角色语音一览
+    - 需要帮助角色语音
+    - 奇偶装扮图标
+    - 装扮图标
+    - 卡牌图标
+    - 图片放大
+    - 视频卡片首页
+    - 画册
+    - 画册按钮
+    - 风尚图册
+    - 表情
+
+  # 切 chunk 时整段丢弃的 section 标题（包含匹配）
+  noise_section_keywords:
+    - 导航
+    - 分类
+    - 参见
+    - 外部链接
+    - 参考文献
+    - 注释
+    - 图鉴筛选
+    - 筛选
+    - 更新历史
+    - 更新日志
+    - 公告
+    - 施工中
+    - 待补充
+    - 编辑教程
+    - 模板文档
+    - 相关页面
+    - 备注
+    - 图片缺失
+
+  # ---------------- 通用实体路：36 族的 kind spec ----------------
+  # name_fields  卡片标题用哪个字段当实体名（都不命中就用页标题）
+  # card_fields  渲染卡片摘要 chunk 的 [标签, 字段名]
+  # attr_fields  额外落 entity_attrs 的字段（查表探针直接按 attr 查）
+  # child_templates 页内子模板 → 行。columns 是"列名: 字段名"映射，
+  #               rows_from 用正则把编号字段拆成多行，{0} 是正则捕获组，
+  #               @key 是"值就是这个字段本身"，const 是这一批行的常量列
+  # rows_from    （kind 级）把 infobox 自己的编号字段拆行，table 必须自己写
+  kinds:
+    # ---- 角色：一个页 = 角色 + 属性数据 + 信息 + 故事 + 命之座 + 突破简 + 天赋技能 ----
+    character:
+      name_fields: [名称]
+      card_fields:
+        - [称号, 称号]
+        - [稀有度, 稀有度]
+        - [元素属性, 元素属性]
+        - [武器类型, 武器类型]
+        - [命之座, 命之座]
+        - [所属, 所属]
+        - [种族, 种族]
+        - [性别, 性别]
+        - [限定, 限定]
+        - [实装日期, 实装日期]
+        - [特殊料理, 特殊料理]
+        - [介绍, 介绍]
+      attr_fields: [名称, 称号, 全名, 英文名称, 稀有度, 元素属性, 武器类型, 命之座,
+                    所属, 出身, 种族, 性别, 介绍, 限定, 实装日期, 实装版本,
+                    特殊料理, 祈愿类型, 神之眼描述, 羁绊属性, TAG, 始基力,
+                    # 角色新（新版合并模板，30 参）把 角色/信息 的字段并进了 infobox；
+                    # 现在 0 篇在用，但换模板那天不用改代码，靠这几个字段兜住
+                    生日, 职业, 体型, 昵称/外号, 中文CV, 日文CV, 韩文CV, 英文CV, 归属]
+      child_templates:
+        # 60 参：等级 20/20+/40/…/90/95/100 × 三维 × 突破前后。按等级归组成行，
+        # 不摊平——摊平就是 60 个 "20生命上限=2671" 挤在一行里，没法查。
+        - template: 角色/属性数据
+          rows_from:
+            - pattern: '^(\d+\+?)(生命上限|攻击力|防御力)$'
+              table: genshin_character_stats
+              columns: {level: '{0}', stat: '{1}', value: '@key'}
+        - template: 角色/信息
+          table: genshin_character_profile
+          columns: {cv_cn: 中文CV, cv_jp: 日文CV, cv_kr: 韩文CV, cv_en: 英文CV,
+                    birthday: 生日, body_type: 体型, profession: 职业,
+                    nicknames: 昵称/外号, namecard: 名片名称, namecard_desc: 名片描述,
+                    costume: 衣装名称, element_attr: 角色属性, personal_quest: 个人任务,
+                    banner: 卡池名, faction: 归属}
+        - template: 角色/故事
+          columns: {detail: 角色详细, eye: 神之眼, eye_condition: 神之眼解锁条件,
+                    heart: 神之心, heart_condition: 神之心解锁条件,
+                    note_name: 冒险笔记名称, note: 冒险笔记,
+                    note_condition: 冒险笔记解锁条件}
+          table: genshin_character_story
+          rows_from:
+            - pattern: '^角色故事(\d+)$'
+              table: genshin_character_story_detail
+              columns: {index: '{0}', text: '@key', condition: '角色故事{0}解锁条件'}
+            - pattern: '^其他故事$'
+              table: genshin_character_story_detail
+              columns: {index: '0', text: '@key', condition: 其他解锁条件}
+        - template: 角色/命之座
+          rows_from:
+            - pattern: '^命之座(\d+)$'
+              table: genshin_character_constellation
+              columns: {index: '{0}', name: '@key', effect: '命之座{0}效果'}
+        - template: 角色/突破简
+          table: genshin_character_ascension
+          columns: {local_specialty: 突破特产材料, gem_series: 突破晶石材料序列,
+                    boss_material: 突破BOSS材料, common_series: 突破普通材料序列,
+                    talent_at_20: 20级新天赋, talent_at_60: 60级新天赋}
+        - template: 角色/技能升级材料简
+          table: genshin_character_talent_material
+          columns: {boss_material: 技能BOSS材料, book_series: 技能天赋材料序列,
+                    common_series: 技能普通材料序列}
+        - template: 角色/技能升级材料
+          rows_from:
+            - pattern: '^(\d+)→(\d+)$'
+              table: genshin_character_talent_levelup
+              columns: {from_level: '{0}', to_level: '{1}', materials: '@key'}
+        # 373 参！属性1-16 × LV1-15 + 战技动作1-10 + 动作1-12。一个技能一块，
+        # occurrence 按出现顺序编号（普通攻击/战技/爆发…）。
+        - template: 天赋技能
+          occurrence: true
+          table: genshin_character_talent
+          columns: {skill_name: 技能名, desc: 描述, energy: 能量产出, stagger: 削韧数据}
+          rows_from:
+            - pattern: '^属性(\d+)LV(\d+)$'
+              table: genshin_character_talent_scaling
+              columns: {attr_index: '{0}', level: '{1}', value: '@key'}
+            - pattern: '^属性(\d+)$'
+              table: genshin_character_talent_attr
+              columns: {attr_index: '{0}', name: '@key'}
+            - pattern: '^战技动作(\d+)$'
+              table: genshin_character_talent_motion
+              columns: {index: '{0}', name: '@key', particles: '战技动作{0}微粒数',
+                        probability: '战技动作{0}概率比', note: '战技动作{0}说明',
+                        cooldown: '战技动作{0}判定冷却'}
+            - pattern: '^动作(\d+)$'
+              table: genshin_character_talent_action
+              columns: {index: '{0}', name: '@key', stagger: '动作{0}削韧数值',
+                        impact: '动作{0}冲击强度', hit_type: '动作{0}打击类型',
+                        range_type: '动作{0}远近类型'}
+        - template: 角色/削韧
+          rows_from:
+            - pattern: '^削韧参数(\d+)_(\d+)$'
+              table: genshin_character_stagger
+              columns: {param: '{0}', hit: '{1}', value: '@key'}
+        # 纯 #ask 查询渲染器，参数只有 1/2（角色名/任务|活动），交给模板数据补捞
+        - template: 人物出场
+          table: genshin_character_appearance
+          columns: {character: '1', kind: '2'}
+
+    # ---- 武器：47 参，等级网格（20/40/…/90 × 突破前后攻击力 + 副属性）----
+    weapon:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [稀有度, 稀有度]
+        - [初始攻击力, 初始攻击力]
+        - [初始副属性, 初始副属性]
+        - [副属性, 副属性]
+        - [技能名称, 技能名称]
+        - [获取途径, 获取途径]
+        - [实装版本, 实装版本]
+        - [是否可锻造获取, 是否可锻造获取]
+        - [介绍, 介绍]
+      attr_fields: [名称, 类型, 稀有度, 介绍, 技能名称, 技能介绍, 技能解析, 故事,
+                    获取途径, 实装版本, 是否可锻造获取, 有无突破状态, 突破普通材料序列,
+                    突破武器材料序列, 突破高级材料序列, 精炼材料, 锻造材料1, 锻造材料2,
+                    锻造材料3, 角色推荐, TAG]
+      rows_from:
+        - pattern: '^(\d+)(突破前|突破后)攻击力$'
+          table: genshin_weapon_atk
+          columns: {level: '{0}', phase: '{1}', value: '@key'}
+        - pattern: '^(\d+)级副属性$'
+          table: genshin_weapon_substat
+          columns: {level: '{0}', value: '@key'}
+
+    # ---- 圣遗物：套装级 9 参 + 五部位各 (名/描述/故事)----
+    artifact:
+      name_fields: [名称]
+      card_fields:
+        - [最低稀有度, 最低稀有度]
+        - [最高稀有度, 最高稀有度]
+        - [两件套效果, 两件套效果]
+        - [四件套效果, 四件套效果]
+        - [获取途径, 获取途径]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 最低稀有度, 最高稀有度, 两件套效果, 四件套效果, 获取途径,
+                    获取方式, 实装版本, 角色推荐, 提示, TAG]
+      rows_from:
+        - pattern: '^(生之花|死之羽|时之沙|空之杯|理之冠|祭祀礼冠)$'
+          table: genshin_artifact_piece
+          columns: {slot: '@key', desc: '{0}描述', story: '{0}故事'}
+
+    # ---- 敌人：111 参（8 元素×8 段抗性、5 段血量、掉落）----
+    enemy:
+      name_fields: [怪物名]
+      card_fields:
+        - [怪物类别, 怪物类别]
+        - [怪物类型, 怪物类型]
+        - [元素属性, 元素属性]
+        - [攻击属性, 攻击属性]
+        - [实装版本, 实装版本]
+        - [别称, 别称]
+        - [出现地点, 出现地点]
+        - [刷新时间, 刷新时间]
+        - [备注, 备注]
+      attr_fields: [怪物名, 名称, 副名称, 别称, 怪物类别, 怪物类型, 怪物分类, 元素属性,
+                    自身附着属性, 攻击属性, 实装版本, 出现地点, 刷新时间, 备注, TAG,
+                    中文CV, 日文CV, 护盾类型, 抗性备注, 抗性状态, 血量档位, 血量比例总,
+                    掉落期望, 掉落期望备注, 重量, 韧性, 盾值, 攻击, 防御]
+      rows_from:
+        # 火抗/火抗2…火抗8、物抗/物抗2…：8 个状态段（1=常态，2-8=各种附属状态）
+        - pattern: '^([火水雷冰岩风草物])抗(\d?)$'
+          table: genshin_enemy_resist
+          columns: {element: '{0}', segment: '{1}', value: '@key'}
+        - pattern: '^抗性状态(\d?)$'
+          table: genshin_enemy_resist_state
+          columns: {segment: '{0}', value: '@key'}
+        - pattern: '^血量(\d)(名字|比例)$'
+          table: genshin_enemy_hp_phase
+          columns: {phase: '{0}', kind: '{1}', value: '@key'}
+      child_templates:
+        - template: 怪物技能
+          occurrence: true
+          table: genshin_enemy_skill
+          columns: {name: 技能名, display_name: 显示名称, desc: 技能说明,
+                    response: 应对方法}
+
+    # ---- 素材 / 消耗品 ----
+    material:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类型, 类型]
+        - [素材系列, 素材系列]
+        - [来源, 来源]
+        - [用处, 用处]
+        - [用途, 用途]
+        - [介绍, 介绍]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类型, 素材系列, 来源, 用处, 用途, 介绍, 图鉴介绍,
+                    实装版本, 排序, 同类素材, 合成材料, TAG]
+    consumable:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类型, 类型]
+        - [来源, 来源]
+        - [用途, 用途]
+        - [价格, 价格]
+        - [介绍, 介绍]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类型, 来源, 用途, 价格, 介绍, 实装版本, 限时,
+                    同类素材, 制作材料]
+
+    # ---- 食物：正常/完美/失败/特殊料理 + 食谱全在一个模板里 ----
+    food:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类别, 类别]
+        - [类型, 类型]
+        - [效果说明, 效果说明]
+        - [介绍, 介绍]
+        - [获取方式, 获取方式]
+        - [所属国家, 所属国家]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类别, 类型, 效果说明, 介绍, 获取方式, 所属国家,
+                    实装版本, 所需熟练度次数, 所需食材, 正常料理, 特殊料理,
+                    特殊料理角色, 特殊料理效果, 特殊料理介绍, 完美效果说明,
+                    完美介绍, 完美获取方式, 失败效果说明, 失败介绍, 失败获取方式,
+                    概率双倍产出, 食谱价格, 食谱效果说明, 食谱获取, 食谱获取方式]
+
+    # ---- 任务道具：1,278 篇，16 参 ----
+    quest_item:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类型, 类型]
+        - [系列, 系列]
+        - [获取方式, 获取方式]
+        - [用途, 用途]
+        - [相关任务, 相关任务]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类型, 系列, 描述, 用途, 获取方式, 限时, 相关任务,
+                    相关活动, 相关角色, 书籍内容, 实装版本]
+
+    # ---- 野生生物 ----
+    wildlife:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [种类, 种类]
+        - [能否捕捉, 能否捕捉]
+        - [对应鱼饵, 对应鱼饵]
+        - [出现地点, 出现地点]
+        - [描述, 描述]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 类型, 种类, 能否捕捉, 对应鱼饵, 出现地点, 描述, 实装版本,
+                    类内排序]
+
+    # ---- NPC：38 参，最大实体类。商店内容是 Module:NPCShop 的紧凑 DSL ----
+    npc:
+      name_fields: [名称]
+      card_fields:
+        - [全名, 全名]
+        - [英文名, 英文名]
+        - [称号, 称号]
+        - [性别, 性别]
+        - [职业, 职业]
+        - [所属国家, 所属国家]
+        - [位置, 位置]
+        - [出现地点, 出现地点]
+        - [出现时间, 出现时间]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 全名, 英文名, 称号, 性别, 职业, 所属国家, 所属组织, 位置,
+                    出现地点, 出现时间, 别名, 实装版本, 中文CV, 日文CV, 韩文CV, 英文CV,
+                    人物关系, 情报, 相关系统, 居民委托, 讨伐悬赏, 剧情限定, 活动限定]
+      child_templates:
+        - template: NPC对话
+          occurrence: true
+          table: genshin_npc_dialogue
+          columns: {title: 标题, content: 内容, idle_voice: 待机语音, thought: 心声}
+        - template: NPC剧情
+          occurrence: true
+          table: genshin_npc_story
+          columns: {option_1: 选项1, option_2: 选项2, option_3: 选项3, option_4: 选项4,
+                    option_5: 选项5, option_6: 选项6, option_7: 选项7, option_8: 选项8,
+                    story_1: 剧情1, story_2: 剧情2, story_3: 剧情3, story_4: 剧情4,
+                    story_5: 剧情5, story_6: 剧情6, story_7: 剧情7, story_8: 剧情8}
+        - template: 人物对话
+          occurrence: true
+          table: genshin_npc_line
+          columns: {speaker: 头像, line_1: '1', line_2: '2', line_3: '3', line_4: '4'}
+
+    # ---- 任务 / 系列任务 ----
+    quest:
+      name_fields: [任务名称]
+      card_fields:
+        - [任务类型, 任务类型]
+        - [任务地区, 任务地区]
+        - [所属版本, 所属版本]
+        - [开放等级, 开放等级]
+        - [领取地点, 领取地点]
+        - [前置任务, 前置任务]
+        - [后续任务, 后续任务]
+        - [任务描述, 任务描述]
+      attr_fields: [任务名称, 任务编号, 任务类型, 任务地区, 所属版本, 时间, 开放等级,
+                    领取地点, 前置任务, 后续任务, 系列任务, 重要任务, 出场人物,
+                    相关书籍, 相关成就, 相关活动, 相关道具, 奖励, 任务描述, 任务条件,
+                    任务流程]
+      child_templates:
+        - template: 任务描述
+          occurrence: true
+          table: genshin_quest_step
+          columns: {desc: '1', location: '2'}
+        # 选项1-7 + 剧情1-7：对话分支 UI，拆成行才看得懂"选什么→出什么剧情"
+        - template: 剧情选项
+          occurrence: true
+          rows_from:
+            - pattern: '^选项(\d+)$'
+              table: genshin_quest_option
+              columns: {index: '{0}', option: '@key', story: '剧情{0}',
+                        icon: '图标{0}'}
+    quest_series:
+      name_fields: [系列任务名]
+      card_fields:
+        - [任务类型, 任务类型]
+        - [任务地区, 任务地区]
+        - [所属版本, 所属版本]
+        - [专属角色, 专属角色]
+        - [描述, 描述]
+      attr_fields: [系列任务名, 编号, 副标题, 重要任务, 专属角色, 任务类型, 任务地区,
+                    描述, 描述2, 所属版本, 相关活动, 活动任务, 现实时间, 系列任务,
+                    存在道具, 存在成就, 存在书籍, 存在头像]
+
+    # ---- 书籍：卷1-12 × (名/描述/内容/获取地点)----
+    book:
+      name_fields: [书籍名]
+      card_fields:
+        - [体裁, 体裁]
+        - [卷数, 卷数]
+        - [国家, 国家]
+        - [稀有度, 稀有度]
+        - [实装版本, 实装版本]
+        - [相关角色, 相关角色]
+      attr_fields: [书籍名, 书名首字母, 体裁, 卷数, 国家, 图鉴, 实装版本, 相关角色,
+                    稀有度]
+      rows_from:
+        - pattern: '^卷(\d+)名$'
+          table: genshin_book_volume
+          columns: {volume: '{0}', name: '@key', desc: '卷{0}描述',
+                    content: '卷{0}内容', location: '卷{0}获取地点'}
+
+    # ---- 七圣召唤卡牌 ----
+    tcg_card:
+      name_fields: [名称]
+      card_fields:
+        - [种类, 种类]
+        - [类别, 类别]
+        - [属性, 属性]
+        - [生命值, 生命值]
+        - [武器, 武器]
+        - [阵营, 阵营]
+        - [获取, 获取]
+        - [描述, 描述]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 种类, 类别, 属性, 生命值, 武器, 阵营, 获取, 描述, 效果,
+                    效果花费, 实装版本, 召唤物]
+      rows_from:
+        - pattern: '^普通攻击(2?)名称$'
+          table: genshin_tcg_skill
+          const: {skill_type: 普通攻击}
+          columns: {variant: '{0}', name: '@key', effect: '普通攻击{0}效果',
+                    cost: '普通攻击{0}花费'}
+        - pattern: '^元素战技(2?)名称$'
+          table: genshin_tcg_skill
+          const: {skill_type: 元素战技}
+          columns: {variant: '{0}', name: '@key', effect: '元素战技{0}效果',
+                    cost: '元素战技{0}花费'}
+        - pattern: '^元素爆发(2?)名称$'
+          table: genshin_tcg_skill
+          const: {skill_type: 元素爆发}
+          columns: {variant: '{0}', name: '@key', effect: '元素爆发{0}效果',
+                    cost: '元素爆发{0}花费'}
+        - pattern: '^被动技能名称$'
+          table: genshin_tcg_skill
+          const: {skill_type: 被动技能}
+          columns: {variant: '', name: '@key', effect: 被动技能效果}
+    tcg_term:
+      name_fields: [名称]
+      card_fields:
+        - [类别, 类别]
+        - [费用, 费用]
+        - [说明, 说明]
+      attr_fields: [名称, 类别, 费用, 说明, 图标]
+    tcg_prop:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类型, 类型]
+        - [来源, 来源]
+        - [兑换材料, 兑换材料]
+        - [介绍, 介绍]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类型, 来源, 兑换材料, 兑换材料个数, 介绍, 用途,
+                    实装版本]
+
+    # ---- 尘歌壶 ----
+    furnishing:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类别, 类别]
+        - [类型, 类型]
+        - [洞天仙力, 洞天仙力]
+        - [负载, 负载]
+        - [摆放区域, 摆放区域]
+        - [获取方式, 获取方式]
+        - [介绍, 介绍]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类别, 类型, 洞天仙力, 负载, 负载2, 摆放区域,
+                    获取方式, 价格, 图纸价格, 图纸获取位置, 图纸获取方式, 合成素材,
+                    介绍, 实装版本, 备注]
+    furnishing_set:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [稀有度, 稀有度]
+        - [风格, 风格]
+        - [摆放区域, 摆放区域]
+        - [偏好角色, 偏好角色]
+        - [所需摆设, 所需摆设]
+        - [介绍, 介绍]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 类型, 稀有度, 风格, 摆放区域, 偏好角色, 所需摆设, 介绍,
+                    实装版本, 图纸来源, 图纸价格, 图纸介绍, 图纸获取位置]
+
+    # ---- 装扮 / 名片 / 风之翼：三代模板字段并成一个 kind ----
+    costume:
+      name_fields: [名称]
+      card_fields:
+        - [适配角色, 适配角色]
+        - [稀有度, 稀有度]
+        - [系列, 系列]
+        - [色系, 色系]
+        - [类型, 类型]
+        - [所属套装, 所属套装]
+        - [获取方式, 获取方式]
+        - [获取途径, 获取途径]
+        - [价格, 价格]
+        - [缤纷评分, 缤纷评分]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 适配角色, 稀有度, 系列, 色系, 类型, 性别, 性别前缀, 性别后缀,
+                    所属套装, 获取方式, 获取方式序号, 获取途径, 获取途径1, 获取途径2,
+                    价格, 制作, 缤纷评分, 海报张数, 升炼后缀, PV, 视频链接, 视频标题,
+                    简介, 介绍, 故事, 来源, 备注, 实装版本]
+    namecard:
+      name_fields: [名称]
+      card_fields:
+        - [获取方式, 获取方式]
+        - [相关成就, 相关成就]
+        - [相关活动, 相关活动]
+        - [相关角色, 相关角色]
+        - [描述, 描述]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 描述, 获取方式, 相关成就, 相关活动, 相关角色, 实装版本, 备注]
+    achievement_namecard:
+      name_fields: []
+      card_fields: []
+      attr_fields: []
+    glider:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [来源, 来源]
+        - [介绍, 介绍]
+        - [故事, 故事]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 来源, 介绍, 故事, 实装版本]
+
+    # ---- 千星奇域 ----
+    lobby_facility:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类型, 类型]
+        - [获取方式, 获取方式]
+        - [获取途径, 获取途径]
+        - [所属模板, 所属模板]
+        - [介绍, 介绍]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类型, 获取方式, 获取途径, 所属模板, 是否包含, 介绍,
+                    实装版本]
+    qiyu_interaction:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类型, 类型]
+        - [系列, 系列]
+        - [获取方式, 获取方式]
+        - [获取途径, 获取途径]
+        - [介绍, 介绍]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类型, 系列, 获取方式, 获取途径, 介绍, 实装版本]
+
+    # ---- 角色子页（X/攻略、X/家园、X/幻想真境剧诗）----
+    character_guide:
+      name_fields: [角色]
+      card_fields:
+        - [攻略类型, 攻略类型]
+        - [评级, 评级]
+        - [定位, 定位]
+      attr_fields: [角色, 攻略类型, 评级, 定位]
+      child_templates:
+        - template: 角色攻略头
+          table: genshin_character_guide_head
+          columns: {note: '1'}
+    character_home:
+      name_fields: [角色]
+      card_fields:
+        - [偏好套装1, 偏好套装1]
+        - [偏好套装2, 偏好套装2]
+        - [背景, 背景]
+      attr_fields: [角色, 偏好套装1, 偏好套装2, 背景, 对话1, 对话2,
+                    偏好1对话a角色, 偏好1对话a, 偏好1对话b角色, 偏好1对话b,
+                    偏好1对话c角色, 偏好1对话c, 偏好2对话a角色, 偏好2对话a,
+                    偏好2对话b角色, 偏好2对话b, 偏好2对话c角色, 偏好2对话c]
+      child_templates:
+        - template: 人物对话
+          occurrence: true
+          table: genshin_character_home_line
+          columns: {speaker: 头像, line_1: '1', line_2: '2', line_3: '3', line_4: '4'}
+    mimegrand_character:
+      name_fields: [角色]
+      card_fields:
+        - [表演诀窍, 表演诀窍]
+      attr_fields: [角色, 表演诀窍, 对话1a角色, 对话1a, 对话1b角色, 对话1b,
+                    对话1c角色, 对话1c, 对话2a角色, 对话2a, 对话2b角色, 对话2b,
+                    对话2c角色, 对话2c, 对话3a角色, 对话3a, 对话3b角色, 对话3b,
+                    对话3c角色, 对话3c]
+      child_templates:
+        - template: 人物对话
+          occurrence: true
+          table: genshin_mimegrand_line
+          columns: {speaker: 头像, line_1: '1', line_2: '2', line_3: '3', line_4: '4'}
+
+    # ---- 秘境：88 参 = 难度1-6 × (名称/进入等级/怪物等级/掉落/五轮怪物/机制…) ----
+    domain:
+      name_fields: [秘境名称]
+      card_fields:
+        - [秘境类型, 秘境类型]
+        - [所属地区, 所属地区]
+        - [树脂消耗, 树脂消耗]
+        - [进入条件, 进入条件]
+        - [通关条件, 通关条件]
+        - [秘境介绍, 秘境介绍]
+      attr_fields: [秘境名称, 秘境类型, 所属地区, 树脂消耗, 进入条件, 通关条件,
+                    秘境介绍, 周一周四掉落, 周二周五掉落, 周三周六掉落]
+      rows_from:
+        - pattern: '^难度(\d)名称$'
+          table: genshin_domain_level
+          columns: {level: '{0}', name: '@key', enter_level: '难度{0}进入等级',
+                    monster_level: '难度{0}怪物等级', drops: '难度{0}掉落',
+                    normal_drops: '难度{0}常规掉落', condition: '难度{0}通关条件',
+                    anomaly: '难度{0}地脉异常', mechanic: '难度{0}秘境机制',
+                    wave_1: '难度{0}第一轮怪物', wave_2: '难度{0}第二轮怪物',
+                    wave_3: '难度{0}第三轮怪物', wave_4: '难度{0}第四轮怪物',
+                    wave_5: '难度{0}第五轮怪物'}
+    domain_level:
+      name_fields: [关卡名称]
+      card_fields:
+        - [秘境名称, 秘境名称]
+        - [进入条件, 进入条件]
+        - [所属地区, 所属地区]
+        - [树脂消耗, 树脂消耗]
+      attr_fields: [秘境名称, 关卡名称, 进入条件, 所属地区, 树脂消耗, 道具掉落, 圣遗物掉落]
+
+    # ---- 纪行 / 活动 / 文章 / 教程 / 游迹 / 讨伐 ----
+    battlepass:
+      name_fields: []
+      card_fields: []
+      attr_fields: []
+      # 228 参全是编号格子（1-/01-/01-a-），没有可复用的列名规律，交给模板数据补捞
+    event:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [开始时间, 开始时间]
+        - [结束时间, 结束时间]
+        - [所属版本, 所属版本]
+        - [地区, 地区]
+        - [活动描述, 活动描述]
+      attr_fields: [名称, 类型, 开始时间, 结束时间, 开始描述, 结束描述, 条件限制,
+                    活动描述, 官方公告链接, 角色获取, 武器获取, 小道具获取, 衣装获取,
+                    千星奇域物品获取, 装扮获取, 所属版本, 活动奖励, 系列, 地区, 出场人物]
+    article:
+      name_fields: []
+      card_fields:
+        - [类别, 文章上级页面]
+        - [时间, 时间]
+        - [作者, 作者]
+        - [来源, 来源]
+        - [是否原创, 是否原创]
+      attr_fields: [文章上级页面, 时间, 作者, 来源, 是否原创, 原文地址]
+    tutorial:
+      name_fields: [教程名称]
+      card_fields:
+        - [类别, 类别]
+        - [类型, 类型]
+        - [教程数目, 教程数目]
+        - [奖励, 奖励]
+        - [实装版本, 实装版本]
+      attr_fields: [教程名称, 类别, 类型, 教程数目, 奖励, 实装版本]
+      child_templates:
+        - template: 教程/列
+          occurrence: true
+          table: genshin_tutorial_entry
+          columns: {branch: 分支, desc: 教程说明}
+    travel_trace:
+      name_fields: [名称]
+      card_fields:
+        - [角色, 角色]
+        - [稀有度, 稀有度]
+        - [介绍, 介绍]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 角色, 稀有度, 介绍, 实装版本]
+    hunt_list:
+      name_fields: []
+      card_fields: []
+      attr_fields: []
+      # 深境回廊/渊月螺旋 一页有十几层，每层一个 讨伐列表 块（深境回廊用
+      # 讨伐列表1，渊月螺旋用 讨伐列表，两种都要认）。infobox 只吃第一块，
+      # 剩下的靠 child_templates 按出现顺序编号——block 列就是层号。
+      # 注意"目标"那组用的是中文数字（第一间目标/第二间目标/第三间目标），
+      # 和 第1间怪物等级 的阿拉伯数字不是一个编号体系，正则得两边都收。
+      child_templates:
+        - template: [讨伐列表, 讨伐列表1]
+          occurrence: true
+          rows_from:
+            - pattern: '^第(\d)间怪物等级$'
+              table: genshin_hunt_floor_level
+              columns: {floor: '{0}', value: '@key'}
+            - pattern: '^第([一二三1-3])间目标$'
+              table: genshin_hunt_floor_goal
+              columns: {floor: '{0}', value: '@key'}
+            - pattern: '^第(\d)间怪物$'
+              table: genshin_hunt_floor
+              columns: {floor: '{0}', value: '@key'}
+            - pattern: '^(\d)(上|下)光环$'
+              table: genshin_hunt_aura
+              columns: {floor: '{0}', side: '{1}', value: '@key'}
+
+    # ---- 角色语音页：表头当 infobox（四语 CV），语音行进 genshin_voice_lines ----
+    voice:
+      name_fields: []
+      card_fields:
+        - [汉语CV, 汉语CV]
+        - [日语CV, 日语CV]
+        - [英语CV, 英语CV]
+        - [韩语CV, 韩语CV]
+      attr_fields: [汉语CV, 日语CV, 英语CV, 韩语CV]
+      child_templates:
+        # 角色/语音1 是新版（7,399 次），角色/语音 是旧版（1,509 次），参数名一致，
+        # 25 页新旧混排，两个都要认；template 列记下实际命中的那个
+        - template: [角色/语音1, 角色/语音]
+          occurrence: true
+          table: genshin_voice_lines
+          columns: {voice_type: 语音类型, file: 语音文件, file_jp: 语音文件日语,
+                    file_en: 语音文件英语, file_kr: 语音文件韩语, text: 语音内容,
+                    text_jp: 语音内容日语, text_en: 语音内容英语, text_kr: 语音内容韩语}

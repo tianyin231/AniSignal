@@ -213,6 +213,12 @@ def generic_entity(ctx: ExtractCtx) -> ExtractResult:
             }))
     for spec_tpl in spec.get("child_templates", []) or []:
         rows.extend(_child_rows(ctx, spec_tpl))
+    # kind 级 rows_from：把【infobox 自己身上】的编号字段拆成多行。武器图鉴的
+    # `20突破前攻击力`/`40突破后攻击力`…、书籍的 `卷1名`/`卷1内容`…、七圣召唤卡牌的
+    # `元素战技名称`/`元素战技效果`… 都是这个形状——不拆就只剩 fields_json 里一行，
+    # 查表探针问"信使 90 级攻击力"只能翻 JSON。template 列记 "infobox"。
+    for rf in spec.get("rows_from", []) or []:
+        rows.extend(_pattern_rows(ctx, "infobox", 1, ctx.fields, rf, ""))
     return ExtractResult(rows=rows, card_text=generic_card(ctx.title, ctx.fields, spec))
 
 
@@ -302,6 +308,15 @@ def child_table_columns(cfg: GameConfig) -> dict[str, list[str]]:
                 rf_table = str(rf.get("table", "") or table)
                 add(rf_table, rf.get("columns", {}) or {})
                 add(rf_table, {"block": None})
+                # const 是这批行的常量列：七圣召唤的 skill_type（普通攻击/元素战技/
+                # 元素爆发各一条 rows_from，值写死），不然同一张表三摊行分不出是哪个技能
+                add(rf_table, rf.get("const", {}) or {})
+        # kind 级 rows_from（infobox 自己的编号字段）：表名必须自己写，没有父表可继承
+        for rf in spec.get("rows_from", []) or []:
+            rf_table = str(rf.get("table", "") or "")
+            add(rf_table, rf.get("columns", {}) or {})
+            add(rf_table, {"block": None})
+            add(rf_table, rf.get("const", {}) or {})
     return tables
 
 
