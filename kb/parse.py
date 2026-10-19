@@ -713,6 +713,11 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
             kind_counter[kind] = kind_counter.get(kind, 0) + 1
 
             # ---- 结构化落库 ----
+            # v3 新家族（关卡图鉴/原型舰/塞壬/同人角色）把入库门槛降到"有字段就行"：
+            # 全库有 6 页字段不足 5 个，其中 3 页带着地图介绍/解锁条件，漏掉可惜。
+            # 只降新家族的门槛——老三族的 card 走老 chunk_id 计数器，条件一改 id 就错位。
+            # 新家族的 card 走 x 前缀计数器，随便降。
+            row_ok = 1 if (kind in NEW_KINDS and fields) else infobox_ok
             ship_row = stats_rows = skill_rows = slot_rows = None
             card_text = None
             if kind == "ship" and infobox_ok:
@@ -724,7 +729,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
             elif kind == "equipment" and infobox_ok:
                 eq = extract_equipment(fields, category)
                 card_text = equip_card(title, eq)
-            elif kind == "stage" and infobox_ok:
+            elif kind == "stage" and row_ok:
                 row = extract_stage(fields)
                 card_text = stage_card(title, row)
                 conn.execute(
@@ -741,7 +746,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
                      row["oil_melee"], row["oil_flagship"], row["oil_sub"], row["sub_start"],
                      row["drops"], json.dumps(fields, ensure_ascii=False)),
                 )
-            elif kind == "ship_perf" and infobox_ok:
+            elif kind == "ship_perf" and row_ok:
                 row = extract_ship_perf(fields, category)
                 card_text = ship_perf_card(title, row)
                 conn.execute(
@@ -754,7 +759,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
                      row["crew"], row["armament"], row.get("armor"), row["aircraft"], row["other"],
                      json.dumps(fields, ensure_ascii=False)),
                 )
-            elif kind == "siren" and infobox_ok:
+            elif kind == "siren" and row_ok:
                 row = extract_siren(fields)
                 card_text = siren_card(title, row)
                 conn.execute(
@@ -766,7 +771,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
                      row["belongs"], row["stages"], row["special_power"], row["intro"],
                      json.dumps(fields, ensure_ascii=False)),
                 )
-            elif kind == "fan_ship" and infobox_ok:
+            elif kind == "fan_ship" and row_ok:
                 row = extract_fan_ship(fields)
                 card_text = fan_ship_card(title, row)
                 conn.execute(
@@ -875,7 +880,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
                                if ln.split(":", 1)[0] not in skip]
                 emit_pack(long_fields, "图鉴字段", "fields", title, url, images)
 
-            if found and not infobox_ok:
+            if found and not infobox_ok and not row_ok:
                 failures.append(title)
 
     # ---- 重定向别名（内容在目标页里，别名本身也要能查到）----
