@@ -99,9 +99,74 @@ def wiki_style(display: dict[str, tuple[str, ...]] | None = None,
 def parse_wikitext(text: str) -> mwparserfromhell.wikicode.Wikicode | None:
     """容错解析：个别页面语法太歪，失败就退回 None（调用方走正则兜底）。"""
     try:
-        return mwparserfromhell.parse(text)
+        return mwparserfromhell.parse(preprocess(text))
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------- 解析预处理
+# mwparserfromhell 的解析在两处会算错括号/标签，代价是整个 infobox 连参数一起消失：
+#
+#  ① `{{#解析器函数: … [[链接]] …}}`——链接的 `]]` 被当成模板闭合，模板被提前截断，
+#     后面所有参数全丢。绝区零 照 的 角色图鉴 就是这么丢的：`|昵称/外号=…{{#info:
+#     见下方[[#人物相关|人物相关]]}}` 之后的中文CV/生日/10生命值…27 个参数全没进
+#     结构化路，等级属性表整页空。链接在块内任何位置都会触发。
+#  ② `{{#解析器函数: …<u>…</u>…}}`——标签落在**模板名**里（第一个 | 之前）时，
+#     mwparserfromhell 的名字解析直接崩，角色图鉴 在 中文CV 那儿被截断。
+#     绝区零 雅 踩的是这个：`{{#info:内测期间为<u>杜冥鸦</u>。|note}}`。
+#     标签落在参数值里反而没事，所以只治名字那段。
+#
+# 两种治法的输出都和原来逐字节一致——这些块在 _plain 里本来就把链接渲染成标签、
+# 把 <u>/<b> 这类 _UNWRAP_TAGS 脱成标记只留内容、把 ref/bstyle 连内容一起丢、
+# 把 br 换成换行，预处理只是提前做同一件事，让括号/标签配对回到正确形状。
+# 没有这种写法的页面正则一次都不命中。1160 页里 37 页命中 ①、1 页命中 ②。
+# (?:(?!\{\{).)*? 是不跨越下一个 {{ 的非贪婪匹配，和 to_plain 里清解析器函数
+# 残骸用的是同一个形状——万一某块没写全闭合，也不会把后面一整页一起吞掉。
+_PF_BLOCK = re.compile(r"\{\{#(?:(?!\{\{).)*?\}\}", re.S)
+_PF_LINK = re.compile(r"\[\[(?:[^\[\]|]*\|)?([^\[\]]*)\]\]")
+# ref/bstyle/math… 连内容一起没的标签（_DROP_TAGS 的标签名子集，够用就行）
+_PF_DROP_BLOCK = re.compile(
+    r"<\s*(ref|references|nowify|nowiki|gallery|timeline|syntaxhighlight|source|"
+    r"math|code|pre|imagemap|inputbox|quiz|bstyle)\b[^>]*>.*?<\s*/\s*\1\s*>",
+    re.I | re.S)
+_PF_BR = re.compile(r"<\s*br\s*/?\s*>", re.I)
+_PF_TAG = re.compile(r"<\s*/?\s*[A-Za-z][^>]*?>")
+
+
+def _pf_neutralize_name(part: str) -> str:
+    """把一个 `{{#…` 块的**名字段**（第一个 | 之前）里的标签治成不碍事的样子。
+
+    唯一的输出分歧：`<br>` 只能整个删掉，不能换成换行——模板名里带字面换行符
+    同样会让 mwparserfromhell 崩（实测 `{{#info:a\\nb}}` 一样截断），而这个名字
+    本来就就够歪了，删掉比丢掉整个 infobox 划算。落点要求 tail ≥12 字符才会渲染，
+    实际上碰不到。
+    """
+    part = _PF_DROP_BLOCK.sub("", part)
+    part = _PF_BR.sub("", part)
+    return _PF_TAG.sub("", part)
+
+
+def preprocess(text: str) -> str:
+    """修 mwparserfromhell 的括号/标签配对错误，输出与 _plain 的渲染结果一致。"""
+    if "{{#" not in text:
+        return text
+    if "[[" not in text and "<" not in text:
+        return text
+
+    def fix(m: re.Match) -> str:
+        block = m.group(0)
+        if "[[" in block:
+            block = _PF_LINK.sub(lambda k: k.group(1), block)
+        if "<" in block:
+            # 名字段 = 第一个 | 之前。整块一个 | 都没有时（{{#info:a<br>b}}）整个
+            # 内芯都是名字，不能因为 partition 不出 sep 就跳过。
+            inner = block[2:-2]
+            head, sep, tail = inner.partition("|")
+            if "<" in head:
+                block = "{{" + _pf_neutralize_name(head) + sep + tail + "}}"
+        return block
+
+    return _PF_BLOCK.sub(fix, text)
 
 
 # ---------------------------------------------------------------- 模板名归一化
@@ -200,11 +265,19 @@ def _plain_template(tpl: Any, depth: int) -> str:
     # 规则：名字以 # 开头、冒号后那段够长（>=12，排除 {{#css:x}} {{#var:a}} 这种
     # 真解析器函数的短参数）且不含模板语法（排除 {{#if:{{{参数名|}}}}})就当正文渲染。
     # 别的游戏没有这种写法，输出一个字节不变。
+    # **必须先确认 tail 里还有冒号再 split**：_plain 的 depth>12 递归闸会返回空串，
+    # 而 depth 数的是所有节点层（标签+模板+参数，不只是模板），深层页面
+    # （敲敲 那种 div/ul/li 套十几层的）走到这儿 name 已经渲染成 "" 了，
+    # 直接 split(":",1)[1] 就是 IndexError。绝区零修掉解析器函数里的链接
+    # （见 preprocess）之后这类节点才第一次成为正常 Template，这个 latent bug
+    # 才暴露出来——落到下面的通用兜底返回空串，本来就是这个函数该有的行为。
     if name.startswith("#") and ":" in name:
-        tail = _plain(tpl.name, depth + 1).split(":", 1)[1].strip()
-        if len(tail) >= 12 and "{{" not in tail:
-            # 编辑在 #replace 里写字时用字面量 \n 换行，还原成真换行再进正文
-            return tail.replace("\\n", "\n")
+        tail = _plain(tpl.name, depth + 1)
+        if ":" in tail:
+            tail = tail.split(":", 1)[1].strip()
+            if len(tail) >= 12 and "{{" not in tail:
+                # 编辑在 #replace 里写字时用字面量 \n 换行，还原成真换行再进正文
+                return tail.replace("\\n", "\n")
 
     # 游戏配置声明的展示型模板（PRTS 的 color/术语/+/*…），优先于 _VALUE_TEMPLATES。
     # 必须先查配置：星铁 BWIKI 的 {{颜色|描述2|50%/100%}} 和 {{颜色|冰|冰属性}} 给人看的
