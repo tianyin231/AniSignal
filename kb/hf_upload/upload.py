@@ -70,11 +70,18 @@ def main() -> int:
             print("跳过（不存在）：", name)
             continue
         print("上传：", name)
-        api.upload_folder(
-            folder_path=str(src),
-            path_in_repo=f"{GAME}/{name}",
-            repo_id=REPO, repo_type="dataset", token=TOKEN,
-        )
+        if src.is_dir():
+            api.upload_folder(
+                folder_path=str(src),
+                path_in_repo=f"{GAME}/{name}",
+                repo_id=REPO, repo_type="dataset", token=TOKEN,
+            )
+        else:
+            api.upload_file(
+                path_or_fileobj=str(src),
+                path_in_repo=f"{GAME}/{name}",
+                repo_id=REPO, repo_type="dataset", token=TOKEN,
+            )
     print("完成。拉取：huggingface_hub.snapshot_download(%r, repo_type='dataset')" % REPO)
     return 0
 
