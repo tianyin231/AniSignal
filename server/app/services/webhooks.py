@@ -6,11 +6,15 @@
 n8n 的 Webhook 节点可直接消费；额外带 id/community/keywords 便于自动化分流。
 
 安全边界：只接受 http/https，拒绝 localhost 与内网/保留 IP 字面量（用户可配 URL，
-不能把自托管实例当成内网扫描器）。
+不能把自托管实例当成内网扫描器）。字面量检查挡不住 `127.0.0.1.nip.io` 这类域名，
+也挡不住"创建时是公网、事后把 DNS 改指向内网"，因此投递前会重新解析并逐个 IP 复核。
 """
 
+import asyncio
 import ipaddress
 import logging
+import socket
+import time
 from datetime import timedelta, timezone
 from urllib.parse import urlparse
 
@@ -42,14 +46,66 @@ MAX_HITS_PER_RUN = 10
 USER_AGENT = "AniSignal-Webhook/1.0"
 CONTENT_MAX = 500
 
+# DNS 复核结果的缓存时长：必须远小于"改一次 DNS 记录"的成本，缓存的是判定结果
+# 而不是 IP，TTL 内重复投递不再解析（同一 host 每轮最多几条，成本可忽略）
+DNS_CHECK_TTL = 60.0
+_dns_cache: dict[str, tuple[float, tuple[str, ...]]] = {}
+
 _BLOCKED_HOSTS = {
     "localhost",
     "127.0.0.1",
     "0.0.0.0",
     "::1",
     "metadata.google.internal",
+    # 裸域名形式的「解析到内网」公共后缀（SEC-021）：不解析也要先拒一层
+    "nip.io",
+    "sslip.io",
+    "localtest.me",
 }
-_BLOCKED_SUFFIXES = (".localhost", ".local", ".internal")
+_BLOCKED_SUFFIXES = (
+    ".localhost",
+    ".local",
+    ".internal",
+    ".nip.io",
+    ".sslip.io",
+    ".localtest.me",
+    ".vcap.me",
+)
+
+
+def _is_internal_address(address: str) -> bool:
+    """单个 IP 是否落在不可投递区间（回环/私网/链路本地/保留/组播/未指定）。"""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return True
+    # ::ffff:127.0.0.1 这类 IPv4-mapped 的 is_loopback 是 False，必须先解包
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return bool(
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+async def _resolved_addresses(host: str) -> tuple[str, ...]:
+    """解析 host 的全部 A/AAAA；解析失败返回空 tuple（POST 自然会失败）。"""
+    now = time.monotonic()
+    cached = _dns_cache.get(host)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+    try:
+        infos = await asyncio.to_thread(socket.getaddrinfo, host, None, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return ()
+    addresses = tuple(sorted({info[4][0] for info in infos}))
+    _dns_cache[host] = (now + DNS_CHECK_TTL, addresses)
+    return addresses
 
 
 def is_safe_webhook_url(url: str) -> bool:
@@ -69,15 +125,26 @@ def is_safe_webhook_url(url: str) -> bool:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        return True  # 域名不在此处解析，避免为校验做一次阻塞 DNS
-    return not (
-        address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_reserved
-        or address.is_multicast
-        or address.is_unspecified
-    )
+        return True  # 域名在此处不解析（阻塞 DNS）；投递前的 _delivery_target_safe 会判
+    return not _is_internal_address(host)
+
+
+async def _delivery_target_safe(url: str) -> bool:
+    """投递前的 SSRF 收敛：形态校验 + 解析后逐个 IP 复核。
+
+    getaddrinfo 会把十进制/十六进制/短形式（`2130706433`、`127.1`、`0x7f000001`）
+    与 `*.nip.io` 这类域名一并归一成真实 IP，所以这一道能盖住字面量检查的全部绕过写法。
+    """
+    if not is_safe_webhook_url(url):
+        return False
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return False
+    addresses = await _resolved_addresses(host)
+    if not addresses:
+        return True  # 解析不了：请求本身就会失败，不额外放行也不误杀
+    return all(not _is_internal_address(address) for address in addresses)
 
 
 def _clean(value, limit: int) -> str:
@@ -110,7 +177,7 @@ def tier_allowed(webhook: WebhookConfig, item: dict) -> bool:
 
 async def _post(url: str, payload: dict) -> tuple[int | None, str | None]:
     """POST 一次；返回 (状态码, 错误信息)。错误信息为 None 表示 2xx 成功。"""
-    async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=WEBHOOK_TIMEOUT, follow_redirects=False) as client:
         response = await client.post(
             url,
             json=payload,
@@ -133,6 +200,8 @@ async def deliver_webhook(
     row: WebhookDelivery | None = None,
 ) -> WebhookDelivery:
     """带重试的投递：最多 MAX_ATTEMPTS 次 POST，结果与错误全部落库。"""
+    # 投递前重新收敛目标地址：创建时校验挡不住 DNS 事后改指向（rebinding）
+    target_unsafe = not await _delivery_target_safe(webhook.url)
     if row is None:
         row = WebhookDelivery(
             webhook_id=webhook.id,
@@ -160,10 +229,13 @@ async def deliver_webhook(
     for attempt in range(1, MAX_ATTEMPTS + 1):
         code: int | None = None
         error: str | None = None
-        try:
-            code, error = await _post(webhook.url, payload)
-        except Exception as exc:  # noqa: BLE001 - 网络错误按失败重试
-            error = f"{type(exc).__name__}: {exc}"[:300]
+        if target_unsafe:
+            error = "目标地址未通过安全校验（解析到内网/回环/保留地址），已拒绝投递"
+        else:
+            try:
+                code, error = await _post(webhook.url, payload)
+            except Exception as exc:  # noqa: BLE001 - 网络错误按失败重试
+                error = f"{type(exc).__name__}: {exc}"[:300]
         row.attempts = attempt
         row.response_code = code
         row.error = error
@@ -180,6 +252,8 @@ async def deliver_webhook(
             "webhook %s attempt %s failed for content=%s: %s",
             webhook.id, attempt, content_id, error,
         )
+        if target_unsafe:
+            break  # 目标地址非法不是瞬时故障，重试不会变好
     row.status = "failed"
     await session.commit()
     return row

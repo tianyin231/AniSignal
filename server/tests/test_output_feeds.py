@@ -135,6 +135,23 @@ def _stub_post(monkeypatch, outcomes) -> _FakeClients:
     return fake
 
 
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch, request):
+    """投递前的 DNS 复核默认不依赖真实解析。
+
+    沙箱/CI 的网络会把所有外部域名解析到 198.18.0.0/15 保留段（is_private=True），
+    真实解析会让每个 webhook 用例都被判内网而拒发。这里统一桩成公网 IP，需要真实
+    getaddrinfo 的用例（十进制/短形式/IPv4-mapped 字面量）打 `real_dns` 标记。
+    """
+    if request.node.get_closest_marker("real_dns"):
+        return
+
+    async def _fake(host: str) -> tuple[str, ...]:
+        return ("93.184.216.34",)
+
+    monkeypatch.setattr(webhooks_module, "_resolved_addresses", _fake)
+
+
 # ---------- token 与 RSS 渲染 ----------
 
 
@@ -404,6 +421,60 @@ def test_is_safe_webhook_url_blocks_internal_targets():
     assert not webhooks_module.is_safe_webhook_url("ftp://example.com/hook")
     assert not webhooks_module.is_safe_webhook_url("")
     assert not webhooks_module.is_safe_webhook_url("not-a-url")
+    # 已知「解析到内网」的公共后缀：不解析也要先拒（SEC-021）
+    assert not webhooks_module.is_safe_webhook_url("https://127.0.0.1.nip.io/hook")
+    assert not webhooks_module.is_safe_webhook_url("https://169.254.169.254.sslip.io/hook")
+    assert not webhooks_module.is_safe_webhook_url("https://foo.localtest.me/hook")
+
+
+@pytest.mark.real_dns
+async def test_delivery_blocks_numeric_and_mapped_internal_literals():
+    """字面量检查只认点分四段，绕过写法全靠投递前的 getaddrinfo 归一化兜住（SEC-021）。
+
+    `ipaddress.ip_address("2130706433")` 直接抛 ValueError（字符串只接受点分形式），
+    所以这些值在 `is_safe_webhook_url` 里是放行的；但 getaddrinfo 会把十进制/十六进制/
+    八进制/短形式统一归一成 127.0.0.1，IPv4-mapped 的 is_loopback 又是 False，两处都堵。
+    """
+    for url in (
+        "http://2130706433/hook",
+        "http://127.1/hook",
+        "http://0x7f000001/hook",
+        "http://017700000001/hook",
+        "http://[::ffff:127.0.0.1]/hook",
+        "http://[::ffff:169.254.169.254]/hook",
+    ):
+        assert not await webhooks_module._delivery_target_safe(url), url
+
+
+async def test_dispatch_refuses_host_that_resolves_to_internal_ip(session, monkeypatch):
+    """创建时是公网、事后 DNS 改指向内网：投递前重新解析并拒发（SEC-021）。"""
+
+    async def _private(host: str) -> tuple[str, ...]:
+        return ("10.1.2.3",)
+
+    monkeypatch.setattr(webhooks_module, "_resolved_addresses", _private)
+    user = await _user(session, "rebind@t.com", keywords=["鸣潮"])
+    hook = WebhookConfig(user_id=user.id, url="https://hooks.example.com/n8n")
+    session.add(hook)
+    await session.commit()
+    await _content(
+        session,
+        external_id="BVrebind",
+        title="鸣潮新角色官宣",
+        keywords=["鸣潮"],
+        published_at=utcnow() - timedelta(hours=1),
+    )
+    fake = _stub_post(monkeypatch, {"https://hooks.example.com/n8n": [_FakeResponse(200)]})
+
+    stats = await webhooks_module.run_webhook_dispatch(session)
+    assert stats == {"users": 1, "sent": 0, "failed": 1, "skipped": 0}
+    assert fake.calls == []  # 一次都不 POST
+
+    row = await session.scalar(select(WebhookDelivery))
+    assert row.status == "failed"
+    assert row.attempts == 1  # 网络错误才重试，目标非法不值得重试
+    assert row.response_code is None
+    assert "安全校验" in row.error
 
 
 def test_build_payload_is_n8n_compatible():
