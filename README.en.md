@@ -8,11 +8,11 @@
 
 A self-hosted signal desk. Gather public updates, trace their sources, and receive what you follow.
 
-<img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-111111">
-<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-111111">
-<img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-111111">
-<img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-111111">
-<img alt="Self-hosted" src="https://img.shields.io/badge/Self--hosted-111111">
+<img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;labelColor=3776AB&amp;logo=python&amp;logoColor=white">
+<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&amp;logo=fastapi&amp;logoColor=white">
+<img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-00DC82?style=flat-square&amp;labelColor=00DC82&amp;logo=nuxt&amp;logoColor=white">
+<img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&amp;labelColor=2496ED&amp;logo=docker&amp;logoColor=white">
+<img alt="Self-hosted" src="https://img.shields.io/badge/Self--hosted-7C3AED?style=flat-square">
 
 [Live demo](http://anisignal.nanamiyako.cn/) · [Product tour](http://anisignal.nanamiyako.cn/intro) · [Quick start](#quick-start) · [Deployment](docs/deployment.md) · [Issues](https://github.com/tianyin231/AniSignal/issues)
 
