@@ -253,6 +253,24 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
     n_chunks = n_extra = n_images = 0
     failures: list[str] = []
 
+    def titled(title: str, text: str, kind: str) -> str:
+        """数据型 chunk 的文本冠上页名（"姬子｜角色故事1: 少女迷路了……"）。
+
+        fields/template/voice/prose 这些 chunk 的正文里一个字的页名都不带
+        （"角色故事1: …"、"角色语音: 语音类型=问候…"、"战技属性1LV1=…"），
+        问"姬子的角色故事1讲了什么"时向量跟本页卡片不沾边、BM25 也匹配不到
+        实体名，答案明明在库里却排不进 top-k。card 的文本开头本来就是
+        "名称（页名）"，不用再加。
+
+        在 emit 这一层加：packing 已经结束，chunk 条数和 chunk_id 一分不变，
+        `--append` 只原地覆盖变了文本的那批向量。
+        """
+        if not cfg.chunk_title_prefix or kind == "card" or not text:
+            return text
+        if text.startswith(title):
+            return text
+        return f"{title}｜{text}"
+
     with open(chunks_path, "w", encoding="utf-8") as cf, \
             cleantext.wiki_style(cfg.display_templates,
                                  cfg.strip_template_name_comments):
@@ -264,7 +282,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
             nonlocal n_extra
             rec = {
                 "chunk_id": f"{cfg.chunk_id_prefix}:x{n_extra:07d}",
-                "text": text,
+                "text": titled(title, text, kind),
                 "source_title": title,
                 "source_url": url,
                 "heading": heading,
@@ -361,7 +379,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
             for heading, chunk in chunker.chunk_body(body_text):
                 cf.write(json.dumps({
                     "chunk_id": f"{cfg.chunk_id_prefix}:{n_chunks:07d}",
-                    "text": chunk,
+                    "text": titled(title, chunk, "prose"),
                     "source_title": title,
                     "source_url": url,
                     "heading": heading,

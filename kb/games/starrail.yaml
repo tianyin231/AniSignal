@@ -38,6 +38,11 @@ chunk:
                             # 没有一个字段叫"…台词"，这个后缀实际不命中
   fields_chunk_min: 60
   max_images_per_page: 16
+  # 数据型 chunk 的文本冠上页名（"姬子｜角色故事1: …"）。星铁的 fields/template
+  # chunk 正文里一个字的页名都不带，问"姬子的角色故事1讲了什么"时向量和 BM25
+  # 都摸不到实体名——50 题评测里 q02/q07/q11/q12/q13 五道问答全是这么挂的。
+  # card 的文本开头本来就是"名称（页名）"，不受影响。
+  chunk_title_prefix: true
 
 parse:
   min_infobox_fields: 5    # 23 族的 infobox 普遍 6~180 个字段，5 是安全下限
