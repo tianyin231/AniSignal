@@ -36,13 +36,13 @@ KB_GAME=arknights tools/fetch_loop.sh                      # 反复续跑直到 
 环境：`kb/.venv`（mwparserfromhell / requests / onnxruntime / tokenizers / torch / PyYAML）。
 数据按游戏分目录（`.gitignore` 已排除，只提交代码、配置和文档）：
 
-| | azurlane（默认） | arknights |
-|---|---|---|
-| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` |
-| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` |
-| qdrant collection | `blhx_kb` | `arknights_kb` |
-| chunk_id 前缀 | `blhx:` | `arknights:` |
-| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` |
+| | azurlane（默认） | arknights | zzz |
+|---|---|---|---|
+| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` | `games/zzz.yaml` |
+| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` | `data/zzz/` |
+| qdrant collection | `blhx_kb` | `arknights_kb` | `zzz_kb` |
+| chunk_id 前缀 | `blhx:` | `arknights:` | `zzz:` |
+| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` | `eval/zzz/questions.jsonl` |
 
 azurlane 的 `data_dir` 故意不搬家：`blhx_kb` 的向量、`index_meta.json`、bm25 索引、
 53697 个 chunk_id 全在那儿，一搬家 v2/v3 的成果全部作废。新游戏各自一个目录，互不污染。
@@ -225,6 +225,40 @@ BM25 索引 **120114 docs / 188010 词条**（jieba 分词，232s 建完，84.7 
 最后一条是上面已知缺端的活样本：实体路由命中阿米娅、但 `entity_attrs` 里没有种族行，
 检索也拉不到模板原文 chunk，模型按提示词要求回了"无法确定"而不是编一个——对 bot 来说
 这个失败模式比 hallucination 好，但确实是下一轮要补的。
+
+### 绝区零（zzz）
+
+| 指标 | 数值 |
+|---|---|
+| 抓取篇数 | 1160（ns0 非重定向正文全量，3 个 gzip 分片，61 次请求 85.5s，0 失败） |
+| 重定向别名 | 45（进 `aliases` 表；**页标题是短名**——`星见雅` 重定向到 `雅`） |
+| 带 infobox 页 | 934（结构化抽取 929 = 99.5%；剩 4 个是"文章预设/材料预设"这类空壳页） |
+| **chunk 数** | **3582**（prose 1581 / card 930 / template 493 / fields 460 / gallery 110 / hidden 8） |
+| **向量数** | **3582**（qdrant collection `zzz_kb`，与 chunks.jsonl 行数一一对齐） |
+| SQLite 表 | `entities` 930 / `entity_attrs` 11919 + `zzz_agent_*`、`zzz_bangboo_skill_attrs` 8 张子表 |
+| 页面类型分布 | activity 233 / other 226 / material 200 / wengine 96 / namecard 96 / agent 62 / signal 80 / bangboo 40 / drivedisc 39 / album 37 / skin 17 / npc 15 / announcement 6 / enemy 5 / minigame 4 / guide 4 |
+
+BM25 索引 **3582 docs / 26447 词条**（jieba 分词，11s 建完，3.4 MB，落 `data/zzz/bm25/`）。
+混合检索三件套同样是 `--game` 一换即用、零代码改动。
+
+**eval 通过率**（50 题：查表 30 + 问答 20，混合检索 top-20 → rerank → top-3）：
+查表 30/30 = 100%；问答 20/20 = 100%；**总计 50/50 = 100%**，是四款游戏里第一个满分。
+
+绝区零这一轮**顺带修了 kblib 两个所有游戏共受益的解析 bug**（commit `03b6bc2`）：
+mwparserfromhell 在 `{{#解析器函数: …}}` 块里遇到 `[[链接]]` 时会把 `]]` 当成模板闭合、
+模板提前截断，**之后所有参数整段消失**——绝区零 1160 页里 37 页命中，照 的 `角色图鉴`
+连中文CV/生日/身高和整张等级属性表一起没了；HTML 标签落在**模板名**里（第一个 `|` 之前）
+时名字解析直接崩，雅 踩的是 `{{#info:内测期间为<u>杜冥鸦</u>。|note}}`。修法是新增
+`cleantext.preprocess()`，提前把块内链接折成文本、把名字段的标签中性化，输出与 `_plain`
+的渲染结果逐字节一致。**这类"参数整段消失"的失败是静默的**——不报错、chunk 数只少几个，
+只能靠"查表探针查不到已知存在的字段"发现，方舟/鸣潮/星铁的库可能也有同类漏抽。
+
+绝区零的结构化难点和另三款都不一样，值得记的是**两代技能模板并存**：v1 平铺的
+`{{角色技能|普攻=…|普攻描述=…}}`（27 页）和 v3 嵌套的
+`{{角色/技能|普攻={{角色/技能/项|名称=…|描述=…|属性1=…}}}}`（37 页）混在不同角色页上，
+v3 的 `角色/技能/项` 只嵌在别的模板参数值里，不 `recursive: true` 就一个节点都找不到；
+零号·安比 更把 v1 的技能块塞在 `{{角色/加强|未加强={{角色技能|…}}}}` 里，是 62 个代理人里
+唯一技能全丢的那个。`parse.kinds` 里两套都声明了，各落各的表。
 
 ## 开发小工具
 
