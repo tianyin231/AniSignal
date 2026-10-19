@@ -283,7 +283,10 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
 
         for rec in read_shards(source):
             title = rec["title"]
-            wikitext = rec["wikitext"]
+            # 先过 preprocess：parse_wikitext 内部也会过一遍（渲染走那条），但
+            # 下面 body_wikitext 要用 str(tpl) 去原文里 replace 掉 infobox，
+            # 不过一遍就找不着、infobox 会连同正文一起再进一次 chunk。
+            wikitext = cleantext.preprocess(rec["wikitext"])
             n_pages += 1
             wc = cleantext.parse_wikitext(wikitext)
             found = cleantext.find_top_level_infobox(

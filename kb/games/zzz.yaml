@@ -282,6 +282,11 @@ parse:
         # pattern 必须带一列 const 区分，否则 `where skill='普攻'` 拿到名称行还是
         # 描述行全看 sort）
         - template: 角色技能
+          # 零号·安比 把整个技能块塞在 `{{角色/加强|未加强={{角色技能|…}}}}` 的
+          # 参数值里，顶层模板池里没有这个节点——不 recursive 她就是 62 个代理人里
+          # 唯一一个技能全丢的。其余 26 页的 角色技能 都在顶层，recursive 只是池子
+          # 变大、命中集合不变（且本 spec 没有 occurrence，本来就只取第一个）。
+          recursive: true
           table: zzz_agent_skills
           rows_from:
             # 名称行：普攻 / 强化普攻2 / 回避支援 …（裸槽位，值就是这个技能的名字）
