@@ -771,7 +771,14 @@ async def _notify_alert(
                 await session.execute(
                     select(WebhookConfig)
                     .join(User, User.id == WebhookConfig.user_id)
-                    .where(WebhookConfig.enabled.is_(True), User.status == "active")
+                    .where(
+                        # 到价提醒是用户级事件：只能投给设提醒的这个人自己的渠道。
+                        # 漏掉 user_id 条件会把他的商品名/心理价位/监控词广播给全站 webhook
+                        # （含第三方群机器人），属于跨租户信息泄露。
+                        WebhookConfig.user_id == alert.user_id,
+                        WebhookConfig.enabled.is_(True),
+                        User.status == "active",
+                    )
                     .order_by(WebhookConfig.id)
                 )
             ).scalars()
