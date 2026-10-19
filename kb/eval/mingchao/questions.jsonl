@@ -23,8 +23,8 @@
 {"id": "t23", "kind": "table", "q": "长离的共鸣链2叫什么", "probe": "child", "args": {"table": "mc_resonator_chains", "title": "共鸣者/长离", "column": "name", "where": {"index": "2"}}, "expect": "循我所望"}
 {"id": "t24", "kind": "table", "q": "今汐的常态攻击叫什么", "probe": "child", "args": {"table": "mc_resonator_skills", "title": "共鸣者/今汐", "column": "basic_attack", "where": {}}, "expect": "浮光霁寒"}
 {"id": "t25", "kind": "table", "q": "卡卡罗的共鸣解放叫什么", "probe": "child", "args": {"table": "mc_resonator_skills", "title": "共鸣者/卡卡罗", "column": "liberation", "where": {}}, "expect": "幻影蚀刻"}
-{"id": "t26", "kind": "table", "q": "今汐的故事1叫什么", "probe": "child", "args": {"table": "mc_resonator_stories", "title": "共鸣者/今汐", "column": "name", "where": {"index": "1"}}, "expect": "令尹之名"}
-{"id": "t27", "kind": "table", "q": "今汐的珍贵之物1叫什么", "probe": "child", "args": {"table": "mc_resonator_stories", "title": "共鸣者/今汐", "column": "name", "where": {"index": null, "template": "共鸣者/档案"}}, "expect": "令尹之名"}
+{"id": "t26", "kind": "table", "q": "今汐的故事1叫什么", "probe": "child", "args": {"table": "mc_resonator_stories", "title": "共鸣者/今汐", "column": "name", "where": {"index": "1", "category": "故事"}}, "expect": "令尹之名"}
+{"id": "t27", "kind": "table", "q": "今汐的珍贵之物1叫什么", "probe": "child", "args": {"table": "mc_resonator_stories", "title": "共鸣者/今汐", "column": "name", "where": {"index": "1", "category": "珍贵之物"}}, "expect": "小龙包"}
 {"id": "t28", "kind": "table", "q": "中曲台地50%探索报告的标题是什么", "probe": "child", "args": {"table": "mc_exploration_reports", "title": "探索报告/中曲台地", "column": "title", "where": {"percent": "50"}}, "expect": "孤独索拉·中曲台地篇·其一"}
 {"id": "t29", "kind": "table", "q": "云陵谷100%探索报告的标题是什么", "probe": "child", "args": {"table": "mc_exploration_reports", "title": "探索报告/云陵谷", "column": "title", "where": {"percent": "100"}}, "expect": "关外金铃·其二"}
 {"id": "t30", "kind": "table", "q": "今汐的六条共鸣链分别叫什么", "probe": "child_list", "args": {"table": "mc_resonator_chains", "title": "共鸣者/今汐", "column": "name", "where": {}, "sep": "；"}, "expect": "沉海洄天溯；绒雪凝屏息；天定神子身；自甘佑凡尘；流光化霜雪；寒尽又逢春"}

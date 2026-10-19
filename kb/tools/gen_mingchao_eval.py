@@ -96,12 +96,15 @@ TABLE_SPECS: list[tuple[str, str, str, dict]] = [
     ("t25", "卡卡罗的共鸣解放叫什么", "child",
      {"table": "mc_resonator_skills", "title": "共鸣者/卡卡罗",
       "column": "liberation", "where": {}}),
+    # 故事/珍贵之物是同一个「共鸣者/档案」模板里的两条 pattern，index 都从 1 起，
+    # 必须带 category 区分——只写 index=1 的话取到哪条全看 sort（评测里这题以前
+    # 就是用 index=None 占位绕过去的，expect 因此错填成故事1 的名字）。
     ("t26", "今汐的故事1叫什么", "child",
      {"table": "mc_resonator_stories", "title": "共鸣者/今汐", "column": "name",
-      "where": {"index": "1"}}),
+      "where": {"index": "1", "category": "故事"}}),
     ("t27", "今汐的珍贵之物1叫什么", "child",
      {"table": "mc_resonator_stories", "title": "共鸣者/今汐", "column": "name",
-      "where": {"index": None, "template": "共鸣者/档案"}}),
+      "where": {"index": "1", "category": "珍贵之物"}}),
     # ---- mc_exploration_reports + child_list（3 题）----
     ("t28", "中曲台地50%探索报告的标题是什么", "child",
      {"table": "mc_exploration_reports", "title": "探索报告/中曲台地",
