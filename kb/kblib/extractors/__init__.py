@@ -52,6 +52,10 @@ class ExtractCtx:
     body_wikitext: str
     # 顶层模板节点（整页解析一次，多处复用，别反复 parse）
     top_level_templates: list[Any] = field(default_factory=list)
+    # infobox 自己命名参数的【原始 wikitext】（不是 fields 里那份纯文本）：
+    # BWIKI 原神把 NPC 的整段对话块塞在 `|对话内容=` 底下，子模板藏在参数值里，
+    # 顶层模板一个都看不见——要按 in_params 去这里捞，必须先有没被 _plain 洗过的原文
+    infobox_params: dict[str, str] = field(default_factory=dict)
 
 
 Extractor = Callable[[ExtractCtx], ExtractResult]
@@ -59,11 +63,13 @@ Extractor = Callable[[ExtractCtx], ExtractResult]
 
 # ---------------------------------------------------------------- 通用实体路
 def _resolve(fields: dict[str, str], alias: str, groups: Sequence[str],
-             index: int, key: str) -> str | None:
-    """字段别名 → 值。支持三个特殊来源：
+             index: int, key: str, title: str = "") -> str | None:
+    """字段别名 → 值。支持四个特殊来源：
 
       @key   当前匹配到的字段名本身（模式拆行时用来取"值就是这个字段"）
       @index 模板第几次出现（occurrence 行）
+      @title 页面标题。原神的 `{{人物出场|{{PAGENAME}}|活动}}` 被 strip_parser_functions
+             预删后第一个位置参数是空的，角色名只能从页面标题补
       {0}    正则捕获组，`技能{0}初始` → `技能1初始`；整个别名就一个 `{N}` 时
              直接返回该组本身（YAML 里 `stage: '{0}'` 写的就是这个意思）
     """
@@ -72,6 +78,8 @@ def _resolve(fields: dict[str, str], alias: str, groups: Sequence[str],
         return fields.get(key)
     if alias == "@index":
         return str(index)
+    if alias == "@title":
+        return title or None
     if "{" in alias:
         # 别名整个就是 `{N}`：值 = 第 N 个捕获组，别 format 完再去 fields 里
         # 找一个叫 "0" 的字段（那只会拿到 None，且不报错，极难发现）
@@ -87,9 +95,9 @@ def _resolve(fields: dict[str, str], alias: str, groups: Sequence[str],
 
 
 def _first(fields: dict[str, str], aliases: Iterable[str], groups: Sequence[str] = (),
-           index: int = 0, key: str = "") -> str | None:
+           index: int = 0, key: str = "", title: str = "") -> str | None:
     for a in aliases:
-        v = _resolve(fields, a, groups, index, key)
+        v = _resolve(fields, a, groups, index, key, title)
         if v:
             return v
     return None
@@ -110,7 +118,7 @@ def generic_card(title: str, fields: dict[str, str], spec: dict) -> str | None:
             keys = keys if isinstance(keys, list) else [keys]
         else:
             label, keys = entry[0], [entry[1]]
-        v = _first(fields, keys)
+        v = _first(fields, keys, title=title)
         if v:
             bits.append(f"{label}{v}")
     text = "。".join(b.strip() for b in bits if b and b.strip())
@@ -146,7 +154,7 @@ def _pattern_rows(ctx: ExtractCtx, template: str, index: int,
         vals.update(const)
         for col, aliases in columns.items():
             aliases = aliases if isinstance(aliases, list) else [aliases]
-            vals[col] = _first(fields, aliases, groups, index, key)
+            vals[col] = _first(fields, aliases, groups, index, key, ctx.title)
         rows.append(Row(table, vals))
     return rows
 
@@ -169,13 +177,26 @@ def _child_rows(ctx: ExtractCtx, spec: dict) -> list[Row]:
         return []
     want = set(names)
     nodes = [t for t in ctx.top_level_templates if cleantext.template_name(t) in want]
+    # in_params：模板整个塞在 infobox 某个命名参数的值里（BWIKI 原神 2540 个 NPC 页
+    # 的对话块全在 `|对话内容=` 底下），顶层模板一个都看不见。这里去参数原文里捞，
+    # 递归——NPC剧情 还嵌在 NPC对话 内部。
+    for pname in spec.get("in_params", []) or []:
+        raw = ctx.infobox_params.get(str(pname))
+        if not raw:
+            continue
+        sub = cleantext.parse_wikitext(raw)
+        if sub:
+            nodes.extend(t for t in sub.filter_templates(recursive=True)
+                         if cleantext.template_name(t) in want)
     if not nodes:
         return []
     if not spec.get("occurrence"):
         nodes = nodes[:1]
     rows: list[Row] = []
     for idx, node in enumerate(nodes, start=1):
-        fields = cleantext.infobox_fields(node)
+        # positional=True：子模板大量用位置参数传值（任务描述/人物对话/人物出场），
+        # 只收命名参数的话这三张表一行都不会有
+        fields = cleantext.infobox_fields(node, positional=True)
         if not fields:
             continue
         table = str(spec.get("table", "") or "")
@@ -185,7 +206,7 @@ def _child_rows(ctx: ExtractCtx, spec: dict) -> list[Row]:
                                     "template": cleantext.template_name(node)}
             for col, aliases in columns.items():
                 aliases = aliases if isinstance(aliases, list) else [aliases]
-                vals[col] = _first(fields, aliases, (), idx, "")
+                vals[col] = _first(fields, aliases, (), idx, "", ctx.title)
             rows.append(Row(table, vals))
         for rf in spec.get("rows_from", []) or []:
             rows.extend(_pattern_rows(ctx, cleantext.template_name(node), idx, fields, rf, table))
