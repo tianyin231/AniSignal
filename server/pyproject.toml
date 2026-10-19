@@ -35,3 +35,4 @@ package = false
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["real_dns: 需要真实 DNS 解析的用例（不走默认的公网解析桩）"]
