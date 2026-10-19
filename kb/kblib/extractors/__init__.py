@@ -272,10 +272,13 @@ def child_table_columns(cfg: GameConfig) -> dict[str, list[str]]:
 
     一张表可能同时被"主行"和"编号拆行"两种声明写（比如技能主表 + 技能等级表各一张），
     这里按表名归并列。eval 的查表探针也靠它做表名/列名白名单。
+
+    `block` 是编号拆行（rows_from）额外带的列——所属子模板的第几次出现，由
+    _pattern_rows 写，所以在这儿补进 DDL 和探针白名单。
     """
     tables: dict[str, list[str]] = {}
 
-    def add(table: str, columns: dict) -> None:
+    def add(table: str, columns) -> None:
         if not table:
             return
         cols = tables.setdefault(table, [])
@@ -289,7 +292,9 @@ def child_table_columns(cfg: GameConfig) -> dict[str, list[str]]:
             add(table, tpl.get("columns", {}) or {})
             # rows_from 不写 table 时继承所属子模板的表（和 _pattern_rows 一致）
             for rf in tpl.get("rows_from", []) or []:
-                add(str(rf.get("table", "") or table), rf.get("columns", {}) or {})
+                rf_table = str(rf.get("table", "") or table)
+                add(rf_table, rf.get("columns", {}) or {})
+                add(rf_table, {"block": None})
     return tables
 
 
