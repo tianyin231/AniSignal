@@ -1,0 +1,68 @@
+{
+  "statistics": {
+    "pages": 227939,
+    "articles": 16025,
+    "edits": 409458,
+    "images": 205127,
+    "users": 4517698,
+    "activeusers": 68,
+    "admins": 36,
+    "jobs": 0
+  },
+  "namespaces": [
+    {
+      "id": 0,
+      "name": "",
+      "canonical": "",
+      "nonredirect_pages": 18574
+    },
+    {
+      "id": 4,
+      "name": "碧蓝航线",
+      "canonical": "Project",
+      "nonredirect_pages": 0
+    },
+    {
+      "id": 5,
+      "name": "碧蓝航线讨论",
+      "canonical": "Project talk",
+      "nonredirect_pages": 0
+    },
+    {
+      "id": 12,
+      "name": "帮助",
+      "canonical": "Help",
+      "nonredirect_pages": 0
+    },
+    {
+      "id": 13,
+      "name": "帮助讨论",
+      "canonical": "Help talk",
+      "nonredirect_pages": 0
+    },
+    {
+      "id": 102,
+      "name": "属性",
+      "canonical": "属性",
+      "nonredirect_pages": 53
+    },
+    {
+      "id": 108,
+      "name": "概念",
+      "canonical": "概念",
+      "nonredirect_pages": 0
+    },
+    {
+      "id": 274,
+      "name": "Widget",
+      "canonical": "Widget",
+      "nonredirect_pages": 22
+    },
+    {
+      "id": 828,
+      "name": "模块",
+      "canonical": "Module",
+      "nonredirect_pages": 52
+    }
+  ]
+}
