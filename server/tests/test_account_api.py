@@ -22,9 +22,21 @@ async def _register_and_login(client, session, email="acc@t.com"):
 async def test_keyword_crud_and_limit(client, session):
     await _register_and_login(client, session)
 
-    # 未登录访问被拒
+    # 已登录：正常返回
     resp = await client.get("/api/account/keywords")
-    assert resp.status_code in (200, 401)  # cookie 已种，先确认当前可用
+    assert resp.status_code == 200, resp.text
+
+    # SEC-039：去掉会话 cookie 必须被拒。原先这里写 `in (200, 401)`，注释还写着
+    # "先确认当前可用"——"登录态生效"和"鉴权依赖整个失效"都算通过，这条边界等于零覆盖。
+    # 注册/验证流程的 Set-Cookie 会落进 client 的 cookie jar，所以显式清掉再打一次。
+    saved = client.cookies.get("anisignal_session")
+    client.cookies.clear()
+    try:
+        resp = await client.get("/api/account/keywords")
+        assert resp.status_code == 401, resp.text
+    finally:
+        if saved:
+            client.cookies.set("anisignal_session", saved)
 
     resp = await client.post("/api/account/keywords", json={"keyword": "爱弥斯"})
     assert resp.status_code == 201

@@ -22,7 +22,11 @@ async def target(session, **overrides):
 
 
 async def test_admin_crud_and_tool_auth(client, session, admin_headers):
-    assert (await client.get('/api/admin/bot')).status_code in (401, 422)
+    # SEC-039：不用 in (401, 422)——缺 X-Bot-Key/X-Admin-Token 走的是 Header 校验层，
+    # 返回 422 且 loc 里带 header 名；区间断言会把"鉴权依赖被摘掉"也算成通过。
+    resp = await client.get('/api/admin/bot')
+    assert resp.status_code == 422, resp.text
+    assert any(e.get('loc', [None])[-1] in ('x-admin-token', 'x-bot-key') for e in resp.json()['detail']), resp.text
     saved = await client.put('/api/admin/bot/bridge', headers=admin_headers,
                              json={"endpoint": "http://bot:6185/api/v1/im/messages", "api_key": "secret-never-echo"})
     assert saved.status_code == 200
