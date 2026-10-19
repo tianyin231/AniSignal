@@ -124,6 +124,11 @@ class GameConfig:
     descend_html_tags: bool
     # 模板名里嵌 HTML 注释时是否剥掉再比对（PRTS 的 CharinfoV2 就嵌了一行）
     strip_template_name_comments: bool
+    # child_templates 的子表要不要收位置参数（'1'/'2'…）。原神必须开：
+    # `{{人物对话|左|丽莎|台词}}`、`{{任务描述|描述|地点}}` 全靠位置传值，只收命名
+    # 参数这三张表一行都没有。默认关——收了之后"整张模板只有位置参数"的子模板也会
+    # 从"被跳过"变成"产出一行全空列"，碧蓝/明日方舟没必要承担这个变化
+    child_positional_params: bool
     # to_plain 之前是否先用正则删掉解析函数。原神必须开：它的 SMW 查询
     # （{{#ask:[[分类:X]][[时间::<]] |?名称 …}}）mwparserfromhell 拆不出一棵
     # 完整的模板树，会整坨漏进正文。碧蓝/明日方舟没这问题，默认关
@@ -272,6 +277,7 @@ def load_game(name: str | None = None) -> GameConfig:
         descend_html_tags=bool(parse.get("descend_html_tags", False)),
         strip_template_name_comments=bool(parse.get("strip_template_name_comments", False)),
         strip_parser_functions=bool(parse.get("strip_parser_functions", False)),
+        child_positional_params=bool(parse.get("child_positional_params", False)),
         extractor_module=(str(parse["extractor_module"]) if parse.get("extractor_module") else None),
         kinds={str(k): (v or {}) for k, v in (parse.get("kinds") or {}).items()},
         raw=raw,
