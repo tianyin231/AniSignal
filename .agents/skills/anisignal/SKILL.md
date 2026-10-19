@@ -11,7 +11,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 
 ## 系统现状（2026-08-23，运行于服务器 154.40.58.230 /www/AniSignal）
 
-访问 `http://154.40.58.230:8090`；管理看板 `/admin`（管理员 Token 存于服务器 `.env`）；测试账号 `demo@anisignal.dev / anisignal123`。
+公开站点 `http://anisignal.nanamiyako.cn`；管理看板 `/admin`（管理员 Token 仅存于服务器 `.env`）。生产环境禁止保留固定口令的演示账号，凭据不得写入仓库。
 
 | 部分 | 位置 | 状态 |
 |---|---|---|

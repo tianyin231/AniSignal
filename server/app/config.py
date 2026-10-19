@@ -10,11 +10,11 @@ class Settings(BaseSettings):
         env_prefix="ANISIGNAL_", env_file=".env", extra="ignore"
     )
 
-    database_url: str = "mysql+asyncmy://root:anisignal@localhost:3306/anisignal"
+    database_url: str = "mysql+asyncmy://root@localhost:3306/anisignal"
     redis_url: str = "redis://localhost:6379/0"
 
     # 单管理员 Token；生产必须通过环境变量覆盖
-    admin_token: str = "change-me"
+    admin_token: str = ""
 
     # 对外站点基址（生成 RSS 等外部引用链接用；留空则回落到请求基址）
     public_base_url: str = ""
@@ -90,9 +90,6 @@ class Settings(BaseSettings):
 
     # 账号会话有效期（天）
     session_days: int = 30
-
-    # 公开站点地址：邮件里的品牌图标等静态资源用它拼绝对 URL
-    public_base_url: str = "http://154.40.58.230:8090"
 
     # AI 层（OpenAI 兼容接口；管理端 site_settings 优先于此处 env）
     ai_base_url: str = ""

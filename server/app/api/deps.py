@@ -9,5 +9,5 @@ from app.config import get_settings
 
 async def require_admin(x_admin_token: str = Header(..., description="管理员 Token")) -> None:
     expected = get_settings().admin_token
-    if not expected or not secrets.compare_digest(x_admin_token, expected):
+    if not expected or expected == "change-me" or not secrets.compare_digest(x_admin_token, expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid admin token")

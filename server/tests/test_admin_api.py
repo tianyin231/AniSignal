@@ -49,6 +49,17 @@ async def test_admin_requires_token(client):
     assert resp.status_code == 401
 
 
+@pytest.mark.parametrize("configured_token", ["", "change-me"])
+async def test_admin_rejects_missing_or_default_configuration(client, monkeypatch, configured_token):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "admin_token", configured_token)
+    resp = await client.get(
+        "/api/admin/collect-targets", headers={"X-Admin-Token": configured_token}
+    )
+    assert resp.status_code == 401
+
+
 async def test_target_crud_flow(client, admin_headers, session):
     payload = {
         "platform": "bilibili",
