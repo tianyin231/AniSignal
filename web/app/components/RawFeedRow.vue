@@ -81,7 +81,6 @@ const excerpt = computed(() => (showCover.value ? '' : props.item.excerpt?.repla
           <span class="mono text-faint">{{ item.publishedAt }}</span>
           <span v-if="viewLabel" class="num font-semibold sm:hidden" :class="isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }} 播放</span>
           <span v-if="deltaLabel" class="num rounded-full bg-hot/10 px-1.5 py-0.5 text-[11px] font-bold text-hot">{{ deltaLabel }} / 24h</span>
-          <span v-if="item.community === 'ai'" class="text-amber-700 dark:text-amber-300">二手消息 · 待核实</span>
           <span v-if="item.translated" class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>
           <span v-if="item.mergedInto" class="text-brand-ink">已并入事件</span>
           <span v-for="k in keywords" :key="k" class="rounded-md bg-chip px-1.5 py-0.5 text-[11px] text-ink-2">{{ k }}</span>

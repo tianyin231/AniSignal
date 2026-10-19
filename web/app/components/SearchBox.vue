@@ -4,7 +4,12 @@ import { Search } from 'lucide-vue-next'
 const q = ref('')
 const router = useRouter()
 const route = useRoute()
-const isAi = computed(() => route.path === '/ai' || route.query.community === 'ai')
+const pageCommunity = useState<{ path: string, key: string } | null>('page-community', () => null)
+const isAi = computed(() =>
+  route.path === '/ai'
+  || route.query.community === 'ai'
+  || (pageCommunity.value?.path === route.path && pageCommunity.value.key === 'ai'),
+)
 const searchPath = computed(() => isAi.value ? '/ai' : '/search')
 const searchQuery = computed(() => isAi.value ? {} : { community: String(route.query.community || 'all') })
 
