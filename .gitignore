@@ -4,5 +4,19 @@ __pycache__/
 
 .venv/
 .env
+.env.*
+!.env.example
+data/
+backups/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sql.gz
+*.dump
+*.pem
+*.key
+*.p12
+*.pfx
 server/local.db
 .zcode/

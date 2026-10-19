@@ -7,7 +7,7 @@ services:
     image: mysql:8.4
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-anisignal}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置随机数据库密码}
       MYSQL_DATABASE: anisignal
     command:
       - --character-set-server=utf8mb4
@@ -15,7 +15,7 @@ services:
     volumes:
       - ${DATA_DIR:-./data}/mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-anisignal}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:?请在 .env 中设置随机数据库密码}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -41,9 +41,9 @@ services:
         max-file: "3"
     command: ["bash", "/app/deploy/start-app.sh"]
     environment: &app_env
-      ANISIGNAL_DATABASE_URL: mysql+asyncmy://root:${MYSQL_ROOT_PASSWORD:-anisignal}@mysql:3306/anisignal
+      ANISIGNAL_DATABASE_URL: mysql+asyncmy://root:${MYSQL_ROOT_PASSWORD:?请在 .env 中设置随机数据库密码}@mysql:3306/anisignal
       ANISIGNAL_REDIS_URL: redis://redis:6379/0
-      ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:-change-me}
+      ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:?请在 .env 中设置随机管理员令牌}
       ANISIGNAL_PUBLIC_BASE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
       ANISIGNAL_YOUTUBE_API_KEY: ${ANISIGNAL_YOUTUBE_API_KEY:-}
       TZ: Asia/Shanghai

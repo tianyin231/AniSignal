@@ -13,3 +13,15 @@ web/.nuxt
 web/.output
 web/.env
 .env
+.env.*
+backups
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sql.gz
+*.dump
+*.pem
+*.key
+*.p12
+*.pfx
