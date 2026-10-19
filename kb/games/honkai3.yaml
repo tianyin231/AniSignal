@@ -72,6 +72,10 @@ parse:
   #   圣痕图鉴 458 / 武器图鉴 263 / 圣痕套装 128 / 女武神装甲 94 / 勋章 67 /
   #   宿舍名册 54 / 宿舍圣痕名册 38 / 角色 32 / BOSS图鉴 27 / 家具图鉴 17 /
   #   人偶 8 / SP装甲 12（从不单独出现，走 child_templates）
+  # 另有一个别名页：`{{武器图}}`（异型·赫尔之弓 1 篇，全库仅此一页，参数名和
+  # 武器图鉴 一字不差）——全量普查按"参数命中已知字段数"扫出来的漏收，补成别名，
+  # 否则这页武器只能走 prose 补捞、查表探针问不到它的攻击/会心。
+  # 现在补是零成本的：honkai3_kb 还是 0 向量，chunk 的 x-id 还没有任何东西依赖。
   # 位置参数型的模板（文章戳/按钮/官方宣传PV/攻略配队…）故意不收：infobox_fields 会丢掉
   # 数字名参数，收进来只会得到空字段 + 把页面 kind 带偏，它们的内容由
   # template_dump / display_templates 两条补捞路兜住。
@@ -79,6 +83,7 @@ parse:
     圣痕图鉴: {kind: stigmata, category: stigmata}
     圣痕套装: {kind: stigmata_set, category: stigmata_set}
     武器图鉴: {kind: weapon, category: weapon}
+    武器图: {kind: weapon, category: weapon}   # 别名，仅"异型·赫尔之弓"1 页
     女武神装甲: {kind: battlesuit, category: battlesuit}
     角色: {kind: character, category: character}
     宿舍名册: {kind: dorm_roster, category: dorm_roster}
