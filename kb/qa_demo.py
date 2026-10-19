@@ -132,12 +132,20 @@ def main():
     conn = sqlite3.connect(CFG.kb_db)
     cur = conn.cursor()
     if CFG.extractor_module:
-        titles = [r[0] for r in cur.execute("SELECT title FROM ships")]
-    # 最长匹配实体名（舰船/干员/敌人…）
+        # 碧蓝航线：舰娘页标题（专用抽取器落的 ships 表）
+        cand = {r[0]: r[0] for r in cur.execute("SELECT title FROM ships")}
+    else:
+        # 通用实体路：实体页标题 + 重定向别名。别名也必须收——问法里常出现页标题以外
+        # 的叫法（"Justice Knight"），命中后要归到目标页，不然 facts_generic 拿别名
+        # 去查 entities 一条都没有。（aliases 是 CORE_SCHEMA 的表，没抓重定向就是空表）
+        cand = {r[0]: r[0] for r in cur.execute("SELECT title FROM entities")}
+        for alias, target in cur.execute("SELECT alias, target FROM aliases"):
+            cand.setdefault(alias, target)
+    # 最长匹配实体名（舰船/干员/敌人…）；hit 统一落到 entities/ships 的标题上
     hit = ""
-    for t in sorted(titles, key=len, reverse=True):
+    for t, target in sorted(cand.items(), key=lambda kv: -len(kv[0])):
         if t and t in question:
-            hit = t
+            hit = target
             break
     table_facts = []
     route = "检索"
