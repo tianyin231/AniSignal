@@ -1,0 +1,50 @@
+{"id": "t01", "kind": "table", "q": "御神装·勿忘的属性是什么", "probe": "entity_attr", "args": {"title": "御神装·勿忘", "attr": "属性"}, "expect": "机械冰伤"}
+{"id": "t02", "kind": "table", "q": "御神装·勿忘的稀有度是什么", "probe": "entity_attr", "args": {"title": "御神装·勿忘", "attr": "稀有度"}, "expect": "S"}
+{"id": "t03", "kind": "table", "q": "御神装·勿忘的队长技叫什么", "probe": "entity_attr", "args": {"title": "御神装·勿忘", "attr": "队长技"}, "expect": "樱之舞"}
+{"id": "t04", "kind": "table", "q": "白骑士·月光的队长技叫什么", "probe": "entity_attr", "args": {"title": "白骑士·月光", "attr": "队长技"}, "expect": "星云闪耀"}
+{"id": "t05", "kind": "table", "q": "白骑士·月光有什么特色", "probe": "entity_attr", "args": {"title": "白骑士·月光", "attr": "特色"}, "expect": "爆发、辅助、自主开启时空断裂"}
+{"id": "t06", "kind": "table", "q": "领域装·白练的必杀技叫什么", "probe": "entity_attr", "args": {"title": "领域装·白练", "attr": "必杀"}, "expect": "女武神爆发"}
+{"id": "t07", "kind": "table", "q": "空之律者的被动技叫什么", "probe": "entity_attr", "args": {"title": "空之律者", "attr": "被动"}, "expect": "被动技能"}
+{"id": "t08", "kind": "table", "q": "雷电芽衣的昵称有哪些", "probe": "entity_attr", "args": {"title": "雷电芽衣", "attr": "昵称"}, "expect": "芽衣，饭之律者，管饭婆"}
+{"id": "t09", "kind": "table", "q": "雷电芽衣的生日是哪天", "probe": "entity_attr", "args": {"title": "雷电芽衣", "attr": "生日"}, "expect": "1997年04月13日"}
+{"id": "t10", "kind": "table", "q": "琪亚娜·卡斯兰娜的萌点有哪些", "probe": "entity_attr", "args": {"title": "琪亚娜·卡斯兰娜", "attr": "萌点"}, "expect": "傲娇、白毛冲国人特供"}
+{"id": "t11", "kind": "table", "q": "八重樱的日文名是什么", "probe": "entity_attr", "args": {"title": "八重樱", "attr": "日文名"}, "expect": "やえざくら"}
+{"id": "t12", "kind": "table", "q": "布洛妮娅·扎伊切克的所属是什么", "probe": "entity_attr", "args": {"title": "布洛妮娅·扎伊切克", "attr": "所属"}, "expect": "圣芙蕾雅学院"}
+{"id": "t13", "kind": "table", "q": "薛定谔（上）的技能叫什么", "probe": "entity_attr", "args": {"title": "薛定谔（上）", "attr": "技能"}, "expect": "波动性"}
+{"id": "t14", "kind": "table", "q": "薛定谔（上）的攻击力是多少", "probe": "entity_attr", "args": {"title": "薛定谔（上）", "attr": "攻击"}, "expect": "92"}
+{"id": "t15", "kind": "table", "q": "薛定谔（上）属于哪个套装", "probe": "entity_attr", "args": {"title": "薛定谔（上）", "attr": "套装名"}, "expect": "虐猫狂魔"}
+{"id": "t16", "kind": "table", "q": "薛定谔（中）的套装技能1叫什么", "probe": "entity_attr", "args": {"title": "薛定谔（中）", "attr": "套装技能1"}, "expect": "薛定谔的猫"}
+{"id": "t17", "kind": "table", "q": "绘画者套装的两件套技能叫什么", "probe": "entity_attr", "args": {"title": "绘画者", "attr": "套装技能2"}, "expect": "日出 -"}
+{"id": "t18", "kind": "table", "q": "逆熵盟主套装的一件套技能叫什么", "probe": "entity_attr", "args": {"title": "逆熵盟主", "attr": "套装技能1"}, "expect": "不屈"}
+{"id": "t19", "kind": "table", "q": "异型·赫尔之弓的武器类型是什么", "probe": "entity_attr", "args": {"title": "异型·赫尔之弓", "attr": "武器类型"}, "expect": "双枪"}
+{"id": "t20", "kind": "table", "q": "异型·赫尔之弓的攻击力是多少", "probe": "entity_attr", "args": {"title": "异型·赫尔之弓", "attr": "攻击"}, "expect": "287"}
+{"id": "t21", "kind": "table", "q": "真理之钥的武器技能1叫什么", "probe": "entity_attr", "args": {"title": "真理之钥", "attr": "武器技能1"}, "expect": "万象蓝图"}
+{"id": "t22", "kind": "table", "q": "童谣的稀有度是什么", "probe": "entity_attr", "args": {"title": "童谣", "attr": "稀有度"}, "expect": "5"}
+{"id": "t23", "kind": "table", "q": "人偶：仿犹大的必杀技叫什么", "probe": "entity_attr", "args": {"title": "人偶：仿犹大", "attr": "必杀技"}, "expect": "鲜血裁决"}
+{"id": "t24", "kind": "table", "q": "战场BOSS：苍骑士·月魂的弱点是什么", "probe": "entity_attr", "args": {"title": "战场BOSS：苍骑士·月魂", "attr": "弱点"}, "expect": "点燃：点燃值蓄慢会产生15秒点燃状态，火焰伤害大幅提升"}
+{"id": "t25", "kind": "table", "q": "纸箱床的舒适度是多少", "probe": "entity_attr", "args": {"title": "纸箱床", "attr": "舒适度"}, "expect": "12"}
+{"id": "t26", "kind": "table", "q": "审判者之翼的获取方式是什么", "probe": "entity_attr", "args": {"title": "审判者之翼", "attr": "获取方式"}, "expect": "参与“破灭的暴雨”活动最终阶段"}
+{"id": "t27", "kind": "table", "q": "夜隐重霞的SP技能1叫什么", "probe": "child", "args": {"table": "h3_battlesuit_sp_skills", "title": "夜隐重霞", "column": "name", "where": {"index": "1"}}, "expect": "空明鬼魇"}
+{"id": "t28", "kind": "table", "q": "夜隐重霞的SP技能3叫什么", "probe": "child", "args": {"table": "h3_battlesuit_sp_skills", "title": "夜隐重霞", "column": "name", "where": {"index": "3"}}, "expect": "摇光"}
+{"id": "t29", "kind": "table", "q": "断罪皇女！！的SP技能2叫什么", "probe": "child", "args": {"table": "h3_battlesuit_sp_skills", "title": "断罪皇女！！", "column": "name", "where": {"index": "2"}}, "expect": "苍雷鸦羽"}
+{"id": "t30", "kind": "table", "q": "夜隐重霞有哪些SP技能", "probe": "child_list", "args": {"table": "h3_battlesuit_sp_skills", "title": "夜隐重霞", "column": "name"}, "expect": "空明鬼魇；宵烛；摇光；影灯"}
+{"id": "q31", "kind": "qa", "q": "御神装·勿忘使用什么属性的伤害", "expect_keywords": ["机械冰伤"], "source_title": "御神装·勿忘"}
+{"id": "q32", "kind": "qa", "q": "空之律者的简称有哪些", "expect_keywords": ["氯化钠"], "source_title": "空之律者"}
+{"id": "q33", "kind": "qa", "q": "人偶：赤鸢之翼的必杀技有什么效果", "expect_keywords": ["赤鸢之舞"], "source_title": "人偶：赤鸢之翼"}
+{"id": "q34", "kind": "qa", "q": "人偶：仿犹大的普攻技效果是什么", "expect_keywords": ["毁灭斩击"], "source_title": "人偶：仿犹大"}
+{"id": "q35", "kind": "qa", "q": "异型·赫尔之弓的介绍说了什么", "expect_keywords": ["死亡女神赫尔"], "source_title": "异型·赫尔之弓"}
+{"id": "q36", "kind": "qa", "q": "CAS-II 浪子推荐哪些角色使用", "expect_keywords": ["白夜执事"], "source_title": "CAS-II 浪子"}
+{"id": "q37", "kind": "qa", "q": "审判者之翼的勋章技能1有什么效果", "expect_keywords": ["护盾杀手"], "source_title": "审判者之翼"}
+{"id": "q38", "kind": "qa", "q": "薛定谔（上）的技能效果是什么", "expect_keywords": ["全伤害提高205%"], "source_title": "薛定谔（上）"}
+{"id": "q39", "kind": "qa", "q": "绘画者套装的一件套效果是什么", "expect_keywords": ["闪电护盾"], "source_title": "绘画者"}
+{"id": "q40", "kind": "qa", "q": "战场BOSS：苍骑士·月魂是什么样的敌人", "expect_keywords": ["冰蚀值"], "source_title": "战场BOSS：苍骑士·月魂"}
+{"id": "q41", "kind": "qa", "q": "纸箱床的介绍说了什么", "expect_keywords": ["蓝色床垫"], "source_title": "纸箱床"}
+{"id": "q42", "kind": "qa", "q": "彼岸双生的必杀技效果是什么", "expect_keywords": ["量子塌缩"], "source_title": "彼岸双生"}
+{"id": "q43", "kind": "qa", "q": "死生之律者的被动效果是什么", "expect_keywords": ["塑灵形态"], "source_title": "死生之律者"}
+{"id": "q44", "kind": "qa", "q": "失落迷迭的普攻效果是什么", "expect_keywords": ["摄取"], "source_title": "失落迷迭"}
+{"id": "q45", "kind": "qa", "q": "家园：特斯拉的记忆片段写了什么", "expect_keywords": ["女电工"], "source_title": "家园：特斯拉"}
+{"id": "q46", "kind": "qa", "q": "家园：辉骑士·月魄的装甲故事讲了什么", "expect_keywords": ["光翼系统"], "source_title": "家园：辉骑士·月魄"}
+{"id": "q47", "kind": "qa", "q": "家园：叶卡捷琳娜的记忆片段写了什么", "expect_keywords": ["普鲁士"], "source_title": "家园：叶卡捷琳娜"}
+{"id": "q48", "kind": "qa", "q": "天命Store购物节里能用纪念币换什么", "expect_keywords": ["国士无双"], "source_title": "《崩坏3》天命store购物节开启！稀有道具、自选装备来啦"}
+{"id": "q49", "kind": "qa", "q": "后崩坏书新章节审判录什么时候开启", "expect_keywords": ["遗迹钥匙"], "source_title": "《崩坏3》V3.9更新前瞻丨「后崩坏书」新内容、主线新章节"}
+{"id": "q50", "kind": "qa", "q": "周年自选扩充补给有哪些女武神概率UP", "expect_keywords": ["辉骑士·月魄"], "source_title": "【补给】自选扩充补给来袭！雷之律者、云墨丹心等目标限时up"}
