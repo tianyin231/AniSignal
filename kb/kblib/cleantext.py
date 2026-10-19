@@ -9,18 +9,13 @@ from __future__ import annotations
 
 import html
 import re
+from contextlib import contextmanager
 from typing import Any, Iterable
 
 import mwparserfromhell
 
-from .config import (
-    FIELDS_CHUNK_MIN,
-    INFOBOX_TEMPLATE_PREFIXES,
-    INFOBOX_TEMPLATES,
-    MAX_IMAGES_PER_PAGE,
-    NAV_TEMPLATE_PREFIXES,
-    VOICE_FIELD_SUFFIX,
-)
+from .config import GAMES_DIR  # noqa: F401  兼容老 import 路径
+from .gamecfg import DEFAULT_GAME, load_game
 
 # ---- 常量 ----
 _CAT_PREFIXES = ("分类:", "category:", "Category:")
@@ -51,6 +46,53 @@ _VALUE_TEMPLATES = {
     "模板", "颜色", "转化颜色", "变色",
 }
 
+# ---------------------------------------------------------------- 展示型模板
+# 每个 wiki 都有一批"参数即展示"的模板，但参数顺序是给机器用的：
+#   PRTS  {{color|#0098DC|+30}}    第一个参数是色值，给人看的是第二个
+#         {{术语|ba.stun|晕眩}}    第一个是词条 key
+#         {{+|70|+70}}             第一个是新值，第二个是带符号的增量
+#         {{mdi|alpha-x-box-outline}}  图标名，压根不该出现在正文里
+# 通用兜底（取无名参数 1）在这种模板上只会掏出机器值。游戏在 YAML 的
+# `parse.display_templates` 里声明"渲染哪几个参数"，_plain 就按声明来；
+# 不声明 = 不扩展，碧蓝航线的输出一个字节都不变。
+#
+# 这是进程级单例：parse.py 一进程只炼一款游戏，进 run() 时设一次。
+# 别在多线程里改它——真要并发就改成 ContextVar。
+_PLAIN_DISPLAY: dict[str, tuple[str, ...]] = {}
+_STRIP_NAME_COMMENTS = False
+
+
+@contextmanager
+def plain_display(mapping: dict[str, tuple[str, ...]] | None):
+    """进段落文本时按游戏配置切换展示型模板渲染表。"""
+    global _PLAIN_DISPLAY
+    old = _PLAIN_DISPLAY
+    _PLAIN_DISPLAY = dict(mapping or {})
+    try:
+        yield
+    finally:
+        _PLAIN_DISPLAY = old
+
+
+@contextmanager
+def template_name_comments(strip: bool):
+    """模板名里嵌 HTML 注释时是否剥掉再比对（见 template_name）。"""
+    global _STRIP_NAME_COMMENTS
+    old = _STRIP_NAME_COMMENTS
+    _STRIP_NAME_COMMENTS = bool(strip)
+    try:
+        yield
+    finally:
+        _STRIP_NAME_COMMENTS = old
+
+
+@contextmanager
+def wiki_style(display: dict[str, tuple[str, ...]] | None = None,
+               strip_name_comments: bool = False):
+    """一次设好这款 wiki 的段落文本风格（parse.py 进 run() 时调）。"""
+    with plain_display(display), template_name_comments(strip_name_comments):
+        yield
+
 
 def parse_wikitext(text: str) -> mwparserfromhell.wikicode.Wikicode | None:
     """容错解析：个别页面语法太歪，失败就退回 None（调用方走正则兜底）。"""
@@ -58,6 +100,27 @@ def parse_wikitext(text: str) -> mwparserfromhell.wikicode.Wikicode | None:
         return mwparserfromhell.parse(text)
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------- 模板名归一化
+_NAME_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def template_name(tpl: Any, strip_comments: bool | None = None) -> str:
+    """模板节点 → 归一化名字：去首尾空白、去"模板:"前缀。
+
+    strip_comments 不给就用进程级开关（wiki_style 设的那份）。PRTS 的干员页把
+    模板写成了 `{{CharinfoV2\\n<!--下方为自动更新部分-->|职业=…}}`，注释整个落在
+    模板名里，`str(t.name).strip()` 匹配不上任何白名单——开这个开关才剥得掉。
+    碧蓝航线不开：它那边唯一的样例是"地图需要模板"这张模板定义页，剥了会从
+    other 变成关卡图鉴，v2/v3 那批向量就白对齐了。
+    """
+    if strip_comments is None:
+        strip_comments = _STRIP_NAME_COMMENTS
+    n = str(tpl.name)
+    if strip_comments:
+        n = _NAME_COMMENT.sub("", n)
+    return re.sub(r"^模板:", "", n.strip()).strip()
 
 
 # ---------------------------------------------------------------- 纯文本化
@@ -125,8 +188,7 @@ def _plain(node: Any, depth: int = 0) -> str:
 
 
 def _plain_template(tpl: Any, depth: int) -> str:
-    name = str(tpl.name).strip()
-    name = re.sub(r"^模板:", "", name)
+    name = template_name(tpl)
     params = {str(p.name).strip(): p.value for p in tpl.params}
 
     if name in _VALUE_TEMPLATES:
@@ -145,6 +207,12 @@ def _plain_template(tpl: Any, depth: int) -> str:
             return ""
         if name == "模板":
             return _plain(params.get("1", ""), depth + 1).strip()
+
+    # 游戏配置声明的展示型模板（PRTS 的 color/术语/+/*…），优先于通用兜底
+    spec = _PLAIN_DISPLAY.get(name)
+    if spec is not None:
+        parts = [_plain(params.get(p, ""), depth + 1).strip() for p in spec]
+        return " ".join(p for p in parts if p)
 
     # 通用兜底：展示型模板第一个无名参数通常就是正文
     unnamed = _plain(params.get("1", ""), depth + 1).strip()
@@ -228,12 +296,15 @@ def tables_to_lines(text: str) -> str:
 # ---------------------------------------------------------------- infobox
 def find_templates(wc: Any, names: Iterable[str]) -> list[Any]:
     want = set(names)
-    return [t for t in wc.filter_templates(recursive=True) if str(t.name).strip() in want]
+    return [t for t in wc.filter_templates(recursive=True) if template_name(t) in want]
 
 
-def is_nav_template(name: str) -> bool:
+def is_nav_template(name: str, prefixes=None) -> bool:
+    """导航/样板模板判定。prefixes 不给就用默认游戏的配置。"""
+    if prefixes is None:
+        prefixes = load_game(DEFAULT_GAME).nav_template_prefixes
     n = name.strip()
-    return any(n == p or n.startswith(p) for p in NAV_TEMPLATE_PREFIXES)
+    return any(n == p or n.startswith(p) for p in prefixes)
 
 
 def infobox_fields(tpl: Any) -> dict[str, str]:
@@ -251,35 +322,48 @@ def infobox_fields(tpl: Any) -> dict[str, str]:
     return fields
 
 
-def top_level_infobox(wikitext: str, names: Iterable[str],
-                      legacy_names: Iterable[str] = ()) -> tuple[Any, str] | None:
-    """在正文里找 infobox 模板，返回 (模板节点, 去掉它之后的正文 wikitext)。
+def find_top_level_infobox(src: Any, names: Iterable[str],
+                           legacy_names: Iterable[str] = (),
+                           prefixes: Iterable[str] = ()) -> Any | None:
+    """在顶层模板里找 infobox，返回模板节点（不给正文，省一次字符串替换）。
 
-    三段匹配，顺序即优先级：老家族（legacy_names）→ 白名单全量（names，含 v3
-    新增）→ 前缀家族（塞壬图鉴/*）。先老后新是为了让 v3 的 chunk_id 和 v2 完全
-    对齐——见 config.LEGACY_INFOBOX_TEMPLATE_NAMES 的注释。
+    三段匹配，顺序即优先级：老家族（legacy_names）→ 白名单全量（names）→
+    前缀家族（塞壬图鉴/*）。先老后新是为了让 azurlane v3 的 chunk_id 和 v2 完全
+    对齐——见 games/azurlane.yaml 的 legacy_infobox_template_names 注释。
+
+    src 可以是 wikitext 字符串或已解析的 Wikicode（parse.py 一页只解析一次，
+    这里复用，别反复 parse）。
     """
-    wc = parse_wikitext(wikitext)
+    wc = src if not isinstance(src, str) else parse_wikitext(src)
     if wc is None:
         return None
     templates = list(wc.filter_templates(recursive=False))
     for want in (set(legacy_names), set(names)):
         for tpl in templates:
-            if str(tpl.name).strip() in want:
-                return tpl, wikitext.replace(str(tpl), "", 1)
+            if template_name(tpl) in want:
+                return tpl
     for tpl in templates:
-        name = str(tpl.name).strip()
-        for prefix in INFOBOX_TEMPLATE_PREFIXES:
+        name = template_name(tpl)
+        for prefix in prefixes:
             if name == prefix or name.startswith(prefix + "/"):
-                return tpl, wikitext.replace(str(tpl), "", 1)
+                return tpl
     return None
 
 
-def infobox_template_name(tpl: Any) -> str:
+def top_level_infobox(wikitext: str, names: Iterable[str],
+                      legacy_names: Iterable[str] = (),
+                      prefixes: Iterable[str] = ()) -> tuple[Any, str] | None:
+    """(模板节点, 去掉它之后的正文 wikitext)。薄封装，工具脚本用。"""
+    tpl = find_top_level_infobox(wikitext, names, legacy_names, prefixes)
+    if tpl is None:
+        return None
+    return tpl, wikitext.replace(str(tpl), "", 1)
+
+
+def infobox_template_name(tpl: Any, prefixes: Iterable[str] = ()) -> str:
     """模板节点 → 归一化后的模板名（塞壬图鉴家族的子页名统一成家族名）。"""
-    name = str(tpl.name).strip()
-    name = re.sub(r"^模板:", "", name)
-    for prefix in INFOBOX_TEMPLATE_PREFIXES:
+    name = template_name(tpl)
+    for prefix in prefixes:
         if name == prefix or name.startswith(prefix + "/"):
             return prefix
     return name
@@ -301,8 +385,10 @@ COMMENT_MIN = 80          # 短于这个长度的注释基本是编辑备注，C
 COMMENT_MAX = 20000       # 超长注释视为数据 dump，不捞
 
 
-def extract_image_files(wikitext: str, limit: int = MAX_IMAGES_PER_PAGE) -> list[str]:
+def extract_image_files(wikitext: str, limit: int | None = None) -> list[str]:
     """正文里引用的文件名（去重、保序）。只记名字，URL 由 imageinfo 批量换。"""
+    if limit is None:
+        limit = load_game(DEFAULT_GAME).max_images_per_page
     seen: set[str] = set()
     out: list[str] = []
     for m in FILE_REF_RE.finditer(wikitext):
@@ -360,7 +446,8 @@ def hidden_lines(wikitext: str) -> list[str]:
     return out
 
 
-def template_dump(wikitext: str, exclude: Any = None) -> list[str]:
+def template_dump(src: Any, exclude: Any = None,
+                  nav_prefixes=None) -> list[str]:
     """数据型模板的全参数转存。
 
     `_plain_template` 的通用兜底只取无名参数 1，像 `{{世界巡游|1=物资|1n=…}}`
@@ -368,18 +455,19 @@ def template_dump(wikitext: str, exclude: Any = None) -> list[str]:
     `{{META图鉴}}`（介绍字段几千字）这种"参数即正文"的模板就只剩两个字。
     这里把这类模板的所有参数摊平，交给调用方另切 chunk。
     """
-    wc = parse_wikitext(wikitext)
+    wc = src if not isinstance(src, str) else parse_wikitext(src)
     if wc is None:
         return []
     skip = str(exclude) if exclude is not None else None
+    if nav_prefixes is None:
+        nav_prefixes = load_game(DEFAULT_GAME).nav_template_prefixes
     out: list[str] = []
     for tpl in wc.filter_templates(recursive=False):
         raw = str(tpl)
         if skip and raw == skip:
             continue
-        name = str(tpl.name).strip()
-        name = re.sub(r"^模板:", "", name)
-        if name.startswith("#") or is_nav_template(name):
+        name = template_name(tpl)
+        if name.startswith("#") or is_nav_template(name, nav_prefixes):
             continue
         inline = _plain(tpl).strip()
         total = sum(len(_plain(p.value).strip()) for p in tpl.params)
@@ -398,34 +486,38 @@ def template_dump(wikitext: str, exclude: Any = None) -> list[str]:
     return out
 
 
-def voice_lines(fields: dict[str, str]) -> list[tuple[str, str]]:
+def voice_lines(fields: dict[str, str], suffix: str | None = None) -> list[tuple[str, str]]:
     """infobox 字段里的台词 → [(场景, 台词)]。
 
     台词是 `舰娘图鉴`/`同人角色` 的 `*台词` 参数，原来只落 fields_json，
     向量库一个字都检索不到。
     """
+    if suffix is None:
+        suffix = load_game(DEFAULT_GAME).voice_field_suffix
     out: list[tuple[str, str]] = []
     for k, v in fields.items():
-        if not k.endswith(VOICE_FIELD_SUFFIX):
+        if not k.endswith(suffix):
             continue
-        scene = k[: -len(VOICE_FIELD_SUFFIX)].strip() or "台词"
+        scene = k[: -len(suffix)].strip() or "台词"
         v = re.sub(r"\s+", " ", v).strip()
         if v:
             out.append((scene, v))
     return out
 
 
-def long_field_lines(fields: dict[str, str],
-                     min_len: int = FIELDS_CHUNK_MIN) -> list[str]:
+def long_field_lines(fields: dict[str, str], min_len: int | None = None) -> list[str]:
     """infobox 里的长文本字段 → 可读行。
 
      infobox 一旦被抽取就会从正文消失，长字段（META图鉴的"介绍"、技能描述、
     审核意见等）原来只进 fields_json。这里把超过阈值的字段摊平补一个 chunk。
     台词字段除外——它们由 voice_lines 单独切成 kind=voice 的 chunk。
     """
+    if min_len is None:
+        min_len = load_game(DEFAULT_GAME).fields_chunk_min
+    suffix = load_game(DEFAULT_GAME).voice_field_suffix
     out: list[str] = []
     for k, v in fields.items():
-        if k.endswith(VOICE_FIELD_SUFFIX):
+        if k.endswith(suffix):
             continue
         v = re.sub(r"\s+", " ", v).strip()
         if len(v) >= min_len:

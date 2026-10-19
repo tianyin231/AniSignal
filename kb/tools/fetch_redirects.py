@@ -3,7 +3,7 @@
 
 fetch.py 只拉非重定向页（apfilterredir=nonredirects），所以别名本身从没进过库：
 查"企业"搜不到"企业号"。重定向页只有一行 `#REDIRECT [[x]]`，拉回来几乎不花钱，
-落到 data/redirects.jsonl.gz，parse.py 读进 `aliases` 表。
+落到游戏配置 data_dir 下的 redirects.jsonl.gz，parse.py 读进 `aliases` 表。
 
 实现要点（都踩过坑）：
   * 分页的 `continue` 在 API 响应的**顶层**，不在 `query` 里——用
@@ -13,7 +13,8 @@ fetch.py 只拉非重定向页（apfilterredir=nonredirects），所以别名本
     正则一条都匹配不上。
 
 用法：
-    ./kb/.venv/bin/python tools/fetch_redirects.py
+    ./kb/.venv/bin/python tools/fetch_redirects.py                # 碧蓝航线
+    ./kb/.venv/bin/python tools/fetch_redirects.py --game arknights
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from kblib.config import REDIRECTS_PATH  # noqa: E402
+from kblib import gamecfg  # noqa: E402
 from kblib.wikiapi import MediaWikiClient  # noqa: E402
 
 log = logging.getLogger("kb.fetch_redirects")
@@ -36,30 +37,34 @@ log = logging.getLogger("kb.fetch_redirects")
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="拉主命名空间重定向页 → aliases 表数据")
+    ap.add_argument("--game", default=gamecfg.DEFAULT_GAME,
+                    help=f"游戏配置名，默认 {gamecfg.DEFAULT_GAME}")
     ap.add_argument("--namespace", type=int, default=0)
-    ap.add_argument("--rps", type=float, default=1.5)
-    ap.add_argument("--out", type=Path, default=REDIRECTS_PATH)
+    ap.add_argument("--rps", type=float, default=None, help="默认用游戏配置的 rps")
+    ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
+    cfg = gamecfg.load_game(args.game)
 
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(asctime)s %(levelname)s %(message)s")
-    client = MediaWikiClient(rps=args.rps)
+    client = MediaWikiClient(rps=args.rps, game=cfg.name)
 
     titles = list(client.iter_all_titles(args.namespace, filter_redir="redirects"))
-    print(f"命名空间 {args.namespace} 下重定向页 {len(titles)} 个")
+    print(f"[{cfg.label}] 命名空间 {args.namespace} 下重定向页 {len(titles)} 个")
 
     t0 = time.time()
     pairs = client.resolve_redirects(titles)
     unresolved = len(titles) - len(pairs)
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = args.out.with_suffix(".tmp")
+    out = args.out or cfg.redirects_path
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".tmp")
     with gzip.open(tmp, "wt", encoding="utf-8", compresslevel=6) as f:
         for alias, target in sorted(pairs.items()):
             f.write(json.dumps({"alias": alias, "target": target},
                                ensure_ascii=False) + "\n")
-    tmp.replace(args.out)
-    print(f"完成：{len(pairs)}/{len(titles)} 个别名解析出目标 → {args.out}"
+    tmp.replace(out)
+    print(f"完成：{len(pairs)}/{len(titles)} 个别名解析出目标 → {out}"
           f"（{client.request_count} 次请求，{time.time() - t0:.0f}s）")
     if unresolved:
         log.warning("%d 个别名没解析出目标（断链/指向自己），不进 aliases 表", unresolved)

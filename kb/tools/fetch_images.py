@@ -4,14 +4,15 @@
 wiki 里图片引用只有文件名（`[[文件:X.jpg]]`），bot 要甩原链得先换成
 `https://patchwiki.biligame.com/...` 直链。MediaWiki 的文件 URL 带 md5 路径
 分区且可能挂在 CDN 上，手拼容易错，直接问 API：`prop=imageinfo&iiprop=url`，
-一批 50 个文件名（约 400 次请求），结果缓存到 data/image_urls.json。
+一批 50 个文件名（约 400 次请求），结果缓存到游戏 data_dir 下的 image_urls.json。
 
 缓存可断点续跑：已有的文件名直接跳过，被 kill 再跑同一命令接着换。
 
 用法：
-    ./kb/.venv/bin/python tools/fetch_images.py            # 全量换
-    ./kb/.venv/bin/python tools/fetch_images.py --limit 5  # 先试 5 批
-    ./kb/.venv/bin/python tools/fetch_images.py --from-db  # 从 kb.db 的 page_images 读清单
+    ./kb/.venv/bin/python tools/fetch_images.py                    # 碧蓝航线全量换
+    ./kb/.venv/bin/python tools/fetch_images.py --game arknights   # 明日方舟
+    ./kb/.venv/bin/python tools/fetch_images.py --limit 5          # 先试 5 批
+    ./kb/.venv/bin/python tools/fetch_images.py --from-db          # 从 kb.db 的 page_images 读清单
 """
 
 from __future__ import annotations
@@ -27,12 +28,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from kblib.config import IMAGE_URLS_PATH, RAW_DIR  # noqa: E402
+from kblib import gamecfg  # noqa: E402
 from kblib.wikiapi import MediaWikiClient  # noqa: E402
 
 log = logging.getLogger("kb.fetch_images")
 
 BATCH = 50          # imageinfo 单批标题数（比正文抓取的 20 大，响应小得多）
+
 FILE_PREFIX = "File:"
 # 问过去的是 "File:x"，这个 wiki 会把 File 命名空间本地化成"文件:"再返回
 # （normalized 里有 from/to），回贴时必须把前缀剥掉再和裸文件名比对
@@ -69,29 +71,34 @@ def collect_from_db(db_path: Path) -> set[str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="图片文件名 → 直链（不下载图片）")
-    ap.add_argument("--source", type=Path, default=RAW_DIR, help="raw 分片目录")
+    ap.add_argument("--game", default=gamecfg.DEFAULT_GAME,
+                    help=f"游戏配置名，默认 {gamecfg.DEFAULT_GAME}")
+    ap.add_argument("--source", type=Path, default=None, help="raw 分片目录")
     ap.add_argument("--db", type=Path, default=None,
                     help="从 kb.db 的 page_images 表读清单（默认扫 raw 分片）")
     ap.add_argument("--batch", type=int, default=BATCH)
-    ap.add_argument("--rps", type=float, default=1.5)
+    ap.add_argument("--rps", type=float, default=None, help="默认用游戏配置的 rps")
     ap.add_argument("--limit", type=int, default=0, help="最多发多少个批次（调试）")
-    ap.add_argument("--out", type=Path, default=IMAGE_URLS_PATH)
+    ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
+    cfg = gamecfg.load_game(args.game)
+    source = args.source or cfg.raw_dir
+    out = args.out or cfg.image_urls_path
 
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(asctime)s %(levelname)s %(message)s")
     if args.db is not None:
         names = collect_from_db(args.db)
-        print(f"从 {args.db} 读到 {len(names)} 个文件名")
+        print(f"[{cfg.label}] 从 {args.db} 读到 {len(names)} 个文件名")
     else:
-        names = collect_from_raw(args.source)
-        print(f"从 {args.source} 扫到 {len(names)} 个文件名")
+        names = collect_from_raw(source)
+        print(f"[{cfg.label}] 从 {source} 扫到 {len(names)} 个文件名")
 
     cache: dict[str, str] = {}
-    if args.out.exists():
+    if out.exists():
         try:
-            cache = {k: v for k, v in json.loads(args.out.read_text(encoding="utf-8")).items() if v}
+            cache = {k: v for k, v in json.loads(out.read_text(encoding="utf-8")).items() if v}
         except (json.JSONDecodeError, OSError):
             log.warning("旧缓存读不了，重新换")
     todo = sorted(n for n in names if n not in cache)
@@ -100,7 +107,7 @@ def main() -> int:
     if not todo:
         return 0
 
-    client = MediaWikiClient(rps=args.rps)
+    client = MediaWikiClient(rps=args.rps, game=cfg.name)
     t0 = time.time()
     done = 0
     for i in range(0, len(todo), args.batch):
@@ -131,12 +138,12 @@ def main() -> int:
                 cache[original] = url
         done += 1
         if done % 20 == 0:
-            args.out.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+            out.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
             print(f"  {i + len(batch)}/{len(todo)}，缓存 {len(cache)} 条"
                   f"（{time.time() - t0:.0f}s，{client.request_count} 次请求）")
 
-    args.out.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
-    print(f"完成：{len(cache)}/{len(names)} 个文件名换到直链 → {args.out}"
+    out.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    print(f"完成：{len(cache)}/{len(names)} 个文件名换到直链 → {out}"
           f"（{client.request_count} 次请求，{time.time() - t0:.0f}s）")
     missing = len(names) - len(cache)
     if missing:

@@ -1,0 +1,190 @@
+# 碧蓝航线（BWIKI）——pipeline 的默认游戏，行为与 v1–v3 完全一致。
+#
+# 这份文件就是原来写死在 kblib/config.py + parse.py + retriever.py 里的碧蓝航线旋钮，
+# 一字不改搬过来。data_dir 沿用 v1 起的 kb/data：blhx_kb collection、index_meta.json、
+# bm25 索引、eval 报告全在那儿，搬家等于作废 v2/v3 的向量库。
+name: azurlane
+label: 碧蓝航线
+wiki_base: https://wiki.biligame.com/blhx
+api_url: https://wiki.biligame.com/blhx/api.php
+user_agent: anisignal-kb/0.1 (offline knowledge-base build; polite 1.5 req/s)
+data_dir: data
+chunk_id_prefix: blhx
+collection: blhx_kb
+namespaces: [0]
+
+fetch:
+  rps: 1.5                 # 每秒请求数上限
+  batch_titles: 20         # BWIKI 有单篇几 MB 的大页，一批里混进一个就能把整个响应
+                           # 拖到超时；20 比较稳，失败了也有二分兜底
+  timeout: 180             # 单次 curl 超时（秒）。大页响应慢，90s 不够
+  max_retries: 6           # 超时/5xx/429 的重试次数
+  backoff_cap: 60          # 指数退避上限（秒）
+  shard_pages: 500         # 每个 gzip 分片的页数
+
+chunk:
+  min: 60                  # 短于此的段落直接丢弃或并入邻段
+  target: 420              # 合并目标长度
+  max: 900                 # 单 chunk 硬上限（超了按句子边界再切）
+  voice_field_suffix: 台词  # infobox 里出现即视为"台词"的字段后缀
+  fields_chunk_min: 60     # 超过这个长度的 infobox 字段值另切一个 kind=fields 的 chunk
+  max_images_per_page: 16  # 单页最多记多少个图片 URL（chunk payload 的 images 字段）
+
+parse:
+  min_infobox_fields: 5    # 字段数达到这个才算"抽取成功"（infobox_ok）
+
+  # 碧蓝航线字段语义特异（初始/满级属性、技能N名、N号槽装备效率），走专用抽取器；
+  # 新游戏不配这一项，全走下面的 kinds 通用实体路
+  extractor_module: kblib.extractors.azurlane
+
+  # infobox 模板 -> (实体类型, 分类)。命名空间 10 下的模板名（不带 "模板:" 前缀）
+  infobox_templates:
+    舰娘图鉴: {kind: ship, category: ship}
+    舰炮图鉴: {kind: equipment, category: naval_gun}
+    防空炮图鉴: {kind: equipment, category: aa_gun}
+    舰载机图鉴: {kind: equipment, category: aircraft}
+    鱼雷图鉴: {kind: equipment, category: torpedo}
+    导弹图鉴: {kind: equipment, category: missile}
+    设备图鉴: {kind: equipment, category: gear}
+    特殊兵装图鉴: {kind: equipment, category: special_aux}
+    指挥喵图鉴: {kind: cat, category: commander_cat}
+    # ---- v3 补的（README 原来只列 9 种，审计发现还有这 6 类）----
+    关卡图鉴: {kind: stage, category: stage}
+    原型舰性能数据: {kind: ship_perf, category: proto_ship}
+    原型舰性能数据（潜艇）: {kind: ship_perf, category: proto_sub}
+    飞行器性能数据: {kind: ship_perf, category: aircraft_perf}
+    同人角色: {kind: fan_ship, category: fan_ship}
+
+  # 按前缀匹配的图鉴模板：同一家族有 /仲裁机关、/维序机关 之类的子页，
+  # 逐个列名字维护不住，按前缀收。
+  infobox_template_prefixes:
+    塞壬图鉴: {kind: siren, category: siren}
+
+  # v2 起就在库里的 9 类老家族。匹配时先老后新：一页同时顶着一个老家族和一个
+  # v3 新家族模板时（全库就 1 页：同人角色:024 同人角色+舰炮图鉴），必须复现 v2
+  # 的选择，否则 prose/card 的 chunk_id 整体错位，增量 upsert 退化成全量重建。
+  legacy_infobox_template_names:
+    - 舰娘图鉴
+    - 舰炮图鉴
+    - 防空炮图鉴
+    - 舰载机图鉴
+    - 鱼雷图鉴
+    - 导弹图鉴
+    - 设备图鉴
+    - 特殊兵装图鉴
+    - 指挥喵图鉴
+
+  # 标题长得像关卡号的页，即使没有 infobox 也算 stage（关卡页正文只有模板）
+  title_patterns:
+    - {regex: '^\d+-\d+(Hard)?$|^\d+-SOS$|^SP\d*$|^EX\d*$|^[A-Z]{2}\d*$', kind: stage}
+
+  # v3 新收入结构化路的图鉴：它们的 card 走 x 前缀 chunk_id，不占老计数器
+  new_kinds: [stage, ship_perf, siren, fan_ship]
+
+  # 各 kind 的 card 已经把短字段渲染过了，长字段补 chunk 时跳过，别重复炼
+  card_field_keys:
+    ship: [名称, 和谐名, 型号, 英文名, 日文名, 编号, 类型, 稀有度, 阵营, 初始星级,
+           装甲类型, 航速, 幸运, 耗时, 评价]
+    equipment: [名称, 类型, 特性, 稀有度, 所属阵营, 伤害, 标准射速, 备注]
+
+  # 出现即视为导航/样板噪音的模板（切 chunk 时整段丢弃）
+  nav_template_prefixes:
+    - 导航
+    - 舰娘图鉴导航
+    - 塞壬图鉴导航
+    - 塞壬图鉴顶栏
+    - 面包屑
+    - 图鉴小标题
+    - 图鉴模拟
+    - 图鉴筛选
+    - 装备图鉴筛选
+    - 舰娘定位筛选
+    - 筛选功能
+    - 筛选
+    - 轮播图
+    - 配色
+    - 渐变
+    - 字体图标
+    - 小图标
+    - 头像
+    - 展开折叠
+    - 折叠面板
+    - 选项卡面板
+    - 切换标签
+    - 施工中
+    - 待补充
+    - 已过期
+    - 允许编辑
+    - 免除CC协议
+    - 消歧义
+    - 视频
+    - B站视频
+    - 短视频
+    - 狗赛克视频
+    - 官方微博
+    - 更新日志
+    - 公告
+    - 文章水印
+    - 警告
+    - 提示
+    - 注意
+    - 备注
+    - 引用
+    - 外部链接
+    - 友情链接
+    - 友情WIKI
+    - Wiki页面加载检测
+    - 资源加载
+    - ResourceLoader
+    - JS
+    - CSS
+    - 排版
+    - 板块
+    - 段落样式
+    - 重复
+    - 条件项
+    - 转化
+    - Math
+    - Frac
+    - Radic
+    - Ruby
+    - 注音
+    - META资讯同步
+
+  # 切 chunk 时整段丢弃的 section 标题（精确/包含匹配）
+  noise_section_keywords:
+    - 导航
+    - 分类
+    - 参见
+    - 外部链接
+    - 参考文献
+    - 注释
+    - 图鉴筛选
+    - 筛选
+    - 更新历史
+    - 更新日志
+    - 公告
+
+# ---- 开发工具（tools/audit_pages.py）用的"未归类页"拆解规则，按顺序第一个命中生效。
+# 纯审计口径，不影响 pipeline；换游戏时这套规则整体换掉。
+audit:
+  title_rules:
+    - {name: 指挥官档案, regex: '^指挥官'}
+    - {name: 同人角色, regex: '^同人角色'}
+    - {name: 同人作品, regex: '^同人文|^同人馆'}
+    - {name: 测试/沙盒, regex: '^测试|^沙盒|^示例|^playground'}
+    - {name: 用户页, regex: '^用户页'}
+    - {name: 编辑教程, regex: '^编辑教程|^碧蓝航线WIKI编辑教程'}
+    - {name: 前方情报, regex: '^前方情报'}
+    - {name: 敌舰/塞壬, regex: '^敌舰|^塞壬|^仲裁者|^测试者|^公海舰队'}
+    - {name: 大型作战/META, regex: '^大型作战|^META|^信标|^舰队科技|^指挥喵|^METAboss攻略要点'}
+    - {name: 碧蓝回忆录(剧情), regex: '^碧蓝回忆录'}
+    - {name: 模拟器/小游戏, regex: '^舰队模拟器|^建造模拟器|^小游戏|^试作型|JUUs动态|^宿舍计划|^岛屿计划'}
+    - {name: 装备研发, regex: '^装备研发|^研发'}
+    - {name: 换装/外观, regex: '^换装|^外观|^皮肤|^誓约系统|^情人节礼物'}
+    - {name: 活动/直播/专题, regex: '^活动|^复刻|^庆典|^演习|^联动|^专题|^生放送|^日服公式|^已击毁的往期卫星|^碧蓝海事局'}
+    - {name: 世界巡游, regex: '^世界巡游'}
+    - {name: 聊天/动态, regex: '^聊天'}
+    - {name: 舰娘志/杂志, regex: '^碧蓝舰娘志|^碧蓝航线Crosswave|^碧蓝航线WIKI天梯榜'}
+    - {name: 攻略, regex: '攻略|指南|配装|推荐|思路|解析|测评|对比|开荒'}
+    - {name: 关卡, regex: '^\d'}

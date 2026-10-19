@@ -4,11 +4,13 @@
 （专有名号"举高高"、装备编号"F6F地狱猫T3"这类）。v1 纯向量在这些词上
 翻车过——top5 全是边角料，而 grep 一秒就能找到。
 
-索引落 data/bm25/（.gitignore 已排除，重建约 2 分钟）：
+索引落 <游戏 data_dir>/bm25/（.gitignore 已排除，重建约 2 分钟）：
 
     from kblib.bm25 import BM25Index
-    idx = BM25Index.build_from_chunks()   # 扫 data/chunks.jsonl
-    idx = BM25Index.load()                # 之后直接用
+    idx = BM25Index.build_from_chunks(game="arknights")   # 扫该游戏的 chunks.jsonl
+    idx = BM25Index.load(game="arknights")                # 之后直接用
+
+不给 game 就用默认游戏（azurlane），索引路径与 v2 起的位置一致。
 
 实现要点：
   * 分词结果用词表映射成 int32 倒排表（postings），17M 个词条压到 ~70MB，
@@ -27,13 +29,19 @@ from array import array
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from .config import CHUNKS_PATH, DATA_DIR
+from . import gamecfg
+from .gamecfg import GameConfig
 
 log = logging.getLogger("kb.bm25")
 
-INDEX_DIR = DATA_DIR / "bm25"
-INDEX_FILE = INDEX_DIR / "index.pkl"
-META_FILE = INDEX_DIR / "meta.json"
+
+def index_paths(cfg: GameConfig | str | None = None, game: str | None = None):
+    """(索引文件, meta 文件)。每款游戏一份，互不覆盖。"""
+    if isinstance(cfg, str):
+        cfg, game = None, cfg
+    cfg = cfg or gamecfg.load_game(game)
+    d = cfg.bm25_dir
+    return d / "index.pkl", d / "meta.json"
 
 K1 = 1.5      # 词频饱和参数，常规值
 B = 0.75      # 长度归一化强度，常规值
@@ -88,10 +96,11 @@ class BM25Index:
     # ------------------------------------------------------------ 构建
     @classmethod
     def build_from_chunks(cls, chunks_path: Path | None = None, k1: float = K1,
-                          b: float = B) -> "BM25Index":
+                          b: float = B, game: str | None = None) -> "BM25Index":
         import numpy as np
 
-        path = chunks_path or CHUNKS_PATH
+        cfg = gamecfg.load_game(game)
+        path = chunks_path or cfg.chunks_path
         log.info("开始扫 %s 建 BM25 索引（jieba 分词）", path)
         t0 = time.time()
         vocab: dict[str, int] = {}
@@ -135,14 +144,15 @@ class BM25Index:
                   postings, doc_ids, avgdl, k1, b)
         log.info("BM25 索引建好：%d docs / %d 词条 / 平均 %.1f 词，耗时 %.1fs",
                  n, len(vocab), avgdl, time.time() - t0)
-        idx.save()
+        idx.save(game=game)
         return idx
 
     # ------------------------------------------------------------ 持久化
-    def save(self, path: Path | None = None) -> None:
+    def save(self, path: Path | None = None, game: str | None = None) -> None:
         import numpy as np
 
-        path = path or INDEX_FILE
+        if path is None:
+            path, _meta = index_paths(game=game)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         with open(tmp, "wb") as f:
@@ -157,7 +167,9 @@ class BM25Index:
                 "postings": self.postings,
             }, f, protocol=4)
         tmp.replace(path)
-        META_FILE.write_text(json.dumps({
+        _p, meta_path = index_paths(game=game)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.write_text(json.dumps({
             "n_docs": len(self.doc_ids), "vocab": len(self.vocab),
             "avgdl": round(self.avgdl, 2), "k1": self.k1, "b": self.b,
             "bytes": path.stat().st_size,
@@ -165,12 +177,14 @@ class BM25Index:
         log.info("BM25 索引已存 %s（%.1f MB）", path, path.stat().st_size / 1e6)
 
     @classmethod
-    def load(cls, path: Path | None = None) -> "BM25Index":
+    def load(cls, path: Path | None = None, game: str | None = None) -> "BM25Index":
         import numpy as np
 
-        path = path or INDEX_FILE
+        if path is None:
+            path, _meta = index_paths(game=game)
         if not path.exists():
-            raise FileNotFoundError(f"没有 BM25 索引 {path}，先跑 BM25Index.build_from_chunks()")
+            raise FileNotFoundError(
+                f"没有 BM25 索引 {path}，先跑 BM25Index.build_from_chunks(game=...)")
         with open(path, "rb") as f:
             d = pickle.load(f)
         idx = cls(d["vocab"], np.asarray(d["doc_len"], dtype=np.int32), d["postings"],
@@ -217,3 +231,20 @@ class BM25Index:
             return []
         nz = nz[np.argsort(-scores[nz], kind="stable")][:top_k]
         return [(self.doc_ids[int(i)], float(scores[int(i)])) for i in nz]
+
+
+if __name__ == "__main__":
+    # parse.py 重跑后重建关键词索引（混合检索的 BM25 那一半）：
+    #   ./kb/.venv/bin/python -m kblib.bm25 --game arknights
+    import argparse
+
+    ap = argparse.ArgumentParser(description="扫 chunks.jsonl 建 BM25 索引")
+    ap.add_argument("--game", default=None,
+                    help=f"游戏配置（默认 {gamecfg.DEFAULT_GAME}）")
+    args = ap.parse_args()
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+    t0 = time.time()
+    idx = BM25Index.build_from_chunks(game=args.game)
+    print(f"BM25 重建完成：{len(idx)} docs → {index_paths(game=args.game)[0]}"
+          f"（耗时 {time.time() - t0:.0f}s）")

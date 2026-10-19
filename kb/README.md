@@ -1,31 +1,57 @@
-# 碧蓝航线知识库（kb/）
+# 多游戏知识库（kb/）
 
-把 [碧蓝航线 BWIKI](https://wiki.biligame.com/blhx) 炼成 bot 可检索、可查表的知识库。
+把游戏 wiki（[碧蓝航线 BWIKI](https://wiki.biligame.com/blhx)、
+[明日方舟 PRTS](https://prts.wiki)）炼成 bot 可检索、可查表的知识库。
 四个阶段：**抓取 → 解析 → 向量索引 → 评测**，全程本地跑，不调外部 API（模型 embedding 也是本地 CPU）。
 
-## 快速开始
+## 一游戏一配置
+
+v1–v3 只炼碧蓝航线，wiki 地址、infobox 白名单、chunk 规则、collection 名全写死在代码里。
+炼第二款游戏时这些要整套换掉，但 fetch/parse/embed/eval 的代码一行都不该动——
+所以全部收进 `kb/games/<name>.yaml`，脚本统一 `--game <name>`（不给就是默认的 azurlane，
+行为与 v1–v3 完全一致）：
 
 ```bash
 cd ~/workspace/anisignal/kb
 
 # 阶段 1：抓取（断点续拉，随时可 Ctrl-C，重跑同一命令继续）
-./.venv/bin/python fetch.py --spike 200      # 先拉 200 篇验证解析率（质量门）
-./.venv/bin/python fetch.py                   # 全量
-tools/fetch_loop.sh                           # 反复续跑直到 manifest 标记抓完
+./.venv/bin/python fetch.py --game arknights --spike 200   # 先拉 200 篇验证解析率（质量门）
+./.venv/bin/python fetch.py --game arknights               # 全量
+KB_GAME=arknights tools/fetch_loop.sh                      # 反复续跑直到 manifest 标记抓完
 
 # 阶段 2：解析（wikitext → SQLite 结构化表 + 语义 chunk）
-./.venv/bin/python parse.py
+./.venv/bin/python parse.py --game arknights
+./.venv/bin/python tools/fetch_images.py --game arknights  # 图片文件名换直链（可选，只记 URL）
+./.venv/bin/python tools/fetch_redirects.py --game arknights   # 重定向别名 → aliases 表
 
 # 阶段 3：embedding → 向量库（Qdrant 单二进制，REST 6333）
-./.venv/bin/python embed_index.py --recreate
-./.venv/bin/python tools/export_onnx.py --verify   # torch 权重 → ONNX int8（可选）
+./.venv/bin/python embed_index.py --game arknights --recreate
+./.venv/bin/python -m kblib.bm25 --game arknights          # 重建 BM25 索引（parse 重跑后必做）
+./.venv/bin/python tools/export_onnx.py --verify           # torch 权重 → ONNX int8（可选，一次即可）
 
 # 阶段 4：评测
-./.venv/bin/python eval.py -v
+./.venv/bin/python eval.py --game arknights -v
 ```
 
-环境：`kb/.venv`（mwparserfromhell / requests / onnxruntime / tokenizers / torch）。
-数据全在 `kb/data/`（`.gitignore` 已排除，只提交代码和文档）。
+环境：`kb/.venv`（mwparserfromhell / requests / onnxruntime / tokenizers / torch / PyYAML）。
+数据按游戏分目录（`.gitignore` 已排除，只提交代码、配置和文档）：
+
+| | azurlane（默认） | arknights |
+|---|---|---|
+| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` |
+| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` |
+| qdrant collection | `blhx_kb` | `arknights_kb` |
+| chunk_id 前缀 | `blhx:` | `arknights:` |
+| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` |
+
+azurlane 的 `data_dir` 故意不搬家：`blhx_kb` 的向量、`index_meta.json`、bm25 索引、
+53697 个 chunk_id 全在那儿，一搬家 v2/v3 的成果全部作废。新游戏各自一个目录，互不污染。
+
+配置里有什么：wiki/api 地址与 UA、抓取礼貌参数（rps/批大小/超时/重试/分片页数）、
+chunk 规则（长短阈值、台词字段后缀、每页图片数）、infobox 模板白名单（模板名 → kind/category，
+支持前缀家族）、标题模式（长得像关卡号就算关卡）、导航/噪音模板清单、`parse.kinds`
+（通用实体路的字段→列名映射）。碧蓝航线另挂 `extractor_module: kblib.extractors.azurlane`
+（舰娘/装备/关卡这些字段语义特异的族走专用抽取器），明日方舟 8 族全走通用实体路，零代码。
 
 ## Pipeline 说明
 
@@ -45,13 +71,21 @@ MediaWiki API 批量拉 wikitext，只拉文本不下载图片。几个为"随�
 
 ### 2. parse.py —— 解析
 
-两条路并行：
+两条结构化路 + 一条文本路（外加 v3 的六类补捞和两条零成本增强，见下）：
 
-- **结构化路**：infobox 模板（v2 的舰娘/装备/指挥喵 9 类，v3 补的关卡图鉴/原型舰性能数据/
-  塞壬图鉴/同人角色 4 族）→ SQLite `data/kb.db`，
+- **结构化路·专用抽取器**（`kblib/extractors/azurlane.py`，由配置的 `extractor_module` 挂上）：
+  碧蓝航线的舰娘/装备/指挥喵/关卡图鉴/原型舰性能数据/塞壬图鉴/同人角色 → SQLite `data/kb.db`，
   表：`ships / equipments / skills / ship_stats / ship_slots / cats / stages / ship_perf /
   sirens / fan_ships / pages / parse_stats / aliases / page_images`。
-  查表类问答直接走这里，精确匹配判分。
+  字段语义和表结构是这个游戏特有的，写死在代码里更清楚。查表类问答直接走这里，精确匹配判分。
+- **结构化路·通用实体**（`kblib/extractors/__init__.py` 的 `generic_entity`，零代码）：
+  字段即结构的 infobox（明日方舟 CharinfoV2/敌人信息/道具信息/关卡信息/家具信息/装置信息/
+  收藏品/VoiceTable 共 8 族）→ `entities`（一行一页，全字段进 `fields_json`）+
+  `entity_attrs`（扁平字段一行一个）+ YAML 声明的子表（`ark_operator_stats`、
+  `ark_operator_talents`、`ark_operator_skill_levels`、`ark_enemy_levels`、
+  `ark_stage_enemies`… 表名和列名都在 `games/arknights.yaml` 的 `parse.kinds` 里）。
+  编号字段（`天赋N`/`技能N描述`/`敌人N`）按正则拆行，`{0}` 是捕获组、`@key` 是"值即字段本身"。
+  kind 同时出现在两边时专用抽取器优先。
 - **文本路**：正文清洗（去导航模板、编辑标记、分类、"最后编辑于"噪音）→ 按语义切 chunk
   （一段讲一件事，`heading` 保留层级）→ `data/chunks.jsonl`，每行
   `{chunk_id, text, source_title, source_url, heading, kind, images?}`，`kind=card` 的是
@@ -87,14 +121,23 @@ v3 覆盖率审计（`docs/kb-coverage-audit.md`，漏了什么/补了什么/为
 - 本机（2 核）实测 torch fp32 ≈28 chunks/s，onnx int8 ≈86 chunks/s（短文本）；
   长文本（chunk p50 ≈341 token）降到 ~10 chunks/s，**全量索引约 2.5-3 小时**。
   索引进内存前按文本长度排序，批内 padding 浪费最小（随机序多花 ~1.5x）。
-- 存储：Qdrant 单二进制（`kblib/qdrant_server.py` 负责起停），collection `blhx_kb`，
-  512 维 cosine；`--store numpy` 可切纯 numpy 兜底（接口抽象在 `kblib/retriever.py`）。
+- 存储：Qdrant 单二进制（`kblib/qdrant_server.py` 负责起停），**一个进程服务所有游戏，
+  collection 按游戏分**（`blhx_kb` / `arknights_kb`），512 维 cosine；
+  `--store numpy` 可切纯 numpy 兜底（接口抽象在 `kblib/retriever.py`）。
+- BM25 关键词索引：`kblib/bm25.py`（jieba 分词 + Okapi BM25，自实现无第三方检索库），
+  落 `data/bm25/`，重建约 2 分钟。**parse.py 重跑后必须重建**
+  （`./.venv/bin/python -m kblib.bm25`），否则混合检索的关键词那一半是旧 chunk 集。
+- 混合检索（v2 起，`kblib/retriever.py` 的 `HybridStore`）：向量召回 + BM25 召回各 20 条
+  → RRF 融合 → `bge-reranker-v2-m3` cross-encoder 精排出 top-k。
 
 ### 4. eval.py —— 评测
 
-题库 `eval/questions.jsonl`，两类判分：
+题库在游戏配置的 `eval_dir/questions.jsonl`，两类判分：
 
 - **table（查表）**：探针查 `kb.db`，归一化（NFKC、全角括号、去空白、小写）后精确比对。
+  探针两套：碧蓝航线的 `skill_name/stat/ship_field/slot_equip…`（专用表），
+  和通用实体路的 `entity_attr/entity_json/child/child_list`（`child` 的表名列名白名单
+  从配置的 `parse.kinds` 来，题库里写不存在的表/列会直接报错）。
   标准答案全部用 `tools/raw_lookup.py` 回查过原始 wikitext，不经过 parser 自证。
 - **qa（检索）**：向量检索 top3，`expect_keywords` 全部命中才算过（考检索+切分，不考生成）。
 

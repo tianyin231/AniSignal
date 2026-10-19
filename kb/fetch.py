@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""阶段 1：抓取。分页拉全量条目 wikitext → data/raw/（gzip，不下载图片）。
+"""阶段 1：抓取。分页拉全量条目 wikitext → data/<game>/raw/（gzip，不下载图片）。
 
 用法：
     ./kb/.venv/bin/python fetch.py --spike 200      # spike：先拉 200 篇验证解析率
     ./kb/.venv/bin/python fetch.py                  # 全量（断点续拉，随时可打断）
     ./kb/.venv/bin/python fetch.py --limit 2000     # 只拉前 2000 篇（调试）
-    tools/fetch_loop.sh                             # 反复续跑，直到 manifest 标记抓完
+    ./kb/.venv/bin/python fetch.py --game arknights # 换游戏（配置见 games/*.yaml）
+    tools/fetch_loop.sh --game arknights            # 反复续跑，直到 manifest 标记抓完
 
 断点续拉按"磁盘上现有分片"自愈，不依赖 manifest：
   * manifest 丢了/写坏了 → 重启后扫分片重建断点，不会从头再拉；
@@ -27,14 +28,7 @@ import sys
 import time
 from pathlib import Path
 
-from kblib.config import (
-    BATCH_TITLES,
-    FETCH_MAX_RETRIES,
-    FETCH_TIMEOUT,
-    RAW_DIR,
-    SHARD_PAGES,
-    SPIKE_DIR,
-)
+from kblib import gamecfg
 from kblib.wikiapi import MediaWikiClient
 
 log = logging.getLogger("kb.fetch")
@@ -245,10 +239,7 @@ def crawl(
     return manifest
 
 
-TITLES_CACHE = RAW_DIR / "titles.json"
-
-
-def load_titles(client: MediaWikiClient, cache: Path = TITLES_CACHE) -> list[str]:
+def load_titles(client: MediaWikiClient, cache: Path) -> list[str]:
     """标题列表缓存到本地，断点续跑时不用再拉一遍。"""
     if cache.exists():
         titles = json.loads(cache.read_text(encoding="utf-8"))
@@ -261,19 +252,21 @@ def load_titles(client: MediaWikiClient, cache: Path = TITLES_CACHE) -> list[str
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="抓取碧蓝航线 BWIKI 全量 wikitext")
+    ap = argparse.ArgumentParser(description="抓取 wiki 全量 wikitext（一游戏一配置）")
+    ap.add_argument("--game", default=None,
+                    help=f"游戏配置 kb/games/<name>.yaml（默认 {gamecfg.DEFAULT_GAME}；"
+                         f"现有：{', '.join(gamecfg.available_games())}）")
     ap.add_argument("--spike", type=int, metavar="N", help="spike 模式：只拉 N 篇（随机抽样）")
     ap.add_argument("--limit", type=int, default=0, help="最多拉多少篇（调试用）")
-    ap.add_argument("--rps", type=float, default=1.5, help="每秒请求数上限（默认 1.5）")
-    ap.add_argument("--batch", type=int, default=BATCH_TITLES,
-                    help=f"单批标题数（默认 {BATCH_TITLES}）")
-    ap.add_argument("--timeout", type=int, default=FETCH_TIMEOUT,
-                    help=f"单次请求超时秒数（默认 {FETCH_TIMEOUT}）")
-    ap.add_argument("--retries", type=int, default=FETCH_MAX_RETRIES,
-                    help=f"重试次数（默认 {FETCH_MAX_RETRIES}）")
-    ap.add_argument("--shard-size", type=int, default=SHARD_PAGES)
+    ap.add_argument("--rps", type=float, default=None, help="每秒请求数上限（默认用配置值）")
+    ap.add_argument("--batch", type=int, default=None, help="单批标题数（默认用配置值）")
+    ap.add_argument("--timeout", type=int, default=None, help="单次请求超时秒数（默认用配置值）")
+    ap.add_argument("--retries", type=int, default=None, help="重试次数（默认用配置值）")
+    ap.add_argument("--shard-size", type=int, default=None,
+                    help="每分片页数（默认用配置值）")
     ap.add_argument("--seed", type=int, default=20261018, help="spike 抽样随机种子")
-    ap.add_argument("--titles-cache", type=Path, default=TITLES_CACHE)
+    ap.add_argument("--titles-cache", type=Path, default=None,
+                    help="标题列表缓存路径（默认 <game>/raw/titles.json）")
     ap.add_argument("--max-seconds", type=float, default=0,
                     help="本轮最多跑多少秒（到点干净退出，方便反复续跑）")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -284,30 +277,33 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    cfg = gamecfg.load_game(args.game)
     client = MediaWikiClient(rps=args.rps, timeout=args.timeout,
-                             max_retries=args.retries, batch_titles=args.batch)
+                             max_retries=args.retries, batch_titles=args.batch, game=cfg.name)
     log.info("列出全部条目标题…")
-    titles = load_titles(client, args.titles_cache)
+    titles = load_titles(client, args.titles_cache or cfg.titles_cache)
     if not titles:
         log.error("没拿到任何标题")
         return 1
-    log.info("共 %d 篇条目", len(titles))
+    log.info("%s：共 %d 篇条目（%s）", cfg.label, len(titles), cfg.wiki_base)
 
     if args.spike:
         random.seed(args.seed)
         sample = random.sample(titles, min(args.spike, len(titles)))
         sample.sort()
-        out_dir = SPIKE_DIR
-        manifest = crawl(client, sample, out_dir, shard_size=args.shard_size, prefix="spike")
-        (SPIKE_DIR / "sample-titles.json").write_text(
+        out_dir = cfg.spike_dir
+        manifest = crawl(client, sample, out_dir,
+                         shard_size=args.shard_size or cfg.shard_pages, prefix="spike")
+        (out_dir / "sample-titles.json").write_text(
             json.dumps(sample, ensure_ascii=False, indent=1), encoding="utf-8"
         )
         print(f"spike 抓取完成：{manifest['pages']} 篇 → {out_dir}（{manifest['requests']} 次请求）")
     else:
         use = titles[: args.limit] if args.limit else titles
-        manifest = crawl(client, use, RAW_DIR, shard_size=args.shard_size,
-                         max_seconds=args.max_seconds, extra_done_dirs=[SPIKE_DIR])
-        print(f"本轮抓取：{manifest['pages']}/{len(use)} 篇 → {RAW_DIR}"
+        manifest = crawl(client, use, cfg.raw_dir,
+                         shard_size=args.shard_size or cfg.shard_pages,
+                         max_seconds=args.max_seconds, extra_done_dirs=[cfg.spike_dir])
+        print(f"本轮抓取：{manifest['pages']}/{len(use)} 篇 → {cfg.raw_dir}"
               f"（{manifest['requests']} 次请求，{manifest['elapsed_sec']}s）")
         if manifest["failed"]:
             print(f"放弃 {manifest['failed']} 篇（见 manifest.failed_titles）")

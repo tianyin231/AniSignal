@@ -1,4 +1,15 @@
-"""全局路径与常量。"""
+"""全局路径与常量（与具体游戏无关的那部分）。
+
+游戏相关的旋钮（wiki 地址、infobox 白名单、chunk 规则、collection 名…）全部
+搬到 kb/games/*.yaml，由 kblib.gamecfg 读取；这里只留跨游戏共享的东西：
+
+  * KB_ROOT / DATA_DIR —— kb/ 与 kb/data/（DATA_DIR 可用 KB_DATA_DIR 覆盖）
+  * GAMES_DIR          —— kb/games/，一款游戏一份 YAML
+  * 模型权重目录、Qdrant 二进制/存储目录 —— 游戏无关，所有游戏共用一份
+
+旧版本文件里那堆 INFOBOX_TEMPLATES / NAV_TEMPLATE_PREFIXES / WIKI_BASE 常量
+已原样搬进 games/azurlane.yaml，见 kblib.gamecfg 的说明。
+"""
 
 from __future__ import annotations
 
@@ -9,150 +20,13 @@ from pathlib import Path
 KB_ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = Path(os.environ.get("KB_DATA_DIR", KB_ROOT / "data"))
-RAW_DIR = DATA_DIR / "raw"
-SPIKE_DIR = RAW_DIR / "spike"
-KB_DB = DATA_DIR / "kb.db"
-CHUNKS_PATH = DATA_DIR / "chunks.jsonl"
-# 重定向别名（fetch_redirects.py 拉的小分页，不混进 raw/ 正片）
-REDIRECTS_PATH = DATA_DIR / "redirects.jsonl.gz"
-# 文件名 → 直链缓存（fetch_images.py 批量 imageinfo 换来的）
-IMAGE_URLS_PATH = DATA_DIR / "image_urls.json"
-EVAL_DIR = KB_ROOT / "eval"
-QUESTIONS_PATH = EVAL_DIR / "questions.jsonl"
+GAMES_DIR = KB_ROOT / "games"
 
-WIKI_BASE = "https://wiki.biligame.com/blhx"
-API_URL = f"{WIKI_BASE}/api.php"
-USER_AGENT = "anisignal-kb/0.1 (offline knowledge-base build; polite 1.5 req/s)"
+# 模型权重（embedding / reranker 共用，游戏无关）缓存在 data/models/
+MODEL_DIR = DATA_DIR / "models"
 
-# 抓取礼貌参数
-DEFAULT_RPS = 1.5          # 每秒请求数上限
-BATCH_TITLES = 20          # 单批标题数：BWIKI 有单篇几 MB 的大页，一批里混进一个
-                           # 就能把整个响应拖到超时；20 比较稳，失败了也有二分兜底
-FETCH_TIMEOUT = 180        # 单次 curl 超时（秒）。大页响应慢，90s 不够
-FETCH_MAX_RETRIES = 6      # 超时/5xx/429 的重试次数
-BACKOFF_CAP = 60           # 指数退避上限（秒）
-SHARD_PAGES = 500          # 每个 gzip 分片的页数
-
-# infobox 模板 -> (实体类型, 分类)
-# 命名空间 10 下的模板名（不带 "模板:" 前缀）
-INFOBOX_TEMPLATES: dict[str, tuple[str, str]] = {
-    "舰娘图鉴": ("ship", "ship"),
-    "舰炮图鉴": ("equipment", "naval_gun"),
-    "防空炮图鉴": ("equipment", "aa_gun"),
-    "舰载机图鉴": ("equipment", "aircraft"),
-    "鱼雷图鉴": ("equipment", "torpedo"),
-    "导弹图鉴": ("equipment", "missile"),
-    "设备图鉴": ("equipment", "gear"),
-    "特殊兵装图鉴": ("equipment", "special_aux"),
-    "指挥喵图鉴": ("cat", "commander_cat"),
-    # ---- v3 补的（README 原来只列 9 种，审计发现还有这 6 类）----
-    "关卡图鉴": ("stage", "stage"),
-    "原型舰性能数据": ("ship_perf", "proto_ship"),
-    "原型舰性能数据（潜艇）": ("ship_perf", "proto_sub"),
-    "飞行器性能数据": ("ship_perf", "aircraft_perf"),
-    "同人角色": ("fan_ship", "fan_ship"),
-}
-
-# 按前缀匹配的图鉴模板：同一家族有 /仲裁机关、/维序机关 之类的子页，
-# 逐个列名字维护不住，按前缀收。
-INFOBOX_TEMPLATE_PREFIXES: dict[str, tuple[str, str]] = {
-    "塞壬图鉴": ("siren", "siren"),
-}
-
-# v2 起就在库里的 9 类老家族。匹配时先老后新：一页同时顶着一个老家族和一个
-# v3 新家族模板时（全库就 1 页：同人角色:024 同人角色+舰炮图鉴），必须复现 v2
-# 的选择，否则 prose/card 的 chunk_id 整体错位，增量 upsert 退化成全量重建。
-LEGACY_INFOBOX_TEMPLATE_NAMES = frozenset({
-    "舰娘图鉴", "舰炮图鉴", "防空炮图鉴", "舰载机图鉴", "鱼雷图鉴", "导弹图鉴",
-    "设备图鉴", "特殊兵装图鉴", "指挥喵图鉴",
-})
-
-# infobox 里出现即视为"台词"的字段后缀（语音台词单独切成 kind=voice 的 chunk）
-VOICE_FIELD_SUFFIX = "台词"
-
-# infobox 长字段阈值：超过这个长度的字段值另切一个 kind=fields 的 chunk，
-# 避免"模板一被抽取就从正文消失、长文本只躺在 fields_json 里没人检索得到"
-FIELDS_CHUNK_MIN = 60
-
-# 单页最多记多少个图片 URL（chunk payload 的 images 字段）
-MAX_IMAGES_PER_PAGE = 16
-
-# 出现即视为导航/样板噪音的模板（切 chunk 时整段丢弃）
-NAV_TEMPLATE_PREFIXES = (
-    "导航",
-    "舰娘图鉴导航",
-    "塞壬图鉴导航",
-    "塞壬图鉴顶栏",
-    "面包屑",
-    "图鉴小标题",
-    "图鉴模拟",
-    "图鉴筛选",
-    "装备图鉴筛选",
-    "舰娘定位筛选",
-    "筛选功能",
-    "筛选",
-    "轮播图",
-    "配色",
-    "渐变",
-    "字体图标",
-    "小图标",
-    "头像",
-    "展开折叠",
-    "折叠面板",
-    "选项卡面板",
-    "切换标签",
-    "施工中",
-    "待补充",
-    "已过期",
-    "允许编辑",
-    "免除CC协议",
-    "消歧义",
-    "视频",
-    "B站视频",
-    "短视频",
-    "狗赛克视频",
-    "官方微博",
-    "更新日志",
-    "公告",
-    "文章水印",
-    "警告",
-    "提示",
-    "注意",
-    "备注",
-    "引用",
-    "外部链接",
-    "友情链接",
-    "友情WIKI",
-    "Wiki页面加载检测",
-    "资源加载",
-    "ResourceLoader",
-    "JS",
-    "CSS",
-    "排版",
-    "板块",
-    "段落样式",
-    "重复",
-    "条件项",
-    "转化",
-    "Math",
-    "Frac",
-    "Radic",
-    "Ruby",
-    "注音",
-    "META资讯同步",
-)
-
-# 切 chunk 时整段丢弃的 section 标题（精确/包含匹配）
-NOISE_SECTION_KEYWORDS = (
-    "导航",
-    "分类",
-    "参见",
-    "外部链接",
-    "参考文献",
-    "注释",
-    "图鉴筛选",
-    "筛选",
-    "更新历史",
-    "更新日志",
-    "公告",
-)
+# Qdrant 单二进制与其存储目录：一个进程服务所有游戏，collection 按游戏分开
+QDRANT_BIN = KB_ROOT / "vendor" / "qdrant"
+QDRANT_STORAGE_DIR = DATA_DIR / "qdrant"
+QDRANT_PID_FILE = DATA_DIR / "qdrant.pid"
+QDRANT_PORT = int(os.environ.get("KB_QDRANT_PORT", "6333"))

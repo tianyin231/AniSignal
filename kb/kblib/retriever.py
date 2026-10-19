@@ -20,13 +20,11 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from . import qdrant_server
+from . import gamecfg, qdrant_server
 from .bm25 import BM25Index
-from .config import CHUNKS_PATH, DATA_DIR
+from .gamecfg import GameConfig
 
 log = logging.getLogger("kb.retriever")
-
-COLLECTION = "blhx_kb"
 
 # RRF 融合常数。60 是常规值（Cormack et al. 2009 的推荐量级，ES/Lucene 混合查询同量级）：
 # 它决定"排第 1 的压倒性优势"和"多路共识"之间的平衡，对具体取值不敏感
@@ -75,10 +73,16 @@ class VectorStore(ABC):
 
 # ---------------------------------------------------------------- Qdrant
 class QdrantVectorStore(VectorStore):
+    """一个游戏一个 collection（azurlane → blhx_kb，arknights → arknights_kb）。
+
+    qdrant 进程本身是常驻单实例，所有游戏共用；collection 名来自游戏配置。
+    """
+
     name = "qdrant"
 
-    def __init__(self, collection: str = COLLECTION, dim: int = 512, url: str | None = None) -> None:
-        self.collection = collection
+    def __init__(self, collection: str | None = None, dim: int = 512, url: str | None = None,
+                 game: str | None = None) -> None:
+        self.collection = collection or gamecfg.load_game(game).collection
         self.dim = dim
         self.url = (url or qdrant_server.BASE_URL).rstrip("/")
 
@@ -197,15 +201,15 @@ class QdrantVectorStore(VectorStore):
 
 # ---------------------------------------------------------------- 兜底
 class NumpyVectorStore(VectorStore):
-    """无第三方向量库时的兜底实现：numpy 暴力检索，快照落盘。"""
+    """无第三方向量库时的兜底实现：numpy 暴力检索，快照落盘（按游戏分文件）。"""
 
     name = "numpy"
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None, game: str | None = None) -> None:
         import numpy as np
 
         self.np = np
-        self.path = path or (DATA_DIR / "vectors.npz")
+        self.path = path or (gamecfg.load_game(game).data_dir / "vectors.npz")
         self.ids: list[int] = []
         self.payloads: list[dict] = []
         self.mat = np.zeros((0, 0), dtype=np.float32)
@@ -274,15 +278,16 @@ class NumpyVectorStore(VectorStore):
             self.path.unlink()
 
 
-def get_store(name: str | None = None, dim: int = 512) -> VectorStore:
+def get_store(name: str | None = None, dim: int = 512,
+              game: str | None = None) -> VectorStore:
     """按名字取向量库；默认 qdrant，qdrant 不可用自动退 numpy。"""
     name = (name or "qdrant").lower()
     if name == "numpy":
-        return NumpyVectorStore()
+        return NumpyVectorStore(game=game)
     if name == "qdrant":
         try:
             qdrant_server.ensure_server()
-            return QdrantVectorStore(dim=dim)
+            return QdrantVectorStore(dim=dim, game=game)
         except Exception as e:  # pragma: no cover - 环境受限时兜底
             log.warning("Qdrant 不可用（%s），退回 numpy 兜底库", e)
             return NumpyVectorStore()
@@ -306,11 +311,12 @@ class HybridStore(VectorStore):
 
     def __init__(self, vector: VectorStore | None = None, bm25: BM25Index | None = None,
                  reranker=None, rrf_k: int = RRF_K, recall_k: int = 20,
-                 rerank: bool = True) -> None:
+                 rerank: bool = True, game: str | None = None) -> None:
         self.vector = vector
+        self.cfg: GameConfig = gamecfg.load_game(game)
         self.rrf_k = rrf_k
         self.recall_k = recall_k
-        self.bm25 = bm25 if bm25 is not None else self._load_bm25()
+        self.bm25 = bm25 if bm25 is not None else self._load_bm25(self.cfg)
         self.reranker = None
         if rerank:
             self.reranker = reranker if reranker is not None else self._load_reranker()
@@ -318,12 +324,12 @@ class HybridStore(VectorStore):
 
     # -- 依赖装配：缺什么补什么，补不上就降级 --
     @staticmethod
-    def _load_bm25() -> BM25Index:
+    def _load_bm25(cfg: GameConfig) -> BM25Index:
         try:
-            return BM25Index.load()
+            return BM25Index.load(game=cfg.name)
         except FileNotFoundError:
-            log.warning("没有 BM25 索引，现场建一个（约 1 分钟）")
-            return BM25Index.build_from_chunks()
+            log.warning("没有 %s 的 BM25 索引，现场建一个（约 1 分钟）", cfg.name)
+            return BM25Index.build_from_chunks(game=cfg.name)
 
     @staticmethod
     def _load_reranker():
@@ -340,7 +346,7 @@ class HybridStore(VectorStore):
     def payloads(self) -> dict[str, dict]:
         if self._payloads is None:
             self._payloads = {}
-            with open(CHUNKS_PATH, encoding="utf-8") as f:
+            with open(self.cfg.chunks_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -418,14 +424,15 @@ class HybridStore(VectorStore):
 
 
 def get_hybrid_store(vector_name: str | None = None, dim: int = 512,
-                     rerank: bool = True, recall_k: int = 20) -> HybridStore:
-    """装一条混合检索链路：向量库 + BM25 + reranker。"""
+                     rerank: bool = True, recall_k: int = 20,
+                     game: str | None = None) -> HybridStore:
+    """装一条混合检索链路：向量库 + BM25 + reranker（按游戏各一份）。"""
     vec = None
     try:
-        vec = get_store(vector_name, dim=dim)
+        vec = get_store(vector_name, dim=dim, game=game)
         if vec.count() == 0:
             log.warning("向量库是空的，混合检索只走 BM25")
             vec = None
     except Exception as e:  # noqa: BLE001 - 向量库不可用就退回纯 BM25
         log.warning("向量库不可用（%s），混合检索只走 BM25", e)
-    return HybridStore(vector=vec, rerank=rerank, recall_k=recall_k)
+    return HybridStore(vector=vec, rerank=rerank, recall_k=recall_k, game=game)

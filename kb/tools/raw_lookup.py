@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""开发小工具：直接从 data/raw/*.jsonl.gz 里按标题查原始 wikitext。
+"""开发小工具：直接从 data/<game>/raw/*.jsonl.gz 里按标题查原始 wikitext。
 
 用来独立核对 eval 题库的标准答案（不经过 parser，避免自证）。
     ./kb/.venv/bin/python tools/raw_lookup.py 光辉 企业
-    ./kb/.venv/bin/python tools/raw_lookup.py --grep "技能1名" 贝尔法斯特
+    ./kb/.venv/bin/python tools/raw_lookup.py --game arknights --grep "职业" 阿米娅
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # 直接跑本文件时能找到 kblib
 
-from kblib.config import RAW_DIR, SPIKE_DIR
+from kblib import gamecfg
 
 
 def iter_raw(dirs):
@@ -37,9 +37,12 @@ def main() -> int:
     ap.add_argument("--grep", default="", help="只输出匹配该正则的行")
     ap.add_argument("--spike", action="store_true", help="连 spike 目录一起搜")
     ap.add_argument("--max-chars", type=int, default=1200)
+    ap.add_argument("--game", default=gamecfg.DEFAULT_GAME,
+                    help=f"游戏配置名，默认 {gamecfg.DEFAULT_GAME}")
     args = ap.parse_args()
+    cfg = gamecfg.load_game(args.game)
 
-    dirs = [RAW_DIR] + ([SPIKE_DIR] if args.spike else [])
+    dirs = [cfg.raw_dir] + ([cfg.spike_dir] if args.spike else [])
     want = set(args.titles)
     found = 0
     for rec in iter_raw(dirs):

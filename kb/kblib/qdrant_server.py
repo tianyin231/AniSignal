@@ -15,14 +15,19 @@ import time
 import urllib.request
 from pathlib import Path
 
-from .config import DATA_DIR, KB_ROOT
+from .config import (
+    DATA_DIR,
+    QDRANT_BIN,
+    QDRANT_PID_FILE,
+    QDRANT_PORT,
+    QDRANT_STORAGE_DIR,
+)
 
 log = logging.getLogger("kb.qdrant")
 
-QDRANT_BIN = KB_ROOT / "vendor" / "qdrant"
-STORAGE_DIR = DATA_DIR / "qdrant"
-PID_FILE = DATA_DIR / "qdrant.pid"
-PORT = int(os.environ.get("KB_QDRANT_PORT", "6333"))
+STORAGE_DIR = QDRANT_STORAGE_DIR
+PID_FILE = QDRANT_PID_FILE
+PORT = QDRANT_PORT
 BASE_URL = f"http://127.0.0.1:{PORT}"
 
 

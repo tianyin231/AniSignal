@@ -7,7 +7,7 @@ embed_index.py --append 之前先跑这个，回答三个问题：
   3. chunks.jsonl 里有、库里没有的（→ 新点，要新算）。
 另外按长度列出"库里缺失的最长 chunk"，即审计报告第 6 节那批尾部没 flush 的。
 
-用法：./kb/.venv/bin/python tools/check_append.py [--chunks data/chunks.jsonl]
+用法：./kb/.venv/bin/python tools/check_append.py [--game arknights] [--chunks ...]
 """
 
 from __future__ import annotations
@@ -20,16 +20,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from kblib import qdrant_server, retriever  # noqa: E402
+from kblib import gamecfg, qdrant_server, retriever  # noqa: E402
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="chunks.jsonl 与向量库的增量对账")
+    ap.add_argument("--game", default=gamecfg.DEFAULT_GAME,
+                    help=f"游戏配置名，默认 {gamecfg.DEFAULT_GAME}")
     ap.add_argument("--chunks", type=Path, default=None)
     args = ap.parse_args()
-    chunks_path = args.chunks or retriever.CHUNKS_PATH
+    cfg = gamecfg.load_game(args.game)
+    chunks_path = args.chunks or cfg.chunks_path
 
-    store = retriever.QdrantVectorStore()
+    store = retriever.QdrantVectorStore(game=cfg.name)
     qdrant_server.ensure_server()
     existing: dict[str, tuple[int, str]] = {}
     for pid, payload in store.iter_payloads():
@@ -37,7 +40,8 @@ def main() -> int:
         if cid and cid not in existing:
             existing[cid] = (pid, hashlib.md5(
                 payload.get("text", "").encode("utf-8")).hexdigest())
-    print(f"库里向量       : {len(existing)}（collection {store.collection}）")
+    print(f"[{cfg.label}] 库里向量   : {len(existing)}"
+          f"（collection {store.collection}，{chunks_path.name}）")
 
     n_total = n_same = n_diff = n_new = 0
     new_long: list[tuple[int, str, str]] = []
