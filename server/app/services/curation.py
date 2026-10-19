@@ -37,6 +37,9 @@ REVIEW_429_BACKOFF_SECONDS = 20
 REVIEW_429_RETRIES = 4
 HIGHLIGHT_WINDOW = timedelta(days=7)
 COMMUNITY_MIN_VIEWS = 10_000
+# select_trending 的预筛倍率与下限：候选行数 = max(limit × 20, 200)
+PRESCREEN_FACTOR = 20
+PRESCREEN_FLOOR = 200
 _PROMOTION_TERMS = (
     "抽奖",
     "转发有奖",
@@ -282,6 +285,11 @@ async def select_trending(
     """热度飙升：窗口内播放增量最高的内容（≥2 个快照才可参与）。
 
     返回 PublicContentItem 兼容 dict，额外带 delta_view（窗口内播放增量）。
+
+    候选先按「最近一次快照」预筛到 max(limit×20, 200) 行：delta 要拿到快照才能算、
+    没法下推 SQL（metrics 是 JSON，没有可移植的数值列），而全窗口可能上万条、每行都带
+    ContentVersion 全文。代价是「窗口早期冲高、之后不再被采集」的内容可能进不了预筛集，
+    换来的是公开端点不再每次请求都把全窗口 ORM 载进内存（PERF-013）。
     """
     from app.services import settings as settings_service
 
@@ -328,6 +336,12 @@ async def select_trending(
             )
             .join(Source, RawContent.source_id == Source.id, isouter=True)
             .where(*conditions)
+            # 预筛（PERF-013）：delta 要拿到快照才能算，没法下推 SQL（metrics 是 JSON，
+            # 无可移植的数值列）。但全窗口可能上万条，每行都带 ContentVersion 全文，先按
+            # 「最近一次快照」取一批候选——快照 id 随采集单调递增，越新说明越还在涨——
+            # 把进内存的 ORM 行数压到百行级。彻底解法是生成列 + 索引把 delta 下推。
+            .order_by(snap_sq.c.last_id.desc())
+            .limit(max(limit * PRESCREEN_FACTOR, PRESCREEN_FLOOR))
         )
     )
     edge_ids = {snap_id for row in rows for snap_id in (row.first_id, row.last_id)}
