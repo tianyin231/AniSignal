@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { safeRedirect } from '~/utils/safe-redirect'
+
 definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '登录 · AniSignal' })
 
@@ -8,11 +10,7 @@ const error = ref('')
 const busy = ref(false)
 const { login } = useAuth()
 const route = useRoute()
-const redirectTarget = () => {
-  const target = String(route.query.redirect || '/')
-  // 只允许站内路径，防开放跳转
-  return target.startsWith('/') && !target.startsWith('//') ? target : '/account'
-}
+const redirectTarget = () => safeRedirect(route.query.redirect, window.location.origin)
 
 async function submit() {
   if (!email.value.trim() || busy.value) return
