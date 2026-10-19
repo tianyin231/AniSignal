@@ -182,6 +182,12 @@ v3 新增 4 族：关卡图鉴 1984、塞壬图鉴 93、飞行器性能数据 88
 | SQLite 表 | 27 张（`entities` 12185 / `entity_attrs` 126937 + `ark_operator_*` 11 张等 21 张子表） |
 | 页面类型分布 | stage 4715 / furniture 2877 / other 6506 / enemy 1832 / item 1392 / device 775 / collectible 741 / operator 463 / voice 439 |
 
+混合检索三件套已在方舟库上配齐（逻辑从碧蓝航线继承，`--game` 一换即用，零代码改动）：
+BM25 索引 **120114 docs / 188010 词条**（jieba 分词，232s 建完，84.7 MB，落 `data/arknights/bm25/`），
+向量召回与 BM25 召回各 20 条 → RRF 融合 → `bge-reranker-v2-m3`（ONNX int8，本地 561 MB 权重）
+精排出 top-k。冒烟实测单问端到端 38s（含 jieba 与 reranker 冷启），reranker 对首位命中的
+打分能把 `卡片摘要` 噪声块压到尾段。
+
 ## 开发小工具
 
 ```bash
