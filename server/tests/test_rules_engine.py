@@ -839,6 +839,23 @@ async def test_rules_config_round_trip_and_clamping(session):
 # ---------- 管理端 API ----------
 
 
+def assert_admin_token_required(response, method: str, path: str) -> None:
+    """SEC-039：精确断言"缺管理员令牌被挡下"，不用 `in (401, 422)` 区间。
+
+    `require_admin` 是 `Header(...)` 形式的必需 header，缺令牌时 FastAPI 走校验层返回
+    422——这与"body 缺字段"的 422 状态码相同，只有 `loc` 不同。区间断言会把两种都算过：
+    把 `Depends(require_admin)` 从路由上摘掉时，GET 会变 200、POST 仍会因缺 body 返回
+    422，`in (401, 422)` 依然全绿，鉴权回归被完全掩护。所以必须核对 loc 里真的出现了
+    header/x-admin-token。
+    """
+    assert response.status_code == 422, (method, path, response.status_code, response.text)
+    detail = response.json()["detail"]
+    assert any(err.get("loc") == ["header", "x-admin-token"] for err in detail), (
+        f"{method} {path} 的响应里没有 x-admin-token 缺失错误，"
+        f"鉴权依赖可能已被摘掉或写反：{detail}"
+    )
+
+
 async def test_admin_rule_crud_and_hit_ledger(client, session, admin_headers):
     created = await client.post(
         "/api/admin/rules-engine",
@@ -932,7 +949,7 @@ async def test_admin_endpoints_require_token(client):
         ("get", "/api/admin/rules-engine/config"),
     ):
         response = await client.request(method, path)
-        assert response.status_code in (401, 422), (method, path, response.status_code)
+        assert_admin_token_required(response, method, path)
 
 
 async def test_admin_volume_and_config_endpoints(client, session, admin_headers):
