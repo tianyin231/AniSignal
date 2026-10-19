@@ -36,13 +36,13 @@ KB_GAME=arknights tools/fetch_loop.sh                      # 反复续跑直到 
 环境：`kb/.venv`（mwparserfromhell / requests / onnxruntime / tokenizers / torch / PyYAML）。
 数据按游戏分目录（`.gitignore` 已排除，只提交代码、配置和文档）：
 
-| | azurlane（默认） | arknights |
-|---|---|---|
-| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` |
-| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` |
-| qdrant collection | `blhx_kb` | `arknights_kb` |
-| chunk_id 前缀 | `blhx:` | `arknights:` |
-| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` |
+| | azurlane（默认） | arknights | starrail |
+|---|---|---|---|
+| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` | `games/starrail.yaml` |
+| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` | `data/starrail/` |
+| qdrant collection | `blhx_kb` | `arknights_kb` | `starrail_kb` |
+| chunk_id 前缀 | `blhx:` | `arknights:` | `starrail:` |
+| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` | `eval/starrail/questions.jsonl` |
 
 azurlane 的 `data_dir` 故意不搬家：`blhx_kb` 的向量、`index_meta.json`、bm25 索引、
 53697 个 chunk_id 全在那儿，一搬家 v2/v3 的成果全部作废。新游戏各自一个目录，互不污染。
@@ -207,6 +207,53 @@ BM25 索引 **120114 docs / 188010 词条**（jieba 分词，232s 建完，84.7 
 `{{人员档案set}}`（种族/性别/出身地/生日/战斗经验/身高/感染情况 + 六维评级 + 融合率/密度）
 目前只以原文形态进 template chunk，没进 `entity_attrs`——全库 0 个实体有 `种族`/`性别`/`出身地`
 属性，463 个干员的种族出身地因此查不到表。补上之后 q04 这类题查表和检索两条路都能通。
+
+### 崩坏：星穹铁道（starrail）
+
+| 指标 | 数值 |
+|---|---|
+| 抓取篇数 | 7569（非重定向正文全量落盘，16 个 gzip 分片） |
+| 重定向别名 | 398 |
+| 带 infobox 页 | 5902（结构化抽取率 98.8%，全页占比 78.0%） |
+| 实体数 | 5959（23 kind，见下） |
+| entity_attrs | 54795 |
+| **chunk 数** | **31617**（prose 11291 / template 10240 / card 5959 / fields 3754 / hidden 243 / gallery 130） |
+| **向量数** | **31617**（qdrant collection `starrail_kb`，与 chunks.jsonl 行数一一对齐） |
+| SQLite 表 | 18 张（`entities` 5959 / `entity_attrs` 54795 + `sr_character_*` 6 张、`sr_enemy_skills`、`sr_lightcone_stats`、`sr_voice_lines`、`sr_book_pages` 等） |
+| 子表明细 | 角色技能 606 / 星魂 498 / 额外能力 250 / 技能等级 2808 / 敌人技能 1142 / 语音台词 5994 / 光锥数值 4218 / 如我所书页码 320 |
+| 图片直链 | 1825（2207 个文件名换到，226 个失效） |
+
+23 族：item 959 / book 686 / quest 638 / blessing 414 / equation 324 / enemy 294 /
+curio 290 / npc 290 / decoration 260 / activity 238 / consumable 218 / message 215 /
+material 200 / lightcone 170 / equipment 159 / character 102 / voice 92 / stage 90 /
+quest_series 88 / component 85 / relic_set 62 / interaction 55 / album 30。
+
+**星铁专有的三个解析坑**（前两个是配置、第三个加了个开关，都只对星铁生效，
+碧蓝航线/方舟输出一个字节不变）：
+
+1. **模板名里嵌 HTML 注释**——`活动信息<!-- 暂时用不上的板块…-->`、
+   `光锥图鉴<!-- 本段为备注信息…-->`、`道具<!-- 暂时用不到的条目…-->`。
+   和方舟 CharinfoV2 一个毛病，`strip_template_name_comments: true` 必须开。
+2. **老/新两代技能格式**：36 个新角色把技能整块嵌进 infobox 字段值里
+   （`|普攻={{行迹/技能|类型=普攻|名称=呀，漏网之鱼|描述=…}}`），顶层模板池里
+   根本没有这个节点 → 给 `child_templates` 加 `recursive: true`。
+   93 个老角色是 `普攻/战技/…` 平铺命名字段 → 用 `^X描述$` 模式 + `const: {slot: X}` 拆行。
+3. **`<div>` 里的模板两头丢**：`filter_templates(recursive=False)` 看不见 Tag 内容
+   里的模板，`_plain` 的通用兜底又只取无名参数 1 → "与你同行的回忆"整页 850+ 条
+   成就只剩 5 个 prose chunk。新增 `parse.dump_templates_in_tags`（星铁开，默认关）。
+
+另外两个静默坑：`rows_from` 不写 `table` 会一声不响丢整块（`_pattern_rows` 的 table 取
+`spec.get("table") or default_table`，父子都不写就是空串）；展示型模板
+`{{颜色|描述2|12%/14%/16%}}` 人看的值在位置参数 2（和方舟 `{{color|#0098DC|+30}}` 同构）
+→ `display_templates: 颜色: ["2"]`。
+
+**embedding 断点续跑的教训**：云电脑重启把上一轮 embedding 腰斩在 21632/31617，而
+`index_meta.json` 里还留着更早一次 `--limit 200` 冒烟的值——它只在 embed_index.py
+**正常跑完**时落盘，被 kill 的长跑一次都不更新。**进度真相是 qdrant 的 `points_count`**
+（`curl localhost:6333/collections/starrail_kb`），不是 `index_meta.json`，也不是
+checkpoint 上那个勾。重跑 `tools/embed_resume.sh starrail --enc-batch 8`，
+`--append` 按 chunk_id 对账，21632 个已有向量文本逐字节一致、一个都没重算，
+只补 9985 个（2595s）。
 
 ### qa_demo 抽查（5 问，方舟库）
 
