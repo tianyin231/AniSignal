@@ -2,7 +2,8 @@
 
 把游戏 wiki（[碧蓝航线 BWIKI](https://wiki.biligame.com/blhx)、
 [明日方舟 PRTS](https://prts.wiki)、
-[鸣潮 BWIKI](https://wiki.biligame.com/wutheringwaves)）炼成 bot 可检索、可查表的知识库。
+[鸣潮 BWIKI](https://wiki.biligame.com/wutheringwaves)、
+[崩坏3 BWIKI](https://wiki.biligame.com/bh3)）炼成 bot 可检索、可查表的知识库。
 四个阶段：**抓取 → 解析 → 向量索引 → 评测**，全程本地跑，不调外部 API（模型 embedding 也是本地 CPU）。
 
 ## 一游戏一配置
@@ -37,14 +38,14 @@ KB_GAME=arknights tools/fetch_loop.sh                      # 反复续跑直到 
 环境：`kb/.venv`（mwparserfromhell / requests / onnxruntime / tokenizers / torch / PyYAML）。
 数据按游戏分目录（`.gitignore` 已排除，只提交代码、配置和文档）：
 
-| | azurlane（默认） | arknights | mingchao |
-|---|---|---|---|
-| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` | `games/mingchao.yaml` |
-| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` | `data/mingchao/` |
-| qdrant collection | `blhx_kb` | `arknights_kb` | `mingchao_kb` |
-| chunk_id 前缀 | `blhx:` | `arknights:` | `mingchao:` |
-| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` | `eval/mingchao/questions.jsonl` |
-| wiki | 碧蓝航线 BWIKI | 方舟 PRTS | 鸣潮 BWIKI（**注意 `wiki.biligame.com/mc` 是我的世界**，鸣潮是 `/wutheringwaves`） |
+| | azurlane（默认） | arknights | mingchao | honkai3 |
+|---|---|---|---|---|
+| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` | `games/mingchao.yaml` | `games/honkai3.yaml` |
+| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` | `data/mingchao/` | `data/honkai3/` |
+| qdrant collection | `blhx_kb` | `arknights_kb` | `mingchao_kb` | `honkai3_kb` |
+| chunk_id 前缀 | `blhx:` | `arknights:` | `mingchao:` | `honkai3:` |
+| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` | `eval/mingchao/questions.jsonl` | `eval/honkai3/questions.jsonl` |
+| wiki | 碧蓝航线 BWIKI | 方舟 PRTS | 鸣潮 BWIKI（**注意 `wiki.biligame.com/mc` 是我的世界**，鸣潮是 `/wutheringwaves`） | 崩坏3 BWIKI（**infobox 驱动**：条目页基本只有一张图鉴模板没正文，结构化路是主力） |
 
 azurlane 的 `data_dir` 故意不搬家：`blhx_kb` 的向量、`index_meta.json`、bm25 索引、
 53697 个 chunk_id 全在那儿，一搬家 v2/v3 的成果全部作废。新游戏各自一个目录，互不污染。
