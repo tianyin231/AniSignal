@@ -130,6 +130,9 @@ def main():
     CFG = gamecfg.load_game(args.game)
 
     conn = sqlite3.connect(CFG.kb_db)
+    # facts_generic 按列名拼子表事实（zip(r.keys(), r)），没有 Row 工厂拿到的是裸 tuple，
+    # 一进通用实体路就 AttributeError——碧蓝航线走 ships 专用表不经过那儿，所以一直没暴露
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     if CFG.extractor_module:
         # 碧蓝航线：舰娘页标题（专用抽取器落的 ships 表）
