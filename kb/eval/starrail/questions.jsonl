@@ -1,0 +1,50 @@
+{"id": "t01", "kind": "table", "q": "姬子的命途是什么", "probe": "entity_attr", "args": {"title": "姬子", "attr": "命途"}, "expect": "智识"}
+{"id": "t02", "kind": "table", "q": "姬子的元素属性是什么", "probe": "entity_attr", "args": {"title": "姬子", "attr": "元素属性"}, "expect": "火"}
+{"id": "t03", "kind": "table", "q": "姬子的稀有度是几星", "probe": "entity_attr", "args": {"title": "姬子", "attr": "稀有度"}, "expect": "5星"}
+{"id": "t04", "kind": "table", "q": "姬子属于哪个阵营", "probe": "entity_attr", "args": {"title": "姬子", "attr": "阵营"}, "expect": "星穹列车"}
+{"id": "t05", "kind": "table", "q": "姬子是哪个版本实装的", "probe": "entity_attr", "args": {"title": "姬子", "attr": "实装版本"}, "expect": "1.0"}
+{"id": "t06", "kind": "table", "q": "姬子的中文配音演员是谁", "probe": "entity_attr", "args": {"title": "姬子", "attr": "中文CV"}, "expect": "林簌"}
+{"id": "t07", "kind": "table", "q": "卡芙卡的战技叫什么名字", "probe": "child", "args": {"table": "sr_character_skills", "title": "卡芙卡", "column": "name", "where": {"slot": "战技"}}, "expect": "月光摩挲连绵"}
+{"id": "t08", "kind": "table", "q": "姬子的终结技叫什么名字", "probe": "child", "args": {"table": "sr_character_skills", "title": "姬子", "column": "name", "where": {"slot": "终结技"}}, "expect": "天坠之火"}
+{"id": "t09", "kind": "table", "q": "姬子有哪些技能", "probe": "child_list", "args": {"table": "sr_character_skills", "title": "姬子", "column": "name"}, "expect": "武装调律"}
+{"id": "t10", "kind": "table", "q": "姬子的第三个星魂叫什么", "probe": "child", "args": {"table": "sr_character_eidolons", "title": "姬子", "column": "name", "where": {"index": "3"}}, "expect": "自我"}
+{"id": "t11", "kind": "table", "q": "姬子有哪些额外能力", "probe": "child_list", "args": {"table": "sr_character_traces", "title": "姬子", "column": "name"}, "expect": "星火"}
+{"id": "t12", "kind": "table", "q": "姬子战技1级的伤害倍率是多少", "probe": "child", "args": {"table": "sr_character_skill_levels", "title": "姬子", "column": "value", "where": {"slot": "战技", "level": "1"}}, "expect": "100.0%攻击力"}
+{"id": "t14", "kind": "table", "q": "丹恒的普攻描述是什么", "probe": "child", "args": {"table": "sr_character_skills", "title": "丹恒", "column": "description", "where": {"slot": "普攻"}}, "expect": "对指定敌方单体造成等同于丹恒50%/100%攻击力的风属性伤害。"}
+{"id": "t15", "kind": "table", "q": "光锥「我」的诞生的命途是什么", "probe": "entity_attr", "args": {"title": "「我」的诞生", "attr": "命途"}, "expect": "智识"}
+{"id": "t16", "kind": "table", "q": "光锥「我」的诞生的技能叫什么", "probe": "entity_attr", "args": {"title": "「我」的诞生", "attr": "技能名称"}, "expect": "画像少女"}
+{"id": "t17", "kind": "table", "q": "蚕食者之影是什么类型的敌人", "probe": "entity_attr", "args": {"title": "蚕食者之影", "attr": "类型"}, "expect": "强敌"}
+{"id": "t18", "kind": "table", "q": "蚕食者之影的弱点是什么", "probe": "entity_attr", "args": {"title": "蚕食者之影", "attr": "弱点"}, "expect": "火、雷、风"}
+{"id": "t19", "kind": "table", "q": "蚕食者之影的第二个技能叫什么", "probe": "child", "args": {"table": "sr_enemy_skills", "title": "蚕食者之影", "column": "name", "where": {"index": "2"}}, "expect": "流年金刺"}
+{"id": "t21", "kind": "table", "q": "遗器不老者的仙舟属于什么类别", "probe": "entity_attr", "args": {"title": "不老者的仙舟", "attr": "类别"}, "expect": "位面饰品"}
+{"id": "t22", "kind": "table", "q": "遗器停转的萨尔索图的连结绳叫什么", "probe": "entity_attr", "args": {"title": "停转的萨尔索图", "attr": "连结绳"}, "expect": "萨尔索图的晨昏界线"}
+{"id": "t23", "kind": "table", "q": "材料「同谐」之影的稀有度是几星", "probe": "entity_attr", "args": {"title": "「同谐」之影", "attr": "稀有度"}, "expect": "5星"}
+{"id": "t25", "kind": "table", "q": "关卡丰饶之蕾 • 绥园消耗多少开拓力", "probe": "entity_attr", "args": {"title": "丰饶之蕾 • 绥园", "attr": "开拓力消耗"}, "expect": "10"}
+{"id": "t27", "kind": "table", "q": "差分宇宙方程「一首美丽的诗」的稀有度是几星", "probe": "entity_attr", "args": {"title": "一首美丽的诗", "attr": "稀有度"}, "expect": "3星"}
+{"id": "t28", "kind": "table", "q": "差分宇宙方程「一首美丽的诗」的命途1需求是多少", "probe": "entity_attr", "args": {"title": "一首美丽的诗", "attr": "命途1需求"}, "expect": "6"}
+{"id": "t29", "kind": "table", "q": "差分宇宙祝福 BCI-34型灰质的命途是什么", "probe": "entity_attr", "args": {"title": "BCI-34型灰质", "attr": "命途"}, "expect": "智识"}
+{"id": "t30", "kind": "table", "q": "差分宇宙组件不老心的特性是什么", "probe": "entity_attr", "args": {"title": "不老心", "attr": "特性"}, "expect": "充能"}
+{"id": "t32", "kind": "table", "q": "三月七语音里「问候」说了什么", "probe": "child", "args": {"table": "sr_voice_lines", "title": "三月七/语音", "column": "content", "where": {"voice_type": "问候"}}, "expect": "哎呀，你来得正好，今天还没一起拍过照呢。"}
+{"id": "t33", "kind": "table", "q": "姬子语音里「道别」说了什么", "probe": "child", "args": {"table": "sr_voice_lines", "title": "姬子/语音", "column": "content", "where": {"voice_type": "道别"}}, "expect": "放心休息吧，有我和帕姆在，不必担心列车。"}
+{"id": "t35", "kind": "table", "q": "万敌的如我所书第一章第一页左页写了什么", "probe": "child", "args": {"table": "sr_book_pages", "title": "万敌/如我所书", "column": "left", "where": {"chapter": "1", "index": "1"}}, "expect": "在士兵之间，久负盛名的城邦……\n\n悬锋，\n\n是每一个战士的向往之地。"}
+{"id": "t36", "kind": "table", "q": "姬子战技10级的伤害倍率是多少", "probe": "child", "args": {"table": "sr_character_skill_levels", "title": "姬子", "column": "value", "where": {"slot": "战技", "level": "10", "prop": "1"}}, "expect": "200.0%攻击力"}
+{"id": "q01", "kind": "qa", "q": "姬子的角色定位是什么", "expect_keywords": ["智识命途", "火属性"], "source_title": "姬子"}
+{"id": "q02", "kind": "qa", "q": "姬子的角色故事1讲了什么", "expect_keywords": ["星际航行动力学"], "source_title": "姬子"}
+{"id": "q03", "kind": "qa", "q": "卡芙卡的终结技悲剧尽头的颤音有什么效果", "expect_keywords": ["触电"], "source_title": "卡芙卡"}
+{"id": "q04", "kind": "qa", "q": "白厄的终结技永劫燔世，其将背负有什么效果", "expect_keywords": ["变身"], "source_title": "白厄"}
+{"id": "q05", "kind": "qa", "q": "流萤是使用什么装甲战斗的", "expect_keywords": ["萨姆"], "source_title": "流萤"}
+{"id": "q06", "kind": "qa", "q": "镜流的战技叫什么名字", "expect_keywords": ["无罅飞光"], "source_title": "镜流"}
+{"id": "q07", "kind": "qa", "q": "光锥「我」的诞生的技能效果是什么", "expect_keywords": ["追加攻击"], "source_title": "「我」的诞生"}
+{"id": "q08", "kind": "qa", "q": "光锥「行于流逝的岸」的稀有度和命途", "expect_keywords": ["虚无"], "source_title": "行于流逝的岸"}
+{"id": "q09", "kind": "qa", "q": "遗器不老者的仙舟的两件套效果是什么", "expect_keywords": ["生命上限"], "source_title": "不老者的仙舟"}
+{"id": "q10", "kind": "qa", "q": "遗器停转的萨尔索图的两件套效果是什么", "expect_keywords": ["暴击率"], "source_title": "停转的萨尔索图"}
+{"id": "q11", "kind": "qa", "q": "蚕食者之影的技能流年谴罚有什么效果", "expect_keywords": ["虚数属性伤害"], "source_title": "蚕食者之影"}
+{"id": "q12", "kind": "qa", "q": "星期日的终结技叫什么名字", "expect_keywords": ["轻与伤痕的赞颂"], "source_title": "星期日"}
+{"id": "q13", "kind": "qa", "q": "三月七的初次见面语音说了什么", "expect_keywords": ["入职"], "source_title": "三月七/语音"}
+{"id": "q14", "kind": "qa", "q": "万敌的如我所书里写了关于迈德漠斯的什么", "expect_keywords": ["悬锋"], "source_title": "万敌/如我所书"}
+{"id": "q15", "kind": "qa", "q": "差分宇宙方程「一首美丽的诗」的演绎内容是什么", "expect_keywords": ["美丽的诗"], "source_title": "一首美丽的诗"}
+{"id": "q16", "kind": "qa", "q": "成就「虎克的礼物」怎么完成", "expect_keywords": ["同行任务"], "source_title": "与你同行的回忆"}
+{"id": "q17", "kind": "qa", "q": "丹恒•腾荒的配装推荐里毕业光锥是什么", "expect_keywords": ["纵然山河万程"], "source_title": "丹恒•腾荒/攻略"}
+{"id": "q18", "kind": "qa", "q": "星穹列车的领航员是谁", "expect_keywords": ["姬子"], "source_title": "姬子"}
+{"id": "q19", "kind": "qa", "q": "仙舟「罗浮」的云骑军是什么", "expect_keywords": ["云骑"], "source_title": "仙舟「罗浮」"}
+{"id": "q20", "kind": "qa", "q": "模拟宇宙里奇物「奇思狂想」机器团的效果", "expect_keywords": ["奇思狂想"], "source_title": "「奇思狂想」机器团"}
