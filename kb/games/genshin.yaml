@@ -558,7 +558,9 @@ parse:
         # 纯 #ask 查询渲染器，参数只有 1/2（角色名/任务|活动），交给模板数据补捞
         - template: 人物出场
           table: genshin_character_appearance
-          columns: {character: '1', kind: '2'}
+          # #ask 渲染器，实参形如 {{人物出场|{{PAGENAME}}|活动}}：解析函数被预删后
+          # 位置参数 1 是空的，角色名只能取 @title（页面标题本身就是角色名）
+          columns: {character: '@title', kind: '2'}
 
     # ---- 武器：47 参，等级网格（20/40/…/90 × 突破前后攻击力 + 副属性）----
     weapon:
@@ -729,12 +731,17 @@ parse:
                     出现地点, 出现时间, 别名, 实装版本, 中文CV, 日文CV, 韩文CV, 英文CV,
                     人物关系, 情报, 相关系统, 居民委托, 讨伐悬赏, 剧情限定, 活动限定]
       child_templates:
+        # NPC对话/NPC剧情 都藏在 infobox 的 |对话内容= 参数值里（2540/1740 页），
+        # 顶层模板一个都匹配不到，必须 in_params 去参数原文里捞；NPC剧情 还嵌在
+        # NPC对话 内部，所以 in_params 那条路是递归捞的
         - template: NPC对话
           occurrence: true
+          in_params: [对话内容]
           table: genshin_npc_dialogue
           columns: {title: 标题, content: 内容, idle_voice: 待机语音, thought: 心声}
         - template: NPC剧情
           occurrence: true
+          in_params: [对话内容]
           table: genshin_npc_story
           columns: {option_1: 选项1, option_2: 选项2, option_3: 选项3, option_4: 选项4,
                     option_5: 选项5, option_6: 选项6, option_7: 选项7, option_8: 选项8,
@@ -743,7 +750,9 @@ parse:
         - template: 人物对话
           occurrence: true
           table: genshin_npc_line
-          columns: {speaker: 头像, line_1: '1', line_2: '2', line_3: '3', line_4: '4'}
+          # 全位置参数：{{人物对话|左|丽莎|药剂…}} → 1=左右侧 2=说话人 3=台词
+          # （1107 页 3 参、105 页 4 参、56 页 5 参且带头像命名参数）
+          columns: {side: '1', speaker: '2', line_1: '3', avatar: 头像}
 
     # ---- 任务 / 系列任务 ----
     quest:
@@ -964,10 +973,8 @@ parse:
         - [评级, 评级]
         - [定位, 定位]
       attr_fields: [角色, 攻略类型, 评级, 定位]
-      child_templates:
-        - template: 角色攻略头
-          table: genshin_character_guide_head
-          columns: {note: '1'}
+      # 角色攻略头 是 0 参纯标记模板（129 页全是 `{{角色攻略头}}`），
+      # 一个字段都没有，不声明子表——建了也是一张空表
     character_home:
       name_fields: [角色]
       card_fields:
@@ -982,7 +989,7 @@ parse:
         - template: 人物对话
           occurrence: true
           table: genshin_character_home_line
-          columns: {speaker: 头像, line_1: '1', line_2: '2', line_3: '3', line_4: '4'}
+          columns: {side: '1', speaker: '2', line_1: '3', avatar: 头像}
     mimegrand_character:
       name_fields: [角色]
       card_fields:
@@ -995,7 +1002,7 @@ parse:
         - template: 人物对话
           occurrence: true
           table: genshin_mimegrand_line
-          columns: {speaker: 头像, line_1: '1', line_2: '2', line_3: '3', line_4: '4'}
+          columns: {side: '1', speaker: '2', line_1: '3', avatar: 头像}
 
     # ---- 秘境：88 参 = 难度1-6 × (名称/进入等级/怪物等级/掉落/五轮怪物/机制…) ----
     domain:

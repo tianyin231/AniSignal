@@ -413,12 +413,18 @@ def is_nav_template(name: str, prefixes=None) -> bool:
     return any(n == p or n.startswith(p) for p in prefixes)
 
 
-def infobox_fields(tpl: Any) -> dict[str, str]:
-    """infobox 模板参数 → {字段名: 纯文本值}（丢掉空值和注释）。"""
+def infobox_fields(tpl: Any, positional: bool = False) -> dict[str, str]:
+    """infobox 模板参数 → {字段名: 纯文本值}（丢掉空值和注释）。
+
+    positional=True 时把位置参数也按 '1'/'2'… 收进来。默认不收：主 infobox 的
+    位置参数基本是模板传参残留，收了只会往 fields_json 和卡片摘要里灌垃圾。
+    子模板反过来——`{{任务描述|描述|地点}}`、`{{人物对话|左|丽莎|台词}}`、
+    `{{人物出场|角色名|类型}}` 全靠位置传值，不收整张子表就是空的。
+    """
     fields: dict[str, str] = {}
     for p in tpl.params:
         key = str(p.name).strip()
-        if not key or key.isdigit():
+        if not key or (key.isdigit() and not positional):
             continue
         val = _plain(p.value).strip()
         val = re.sub(r"[ \t]+", " ", val)

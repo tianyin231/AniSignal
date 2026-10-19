@@ -327,6 +327,11 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
                     title=title, page_id=rec.get("page_id"), kind=kind, category=category,
                     fields=fields, cfg=cfg, wikitext=wikitext, body_wikitext=body_wikitext,
                     top_level_templates=cleantext.iter_templates(wc, cfg.descend_html_tags) if wc else [],
+                    # 命名参数的原始 wikitext：子模板藏在参数值里时（原神 NPC 的
+                    # |对话内容=）靠 in_params 去捞，fields 那份纯文本已经不能用了
+                    infobox_params={str(pp.name).strip(): str(pp.value)
+                                    for pp in found.params
+                                    if str(pp.name).strip() and not str(pp.name).strip().isdigit()},
                 )
                 if spec:
                     result = spec[0](ctx)
