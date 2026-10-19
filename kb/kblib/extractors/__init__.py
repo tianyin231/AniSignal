@@ -357,6 +357,12 @@ def child_table_columns(cfg: GameConfig) -> dict[str, list[str]]:
             for rf in tpl.get("rows_from", []) or []:
                 rf_table = str(rf.get("table", "") or table)
                 add(rf_table, rf.get("columns", {}) or {})
+                # const 的键也得进 DDL：_pattern_rows 会把 const 原样写进 vals，
+                # insert_rows 按 vals 的键拼 INSERT，DDL 里没这一列就直接
+                # "no such column" 崩在 parse 上。鸣潮的 共鸣者/档案 用它区分
+                # 故事/珍贵之物——两条 pattern 的 index 都从 1 起，不区分的话
+                # `where index=1` 取到故事1 还是珍贵之物1 全看 sort。
+                add(rf_table, rf.get("const", {}) or {})
                 add(rf_table, {"block": None})
     return tables
 
