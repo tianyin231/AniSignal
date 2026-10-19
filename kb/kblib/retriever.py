@@ -305,7 +305,7 @@ class HybridStore(VectorStore):
     name = "hybrid"
 
     def __init__(self, vector: VectorStore | None = None, bm25: BM25Index | None = None,
-                 reranker=None, rrf_k: int = RRF_K, recall_k: int = 20,
+                 reranker=None, rrf_k: int = RRF_K, recall_k: int = 40,
                  rerank: bool = True) -> None:
         self.vector = vector
         self.rrf_k = rrf_k
@@ -418,7 +418,7 @@ class HybridStore(VectorStore):
 
 
 def get_hybrid_store(vector_name: str | None = None, dim: int = 512,
-                     rerank: bool = True, recall_k: int = 20) -> HybridStore:
+                     rerank: bool = True, recall_k: int = 40) -> HybridStore:
     """装一条混合检索链路：向量库 + BM25 + reranker。"""
     vec = None
     try:
