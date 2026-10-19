@@ -191,21 +191,30 @@ def extract_price(text: str | None) -> float | None:
     return best
 
 
-async def _matched_contents(
-    session: AsyncSession, product: Product, since: datetime, limit: int = 200
-) -> list[tuple[RawContent, ContentVersion | None]]:
-    """命中商品 watch_terms（+ 档案别名）的近期内容。"""
+async def _watch_terms(session: AsyncSession, product: Product) -> list[str]:
+    """商品监控词 + 档案别名（去重、保序）。"""
     terms = [str(t).strip() for t in (product.watch_terms or []) if str(t).strip()]
     profile = await get_profile(session, product.id)
     if profile is not None:
         terms.extend(str(a).strip() for a in (profile.aliases or []) if str(a).strip())
-    terms = list(dict.fromkeys(terms))
+    return list(dict.fromkeys(terms))
+
+
+def _match_conditions(terms: list[str]) -> list:
+    """命中条件：标题或正文 LIKE '%词%'（前导通配必然全表扫，见 _daily_hit_counts）。"""
+    return [
+        ContentVersion.title.like(f"%{term}%") | ContentVersion.text.like(f"%{term}%")
+        for term in terms
+    ]
+
+
+async def _matched_contents(
+    session: AsyncSession, product: Product, since: datetime, limit: int = 200
+) -> list[tuple[RawContent, ContentVersion | None]]:
+    """命中商品 watch_terms（+ 档案别名）的近期内容。"""
+    terms = await _watch_terms(session, product)
     if not terms:
         return []
-    conditions = []
-    for term in terms:
-        like = f"%{term}%"
-        conditions.append(ContentVersion.title.like(like) | ContentVersion.text.like(like))
     rows = await session.execute(
         select(RawContent, ContentVersion)
         .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
@@ -213,7 +222,7 @@ async def _matched_contents(
             RawContent.hidden.is_(False),
             RawContent.community == product.community,
             RawContent.collected_at >= since,
-            or_(*conditions),
+            or_(*_match_conditions(terms)),
         )
         .order_by(RawContent.collected_at.desc())
         .limit(limit)
@@ -228,26 +237,60 @@ async def _matched_contents(
     return out
 
 
+def _day_start(day: date) -> datetime:
+    return datetime(day.year, day.month, day.day)
+
+
+async def _daily_hit_counts(
+    session: AsyncSession, product: Product, since: datetime
+) -> dict[date, int]:
+    """一条 SQL 按天分组统计命中数。
+
+    原来 `heat_score` 要跑 7 次 `daily_hits`，每次都是一次 `LIKE '%词%'` 全表扫；
+    一个商品常配 5-10 个监控词，OR 出 10-20 个前导通配，50 个商品就是上千次全表扫
+    （PERF-015）。这里合并成一次带 GROUP BY 的扫描， sweep 也复用同一份结果。
+    彻底解法是 FULLTEXT 或 (term, collected_at) 反查表，见报告 PERF-015 建议①。
+    """
+    terms = await _watch_terms(session, product)
+    if not terms:
+        return {}
+    rows = await session.execute(
+        select(func.date(RawContent.collected_at), func.count(RawContent.id))
+        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+        .where(
+            RawContent.hidden.is_(False),
+            RawContent.community == product.community,
+            RawContent.collected_at >= since,
+            or_(*_match_conditions(terms)),
+        )
+        .group_by(func.date(RawContent.collected_at))
+    )
+    counts: dict[date, int] = {}
+    for day, count in rows:
+        try:
+            counts[date.fromisoformat(str(day))] = int(count)
+        except ValueError:
+            continue  # 方言返回了非日期形态，宁缺勿错
+    return counts
+
+
+def _heat_from_counts(counts: dict[date, int], today: date) -> float:
+    """热度分 = 当日命中 + 近 7 日日均命中（让新爆发比长期平稳更突出）。"""
+    week = [counts.get(today - timedelta(days=offset), 0) for offset in range(7)]
+    return round(week[0] + (sum(week[1:]) / 6), 2)
+
+
 async def daily_hits(session: AsyncSession, product: Product, day: date) -> int:
     """某天命中该商品监控词的内容条数（热度曲线的原始信号）。"""
-    start = datetime(day.year, day.month, day.day)
-    end = start + timedelta(days=1)
-    rows = await _matched_contents(
-        session, product, start - timedelta(days=1), limit=400
-    )
-    return sum(
-        1
-        for raw, _ in rows
-        if raw.collected_at is not None and start <= raw.collected_at < end
-    )
+    counts = await _daily_hit_counts(session, product, _day_start(day))
+    return counts.get(day, 0)
 
 
 async def heat_score(session: AsyncSession, product: Product, now: datetime | None = None) -> float:
     """热度分 = 当日命中 + 近 7 日日均命中（让新爆发比长期平稳更突出）。"""
     now = now or utcnow()
-    today = now.date()
-    week = [await daily_hits(session, product, today - timedelta(days=offset)) for offset in range(7)]
-    return round(week[0] + (sum(week[1:]) / 6), 2)
+    counts = await _daily_hit_counts(session, product, _day_start(now.date() - timedelta(days=6)))
+    return _heat_from_counts(counts, now.date())
 
 
 async def record_price_point(
@@ -324,6 +367,9 @@ async def sweep_price_points(session: AsyncSession, now: datetime | None = None)
     for product in products:
         profile = await get_profile(session, product.id)
         rows = await _matched_contents(session, product, since, limit=60)
+        # 每商品只扫一次：热度与当日命中都从同一份按天分组结果里取（PERF-015）
+        counts = await _daily_hit_counts(session, product, _day_start(now.date() - timedelta(days=6)))
+        heat = _heat_from_counts(counts, now.date())
         recorded = 0
         for raw, version in rows:
             if recorded >= MAX_PRICE_POINTS_PER_SWEEP:
@@ -337,12 +383,12 @@ async def sweep_price_points(session: AsyncSession, now: datetime | None = None)
             current = profile.price_current if profile is not None else None
             if current is not None and price >= current:
                 continue
-            hits = await daily_hits(session, product, raw.collected_at.date()) if raw.collected_at else 0
+            hits = counts.get(raw.collected_at.date(), 0) if raw.collected_at else 0
             await record_price_point(
                 session,
                 product.id,
                 price=price,
-                heat=await heat_score(session, product, now),
+                heat=heat,
                 hits=hits,
                 source="auto",
                 note=f"正文抽取：内容 #{raw.id}",
