@@ -226,6 +226,18 @@ BM25 索引 **120114 docs / 188010 词条**（jieba 分词，232s 建完，84.7 
 | BM25 | 70557 docs / 175466 词条（平均 107.9 词，448.5s 建完，55.4 MB，落 `data/genshin/bm25/`） |
 | 页面类型分布 | npc 2811 / furnishing 2418 / costume 2357 / quest 2123 / quest_item 1279 / material 816 / consumable 701 / tutorial 689 / tcg_card 652 / enemy 573 / quest_series 472 / event 526 / food 458 |
 
+**eval 通过率**（51 题：查表 30 + 问答 21，混合检索 top-20 → RRF → rerank → top-3）：
+
+查表 30/30 = 100%；问答 18/21 = 86%；**总计 48/51 = 94.1%**
+（明细见 `data/genshin/eval_report.json`）。高于方舟的 92.0% 和碧蓝 v3 的 88.2%。
+
+三条未过题（q07/q18/q19）答案都在库里，根因同一个：**只有 `card` chunk 的文本带页名，
+`prose`/`fields`/`template` 三类 chunk 的文本不带页名也不带章节名**（页名在 payload 的
+`source_title`、章节在 `heading`，都不进被 embed/分词的 `text`），于是问题里点了页名或
+章节名时答案 chunk 只能靠 incidental 词命中——q07 是召回得到但 rerank 输给攻略转述句，
+q18/q19 连 BM25 都没召回。修法（`card_field_keys` 为 `{}`，往 `card_fields` 补长字段
+不改 chunk 条数和 id）记在 burner checkpoint 里，本轮未动数据。
+
 infobox 模板分布：NPC 2811、摆设图鉴 2418、奇偶装扮 2206、任务 2100、任务道具 1279、
 素材图鉴 816、消耗品图鉴 701、教程 689、卡牌 651、怪物信息栏 573、活动信息 526、
 食物图鉴新 458、系列任务 380、名片 292、武器图鉴 253、圣遗物套装 67、秘境副本 53。
