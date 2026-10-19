@@ -1,0 +1,316 @@
+# 鸣潮（Wuthering Waves，BWIKI 鸣潮站）——第三款游戏。
+#
+# 站点的坑：BWIKI 的子域 `wiki.biligame.com/mc` 是**我的世界（Minecraft）**
+# 而不是鸣潮（siteinfo 的 base 字段直接写着 …/mc/Minecraft_Wiki，ns4 叫
+# "Minecraft WIKI"，还有 ns5580 Dungeons / ns5582 Earth）。鸣潮的中文大站是
+# `wiki.biligame.com/wutheringwaves`。候选对比：
+#   wiki.biligame.com/wutheringwaves  articles 1633 / ns0 非重定向 1779  ← 选它
+#   wutheringwaves.fandom.com/zh      articles 973  （英文站子站，更小）
+#   wutheringwaves.fandom.com         articles 9082 但是英文，配不上 bge-small-zh
+#
+# 结构化路照方舟的写法全走 parse.kinds 通用实体路（entities + entity_attrs +
+# YAML 里声明的子表），kblib/extractors/ 下一个字都没写。
+# 字段名都是鸣潮 BWIKI wikitext 里的原样参数名（1779 篇全量抓完，扫顶层模板分布
+# + 逐个模板的参数并集核对的），不是猜的。
+name: mingchao
+label: 鸣潮
+wiki_base: https://wiki.biligame.com/wutheringwaves
+api_url: https://wiki.biligame.com/wutheringwaves/api.php
+user_agent: anisignal-kb/0.1 (offline knowledge-base build; polite 1 req/s)
+data_dir: data/mingchao
+eval_dir: eval/mingchao
+chunk_id_prefix: mingchao
+collection: mingchao_kb
+namespaces: [0]
+
+fetch:
+  rps: 1.0                 # BWIKI 是公共服务，比 PRTS 更禁不起折腾
+  batch_titles: 20
+  timeout: 180
+  max_retries: 6
+  backoff_cap: 60
+  shard_pages: 500
+
+chunk:
+  min: 60
+  target: 420
+  max: 900
+  voice_field_suffix: 台词
+  fields_chunk_min: 60
+  max_images_per_page: 16
+
+parse:
+  min_infobox_fields: 3
+
+  # BWIKI 的模板名里普遍嵌 HTML 注释（星铁的 {{活动信息<!-- 暂时用不上的板块…-->}}
+  # 已经踩过），鸣潮同样有。不剥的话 infobox 白名单一个都匹配不上。
+  strip_template_name_comments: true
+
+  # 展示型模板：人看的值在位置参数里，通用兜底只会取出机器值。
+  # 1779 篇里逐个核对出现次数后填的，前三行是主力：
+  #   {{颜色|技能|普攻}}        8572 次——参数 1 是机器键（技能/湮灭/标题），
+  #                            人看的在 2。cleantext 的 _VALUE_TEMPLATES 对"颜色"
+  #                            有硬编码兜底（碧蓝航线的 {{color|#0098DC|+30}} 取 1），
+  #                            不声明的话整篇技能描述会变成"技能 普攻"这种机器键
+  #   {{任务/对话|秧秧|台词}}   3902 次——参数 1 说话人、参数 2 才是台词，
+  #                            兜底只取 1 会把 215 篇剧情回顾的对白整段丢掉
+  #   {{语音|正文|中|0001|心声·一|台词}}  1245 次——台词在 4/5，兜底只取 1（"正文"）
+  #   {{选项卡|1=<big>中</big>|2=…语音们…}}  语音页的包裹壳，兜底只取 1
+  display_templates:
+    颜色: ["2"]
+    任务/对话: ["1", "2"]
+    语音: ["4", "5"]
+    选项卡: ["2"]
+    图标: ["2", "3"]          # {{图标|道具|清芬鱼汤|1}} → "清芬鱼汤 1"
+    注音: ["1", "2"]          # {{注音|声之领域|索诺拉}} 两个都留，都能被搜到
+    提示: ["2"]                # {{提示|蓝色|正文}} 参数 1 是配色不是内容
+    动态: ["1", "3"]          # {{动态|标题|标题|正文}}
+    时间轴: ["时间", "标题", "内容"]
+    # 纯布局/解析器函数：一个字符都不该出现在正文里（引号包住是因为 YAML 把 # 当注释）
+    "#css": []
+    "#var": []
+    "#vardefine": []
+    "#if": []
+    "#widget": []
+    数字滚动: []
+    左侧目录: []
+    板块: []
+    板块（Aion测试）: []
+    图片查看按钮: []
+
+  # infobox 白名单：模板名 → (kind, category)。都是"命名参数即结构"的图鉴模板，
+  # 1304/1779 页命中。位置参数型的模板（成就/语音/剧情选项/任务/对话…）故意不收：
+  # infobox_fields 会丢掉数字名参数，收进来只会得到空字段 + 把页面 kind 带偏，
+  # 它们的内容由 template_dump / display_templates 两条补捞路兜住。
+  infobox_templates:
+    共鸣者/基本资料: {kind: resonator, category: resonator}
+    武器: {kind: weapon, category: weapon}
+    声骸: {kind: echo, category: echo}
+    声骸合鸣: {kind: sonata, category: sonata}
+    敌人: {kind: enemy, category: enemy}
+    道具: {kind: item, category: item}
+    探索报告: {kind: exploration, category: exploration}
+    活动信息: {kind: activity, category: activity}
+    名词注释: {kind: glossary, category: glossary}
+    角色/基本资料: {kind: npc, category: npc}
+
+  infobox_template_prefixes: {}
+
+  legacy_infobox_template_names: []
+
+  title_patterns: []
+
+  new_kinds: [resonator, weapon, echo, sonata, enemy, item, exploration,
+              activity, glossary, npc]
+
+  card_field_keys: {}
+
+  # 切 chunk 时整段丢弃的导航/样板模板（按前缀收）。板块/选项卡 同时在
+  # display_templates 里声明了要渲染的参数——template_dump 跳过它们避免重复倒一份，
+  # 而正文路照样把内容渲染出来。
+  nav_template_prefixes:
+    - 导航
+    - 面包屑
+    - pathnav
+    - 折叠
+    - 展开
+    - 板块
+    - 选项卡
+    - 切换标签
+    - CSS
+    - JS
+    - ResourceLoader
+    - 排版
+    - 颜色
+    - 字体
+    - Font
+    - 锚点
+    - 参阅
+    - 消歧义
+    - Math
+    - 提示
+    - 注意
+    - 备注
+    - 修正
+    - 左侧目录
+    - 数字滚动
+    - 图片查看按钮
+    - 整栏
+    - 黑幕
+    - 划线
+    - Cquote
+    - 红色
+    - 颜色引用
+
+  noise_section_keywords:
+    - 导航
+    - 分类
+    - 参见
+    - 外部链接
+    - 参考文献
+    - 注释
+    - 更新历史
+    - 更新日志
+    - 公告
+    - 统计信息
+    - 模型
+    - 相关页面
+
+  # ---------------- 通用实体路：10 族的 kind spec ----------------
+  kinds:
+    resonator:                      # 共鸣者（角色），59 页
+      name_fields: [名称]
+      card_fields:
+        - [属性, 属性]
+        - [武器, 武器]
+        - [品质, 品质]
+        - [势力, 势力]
+        - [共鸣能力, 共鸣能力]
+        - [战斗风格, 战斗风格]
+        - [实装日期, 实装日期]
+        - [出生, 出生]
+        - [特殊料理, 特殊料理]
+      attr_fields: [名称, 英文名, 属性, 武器, 品质, 势力, 共鸣能力, 战斗风格,
+                    实装日期, 出生, 生日, 特殊料理, 初奏, 简介]
+      attr_templates:
+        # 档案不在基本资料里，在正文的 {{共鸣者/档案}}。故事/珍贵之物的标题短、
+        # 详情长，都进 entity_attrs，查表探针按 attr 直接问得到
+        共鸣者/档案: [故事1, 故事2, 故事3, 故事4, 故事5,
+                      珍贵之物1, 珍贵之物2, 珍贵之物3,
+                      频谱检验报告, 超频诊断报告]
+      child_templates:
+        # 各级属性：生命/攻击/防御 + 20生命/90+攻击…（44 页有完整等级表）
+        - template: 共鸣者/基础属性
+          table: mc_resonator_stats
+          rows_from:
+            - pattern: '^(\d*\+?)(生命|攻击|防御)$'
+              columns: {level: '{1}', stat: '{2}', value: '@key'}
+        # 五个基础技能 + 延奏，一页一块。倍率字段几十 KB 不进表，正文路和
+        # template_dump 会兜住
+        - template: 共鸣者/技能
+          table: mc_resonator_skills
+          columns: {basic_attack: 常态攻击, basic_attack_desc: 常态攻击描述,
+                    echo_skill: 共鸣技能, echo_skill_desc: 共鸣技能描述,
+                    forte_circuit: 共鸣回路, forte_circuit_desc: 共鸣回路描述,
+                    liberation: 共鸣解放, liberation_desc: 共鸣解放描述,
+                    intro_skill: 变奏技能, intro_skill_desc: 变奏技能描述,
+                    outro_skill: 延奏技能, outro_skill_desc: 延奏技能描述,
+                    upgrade_cost: 基础技能升级消耗, combat_feature: 战斗特色}
+          rows_from:
+            - pattern: '^固有技能(\d+)$'
+              table: mc_resonator_innate
+              columns: {index: '{0}', name: '@key',
+                        description: '固有技能{0}描述', cost: '固有技能{0}激活消耗'}
+            - pattern: '^属性加成(\d+)$'
+              table: mc_resonator_innate
+              columns: {index: '{0}', name: '@key',
+                        description: '属性加成{0}描述', cost: '属性加成{0}激活消耗'}
+        # 共鸣链（命之座等价物）1~6
+        - template: 共鸣者/共鸣链
+          table: mc_resonator_chains
+          rows_from:
+            - pattern: '^共鸣链(\d+)$'
+              columns: {index: '{0}', name: '@key', description: '共鸣链{0}描述'}
+        # 角色故事/珍贵之物
+        - template: 共鸣者/档案
+          table: mc_resonator_stories
+          rows_from:
+            - pattern: '^故事(\d+)$'
+              columns: {index: '{0}', name: '@key', detail: '故事{0}详情'}
+            - pattern: '^珍贵之物(\d+)$'
+              columns: {index: '{0}', name: '@key', detail: '珍贵之物{0}详情'}
+
+    weapon:                         # 武器，121 页
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [品质, 品质]
+        - [获取途径, 获取途径]
+        - [武器技能, 武器技能]
+        - [副词条, 副词条]
+        - [初始攻击, 初始攻击]
+      attr_fields: [名称, 类型, 品质, 获取途径, 武器技能, 技能描述, 副词条,
+                    初始攻击, 词条初始数值, 突破材料总览, 实装版本]
+      child_templates:
+        - template: 武器
+          table: mc_weapon_ascension
+          rows_from:
+            - pattern: '^(\d+)级突破材料$'
+              columns: {level: '{0}', materials: '@key'}
+
+    echo:                           # 声骸，138 页
+      name_fields: [名称]
+      card_fields:
+        - [危险度, 危险度]
+        - [COST花费, COST花费]
+        - [所属套装, 所属套装]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 编号, 危险度, COST花费, 所属套装, 技能冷却,
+                    是否有异相, 实装版本, 获取途径, 技能简述,
+                    2星声骸技能, 3星声骸技能, 4星声骸技能, 5星声骸技能]
+
+    sonata:                         # 声骸合鸣（套装效果），34 页
+      name_fields: [名称]
+      card_fields:
+        - [2件套效果, 2件套效果]
+        - [5件套效果, 5件套效果]
+      attr_fields: [名称, 1件套效果, 2件套效果, 3件套效果, 5件套效果]
+
+    enemy:                          # 敌人，59 页
+      name_fields: [名称]
+      card_fields:
+        - [危险度, 危险度]
+        - [掉落物, 掉落物]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 危险度, 描述, 掉落物, 是否有关联声骸, 实装版本, 分类]
+
+    item:                           # 道具，461 页（最大一族）
+      name_fields: [名称]
+      card_fields:
+        - [品质, 品质]
+        - [一级分类, 一级分类]
+        - [二级分类, 二级分类]
+        - [来源, 来源]
+        - [主要描述, 主要描述]
+      attr_fields: [名称, 品质, 一级分类, 二级分类, 来源, 功效, 原料, 实装版本,
+                    限时, 书籍名, 主要描述, 次要描述, 故事]
+
+    exploration:                    # 探索报告，15 页
+      name_fields: []
+      card_fields:
+        - [50%报告, 50%标题]
+        - [100%报告, 100%标题]
+      attr_fields: [50%标题, 100%标题, 50%内容, 100%内容]
+      child_templates:
+        - template: 探索报告
+          table: mc_exploration_reports
+          rows_from:
+            - pattern: '^(\d+)%标题$'
+              columns: {percent: '{0}', title: '@key', content: '{0}%内容'}
+
+    activity:                       # 活动，5 页
+      name_fields: [活动名称]
+      card_fields:
+        - [活动类型, 活动类型]
+        - [版本, 版本]
+        - [活动开始, 活动开始]
+        - [活动结束, 活动结束]
+      attr_fields: [活动名称, 活动类型, 类型码, 活动开始, 活动结束, 版本]
+
+    glossary:                       # 名词注释，409 页
+      name_fields: [标题]
+      card_fields:
+        - [注释分类, 注释分类]
+        - [二级分类, 二级分类]
+        - [描述, 描述]
+      attr_fields: [标题, 注释分类, 二级分类, 描述]
+
+    npc:                            # 剧中人/NPC，3 页
+      name_fields: [名称]
+      card_fields:
+        - [别称, 别称]
+        - [势力, 势力]
+        - [身份, 身份]
+      attr_fields: [名称, 别称, 英文名称, 日文名称, 韩文名称, 势力, 身份,
+                    活动范围, 简介, 汉语配音演员, 日语配音演员, 韩语配音演员,
+                    英语配音演员]
