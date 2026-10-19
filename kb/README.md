@@ -170,6 +170,18 @@ v3 新增 4 族：关卡图鉴 1984、塞壬图鉴 93、飞行器性能数据 88
 原型舰性能数据 16、原型舰性能数据（潜艇）1（聚合/导航模板 `装备图鉴` 827、`关卡图鉴汇总` 196
 不抽，明细见 `docs/kb-coverage-audit.md` 第 4 节）。
 
+### 明日方舟（arknights）
+
+| 指标 | 数值 |
+|---|---|
+| 抓取篇数 | 19740（非重定向正文全量落盘，43 个 gzip 分片 / 40 MB） |
+| 重定向别名 | 7691（进 `aliases` 表，qa_demo 的实体路由用） |
+| 带 infobox 页 | 12185（结构化抽取率 100%，全页占比 61.7%） |
+| **chunk 数** | **120114**（prose 13870 / card 12185 / template 77081 / fields 15652 / hidden 1322 / gallery 4） |
+| **向量数** | **120114**（qdrant collection `arknights_kb`，与 chunks.jsonl 行数一致） |
+| SQLite 表 | 27 张（`entities` 12185 / `entity_attrs` 126937 + `ark_operator_*` 11 张等 21 张子表） |
+| 页面类型分布 | stage 4715 / furniture 2877 / other 6506 / enemy 1832 / item 1392 / device 775 / collectible 741 / operator 463 / voice 439 |
+
 ## 开发小工具
 
 ```bash
