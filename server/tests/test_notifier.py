@@ -3,6 +3,33 @@ import httpx
 from app.services import mailer, notifier
 
 
+async def test_mailer_folds_multiline_subject_instead_of_raising(monkeypatch):
+    """含换行的主题必须被折成空格，不能让 ValueError 冒到调用链外（SEC-020）。
+
+    规则名/广播主题都是管理端自由文本，`EmailMessage["Subject"] = ...` 对 \r\n 直接
+    raise，而那个赋值在 send_email 的 try 之外——一个换行就能让整轮采集 FAILED。
+    """
+    captured = {}
+
+    async def fake_send(message, **kwargs):
+        captured["message"] = message
+
+    monkeypatch.setattr("aiosmtplib.send", fake_send)
+    sent = await mailer.send_email(
+        "to@example.com",
+        "大版本更新\nBcc: victim@example.com\r\nX-Evil: 1",
+        "正文",
+        smtp={"host": "smtp.example.com", "port": 465, "tls_mode": "tls"},
+    )
+
+    assert sent is True
+    subject = captured["message"]["Subject"]
+    assert "\n" not in subject and "\r" not in subject
+    assert subject == "大版本更新 Bcc: victim@example.com X-Evil: 1"
+    # 只污染主题，不额外长出注入的头
+    assert captured["message"].get("X-Evil") is None
+
+
 async def test_mailer_uses_implicit_tls_for_port_465(monkeypatch):
     captured = {}
 
