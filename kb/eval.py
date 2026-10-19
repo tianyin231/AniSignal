@@ -162,7 +162,7 @@ def main() -> int:
     ap.add_argument("--top-k", type=int, default=3)
     ap.add_argument("--retrieval", default="hybrid", choices=["hybrid", "vector"],
                     help="qa 用哪条检索链路；vector 是 v1 纯向量口径，留着做同题对比")
-    ap.add_argument("--recall-k", type=int, default=20, help="混合检索每路召回条数 / 精排候选数")
+    ap.add_argument("--recall-k", type=int, default=40, help="混合检索每路召回条数 / 精排候选数")
     ap.add_argument("--backend", default="auto", choices=["auto", "torch", "onnx"])
     ap.add_argument("--store", default="qdrant", choices=["qdrant", "numpy"])
     ap.add_argument("--out", type=Path, default=None, help="明细 JSON 输出路径")
