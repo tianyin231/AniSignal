@@ -13,7 +13,14 @@ from typing import Any, Iterable
 
 import mwparserfromhell
 
-from .config import NAV_TEMPLATE_PREFIXES
+from .config import (
+    FIELDS_CHUNK_MIN,
+    INFOBOX_TEMPLATE_PREFIXES,
+    INFOBOX_TEMPLATES,
+    MAX_IMAGES_PER_PAGE,
+    NAV_TEMPLATE_PREFIXES,
+    VOICE_FIELD_SUFFIX,
+)
 
 # ---- 常量 ----
 _CAT_PREFIXES = ("分类:", "category:", "Category:")
@@ -244,13 +251,183 @@ def infobox_fields(tpl: Any) -> dict[str, str]:
     return fields
 
 
-def top_level_infobox(wikitext: str, names: Iterable[str]) -> tuple[Any, str] | None:
-    """在正文里找 infobox 模板，返回 (模板节点, 去掉它之后的正文 wikitext)。"""
+def top_level_infobox(wikitext: str, names: Iterable[str],
+                      legacy_names: Iterable[str] = ()) -> tuple[Any, str] | None:
+    """在正文里找 infobox 模板，返回 (模板节点, 去掉它之后的正文 wikitext)。
+
+    三段匹配，顺序即优先级：老家族（legacy_names）→ 白名单全量（names，含 v3
+    新增）→ 前缀家族（塞壬图鉴/*）。先老后新是为了让 v3 的 chunk_id 和 v2 完全
+    对齐——见 config.LEGACY_INFOBOX_TEMPLATE_NAMES 的注释。
+    """
     wc = parse_wikitext(wikitext)
     if wc is None:
         return None
-    want = set(names)
-    for tpl in wc.filter_templates(recursive=False):
-        if str(tpl.name).strip() in want:
-            return tpl, wikitext.replace(str(tpl), "", 1)
+    templates = list(wc.filter_templates(recursive=False))
+    for want in (set(legacy_names), set(names)):
+        for tpl in templates:
+            if str(tpl.name).strip() in want:
+                return tpl, wikitext.replace(str(tpl), "", 1)
+    for tpl in templates:
+        name = str(tpl.name).strip()
+        for prefix in INFOBOX_TEMPLATE_PREFIXES:
+            if name == prefix or name.startswith(prefix + "/"):
+                return tpl, wikitext.replace(str(tpl), "", 1)
     return None
+
+
+def infobox_template_name(tpl: Any) -> str:
+    """模板节点 → 归一化后的模板名（塞壬图鉴家族的子页名统一成家族名）。"""
+    name = str(tpl.name).strip()
+    name = re.sub(r"^模板:", "", name)
+    for prefix in INFOBOX_TEMPLATE_PREFIXES:
+        if name == prefix or name.startswith(prefix + "/"):
+            return prefix
+    return name
+
+
+# ---------------------------------------------------------------- v3 补捞
+# 下面几个函数都只做"增量补捞"：从 wikitext 里把 _plain 主动丢掉或只取了
+# 第一个参数的内容另存成独立 chunk，绝不改动主正文路径——现有 prose/card
+# chunk 的 chunk_id 必须一个都不变，增量 upsert 才不会退化成全量重建。
+
+FILE_REF_RE = re.compile(
+    r"\[\[\s*(?:文件|檔案|档案|File|Image)\s*:\s*([^\]|#\n]+?)\s*(?:\|[^\]]*)?\]\]", re.I
+)
+GALLERY_RE = re.compile(r"<\s*gallery([^>]*)>(.*?)<\s*/\s*gallery\s*>", re.I | re.S)
+COMMENT_RE = re.compile(r"<!--(.*?)-->", re.S)
+# 注释里混进来的 base64 音频/图片 blob：捞它只会得到一坨乱码
+BLOB_RE = re.compile(r"base64\s*,|[A-Za-z0-9+/]{200,}")
+COMMENT_MIN = 80          # 短于这个长度的注释基本是编辑备注，CHUNK_MIN 也会拦
+COMMENT_MAX = 20000       # 超长注释视为数据 dump，不捞
+
+
+def extract_image_files(wikitext: str, limit: int = MAX_IMAGES_PER_PAGE) -> list[str]:
+    """正文里引用的文件名（去重、保序）。只记名字，URL 由 imageinfo 批量换。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in FILE_REF_RE.finditer(wikitext):
+        name = m.group(1).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(name)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def gallery_lines(wikitext: str) -> list[str]:
+    """<gallery> 图库 → 可读行。
+
+    原来是整块丢（_DROP_TAGS 里有 gallery），图注（画师名、日期、装备名）
+    跟着一起没了。307 篇的图注超过 300 字，最大的"画师贺图、同人图合集"
+    一篇 77KB。
+    """
+    out: list[str] = []
+    for m in GALLERY_RE.finditer(wikitext):
+        for raw in m.group(2).split("\n"):
+            line = raw.strip()
+            if not line:
+                continue
+            parts = re.split(r"\|", line, maxsplit=1)
+            fname = parts[0].strip()
+            caption = re.sub(r"\s+", " ", parts[1]).strip() if len(parts) > 1 else ""
+            if not fname:
+                continue
+            out.append(f"{fname} {caption}".strip() if caption else fname)
+    return out
+
+
+def hidden_lines(wikitext: str) -> list[str]:
+    """HTML 注释里的正文 → 可读行。
+
+    编辑常用 <!-- --> 藏旧版攻略/备份数据，98 篇的注释正文超过 800 字，
+    最大的"艦船少女セリフ集"65KB。注释按 MediaWiki 语义确实不渲染，但内容
+    是 wiki 上真实存在的知识，按"宁可多炼不可漏炼"捞出来单列一类。
+    """
+    out: list[str] = []
+    for m in COMMENT_RE.finditer(wikitext):
+        body = m.group(1).strip()
+        if len(body) < COMMENT_MIN or len(body) > COMMENT_MAX:
+            continue
+        if BLOB_RE.search(body):
+            continue
+        text = to_plain(body)
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        text = re.sub(r"\n{2,}", "\n", text).strip()
+        if len(text) >= COMMENT_MIN:
+            out.append(text)
+    return out
+
+
+def template_dump(wikitext: str, exclude: Any = None) -> list[str]:
+    """数据型模板的全参数转存。
+
+    `_plain_template` 的通用兜底只取无名参数 1，像 `{{世界巡游|1=物资|1n=…}}`
+    （整页是 100 级奖励表）、`{{每月签到}}`（116KB）、`{{InfoBox}}`、
+    `{{META图鉴}}`（介绍字段几千字）这种"参数即正文"的模板就只剩两个字。
+    这里把这类模板的所有参数摊平，交给调用方另切 chunk。
+    """
+    wc = parse_wikitext(wikitext)
+    if wc is None:
+        return []
+    skip = str(exclude) if exclude is not None else None
+    out: list[str] = []
+    for tpl in wc.filter_templates(recursive=False):
+        raw = str(tpl)
+        if skip and raw == skip:
+            continue
+        name = str(tpl.name).strip()
+        name = re.sub(r"^模板:", "", name)
+        if name.startswith("#") or is_nav_template(name):
+            continue
+        inline = _plain(tpl).strip()
+        total = sum(len(_plain(p.value).strip()) for p in tpl.params)
+        # 已经在正文里露出过半内容的模板不用再转存一遍
+        if total <= 0 or len(inline) * 2 >= total:
+            continue
+        parts: list[str] = []
+        for p in tpl.params:
+            k = str(p.name).strip()
+            v = re.sub(r"\s+", " ", _plain(p.value).strip())
+            if not v:
+                continue
+            parts.append(f"{k}={v}" if k and not k.isdigit() else v)
+        if len(parts) >= 3:
+            out.append(f"{name}: " + " | ".join(parts))
+    return out
+
+
+def voice_lines(fields: dict[str, str]) -> list[tuple[str, str]]:
+    """infobox 字段里的台词 → [(场景, 台词)]。
+
+    台词是 `舰娘图鉴`/`同人角色` 的 `*台词` 参数，原来只落 fields_json，
+    向量库一个字都检索不到。
+    """
+    out: list[tuple[str, str]] = []
+    for k, v in fields.items():
+        if not k.endswith(VOICE_FIELD_SUFFIX):
+            continue
+        scene = k[: -len(VOICE_FIELD_SUFFIX)].strip() or "台词"
+        v = re.sub(r"\s+", " ", v).strip()
+        if v:
+            out.append((scene, v))
+    return out
+
+
+def long_field_lines(fields: dict[str, str],
+                     min_len: int = FIELDS_CHUNK_MIN) -> list[str]:
+    """infobox 里的长文本字段 → 可读行。
+
+     infobox 一旦被抽取就会从正文消失，长字段（META图鉴的"介绍"、技能描述、
+    审核意见等）原来只进 fields_json。这里把超过阈值的字段摊平补一个 chunk。
+    台词字段除外——它们由 voice_lines 单独切成 kind=voice 的 chunk。
+    """
+    out: list[str] = []
+    for k, v in fields.items():
+        if k.endswith(VOICE_FIELD_SUFFIX):
+            continue
+        v = re.sub(r"\s+", " ", v).strip()
+        if len(v) >= min_len:
+            out.append(f"{k}: {v}")
+    return out
