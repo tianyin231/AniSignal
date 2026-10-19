@@ -48,7 +48,7 @@ azurlane 的 `data_dir` 故意不搬家：`blhx_kb` 的向量、`index_meta.json
 53697 个 chunk_id 全在那儿，一搬家 v2/v3 的成果全部作废。新游戏各自一个目录，互不污染。
 
 配置里有什么：wiki/api 地址与 UA、抓取礼貌参数（rps/批大小/超时/重试/分片页数）、
-chunk 规则（长短阈值、台词字段后缀、每页图片数）、infobox 模板白名单（模板名 → kind/category，
+chunk 规则（长短阈值、台词字段后缀、每页图片数、数据型 chunk 是否冠页名）、infobox 模板白名单（模板名 → kind/category，
 支持前缀家族）、标题模式（长得像关卡号就算关卡）、导航/噪音模板清单、`parse.kinds`
 （通用实体路的字段→列名映射）。碧蓝航线另挂 `extractor_module: kblib.extractors.azurlane`
 （舰娘/装备/关卡这些字段语义特异的族走专用抽取器），明日方舟 8 族全走通用实体路，零代码。
