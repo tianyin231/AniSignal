@@ -85,6 +85,10 @@ MediaWiki API 批量拉 wikitext，只拉文本不下载图片。几个为"随�
   `ark_operator_talents`、`ark_operator_skill_levels`、`ark_enemy_levels`、
   `ark_stage_enemies`… 表名和列名都在 `games/arknights.yaml` 的 `parse.kinds` 里）。
   编号字段（`天赋N`/`技能N描述`/`敌人N`）按正则拆行，`{0}` 是捕获组、`@key` 是"值即字段本身"。
+  `attr_fields` 只能从 infobox 取字段；字段在页内子模板里的（干员的种族/性别/出身地全在
+  `{{人员档案set}}`，CharinfoV2 一个都没有）用 `attr_templates` 声明，同样落
+  `entity_attrs`，并按需进 `card_fields` 渲染成卡片摘要（短字段过不了 `fields_chunk_min`
+  的字数门槛，不进卡片就检索不到）。
   kind 同时出现在两边时专用抽取器优先。
 - **文本路**：正文清洗（去导航模板、编辑标记、分类、"最后编辑于"噪音）→ 按语义切 chunk
   （一段讲一件事，`heading` 保留层级）→ `data/chunks.jsonl`，每行

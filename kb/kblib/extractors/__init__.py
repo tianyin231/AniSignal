@@ -8,6 +8,8 @@
   * **通用实体路**（本文件的 generic_entity）：完全由 games/*.yaml 的 `parse.kinds`
     驱动——卡片字段、attr 字段、子模板列名→字段名映射、编号字段拆行，全在配置里。
     明日方舟（CharinfoV2/敌人信息/道具信息/关卡信息…）零代码进结构化路。
+    `attr_templates` 是 attr_fields 的补充：字段不在 infobox 里、而在页内子模板
+    （干员的 `{{人员档案set}}`）时，从那儿取字段落 entity_attrs。
 
 每款游戏只挂自己的 extractor_module，kind 名撞车也不会串味。
 """
@@ -95,9 +97,17 @@ def _first(fields: dict[str, str], aliases: Iterable[str], groups: Sequence[str]
     return None
 
 
-def generic_card(title: str, fields: dict[str, str], spec: dict) -> str | None:
-    """按配置里的 card_fields 渲染卡片摘要（干员职业/分支、敌人种类/能力…）。"""
+def generic_card(title: str, fields: dict[str, str], spec: dict,
+                 extra_fields: dict[str, str] | None = None) -> str | None:
+    """按配置里的 card_fields 渲染卡片摘要（干员职业/分支、敌人种类/能力…）。
+
+    extra_fields 是 infobox 之外的补充来源（`attr_templates` 从页内子模板抽出来的
+    档案字段），card_fields 可以引用它们；两边重名时 infobox 赢——它才是这一页的
+    主模板，子模板只是补料。
+    """
     bits: list[str] = []
+    if extra_fields:
+        fields = {**extra_fields, **fields}
     name = None
     for nf in spec.get("name_fields", []) or []:
         name = fields.get(nf)
@@ -151,6 +161,16 @@ def _pattern_rows(ctx: ExtractCtx, template: str, index: int,
     return rows
 
 
+def _template_nodes(ctx: ExtractCtx, names: Any) -> list[Any]:
+    """页内顶层模板里名字命中的那些（按出现顺序）。names 给单个名字或一组。"""
+    if isinstance(names, str):
+        names = [names]
+    want = {str(n).strip() for n in (names or []) if str(n).strip()}
+    if not want:
+        return []
+    return [t for t in ctx.top_level_templates if cleantext.template_name(t) in want]
+
+
 def _child_rows(ctx: ExtractCtx, spec: dict) -> list[Row]:
     """子模板（技能2/属性/敌人信息/levelcontent…）→ 行。
 
@@ -161,14 +181,7 @@ def _child_rows(ctx: ExtractCtx, spec: dict) -> list[Row]:
     occurrence: true 表示一页会出现多次（每个技能一块、每级敌人一块、第几天赋
     各一块），按出现顺序编号；否则只取第一次出现（属性/CharinfoV2 这类一页一块的）。
     """
-    names = spec.get("template") or []
-    if isinstance(names, str):
-        names = [names]
-    names = [str(n).strip() for n in names if str(n).strip()]
-    if not names:
-        return []
-    want = set(names)
-    nodes = [t for t in ctx.top_level_templates if cleantext.template_name(t) in want]
+    nodes = _template_nodes(ctx, spec.get("template"))
     if not nodes:
         return []
     if not spec.get("occurrence"):
@@ -192,6 +205,43 @@ def _child_rows(ctx: ExtractCtx, spec: dict) -> list[Row]:
     return rows
 
 
+def _attr_template_fields(ctx: ExtractCtx, spec: dict) -> tuple[list[Row], dict[str, str]]:
+    r"""页内子模板的字段 → entity_attrs 行，外加一份给卡片摘要用的字段表。
+
+    为什么需要它：`attr_fields` 只能从 infobox 取字段，可 PRTS 把干员的种族/性别/
+    出身地/生日/身高… 全放在正文的 `{{人员档案set}}` 里，CharinfoV2 一个都没有。
+    没有这条的话这些字段只能落 child_templates 声明的子表——查表探针 `entity_attr`
+    只查 entity_attrs，问不出来；chunks.jsonl 里也只剩 template_dump 倒出来的那行
+    （还不含页标题，BM25 匹配不到干员名）。eval 里"阿米娅是什么种族的干员"和
+    "阿米娅的中文配音是谁"就是这么挂的。
+
+    spec 是 `{模板名: [字段名...]}`：一页出现多块时后面的覆盖前面的
+    （entity_attrs 的主键是 (title, kind, attr)，本来就是 upsert 语义）。
+
+    机器人干员（Castle-3/Lancet-2/THRM-EX…）把 人员档案set 换成了 代号/制造商/
+    产地/最高速度 那一套，所以字段清单里两类都得列，各自的页只会命中自己有的。
+    """
+    rows: list[Row] = []
+    merged: dict[str, str] = {}
+    for tpl_name, fields in (spec or {}).items():
+        nodes = _template_nodes(ctx, tpl_name)
+        if not nodes:
+            continue
+        wanted = fields if isinstance(fields, (list, tuple)) else [fields]
+        wanted = [str(f).strip() for f in wanted if str(f).strip()]
+        for node in nodes:
+            page_fields = cleantext.infobox_fields(node)
+            for f in wanted:
+                v = page_fields.get(f)
+                if v and str(v).strip():
+                    merged[f] = v
+    for f, v in merged.items():
+        rows.append(Row("entity_attrs", {
+            "title": ctx.title, "kind": ctx.kind, "attr": f, "value": v,
+        }))
+    return rows, merged
+
+
 def generic_entity(ctx: ExtractCtx) -> ExtractResult:
     """通用实体路：CharinfoV2/敌人信息/道具信息 这类"字段即结构"的模板都走这里。"""
     spec = ctx.cfg.kinds.get(ctx.kind, {}) or {}
@@ -211,9 +261,15 @@ def generic_entity(ctx: ExtractCtx) -> ExtractResult:
             rows.append(Row("entity_attrs", {
                 "title": ctx.title, "kind": ctx.kind, "attr": attr, "value": v,
             }))
+    # infobox 里没有的档案字段（人员档案set）走这条补进来
+    attr_rows, profile_fields = _attr_template_fields(ctx, spec.get("attr_templates"))
+    rows.extend(attr_rows)
     for spec_tpl in spec.get("child_templates", []) or []:
         rows.extend(_child_rows(ctx, spec_tpl))
-    return ExtractResult(rows=rows, card_text=generic_card(ctx.title, ctx.fields, spec))
+    return ExtractResult(
+        rows=rows,
+        card_text=generic_card(ctx.title, ctx.fields, spec, extra_fields=profile_fields),
+    )
 
 
 # ---------------------------------------------------------------- 表结构
