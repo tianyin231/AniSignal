@@ -6,9 +6,9 @@
 {"id": "t06", "kind": "table", "q": "姬子的中文配音演员是谁", "probe": "entity_attr", "args": {"title": "姬子", "attr": "中文CV"}, "expect": "林簌"}
 {"id": "t07", "kind": "table", "q": "卡芙卡的战技叫什么名字", "probe": "child", "args": {"table": "sr_character_skills", "title": "卡芙卡", "column": "name", "where": {"slot": "战技"}}, "expect": "月光摩挲连绵"}
 {"id": "t08", "kind": "table", "q": "姬子的终结技叫什么名字", "probe": "child", "args": {"table": "sr_character_skills", "title": "姬子", "column": "name", "where": {"slot": "终结技"}}, "expect": "天坠之火"}
-{"id": "t09", "kind": "table", "q": "姬子有哪些技能", "probe": "child_list", "args": {"table": "sr_character_skills", "title": "姬子", "column": "name"}, "expect": "武装调律"}
+{"id": "t09", "kind": "table", "q": "姬子有哪些技能", "probe": "child_list", "args": {"table": "sr_character_skills", "title": "姬子", "column": "name"}, "expect": "武装调律；熔核爆裂；天坠之火；乘胜追击；不完全燃烧"}
 {"id": "t10", "kind": "table", "q": "姬子的第三个星魂叫什么", "probe": "child", "args": {"table": "sr_character_eidolons", "title": "姬子", "column": "name", "where": {"index": "3"}}, "expect": "自我"}
-{"id": "t11", "kind": "table", "q": "姬子有哪些额外能力", "probe": "child_list", "args": {"table": "sr_character_traces", "title": "姬子", "column": "name"}, "expect": "星火"}
+{"id": "t11", "kind": "table", "q": "姬子有哪些额外能力", "probe": "child_list", "args": {"table": "sr_character_traces", "title": "姬子", "column": "name"}, "expect": "星火；灼热；道标"}
 {"id": "t12", "kind": "table", "q": "姬子战技1级的伤害倍率是多少", "probe": "child", "args": {"table": "sr_character_skill_levels", "title": "姬子", "column": "value", "where": {"slot": "战技", "level": "1"}}, "expect": "100.0%攻击力"}
 {"id": "t14", "kind": "table", "q": "丹恒的普攻描述是什么", "probe": "child", "args": {"table": "sr_character_skills", "title": "丹恒", "column": "description", "where": {"slot": "普攻"}}, "expect": "对指定敌方单体造成等同于丹恒50%/100%攻击力的风属性伤害。"}
 {"id": "t15", "kind": "table", "q": "光锥「我」的诞生的命途是什么", "probe": "entity_attr", "args": {"title": "「我」的诞生", "attr": "命途"}, "expect": "智识"}
