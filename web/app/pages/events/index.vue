@@ -18,8 +18,14 @@ const tab = computed({
   get: () => String(route.query.tab || 'all'),
   set: (v: string) => router.replace({ query: { ...route.query, tab: v } }),
 })
-const page = computed(() => Math.max(1, Number(route.query.page) || 1))
+const requestedPage = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
+// PERF-039：服务端 offset 上界 10_000（见 app/api/public.py）。只钳下界时
+// `/events?page=99999` 会真的发出 offset=2,999,940——InnoDB 必须读取并丢弃前 300 万行，
+// 而这是无需认证的公开端点。这里按 totalPages 钳上界（正确范式：同仓库 account.vue:180）。
+const total = ref(0)
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const page = computed(() => Math.min(requestedPage.value, totalPages.value))
 
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐行标注分区
@@ -39,7 +45,9 @@ const { data, status } = await useAsyncData(
 )
 
 const list = computed<AppEvent[]>(() => (data.value?.items ?? []).map(toAppEvent))
-const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
+// total 用独立 ref 而不是 computed：data 依赖 page、page 又依赖 totalPages，
+// 直接写成 computed 会被 Vue 判成循环计算。watch 是副作用，不成环。
+watch(data, (d) => (total.value = d?.total ?? 0), { immediate: true })
 
 function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
