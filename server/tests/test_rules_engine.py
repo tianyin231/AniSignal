@@ -283,6 +283,31 @@ async def test_condition_scopes_platform_community_and_intent_tier(session):
     assert stats.matched == 1
 
 
+async def test_keyword_expr_is_parsed_once_per_rule(session, monkeypatch):
+    """keyword_expr 每条规则只 parse 一次，不是 contents × rules 次（SEC-022 建议 4）。
+
+    表达式最长 1000 字符、规则数不可控，批量回填时反复 parse 是纯浪费。
+    """
+    for index in range(3):
+        await _content(session, external_id=f"BVparse{index}", title="鸣潮联名官宣")
+    contents = list((await session.execute(select(RawContent))).scalars())
+    rules = [await _rule(session, name=f"规则{index}", priority=index) for index in range(4)]
+
+    calls: list[str | None] = []
+    original = rules_module.boolean_query.parse
+
+    def counting_parse(expr):
+        calls.append(expr)
+        return original(expr)
+
+    monkeypatch.setattr(rules_module.boolean_query, "parse", counting_parse)
+    stats = await rules_module.apply_rules(session, [content.id for content in contents])
+
+    # 容错语义没变：4 条规则 × 3 条内容全命中
+    assert stats.matched == len(contents) * len(rules)
+    assert calls == [rule.keyword_expr for rule in rules]
+
+
 async def test_promote_event_action_creates_event(session):
     source = await _source(session)
     content = await _content(session, external_id="BVP1", title="鸣潮联名官宣", source=source)
