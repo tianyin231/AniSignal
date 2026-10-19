@@ -2,6 +2,8 @@
 
 from datetime import timedelta
 
+import pytest
+
 from sqlalchemy import select
 
 from app.clock import utcnow
@@ -673,3 +675,25 @@ async def test_public_output_keeps_normal_urls(client, session):
             assert item["url"].startswith("https://"), item["url"]
         if item["cover"]:
             assert item["cover"].startswith("http"), item["cover"]
+
+
+@pytest.mark.parametrize(
+    "path,params",
+    [
+        ("/api/contents", {"limit": 30, "offset": 10_001}),
+        ("/api/events", {"limit": 30, "offset": 10_001}),
+        ("/api/custom/feeds", {"page": 335, "page_size": 30}),
+    ],
+)
+async def test_public_pagination_rejects_unbounded_deep_offset(client, path, params):
+    """PERF-039：offset 无上界 = 无需认证的深分页全表扫。
+
+    `LIMIT 30 OFFSET 2999940` 在 InnoDB 上必须实际读取并丢弃前 300 万行，单个 URL
+    就能让公开端点做一次全表扫描级工作。上界之内的正常翻页必须照旧放行。
+    """
+    resp = await client.get(path, params=params)
+    assert resp.status_code == 422, f"{path} {params} 应被拒（got {resp.status_code}）"
+    assert "offset" in str(resp.json()).lower() or "page" in str(resp.json()).lower()
+
+    ok = await client.get(path, params={**params, "offset": 9_990} if "offset" in params else {**params, "page": 100})
+    assert ok.status_code == 200, ok.text

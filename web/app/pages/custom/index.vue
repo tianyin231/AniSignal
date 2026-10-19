@@ -13,8 +13,14 @@ interface CustomFeedCard {
 }
 
 const { api } = usePublicApi()
-const page = computed(() => Math.max(1, Number(useRoute().query.page) || 1))
+const requestedPage = computed(() => Math.max(1, Number(useRoute().query.page) || 1))
 const pageSize = 30
+// PERF-039：服务端 offset 上界 10_000（见 app/api/custom.py）。只钳下界时
+// `/custom?page=99999` 会真的发出 offset=2,999,940——InnoDB 必须读取并丢弃前 300 万行，
+// 而这是无需认证的公开端点。这里按 totalPages 钳上界（正确范式：同仓库 account.vue:180）。
+const total = ref(0)
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const page = computed(() => Math.min(requestedPage.value, totalPages.value))
 
 const { data, status } = await useAsyncData(
   () => `custom-feeds-${page.value}`,
@@ -26,7 +32,9 @@ const { data, status } = await useAsyncData(
 )
 
 const items = computed(() => data.value?.items ?? [])
-const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
+// total 用独立 ref 而不是 computed：data 依赖 page、page 又依赖 totalPages，
+// 直接写成 computed 会被 Vue 判成循环计算。watch 是副作用，不成环。
+watch(data, (d) => (total.value = d?.total ?? 0), { immediate: true })
 const router = useRouter()
 function goPage(p: number) {
   router.replace({ query: { ...useRoute().query, page: p > 1 ? String(p) : undefined } })

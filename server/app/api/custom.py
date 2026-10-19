@@ -39,7 +39,8 @@ def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None =
 
 @router.get("/feeds")
 async def public_feeds(
-    page: int = Query(default=1, ge=1),
+    # PERF-039：page 无上界 = offset 无上界（`(page-1)*page_size` 直接进 OFFSET）
+    page: int = Query(default=1, ge=1, le=334),  # 334*30 = 10_020，与 offset 上界对齐
     page_size: int = Query(default=30, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ):

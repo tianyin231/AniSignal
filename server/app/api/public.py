@@ -200,7 +200,10 @@ async def list_contents(
     sort: str = Query(default="time", pattern="^(time|hot)$", description="hot=按最新播放量排序"),
     q: str | None = Query(default=None, max_length=100, description="标题关键词"),
     limit: int = Query(default=30, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    # PERF-039：offset 无上界时 `/api/contents?page=99999` 就是一次
+    # `LIMIT 30 OFFSET 2999940`——InnoDB 必须实际读取并丢弃前 300 万行，
+    # 公开端点无需认证即可触发。上限 10_000 足够正常翻页，超了返回 422 并提示收窄条件。
+    offset: int = Query(default=0, ge=0, le=10_000),
     session: AsyncSession = Depends(get_session),
 ):
     from app.services.classify import HIDDEN_CATEGORIES
@@ -572,7 +575,7 @@ async def list_events(
     ),
     q: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=30, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0, le=10_000),  # 同 /api/contents，见 PERF-039
     session: AsyncSession = Depends(get_session),
 ):
     from app.models import Event as EventModel
