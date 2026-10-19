@@ -26,15 +26,39 @@ from kblib import cleantext
 from kblib.config import (
     CHUNKS_PATH,
     DATA_DIR,
+    FIELDS_CHUNK_MIN,
+    IMAGE_URLS_PATH,
     INFOBOX_TEMPLATES,
+    INFOBOX_TEMPLATE_PREFIXES,
     KB_DB,
+    LEGACY_INFOBOX_TEMPLATE_NAMES,
     NOISE_SECTION_KEYWORDS,
     RAW_DIR,
+    REDIRECTS_PATH,
     SPIKE_DIR,
     WIKI_BASE,
 )
 
 log = logging.getLogger("kb.parse")
+
+# 模板名 → (kind, category)。塞壬图鉴家族的子页名（/仲裁机关、/维序者…）
+# 在 top_level_infobox 里已归一成家族名，这里直接查表
+TEMPLATE_KINDS: dict[str, tuple[str, str]] = {
+    **INFOBOX_TEMPLATES,
+    **INFOBOX_TEMPLATE_PREFIXES,
+}
+
+# v3 新收入结构化路的图鉴：它们的 card 也走 x 前缀 chunk_id，不占老计数器
+NEW_KINDS = frozenset({"stage", "ship_perf", "siren", "fan_ship"})
+
+# 各 kind 的 card 已经把短字段渲染过了，长字段补 chunk 时跳过，别重复炼
+CARD_FIELD_KEYS: dict[str, frozenset[str]] = {
+    "ship": frozenset({"名称", "和谐名", "型号", "英文名", "日文名", "编号", "类型",
+                       "稀有度", "阵营", "初始星级", "装甲类型", "航速", "幸运",
+                       "耗时", "评价"}),
+    "equipment": frozenset({"名称", "类型", "特性", "稀有度", "所属阵营", "伤害",
+                            "标准射速", "备注"}),
+}
 
 # ---- chunk 参数 ----
 CHUNK_MIN = 60          # 短于此的段落直接丢弃或并入邻段
@@ -117,6 +141,60 @@ CREATE TABLE cats(
   page_id INTEGER PRIMARY KEY REFERENCES pages(page_id),
   title TEXT NOT NULL UNIQUE,
   name TEXT, rarity TEXT, fields_json TEXT
+);
+
+-- v3 新增：原来这四类图鉴模板一个都没进结构化路
+CREATE TABLE stages(
+  page_id INTEGER PRIMARY KEY REFERENCES pages(page_id),
+  title TEXT NOT NULL UNIQUE,
+  map_no TEXT, map_name TEXT, intro TEXT,
+  clear_reward TEXT, three_star_cond TEXT, three_star_reward TEXT,
+  req_air TEXT, enemy_air TEXT, rec_air TEXT,
+  weekly_enemy_air TEXT, weekly_rec_air TEXT, ship_limit TEXT,
+  enemy_level TEXT, boss_level TEXT, boss_pos TEXT, boss_lineup TEXT,
+  req_cmd_level TEXT, danger TEXT,
+  oil_melee TEXT, oil_flagship TEXT, oil_sub TEXT, sub_start TEXT, drops TEXT,
+  fields_json TEXT
+);
+CREATE INDEX idx_stages_map ON stages(map_no);
+
+CREATE TABLE ship_perf(
+  page_id INTEGER PRIMARY KEY REFERENCES pages(page_id),
+  title TEXT NOT NULL UNIQUE,
+  name TEXT, perf_type TEXT,
+  displacement_std TEXT, displacement_full TEXT, length TEXT, beam TEXT,
+  draft TEXT, power TEXT, speed TEXT, range TEXT, range_speed TEXT,
+  crew TEXT, armament TEXT, armor TEXT, aircraft TEXT, other TEXT,
+  fields_json TEXT
+);
+
+CREATE TABLE sirens(
+  page_id INTEGER PRIMARY KEY REFERENCES pages(page_id),
+  title TEXT NOT NULL UNIQUE,
+  name TEXT, name_en TEXT, faction TEXT, category TEXT, tarot TEXT,
+  ship_type TEXT, unit_type TEXT, code TEXT, belongs TEXT,
+  stages TEXT, special_power TEXT, intro TEXT, fields_json TEXT
+);
+
+CREATE TABLE fan_ships(
+  page_id INTEGER PRIMARY KEY REFERENCES pages(page_id),
+  title TEXT NOT NULL UNIQUE,
+  name TEXT, code TEXT, ship_type TEXT, faction TEXT, author TEXT,
+  identity TEXT, personality TEXT, keywords TEXT, fields_json TEXT
+);
+
+-- 重定向别名（wiki 主命名空间 759 个）。内容在目标页里，但别名本身
+-- 以前查不到——"企业"这种叫法在表里搜不到"企业号"
+CREATE TABLE aliases(
+  alias TEXT PRIMARY KEY, target TEXT NOT NULL
+);
+CREATE INDEX idx_aliases_target ON aliases(target);
+
+-- 图片 URL（只记链接不下载）。file 是 wiki 文件名，url 由 imageinfo 批量换，
+-- 没换到就留 NULL（fetch_images.py 补跑后可再 parse 一次补齐）
+CREATE TABLE page_images(
+  title TEXT NOT NULL, sort INTEGER NOT NULL, file TEXT NOT NULL, url TEXT,
+  PRIMARY KEY(title, sort)
 );
 
 CREATE TABLE parse_stats(
@@ -240,6 +318,163 @@ def extract_equipment(fields: dict[str, str], category: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------- v3 新抽取器
+STAGE_KEYMAP = {
+    "map_no": ("地图编号",),
+    "map_name": ("地图名",),
+    "intro": ("地图介绍",),
+    "clear_reward": ("通关奖励",),
+    "three_star_cond": ("三星条件",),
+    "three_star_reward": ("三星奖励",),
+    "req_air": ("我方要求侦查值",),
+    "enemy_air": ("敌方原始制空值",),
+    "rec_air": ("我方推荐制空值",),
+    "weekly_enemy_air": ("周回模式敌方原始制空值",),
+    "weekly_rec_air": ("周回模式我方推荐制空值",),
+    "ship_limit": ("舰船限定",),
+    "enemy_level": ("敌舰等级",),
+    "boss_level": ("BOSS等级",),
+    "boss_pos": ("BOSS位置",),
+    "boss_lineup": ("BOSS阵容",),
+    "req_cmd_level": ("要求指挥官等级",),
+    "danger": ("危险等级",),
+    "oil_melee": ("周回道中油耗",),
+    "oil_flagship": ("周回旗舰油耗",),
+    "oil_sub": ("周回潜艇油耗",),
+    "sub_start": ("潜艇起点",),
+    "drops": ("地图掉落",),
+}
+
+
+def _first(fields: dict[str, str], keys: tuple[str, ...]) -> str | None:
+    for k in keys:
+        v = fields.get(k)
+        if v:
+            return v
+    return None
+
+
+def extract_stage(fields: dict[str, str]) -> dict:
+    row = {col: _first(fields, keys) for col, keys in STAGE_KEYMAP.items()}
+    if not row["map_name"]:
+        row["map_name"] = fields.get("名称")
+    return row
+
+
+SHIP_PERF_KEYMAP = {
+    "name": ("名称", "型号"),
+    "displacement_std": ("排水量标准", "标准排水量"),
+    "displacement_full": ("排水量满载", "满载排水量"),
+    "length": ("长",),
+    "beam": ("宽",),
+    "draft": ("吃水",),
+    "power": ("动力", "动力装置"),
+    "speed": ("航速", "最大速度"),
+    "range": ("最大航程", "航程"),
+    "range_speed": ("最大航程所用航速",),
+    "crew": ("编制",),
+    "armament": ("武器", "机枪", "挂载"),
+    "armor_": ("装甲",),
+    "aircraft": ("舰载机",),
+    "other": ("其它", "初始爬升率", "升限", "作战半径", "最大起飞重量", "翼展",
+              "机长", "机高", "机翼面积", "重量", "装置"),
+}
+
+
+def extract_ship_perf(fields: dict[str, str], category: str) -> dict:
+    row = {col: _first(fields, keys) for col, keys in SHIP_PERF_KEYMAP.items()}
+    row.pop("armor_", None)
+    row["perf_type"] = category
+    return row
+
+
+def extract_siren(fields: dict[str, str]) -> dict:
+    return {
+        "name": fields.get("名称"),
+        "name_en": fields.get("英文名"),
+        "faction": fields.get("所属") or fields.get("阵营"),
+        "category": fields.get("分类"),
+        "tarot": fields.get("塔罗牌"),
+        "ship_type": fields.get("类型") or fields.get("舰种"),
+        "unit_type": fields.get("兵种"),
+        "code": fields.get("编号"),
+        "belongs": fields.get("所属仲裁者") or fields.get("上级维序者"),
+        "stages": fields.get("出现关卡"),
+        "special_power": fields.get("特殊能力"),
+        "intro": fields.get("介绍") or fields.get("相关介绍"),
+    }
+
+
+def extract_fan_ship(fields: dict[str, str]) -> dict:
+    return {
+        "name": fields.get("名称") or fields.get("名字"),
+        "code": fields.get("编号"),
+        "ship_type": fields.get("类型"),
+        "faction": fields.get("阵营"),
+        "author": fields.get("作者"),
+        "identity": fields.get("身份"),
+        "personality": fields.get("性格"),
+        "keywords": fields.get("关键词"),
+    }
+
+
+def stage_card(title: str, row: dict) -> str:
+    bits = [f"{row.get('map_no') or title}（{title}）"]
+    if row.get("map_name"):
+        bits.append(str(row["map_name"]))
+    for label, key in (("敌方原始制空值", "enemy_air"), ("我方推荐制空值", "rec_air"),
+                       ("三星条件", "three_star_cond"), ("三星奖励", "three_star_reward"),
+                       ("通关奖励", "clear_reward"), ("敌舰等级", "enemy_level"),
+                       ("BOSS等级", "boss_level"), ("BOSS位置", "boss_pos"),
+                       ("BOSS阵容", "boss_lineup"), ("危险等级", "danger"),
+                       ("潜艇起点", "sub_start"), ("地图掉落", "drops")):
+        if row.get(key):
+            bits.append(f"{label}{row[key]}")
+    oil = "、".join(f"{lbl}{row[k]}" for lbl, k in
+                    (("道中油耗", "oil_melee"), ("旗舰油耗", "oil_flagship"),
+                     ("潜艇油耗", "oil_sub")) if row.get(k))
+    if oil:
+        bits.append(oil)
+    if row.get("intro"):
+        bits.append(f"介绍：{row['intro']}")
+    return "。".join(bits) + "。"
+
+
+def ship_perf_card(title: str, row: dict) -> str:
+    bits = [f"{row.get('name') or title}（{title}）"]
+    for label, key in (("标准排水量", "displacement_std"), ("满载排水量", "displacement_full"),
+                       ("长", "length"), ("宽", "beam"), ("吃水", "draft"),
+                       ("动力", "power"), ("航速", "speed"), ("最大航程", "range"),
+                       ("编制", "crew"), ("武器", "armament"), ("装甲", "armor"),
+                       ("舰载机", "aircraft")):
+        if row.get(key):
+            bits.append(f"{label}{row[key]}")
+    return "。".join(bits) + "。"
+
+
+def siren_card(title: str, row: dict) -> str:
+    bits = [f"{row.get('name') or title}（{title}）"]
+    for label, key in (("分类", "category"), ("塔罗牌", "tarot"), ("舰种", "ship_type"),
+                       ("兵种", "unit_type"), ("所属", "faction"), ("编号", "code"),
+                       ("上级", "belongs"), ("出现关卡", "stages"),
+                       ("特殊能力", "special_power")):
+        if row.get(key):
+            bits.append(f"{label}{row[key]}")
+    if row.get("intro"):
+        bits.append(f"介绍：{row['intro']}")
+    return "。".join(bits) + "。"
+
+
+def fan_ship_card(title: str, row: dict) -> str:
+    bits = [f"{row.get('name') or title}（{title}）"]
+    for label, key in (("编号", "code"), ("类型", "ship_type"), ("阵营", "faction"),
+                       ("身份", "identity"), ("性格", "personality"),
+                       ("关键词", "keywords"), ("作者", "author")):
+        if row.get(key):
+            bits.append(f"{label}{row[key]}")
+    return "。".join(bits) + "。"
+
+
 # ---------------------------------------------------------------- 分节 / 分段
 def iter_sections(text: str):
     """按标题切成 (标题路径, 正文) 段。"""
@@ -314,6 +549,11 @@ def chunk_body(text: str) -> list[tuple[str, str]]:
                 continue
             paras.append((heading, para))
 
+    return pack_paragraphs(paras)
+
+
+def pack_paragraphs(paras: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """(heading, 段落) 列表 → 合并到 CHUNK_TARGET、超长按句再切、丢短尾。"""
     chunks: list[tuple[str, str]] = []
     cur_head, cur = "", ""
     for heading, para in paras:
@@ -331,6 +571,11 @@ def chunk_body(text: str) -> list[tuple[str, str]]:
 
     # 丢掉过短的尾巴
     return [(h, c) for h, c in chunks if len(c) >= CHUNK_MIN]
+
+
+def pack_lines(lines: list[str], heading: str) -> list[tuple[str, str]]:
+    """一批独立成义的行（图注/台词/模板参数）→ chunk，口径同 pack_paragraphs。"""
+    return pack_paragraphs([(heading, line) for line in lines if line and line.strip()])
 
 
 # ---------------------------------------------------------------- card 摘要
@@ -392,31 +637,71 @@ def read_shards(source: Path):
                     yield json.loads(line)
 
 
+def load_image_urls(path: Path) -> dict[str, str]:
+    """文件名 → 直链缓存（tools/fetch_images.py 批量 imageinfo 换来的）。"""
+    if not path.exists():
+        return {}
+    try:
+        return {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items() if v}
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning("图片 URL 缓存读不了（%s），本次不记 images", e)
+        return {}
+
+
 def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> dict:
     conn = open_db(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     chunks_path.parent.mkdir(parents=True, exist_ok=True)
 
+    image_urls = load_image_urls(IMAGE_URLS_PATH)
     infobox_names = set(INFOBOX_TEMPLATES)
     n_pages = n_ok = 0
     tpl_counter: dict[str, int] = {}
     kind_counter: dict[str, int] = {}
-    n_chunks = 0
+    extra_counter: dict[str, int] = {}
+    n_chunks = n_extra = n_images = 0
     failures: list[str] = []
 
     with open(chunks_path, "w", encoding="utf-8") as cf:
+        # chunk_id 分配：prose/card 走老计数器（v2 已入向量库的 id 一个都不能变，
+        # 否则增量 upsert 会退化成全量重建）；v3 新增的补捞内容走 x 前缀的另一个
+        # 计数器，两边互不干扰
+        def emit(text: str, heading: str, kind: str, title: str, url: str,
+                 images: list[str]) -> None:
+            nonlocal n_extra
+            rec = {
+                "chunk_id": f"blhx:x{n_extra:07d}",
+                "text": text,
+                "source_title": title,
+                "source_url": url,
+                "heading": heading,
+                "kind": kind,
+            }
+            if images:
+                rec["images"] = images
+            cf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            n_extra += 1
+            extra_counter[kind] = extra_counter.get(kind, 0) + 1
+
+        def emit_pack(lines: list[str], heading: str, kind: str, title: str,
+                      url: str, images: list[str]) -> None:
+            for _h, chunk in pack_lines(lines, heading):
+                emit(chunk, heading, kind, title, url, images)
+
         for rec in read_shards(source):
             title = rec["title"]
             wikitext = rec["wikitext"]
             n_pages += 1
-            found = cleantext.top_level_infobox(wikitext, infobox_names)
+            found = cleantext.top_level_infobox(wikitext, infobox_names,
+                                               LEGACY_INFOBOX_TEMPLATE_NAMES)
             kind, category, fields = "other", None, {}
             body_wikitext = wikitext
 
             if found:
                 tpl, body_wikitext = found
-                tpl_name = str(tpl.name).strip()
-                kind, category = INFOBOX_TEMPLATES[tpl_name]
+                # 塞壬图鉴/仲裁机关 这类家族子页归一成家族名再查表
+                tpl_name = cleantext.infobox_template_name(tpl)
+                kind, category = TEMPLATE_KINDS[tpl_name]
                 fields = cleantext.infobox_fields(tpl)
                 tpl_counter[tpl_name] = tpl_counter.get(tpl_name, 0) + 1
             elif STAGE_RE.match(title):
@@ -439,6 +724,58 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
             elif kind == "equipment" and infobox_ok:
                 eq = extract_equipment(fields, category)
                 card_text = equip_card(title, eq)
+            elif kind == "stage" and infobox_ok:
+                row = extract_stage(fields)
+                card_text = stage_card(title, row)
+                conn.execute(
+                    "INSERT OR REPLACE INTO stages(page_id,title,map_no,map_name,intro,clear_reward,"
+                    "three_star_cond,three_star_reward,req_air,enemy_air,rec_air,weekly_enemy_air,"
+                    "weekly_rec_air,ship_limit,enemy_level,boss_level,boss_pos,boss_lineup,"
+                    "req_cmd_level,danger,oil_melee,oil_flagship,oil_sub,sub_start,drops,fields_json)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (rec.get("page_id"), title, row["map_no"], row["map_name"], row["intro"],
+                     row["clear_reward"], row["three_star_cond"], row["three_star_reward"],
+                     row["req_air"], row["enemy_air"], row["rec_air"], row["weekly_enemy_air"],
+                     row["weekly_rec_air"], row["ship_limit"], row["enemy_level"], row["boss_level"],
+                     row["boss_pos"], row["boss_lineup"], row["req_cmd_level"], row["danger"],
+                     row["oil_melee"], row["oil_flagship"], row["oil_sub"], row["sub_start"],
+                     row["drops"], json.dumps(fields, ensure_ascii=False)),
+                )
+            elif kind == "ship_perf" and infobox_ok:
+                row = extract_ship_perf(fields, category)
+                card_text = ship_perf_card(title, row)
+                conn.execute(
+                    "INSERT OR REPLACE INTO ship_perf(page_id,title,name,perf_type,displacement_std,"
+                    "displacement_full,length,beam,draft,power,speed,range,range_speed,crew,armament,"
+                    "armor,aircraft,other,fields_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (rec.get("page_id"), title, row["name"], row["perf_type"],
+                     row["displacement_std"], row["displacement_full"], row["length"], row["beam"],
+                     row["draft"], row["power"], row["speed"], row["range"], row["range_speed"],
+                     row["crew"], row["armament"], row.get("armor"), row["aircraft"], row["other"],
+                     json.dumps(fields, ensure_ascii=False)),
+                )
+            elif kind == "siren" and infobox_ok:
+                row = extract_siren(fields)
+                card_text = siren_card(title, row)
+                conn.execute(
+                    "INSERT OR REPLACE INTO sirens(page_id,title,name,name_en,faction,category,tarot,"
+                    "ship_type,unit_type,code,belongs,stages,special_power,intro,fields_json)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (rec.get("page_id"), title, row["name"], row["name_en"], row["faction"],
+                     row["category"], row["tarot"], row["ship_type"], row["unit_type"], row["code"],
+                     row["belongs"], row["stages"], row["special_power"], row["intro"],
+                     json.dumps(fields, ensure_ascii=False)),
+                )
+            elif kind == "fan_ship" and infobox_ok:
+                row = extract_fan_ship(fields)
+                card_text = fan_ship_card(title, row)
+                conn.execute(
+                    "INSERT OR REPLACE INTO fan_ships(page_id,title,name,code,ship_type,faction,"
+                    "author,identity,personality,keywords,fields_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (rec.get("page_id"), title, row["name"], row["code"], row["ship_type"],
+                     row["faction"], row["author"], row["identity"], row["personality"],
+                     row["keywords"], json.dumps(fields, ensure_ascii=False)),
+                )
 
             conn.execute(
                 "INSERT OR REPLACE INTO pages(page_id,title,kind,url,wikitext_len,infobox_template,"
@@ -484,9 +821,19 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
                      json.dumps(fields, ensure_ascii=False)),
                 )
 
+            # ---- 图片 URL（只记链接不下载）----
+            url = page_url(title)
+            images: list[str] = []
+            for sort, fname in enumerate(cleantext.extract_image_files(wikitext)):
+                u = image_urls.get(fname)
+                conn.execute("INSERT OR REPLACE INTO page_images VALUES(?,?,?,?)",
+                             (title, sort, fname, u))
+                if u:
+                    images.append(u)
+            n_images += len(images)
+
             # ---- 文本路：正文 → chunk ----
             body_text = cleantext.to_plain(body_wikitext)
-            url = page_url(title)
             for heading, chunk in chunk_body(body_text):
                 cf.write(json.dumps({
                     "chunk_id": f"blhx:{n_chunks:07d}",
@@ -495,23 +842,59 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
                     "source_url": url,
                     "heading": heading,
                     "kind": "prose",
+                    **({"images": images} if images else {}),
                 }, ensure_ascii=False) + "\n")
                 n_chunks += 1
             if card_text:
-                cf.write(json.dumps({
-                    "chunk_id": f"blhx:{n_chunks:07d}",
-                    "text": card_text,
-                    "source_title": title,
-                    "source_url": url,
-                    "heading": "卡片摘要",
-                    "kind": "card",
-                }, ensure_ascii=False) + "\n")
-                n_chunks += 1
+                # 老三类（舰娘/装备/指挥喵）的 card 还走老计数器，v2 已入库的 id
+                # 一个都不能动；v3 新图鉴的 card 走 x 前缀，否则会把后面的 prose id 全挤位
+                if kind in NEW_KINDS:
+                    emit(card_text, "卡片摘要", "card", title, url, images)
+                else:
+                    cf.write(json.dumps({
+                        "chunk_id": f"blhx:{n_chunks:07d}",
+                        "text": card_text,
+                        "source_title": title,
+                        "source_url": url,
+                        "heading": "卡片摘要",
+                        "kind": "card",
+                        **({"images": images} if images else {}),
+                    }, ensure_ascii=False) + "\n")
+                    n_chunks += 1
+
+            # ---- v3 补捞：正文路径丢过/只取了首参的内容，另切一类 chunk ----
+            emit_pack(cleantext.gallery_lines(wikitext), "图库", "gallery", title, url, images)
+            emit_pack(cleantext.hidden_lines(wikitext), "隐藏正文", "hidden", title, url, images)
+            emit_pack(cleantext.template_dump(body_wikitext), "模板数据", "template",
+                      title, url, images)
+            if fields:
+                voice = [f"{scene}：{line}" for scene, line in cleantext.voice_lines(fields)]
+                emit_pack(voice, "语音台词", "voice", title, url, images)
+                skip = CARD_FIELD_KEYS.get(kind, frozenset())
+                long_fields = [ln for ln in cleantext.long_field_lines(fields)
+                               if ln.split(":", 1)[0] not in skip]
+                emit_pack(long_fields, "图鉴字段", "fields", title, url, images)
 
             if found and not infobox_ok:
                 failures.append(title)
 
+    # ---- 重定向别名（内容在目标页里，别名本身也要能查到）----
+    n_aliases = 0
+    if REDIRECTS_PATH.exists():
+        with gzip.open(REDIRECTS_PATH, "rt", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                d = json.loads(line)
+                if d.get("alias") and d.get("target"):
+                    conn.execute("INSERT OR REPLACE INTO aliases VALUES(?,?)",
+                                 (d["alias"], d["target"]))
+                    n_aliases += 1
+
     for k, v in (("pages", n_pages), ("infobox_ok", n_ok), ("chunks", n_chunks),
+                 ("extra_chunks", n_extra), ("aliases", n_aliases),
+                 ("page_images", n_images),
                  ("infobox_rate", round(n_ok / max(n_pages, 1), 4))):
         conn.execute("INSERT OR REPLACE INTO parse_stats VALUES(?,?)", (k, str(v)))
     conn.commit()
@@ -526,6 +909,10 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
         "templates": dict(sorted(tpl_counter.items(), key=lambda x: -x[1])),
         "kinds": kind_counter,
         "chunks": n_chunks,
+        "extra_chunks": n_extra,
+        "extra_by_kind": dict(sorted(extra_counter.items(), key=lambda x: -x[1])),
+        "page_images": n_images,
+        "aliases": n_aliases,
         "weak_infobox": failures[:50],
     }
     if report:
@@ -538,7 +925,10 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
         for k, v in result["templates"].items():
             print(f"    {k:<16} {v}")
         print(f"页面类型      : {kind_counter}")
-        print(f"chunk 数      : {n_chunks}")
+        print(f"chunk 数      : {n_chunks}（prose/card，id 与 v2 对齐）")
+        print(f"补捞 chunk   : {n_extra}  {result['extra_by_kind']}")
+        print(f"图片 URL     : {n_images}（{len(image_urls)} 个文件名已换直链）")
+        print(f"重定向别名    : {n_aliases}")
         if failures:
             print(f"抽取不完整示例 : {failures[:10]}")
     return result

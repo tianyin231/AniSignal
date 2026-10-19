@@ -149,6 +149,46 @@ class QdrantVectorStore(VectorStore):
         res = self._req("POST", f"/collections/{self.collection}/points/count", {"exact": True})
         return int(res.get("result", {}).get("count", 0))
 
+    def iter_payloads(self, page: int = 1000) -> Iterable[tuple[int, dict]]:
+        """滚动全库，yield (point_id, payload)。只要 payload 不要向量，做增量对账用。"""
+        qdrant_server.ensure_server()
+        offset: Any = None
+        while True:
+            body: dict[str, Any] = {"limit": page, "with_payload": True, "with_vector": False}
+            if offset is not None:
+                body["offset"] = offset
+            res = self._req("POST", f"/collections/{self.collection}/points/scroll", body)
+            for p in res.get("result", {}).get("points", []):
+                yield int(p["id"]), (p.get("payload") or {})
+            offset = res.get("result", {}).get("next_page_offset")
+            if offset is None:
+                return
+
+    def max_point_id(self) -> int:
+        ids = [pid for pid, _ in self.iter_payloads()]
+        return max(ids) if ids else -1
+
+    def delete_ids(self, ids: Sequence[int]) -> int:
+        if not ids:
+            return 0
+        qdrant_server.ensure_server()
+        n = 0
+        for i in range(0, len(ids), 500):
+            batch = [int(x) for x in ids[i : i + 500]]
+            self._req("POST", f"/collections/{self.collection}/points/delete",
+                      {"points": batch})
+            n += len(batch)
+        return n
+
+    def set_payload_where(self, key: str, value: str, payload: dict) -> None:
+        """按 payload 字段给命中的点打补丁（不动向量）。"""
+        qdrant_server.ensure_server()
+        self._req("POST", f"/collections/{self.collection}/points/payload", {
+            "payload": payload,
+            "filter": {"must": [{"key": key, "match": {"value": value}}]},
+            "wait": True,
+        })
+
     def reset(self) -> None:
         qdrant_server.ensure_server()
         self._req("DELETE", f"/collections/{self.collection}")

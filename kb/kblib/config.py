@@ -13,6 +13,10 @@ RAW_DIR = DATA_DIR / "raw"
 SPIKE_DIR = RAW_DIR / "spike"
 KB_DB = DATA_DIR / "kb.db"
 CHUNKS_PATH = DATA_DIR / "chunks.jsonl"
+# 重定向别名（fetch_redirects.py 拉的小分页，不混进 raw/ 正片）
+REDIRECTS_PATH = DATA_DIR / "redirects.jsonl.gz"
+# 文件名 → 直链缓存（fetch_images.py 批量 imageinfo 换来的）
+IMAGE_URLS_PATH = DATA_DIR / "image_urls.json"
 EVAL_DIR = KB_ROOT / "eval"
 QUESTIONS_PATH = EVAL_DIR / "questions.jsonl"
 
@@ -41,7 +45,37 @@ INFOBOX_TEMPLATES: dict[str, tuple[str, str]] = {
     "设备图鉴": ("equipment", "gear"),
     "特殊兵装图鉴": ("equipment", "special_aux"),
     "指挥喵图鉴": ("cat", "commander_cat"),
+    # ---- v3 补的（README 原来只列 9 种，审计发现还有这 6 类）----
+    "关卡图鉴": ("stage", "stage"),
+    "原型舰性能数据": ("ship_perf", "proto_ship"),
+    "原型舰性能数据（潜艇）": ("ship_perf", "proto_sub"),
+    "飞行器性能数据": ("ship_perf", "aircraft_perf"),
+    "同人角色": ("fan_ship", "fan_ship"),
 }
+
+# 按前缀匹配的图鉴模板：同一家族有 /仲裁机关、/维序机关 之类的子页，
+# 逐个列名字维护不住，按前缀收。
+INFOBOX_TEMPLATE_PREFIXES: dict[str, tuple[str, str]] = {
+    "塞壬图鉴": ("siren", "siren"),
+}
+
+# v2 起就在库里的 9 类老家族。匹配时先老后新：一页同时顶着一个老家族和一个
+# v3 新家族模板时（全库就 1 页：同人角色:024 同人角色+舰炮图鉴），必须复现 v2
+# 的选择，否则 prose/card 的 chunk_id 整体错位，增量 upsert 退化成全量重建。
+LEGACY_INFOBOX_TEMPLATE_NAMES = frozenset({
+    "舰娘图鉴", "舰炮图鉴", "防空炮图鉴", "舰载机图鉴", "鱼雷图鉴", "导弹图鉴",
+    "设备图鉴", "特殊兵装图鉴", "指挥喵图鉴",
+})
+
+# infobox 里出现即视为"台词"的字段后缀（语音台词单独切成 kind=voice 的 chunk）
+VOICE_FIELD_SUFFIX = "台词"
+
+# infobox 长字段阈值：超过这个长度的字段值另切一个 kind=fields 的 chunk，
+# 避免"模板一被抽取就从正文消失、长文本只躺在 fields_json 里没人检索得到"
+FIELDS_CHUNK_MIN = 60
+
+# 单页最多记多少个图片 URL（chunk payload 的 images 字段）
+MAX_IMAGES_PER_PAGE = 16
 
 # 出现即视为导航/样板噪音的模板（切 chunk 时整段丢弃）
 NAV_TEMPLATE_PREFIXES = (

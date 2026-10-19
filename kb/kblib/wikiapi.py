@@ -123,8 +123,13 @@ class MediaWikiClient:
         return data.get("query", {})
 
     # ---- 高层 ----
-    def iter_all_titles(self, namespace: int = 0, page_size: int = 500) -> Iterator[str]:
-        """分页列出命名空间下所有非重定向条目标题。"""
+    def iter_all_titles(self, namespace: int = 0, page_size: int = 500,
+                        filter_redir: str = "nonredirects") -> Iterator[str]:
+        """分页列出命名空间下的条目标题。
+
+        filter_redir: "nonredirects"（默认，正文抓取用）/ "redirects"（别名用）/
+        "all"（不过滤）。
+        """
         cont: dict[str, Any] = {}
         while True:
             data = self._raw(
@@ -133,7 +138,7 @@ class MediaWikiClient:
                     "list": "allpages",
                     "apnamespace": namespace,
                     "aplimit": page_size,
-                    "apfilterredir": "nonredirects",
+                    "apfilterredir": filter_redir,
                     **cont,
                 }
             )
@@ -142,6 +147,28 @@ class MediaWikiClient:
             if "continue" not in data:
                 return
             cont = data["continue"]
+
+    def resolve_redirects(self, titles: list[str]) -> dict[str, str]:
+        """别名 → 最终目标页标题。
+
+        用 API 自带的 redirects 解析（redirects=1，只要 revision id 不拉正文），
+        比拿回来正则抠 `#REDIRECT [[x]]` 稳：链式重定向 A→B→C 会一次全解析，
+        且不受 `#REDIRECT` 写法变体影响。返回的字典不含"自己指向自己"的条目。
+        """
+        out: dict[str, str] = {}
+        for i in range(0, len(titles), self.batch_titles):
+            batch = titles[i : i + self.batch_titles]
+            q = self.query(prop="revisions", rvprop="ids",
+                           titles="|".join(batch), redirects=1)
+            hops = {r["from"]: r["to"] for r in q.get("redirects", [])}
+            for alias in batch:
+                cur, seen = alias, set()
+                while cur in hops and cur not in seen:
+                    seen.add(cur)
+                    cur = hops[cur]
+                if cur != alias:
+                    out[alias] = cur
+        return out
 
     def fetch_revisions(self, titles: list[str]) -> list[dict[str, Any]]:
         """批量取正文 wikitext，返回 [{page_id,title,rev_id,wikitext}]。"""

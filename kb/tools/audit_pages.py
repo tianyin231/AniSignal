@@ -21,7 +21,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from kblib import cleantext  # noqa: E402
-from kblib.config import INFOBOX_TEMPLATES, RAW_DIR  # noqa: E402
+from kblib.config import (INFOBOX_TEMPLATES, INFOBOX_TEMPLATE_PREFIXES,  # noqa: E402
+                          LEGACY_INFOBOX_TEMPLATE_NAMES, RAW_DIR)
+from parse import TEMPLATE_KINDS  # noqa: E402
 
 STAGE_RE = re.compile(r"^\d+-\d+(Hard)?$|^\d+-SOS$|^SP\d*$|^EX\d*$|^[A-Z]{2}\d*$")
 
@@ -103,7 +105,7 @@ def main() -> int:
 
                 found = cleantext.top_level_infobox(wt, infobox_names)
                 if found:
-                    kind = INFOBOX_TEMPLATES[str(found[0].name).strip()][0]
+                    kind = TEMPLATE_KINDS[cleantext.infobox_template_name(found[0])][0]
                 elif STAGE_RE.match(title):
                     kind = "stage"
                 else:
