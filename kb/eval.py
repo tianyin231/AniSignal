@@ -6,6 +6,7 @@
     ./kb/.venv/bin/python eval.py --kind table    # 只评测查表类
     ./kb/.venv/bin/python eval.py --kind qa --retrieval vector   # 退回 v1 纯向量口径
     ./kb/.venv/bin/python eval.py -v              # 打印每条明细
+    ./kb/.venv/bin/python eval.py --resume        # 接着上一轮的 --out 报告往下跑
 
 题库在游戏配置的 eval_dir 下（随代码提交）。每条：
   {"id","kind":"table","q":"问题","probe":"skill_name",
@@ -235,6 +236,19 @@ def load_questions(path: Path, kind: str | None) -> list[dict]:
     return qs
 
 
+def write_report(path: Path, results: list[dict]) -> None:
+    """落一份报告。每答一题就调一次——中途被 kill / 重启时进度还在盘上，
+    --resume 靠它接着跑；只在结尾写一遍的话，杀在 49/51 就全白跑了。"""
+    passed = {k: sum(1 for r in results if r["kind"] == k and r["pass"])
+              for k in ("table", "qa")}
+    total = {k: sum(1 for r in results if r["kind"] == k) for k in ("table", "qa")}
+    n_pass, n_total = len([r for r in results if r["pass"]]), len(results)
+    path.write_text(json.dumps(
+        {"total": n_total, "passed": n_pass, "rate": round(n_pass / max(n_total, 1), 4),
+         "by_kind": {k: {"passed": passed[k], "total": total[k]} for k in total},
+         "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def main() -> int:
     global store_encoder
     ap = argparse.ArgumentParser(description="知识库评测")
@@ -251,6 +265,8 @@ def main() -> int:
     ap.add_argument("--backend", default="auto", choices=["auto", "torch", "onnx"])
     ap.add_argument("--store", default="qdrant", choices=["qdrant", "numpy"])
     ap.add_argument("--out", type=Path, default=None, help="明细 JSON 输出路径")
+    ap.add_argument("--resume", action="store_true",
+                    help="读 --out 里上一轮的结果，已出结果且题干没变的题号跳过不重跑")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
     cfg = gamecfg.load_game(args.game)
@@ -286,6 +302,23 @@ def main() -> int:
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
+    # 断点续跑：这台机器（2 核 / 7G）会被重启打断长跑，51 题从零重跑要 10 分钟以上。
+    # 认 id + kind + 题干三者都对得上才复用旧结果——题库改过题干的旧分不能算数。
+    prior: dict[str, dict] = {}
+    if args.resume and args.out and args.out.exists():
+        try:
+            old = json.loads(args.out.read_text(encoding="utf-8"))
+            prior = {r["id"]: r for r in old.get("results", []) if r.get("id")}
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"续跑读不到 {args.out}（{e}），本轮从零开始", file=sys.stderr)
+    reusable = [q for q in questions
+                if prior.get(q["id"], {}).get("q") == q["q"]
+                and prior[q["id"]].get("kind") == q["kind"]]
+    if reusable:
+        ids = [q["id"] for q in reusable]
+        print(f"续跑：复用 {len(ids)} 题旧结果（{', '.join(ids[:10])}"
+              f"{'…' if len(ids) > 10 else ''}）\n")
+
     results = []
     passed = {"table": 0, "qa": 0}
     total = {"table": 0, "qa": 0}
@@ -295,7 +328,10 @@ def main() -> int:
 
     for q in questions:
         total[q["kind"]] += 1
-        if q["kind"] == "table":
+        old = prior.get(q["id"])
+        if old is not None and old.get("q") == q["q"] and old.get("kind") == q["kind"]:
+            ok, detail, hits = old["pass"], old.get("detail", ""), []
+        elif q["kind"] == "table":
             try:
                 ok, detail = run_table(cur, cfg, q)
                 hits = []
@@ -312,6 +348,8 @@ def main() -> int:
                 print(f"    · {h.score:.3f} {h.source_title}｜{h.heading}｜{h.text[:70]}")
         results.append({"id": q["id"], "kind": q["kind"], "q": q["q"],
                         "pass": ok, "detail": detail})
+        if args.out:
+            write_report(args.out, results)
 
     n_pass = sum(passed.values())
     n_total = sum(total.values())
@@ -322,10 +360,7 @@ def main() -> int:
     print(f"总通过率 {n_pass}/{n_total} = {n_pass/max(n_total,1):.1%}")
 
     if args.out:
-        args.out.write_text(json.dumps(
-            {"total": n_total, "passed": n_pass, "rate": round(n_pass / max(n_total, 1), 4),
-             "by_kind": {k: {"passed": passed[k], "total": total[k]} for k in total},
-             "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_report(args.out, results)
         print(f"明细 → {args.out}")
 
     conn.close()
