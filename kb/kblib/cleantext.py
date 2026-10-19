@@ -191,6 +191,16 @@ def _plain_template(tpl: Any, depth: int) -> str:
     name = template_name(tpl)
     params = {str(p.name).strip(): p.value for p in tpl.params}
 
+    # 游戏配置声明的展示型模板（PRTS 的 color/术语/+/*…），优先于 _VALUE_TEMPLATES。
+    # 必须先查配置：星铁 BWIKI 的 {{颜色|描述2|50%/100%}} 和 {{颜色|冰|冰属性}} 给人看的
+    # 值都在位置参数 2（参数 1 是机器键），而下面的 _VALUE_TEMPLATES 兜底取参数 1，
+    # 会把正文渲染成"描述2攻击力的冰伤害"。没声明这个模板名的游戏不受影响——
+    # _PLAIN_DISPLAY 查不到就原样落到 _VALUE_TEMPLATES，碧蓝航线输出一个字节不变。
+    spec = _PLAIN_DISPLAY.get(name)
+    if spec is not None:
+        parts = [_plain(params.get(p, ""), depth + 1).strip() for p in spec]
+        return " ".join(p for p in parts if p)
+
     if name in _VALUE_TEMPLATES:
         if name in ("强化值", "营养价值"):
             parts = [f"{k}{_plain(v, depth + 1).strip()}" for k, v in params.items()]
@@ -207,12 +217,6 @@ def _plain_template(tpl: Any, depth: int) -> str:
             return ""
         if name == "模板":
             return _plain(params.get("1", ""), depth + 1).strip()
-
-    # 游戏配置声明的展示型模板（PRTS 的 color/术语/+/*…），优先于通用兜底
-    spec = _PLAIN_DISPLAY.get(name)
-    if spec is not None:
-        parts = [_plain(params.get(p, ""), depth + 1).strip() for p in spec]
-        return " ".join(p for p in parts if p)
 
     # 通用兜底：展示型模板第一个无名参数通常就是正文
     unnamed = _plain(params.get("1", ""), depth + 1).strip()
