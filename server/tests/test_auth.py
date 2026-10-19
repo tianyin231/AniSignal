@@ -1,5 +1,9 @@
 """账号系统全流程单测：注册→验证→登录→改密→找回，含安全边界。"""
 
+import time
+from collections import deque
+
+import pytest
 from sqlalchemy import select
 
 from app.models import EmailCode, User
@@ -215,3 +219,48 @@ async def test_admin_email_codes_never_returns_plaintext_code(client, session, a
         # 排障真正需要的信息仍在
         assert set(row) >= {"id", "email", "purpose", "expires_at", "used", "attempts", "sent_via_smtp"}
         assert row["sent_via_smtp"] is False, "SMTP 未配置时应如实反映未发信"
+
+
+async def test_login_failure_map_is_bounded(client, session):
+    """SEC-016 / QUAL-014：随机邮箱打登录不能让进程内失败计数无限增长。
+
+    原先 `_check_login_lock` 只清理"当前正在检查的那个 email"，其他 email 的 deque
+    永不过期——攻击者用随机邮箱即可让这个 dict 无限增长（慢漏型内存 DoS）。
+    """
+    from app.services import auth as auth_module
+
+    auth_module._login_failures.clear()
+    auth_module._login_fail_since_sweep = 0
+    try:
+        # 灌进远超上限的随机邮箱
+        for i in range(auth_module._LOGIN_FAIL_MAX_ENTRIES + 500):
+            auth_module.record_login_failure(f"flood{i}@x.com")
+        size = len(auth_module._login_failures)
+        assert size <= auth_module._LOGIN_FAIL_MAX_ENTRIES + auth_module._LOGIN_FAIL_SWEEP_EVERY, (
+            f"失败计数表不应无限增长（当前 {size}）"
+        )
+
+        # 过期条目必须被清掉（不是只靠上限淘汰）
+        auth_module._login_failures.clear()
+        auth_module._login_fail_since_sweep = 0
+        stale = auth_module._LOGIN_FAIL_WINDOW + 60
+        auth_module._login_failures["stale@x.com"] = deque(
+            [time.monotonic() - stale, time.monotonic() - stale]
+        )
+        for i in range(auth_module._LOGIN_FAIL_SWEEP_EVERY):
+            auth_module.record_login_failure(f"fresh{i}@x.com")
+        assert "stale@x.com" not in auth_module._login_failures, "过期条目应被清理"
+
+        # 真正的锁定语义不能被动掉
+        auth_module._login_failures.clear()
+        auth_module._login_fail_since_sweep = 0
+        for _ in range(auth_module._LOGIN_FAIL_LIMIT):
+            auth_module.record_login_failure("victim@x.com")
+        with pytest.raises(auth_module.AuthError) as exc:
+            auth_module._check_login_lock("victim@x.com")
+        assert exc.value.status_code == 429
+        auth_module.clear_login_failures("victim@x.com")
+        auth_module._check_login_lock("victim@x.com")  # 清掉后不再锁
+    finally:
+        auth_module._login_failures.clear()
+        auth_module._login_fail_since_sweep = 0

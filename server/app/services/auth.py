@@ -29,12 +29,20 @@ _SEND_MIN_INTERVAL = 60  # 同邮箱两次发码最小间隔（秒）
 _SEND_HOURLY_LIMIT = 5
 _LOGIN_FAIL_WINDOW = 15 * 60
 _LOGIN_FAIL_LIMIT = 5
+# 进程内失败计数的容量上限（SEC-016 / QUAL-014）。只按 email 计数时，用随机邮箱打
+# 登录接口就能让这个 dict 无限增长——每个 value 还是一个 deque 对象，重启才清空，
+# 属于可触发的慢漏型内存 DoS。超过上限就淘汰最早失败的那个 email。
+_LOGIN_FAIL_MAX_ENTRIES = 5_000
+# 每多少次失败记录做一次全量清理：常数级摊销，避免把清理本身变成 CPU 放大器
+# （攻击者高频打登录时，每次请求都扫 5000 条反而是新的 DoS 面）。
+_LOGIN_FAIL_SWEEP_EVERY = 128
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # 进程内限频状态（单 worker 有效）
 _send_times: dict[str, deque[float]] = {}
 _login_failures: dict[str, deque[float]] = {}
+_login_fail_since_sweep = 0
 
 
 class AuthError(Exception):
@@ -207,6 +215,27 @@ async def revoke_all_sessions(session: AsyncSession, user_id: int) -> None:
 
 # ---------- 登录防爆破 ----------
 
+def _sweep_login_failures(now: float) -> None:
+    """清理过期条目 + 超上限淘汰（SEC-016 / QUAL-014）。
+
+    `_check_login_lock` 原先只清理"当前正在检查的那个 email"的 deque，其他 email 的
+    条目永不过期。这里按窗口清空已过期的，再按上限淘汰最早失败的那个。
+    """
+    expired = [
+        email
+        for email, fails in _login_failures.items()
+        if not fails or now - fails[-1] > _LOGIN_FAIL_WINDOW
+    ]
+    for email in expired:
+        _login_failures.pop(email, None)
+    while len(_login_failures) > _LOGIN_FAIL_MAX_ENTRIES:
+        oldest = min(
+            _login_failures,
+            key=lambda e: _login_failures[e][0] if _login_failures[e] else 0.0,
+        )
+        _login_failures.pop(oldest, None)
+
+
 def _check_login_lock(email: str) -> None:
     now = time.monotonic()
     fails = _login_failures.setdefault(email, deque())
@@ -217,7 +246,16 @@ def _check_login_lock(email: str) -> None:
 
 
 def record_login_failure(email: str) -> None:
-    _login_failures.setdefault(email, deque()).append(time.monotonic())
+    global _login_fail_since_sweep
+    now = time.monotonic()
+    _login_failures.setdefault(email, deque()).append(now)
+    _login_fail_since_sweep += 1
+    if (
+        _login_fail_since_sweep >= _LOGIN_FAIL_SWEEP_EVERY
+        or len(_login_failures) > _LOGIN_FAIL_MAX_ENTRIES
+    ):
+        _login_fail_since_sweep = 0
+        _sweep_login_failures(now)
 
 
 def clear_login_failures(email: str) -> None:
