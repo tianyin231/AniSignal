@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowUpRight, Check, Radio, RefreshCw, Search, Sparkles } from 'lucide-vue-next'
+import { ArrowUpRight, Check, Flame, Radio, RefreshCw, Search, Sparkles } from 'lucide-vue-next'
 import { utcTimestamp } from '~/utils/public-utils'
 
 interface NewsItem {
@@ -14,6 +14,16 @@ interface NewsItem {
   published_at: string | null
   url: string | null
   references: { url: string; label: string }[]
+  story_id: number | null
+  report_count: number
+  participant_count: number
+  heat: number
+  selected: boolean
+  score: number | null
+  latest_at: string
+  updated_at: string
+  sources: NewsItem[]
+  developments: (NewsItem & { event_id: number | null })[]
 }
 interface NewsList {
   items: NewsItem[]
@@ -33,18 +43,23 @@ const filters = computed(() => ({
   topic: String(route.query.topic || ''),
   kind: ['report', 'rumor'].includes(String(route.query.kind)) ? String(route.query.kind) : 'all',
   hours: [24, 168, 720].includes(Number(route.query.hours)) ? Number(route.query.hours) : 168,
+  sort: route.query.mode === 'hot' ? 'hot' : 'time',
+  selected: route.query.mode === 'selected',
 }))
 const request = computed(() => ({ ...filters.value, limit: 20, offset: (page.value - 1) * 20 }))
 const { data, status, error, refresh } = await useLazyAsyncData(
   () => `ai-news-${JSON.stringify(request.value)}`,
-  (_app, { signal }) => api<NewsList>('/api/ai-news', { query: request.value, signal }),
+  (_app, { signal }) => api<NewsList>('/api/ai-news/events', { query: request.value, signal }),
 )
+const { data: edition } = await useLazyAsyncData('ai-news-edition',
+  (_app, { signal }) => api<{ day: string | null; items: NewsItem[] }>('/api/ai-news/edition', { signal }))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total || 0) / 20)))
-const hasFilters = computed(() => !!(filters.value.q || filters.value.topic || filters.value.kind !== 'all'))
+const hasFilters = computed(() => !!(filters.value.q || filters.value.topic || filters.value.kind !== 'all' || filters.value.selected || filters.value.sort === 'hot'))
 const pendingNew = ref(false)
 const refreshBusy = ref(false)
 const knownTopics = ['OpenAI', 'Codex', 'Claude', 'Gemini', 'DeepSeek', '开源模型', '行业动态']
 const kinds = [{ key: 'all', label: '全部快讯' }, { key: 'report', label: '报道' }, { key: 'rumor', label: '传闻线索' }]
+const modes = [{ key: 'time', label: '最新' }, { key: 'hot', label: '热点' }, { key: 'selected', label: '精选' }]
 const sourceLabels: Record<string, string> = { active: '正常更新', delayed: '更新延迟', pending: '等待首轮' }
 const sourceTime = computed(() => {
   const times = (data.value?.sources || []).map(s => s.last_success_at).filter((t): t is string => !!t)
@@ -79,8 +94,9 @@ async function checkUpdates() {
   const controller = new AbortController()
   probeController = controller
   try {
-    const head = await api<NewsList>('/api/ai-news', { query: { ...filters.value, limit: 1 }, signal: controller.signal })
-    if (!controller.signal.aborted && head.items[0] && head.items[0].id !== data.value?.items[0]?.id) pendingNew.value = true
+    const head = await api<NewsList>('/api/ai-news/events', { query: { ...filters.value, limit: 1 }, signal: controller.signal })
+    const stamp = (item?: NewsItem) => item ? `${item.id}:${item.report_count}:${item.latest_at}:${item.updated_at}` : ''
+    if (!controller.signal.aborted && head.items[0] && stamp(head.items[0]) !== stamp(data.value?.items[0])) pendingNew.value = true
   } catch { /* 保留正在阅读的列表，用户手动刷新时显示错误。 */ }
   finally { if (probeController === controller) probeController = undefined }
 }
@@ -129,6 +145,12 @@ onBeforeUnmount(() => {
             <button type="button" :aria-pressed="!filters.topic" class="rounded-full px-3 py-1.5 text-xs" :class="!filters.topic ? 'bg-teal-700 text-white dark:bg-teal-600' : 'text-slate-500 hover:bg-slate-100 dark:text-zinc-400 dark:hover:bg-white/5'" @click="filterBy('topic', '')">全部</button>
             <button v-for="topic in data?.topics || knownTopics" :key="topic" type="button" :aria-pressed="filters.topic === topic" class="rounded-full px-3 py-1.5 text-xs" :class="filters.topic === topic ? 'bg-teal-700 text-white dark:bg-teal-600' : 'text-slate-600 hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-white/5'" @click="filterBy('topic', topic)">{{ topic }}</button>
           </div>
+          <nav class="mt-3 flex gap-1 border-t border-line pt-3" aria-label="快讯排序">
+            <button v-for="mode in modes" :key="mode.key" type="button" class="min-h-11 cursor-pointer rounded-lg px-4 text-sm transition-colors"
+              :aria-pressed="(route.query.mode || 'time') === mode.key"
+              :class="(route.query.mode || 'time') === mode.key ? 'bg-teal-700 font-medium text-white dark:bg-teal-600' : 'text-ink-2 hover:bg-chip'"
+              @click="filterBy('mode', mode.key)">{{ mode.label }}</button>
+          </nav>
         </div>
 
         <div class="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
@@ -150,10 +172,11 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="status === 'pending' && !data" role="status" class="panel py-16 text-center text-sm text-slate-500">正在整理快讯…</div>
         <div v-else-if="data?.items.length" class="panel overflow-hidden" :aria-busy="status === 'pending'">
-          <article v-for="item in data.items" :key="item.id" class="border-b border-slate-900/7 px-4 py-5 last:border-0 sm:px-6 sm:py-6 dark:border-white/8">
+          <article v-for="item in data.items" :key="item.story_id ? `event:${item.story_id}` : `content:${item.id}`" class="border-b border-slate-900/7 px-4 py-5 last:border-0 sm:px-6 sm:py-6 dark:border-white/8">
             <div class="mb-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs">
               <span class="rounded-md px-2 py-0.5 font-medium" :class="item.kind === 'rumor' ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300' : 'bg-teal-500/10 text-teal-800 dark:text-teal-300'">{{ item.kind === 'rumor' ? '传闻线索' : '报道' }}</span>
               <span class="text-slate-500 dark:text-zinc-400">{{ item.platform === 'x' ? 'X 原帖' : '二手消息' }} · 待核实</span>
+              <span v-if="item.participant_count >= 2" class="inline-flex items-center gap-1 text-hot"><Flame :size="13" aria-hidden="true" />{{ item.participant_count }} 个独立来源</span>
               <time :datetime="item.published_at || undefined" class="text-slate-500 sm:ml-auto dark:text-zinc-400" :title="`${dateLabel(item.published_at)}（北京时间），来源发布时间`">{{ item.platform === 'x' ? '原帖发布' : '视频发布' }} {{ dateLabel(item.published_at) }}</time>
             </div>
             <NuxtLink :to="{ path: `/contents/${item.id}`, query: { community: 'ai' } }" class="block rounded-sm text-[17px] font-semibold leading-relaxed text-slate-900 hover:text-teal-700 sm:text-[19px] dark:text-zinc-100 dark:hover:text-teal-300">
@@ -165,6 +188,25 @@ onBeforeUnmount(() => {
               <span v-for="topic in item.topics" :key="topic" class="text-teal-700 dark:text-teal-300">#{{ topic }}</span>
               <a v-if="item.url" :href="item.url" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-8 items-center gap-1 text-slate-600 hover:text-teal-700 sm:ml-auto dark:text-zinc-300 dark:hover:text-teal-300">看来源 <ArrowUpRight :size="13" aria-hidden="true" /></a>
             </div>
+            <details v-if="item.report_count > 1 || item.developments.length > 1" class="mt-3 rounded-lg border border-line px-3">
+              <summary class="min-h-11 cursor-pointer content-center text-sm font-medium text-teal-700 dark:text-teal-300">
+                {{ item.report_count }} 条报道<template v-if="item.developments.length > 1"> · {{ item.developments.length }} 项进展</template>
+              </summary>
+              <ol class="border-l border-line pl-4">
+                <li v-for="development in item.developments" :key="development.event_id || development.id" class="pb-5">
+                  <div class="mb-1 flex flex-wrap items-center gap-2 text-xs text-muted">
+                    <time :datetime="development.published_at || undefined">{{ dateLabel(development.published_at) }}</time>
+                    <span v-if="development.kind === 'rumor'" class="text-warn">传闻线索</span>
+                  </div>
+                  <NuxtLink :to="`/contents/${development.id}?community=ai`" class="text-sm font-medium leading-6 text-ink hover:text-teal-700 dark:hover:text-teal-300">{{ development.headline }}</NuxtLink>
+                  <p class="mt-1 text-sm leading-6 text-ink-2">{{ development.summary }}</p>
+                  <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                    <a v-for="source in development.sources" :key="source.id" :href="source.url || `/contents/${source.id}`" target="_blank" rel="noopener noreferrer"
+                      class="inline-flex min-h-11 items-center gap-1 text-xs text-teal-700 hover:underline dark:text-teal-300">{{ source.source_name }}<ArrowUpRight :size="12" aria-hidden="true" /></a>
+                  </div>
+                </li>
+              </ol>
+            </details>
             <details class="mt-2 text-xs text-slate-500 dark:text-zinc-400">
               <summary class="w-fit cursor-pointer py-1.5 hover:text-teal-700 dark:hover:text-teal-300">原始标题与参考链接</summary>
               <p class="mt-1 leading-6">{{ item.original_title }}</p>
@@ -182,7 +224,7 @@ onBeforeUnmount(() => {
           <button v-if="hasFilters" type="button" class="mt-4 min-h-10 text-sm text-teal-700 underline underline-offset-4 dark:text-teal-300" @click="clearFilters">清除筛选</button>
         </div>
         <footer v-if="data?.total" class="mt-4 flex items-center justify-between gap-2 px-1 text-xs text-slate-500 dark:text-zinc-400">
-          <span>{{ data.total }} 条快讯，按发布时间排序</span>
+          <span>{{ data.total }} 条事件 · {{ filters.sort === 'hot' ? '按事件热度排序' : '按最新进展排序' }}</span>
           <div v-if="totalPages > 1" class="flex items-center gap-3">
             <button type="button" :disabled="page <= 1" class="min-h-10 hover:text-teal-700" @click="router.replace({ query: { ...route.query, page: page - 1 } })">上一页</button>
             <span>{{ page }} / {{ totalPages }}</span>
@@ -192,14 +234,23 @@ onBeforeUnmount(() => {
       </section>
 
       <aside class="space-y-6 lg:sticky lg:top-20" aria-label="快讯来源说明">
+        <section v-if="edition?.items.length" class="panel p-5">
+          <h2 class="flex items-center justify-between gap-2 text-sm font-semibold"><span>每日速报</span><time class="mono text-xs font-normal text-muted">{{ edition.day?.replaceAll('-', '/') }}</time></h2>
+          <ol class="mt-3 space-y-3">
+            <li v-for="(item, index) in edition.items" :key="item.id" class="flex gap-2 text-sm leading-6">
+              <span class="mono text-faint">{{ index + 1 }}</span>
+              <NuxtLink :to="`/contents/${item.id}?community=ai`" class="text-ink hover:text-teal-700 dark:hover:text-teal-300">{{ item.headline }}</NuxtLink>
+            </li>
+          </ol>
+        </section>
         <section class="rounded-2xl bg-teal-700/5 p-5 dark:bg-teal-400/5">
           <h2 class="flex items-center gap-2 text-sm font-semibold text-teal-900 dark:text-teal-200"><Sparkles :size="16" aria-hidden="true" /> 小情报站的约定</h2>
           <ul class="mt-4 space-y-3 text-sm leading-6 text-slate-600 dark:text-zinc-300">
-            <li class="flex gap-2"><Check :size="14" class="mt-1.5 shrink-0 text-teal-600" aria-hidden="true" />新消息按发布时间排，不按播放量排。</li>
+            <li class="flex gap-2"><Check :size="14" class="mt-1.5 shrink-0 text-teal-600" aria-hidden="true" />同一件事集中看，后续进展接着看。</li>
             <li class="flex gap-2"><Check :size="14" class="mt-1.5 shrink-0 text-teal-600" aria-hidden="true" />报道与传闻分开，来源随手可查。</li>
             <li class="flex gap-2"><Check :size="14" class="mt-1.5 shrink-0 text-teal-600" aria-hidden="true" />暂未核实的内容，就坦白标出来。</li>
           </ul>
-          <p class="mt-4 border-t border-teal-700/10 pt-4 text-xs leading-6 text-slate-500 dark:text-zinc-400">摘要依据视频标题与简介整理，未核对完整视频。这里的时间是视频发布时间，不是事件发生时间。</p>
+          <p class="mt-4 border-t border-teal-700/10 pt-4 text-xs leading-6 text-slate-500 dark:text-zinc-400">摘要依据来源公开文字整理；视频仅参考标题与简介。时间采用来源发布时间。</p>
         </section>
         <section class="px-1">
           <h2 class="text-sm font-semibold">消息从哪里来</h2>
@@ -212,6 +263,7 @@ onBeforeUnmount(() => {
           <p v-else-if="data" class="mt-3 text-xs text-slate-500">还没有启用的资讯来源。</p>
           <p v-if="sourceTime" class="mt-4 text-xs leading-6 text-slate-500 dark:text-zinc-400">最近成功检查：{{ dateLabel(sourceTime) }}（北京时间）</p>
           <NuxtLink to="/sources" class="mt-3 inline-flex min-h-9 items-center gap-1 text-xs text-teal-700 hover:underline dark:text-teal-300">查看来源状态 <ArrowUpRight :size="13" aria-hidden="true" /></NuxtLink>
+          <a href="/api/ai-news/rss.xml" class="mt-1 flex min-h-11 items-center gap-1 text-xs text-teal-700 hover:underline dark:text-teal-300">订阅 AI 精选 RSS <ArrowUpRight :size="13" aria-hidden="true" /></a>
         </section>
       </aside>
     </div>

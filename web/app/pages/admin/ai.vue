@@ -60,6 +60,8 @@ const TASK_LABELS: Record<string, string> = {
   translate_content: '内容翻译',
   assess_product: '商品履约判断',
   test: '连通测试',
+  news_group: '资讯事件归组',
+  news_score: '资讯价值评分',
 }
 
 async function saveConfig() {
@@ -191,6 +193,8 @@ async function translateMissing() {
         <span v-if="testResult" class="text-xs" :class="testResult.includes('失败') || testResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ testResult }}</span>
       </div>
     </section>
+
+    <AdminNewsEditorial />
 
     <!-- 批量任务 -->
     <section class="panel p-5">

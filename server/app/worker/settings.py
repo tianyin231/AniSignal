@@ -97,6 +97,25 @@ async def review_pending_news(ctx) -> dict:
     return {"candidates": len(ids)}
 
 
+async def news_editorial_sweep(ctx) -> dict:
+    import secrets
+    from app.db import SessionLocal
+    from app.services.news_editorial import group_pending_news, score_pending_news
+    from app.services.news_publication import compose_news_edition
+
+    redis, key, token = ctx["redis"], "anisignal:news-editorial-lock", secrets.token_hex(16)
+    if not await redis.set(key, token, nx=True, ex=1900):
+        return {"status": "busy"}
+    try:
+        async with SessionLocal() as session:
+            grouped = await group_pending_news(session, limit=4)
+            scored = await score_pending_news(session, limit=4)
+            issue = await compose_news_edition(session)
+            return {"grouping": grouped, "scoring": scored, "edition": str(issue.day) if issue else None}
+    finally:
+        await redis.eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0", 1, key, token)
+
+
 async def review_pending_fulfillment(ctx) -> dict:
     """补偿旧版、漏审和失败的履约判断；完整结果不重复计费。"""
     from app.db import SessionLocal
@@ -207,6 +226,7 @@ class WorkerSettings:
         func(send_instant_notifications, keep_result=0),
         func(review_contents, keep_result=0, max_tries=3),
         review_pending_news,
+        func(news_editorial_sweep, keep_result=0),
         review_pending_fulfillment,
         send_user_notification,
         send_morning_notifications,

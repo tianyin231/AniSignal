@@ -21,6 +21,7 @@ _SHANGHAI = timezone(timedelta(hours=8))
 _local_morning_date = None
 _local_custom_sweep_at = None
 _local_fulfillment_sweep_at = None
+_local_editorial_sweep_at = None
 _CUSTOM_SWEEP_INTERVAL = timedelta(minutes=5)
 
 
@@ -58,6 +59,10 @@ async def local_loop(queue) -> None:
                     _local_morning_date = day
                     logger.info("local enqueued morning notifications for %s", day)
                 global _local_custom_sweep_at
+                global _local_editorial_sweep_at
+                if _local_editorial_sweep_at is None or now >= _local_editorial_sweep_at:
+                    await queue.enqueue_editorial()
+                    _local_editorial_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
                 if _local_custom_sweep_at is None or now >= _local_custom_sweep_at:
                     await queue.enqueue_custom_sweep()
                     _local_custom_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
@@ -152,6 +157,10 @@ async def main() -> None:
                     await redis.enqueue_job("send_instant_notifications", _job_id="instant-notifications")
                     # 定制监控轮询：5 分钟桶去重，worker 内部再按 next_run_at 限速
                     bucket = int(now.timestamp() // 300)
+                    if not await redis.get(f"anisignal:news-editorial-enqueued:{bucket}"):
+                        job = await redis.enqueue_job("news_editorial_sweep", _job_id="news-editorial")
+                        if job is not None:
+                            await redis.set(f"anisignal:news-editorial-enqueued:{bucket}", "1", nx=True, px=6 * 60 * 60 * 1000)
                     await redis.enqueue_job(
                         "review_pending_news", _job_id=f"review-pending-news:{bucket}")
                     await redis.enqueue_job(

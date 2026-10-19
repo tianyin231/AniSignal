@@ -514,7 +514,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
     event_row = await session.execute(
         select(EventModel, Evidence)
         .join(Evidence, Evidence.event_id == EventModel.id)
-        .where(Evidence.raw_content_id == content_id, EventModel.is_active.is_(True))
+        .where(Evidence.raw_content_id == content_id, EventModel.is_active.is_(True), EventModel.category != "ai_news")
         .limit(1)
     )
     event_pair = event_row.first()
@@ -580,7 +580,8 @@ async def list_events(
     from app.models import Product as ProductModel
     from app.services.views import events_to_out
 
-    conditions = [EventModel.is_active.is_(True)]
+    # 资讯事件由专用发布层重新核对审核版本与引用，避免游戏出口暴露旧摘要。
+    conditions = [EventModel.is_active.is_(True), EventModel.category != "ai_news"]
     if not is_all_community(community):
         conditions.append(EventModel.community == community)
     latest_evidence_sq = (
@@ -650,7 +651,7 @@ async def get_event(event_id: int, session: AsyncSession = Depends(get_session))
     from app.services.views import events_to_out
 
     event = await session.get(EventModel, event_id)
-    if event is None or not event.is_active:
+    if event is None or not event.is_active or event.category == "ai_news":
         from fastapi import HTTPException
 
         raise HTTPException(status_code=404, detail="event not found")

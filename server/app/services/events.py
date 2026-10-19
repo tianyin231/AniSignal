@@ -372,7 +372,8 @@ async def _aggregate_official(
     分区先行：鸣潮/碧蓝航线的官方内容分别聚类、分别对账各自分区的事件，
     跨分区的证据与 AI 匹配关系不会互相影响。
     """
-    official_all = [row for row in contents if row.identity == "official"]
+    from app.communities import get_community
+    official_all = [row for row in contents if row.identity == "official" and get_community(row.community).domain == "game"]
     official_ids = {row.raw_id for row in official_all}
     semantic_pairs: set[tuple[int, int]] = set()
     if official_ids:

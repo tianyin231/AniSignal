@@ -130,7 +130,7 @@ async def approved_news_query(session: AsyncSession):
     return query.where(RawContent.platform.notin_(hidden)) if hidden else query
 
 
-async def load_bot_news(session: AsyncSession, keywords, start_at, end_at, *, collected_after=None) -> list[dict]:
+async def load_bot_news(session: AsyncSession, keywords, start_at, end_at, *, collected_after=None, collapse=True) -> list[dict]:
     query = (await approved_news_query(session)).where(
         RawContent.published_at >= start_at, RawContent.published_at < end_at,
         ContentReview.updated_at < end_at,
@@ -155,7 +155,43 @@ async def load_bot_news(session: AsyncSession, keywords, start_at, end_at, *, co
             "collected_at": raw.collected_at, "keywords": keywords or [], "strength": "strong",
             "category": "ai_news", "event_id": None, "importance": False, "content_ids": [raw.id],
         })
-    return items
+    return await collapse_news_items(session, items) if collapse else items
+
+
+def news_review_identity(value: dict) -> dict:
+    """编辑分属于派生元数据，补评分不应使已排队的同一事实失效。"""
+    return {key: item for key, item in value.items() if key != "selection"}
+
+
+async def collapse_news_items(session, items: list[dict]) -> list[dict]:
+    from app.models import Event, Evidence, NewsGrouping
+    from app.services.editorial_calls import fingerprint
+    from app.services.news_editorial import GROUP_VERSION
+    if not items:
+        return []
+    ids = [item["id"] for item in items]
+    rows = (await session.execute(select(NewsGrouping, Event).outerjoin(Event, Event.id == NewsGrouping.event_id)
+        .where(NewsGrouping.raw_content_id.in_(ids)))).all()
+    groups = {group.raw_content_id: (group, event) for group, event in rows}
+    excluded = set(await session.scalars(select(Evidence.raw_content_id).where(
+        Evidence.raw_content_id.in_(ids), Evidence.role == "excluded")))
+    result = {}
+    for item in sorted(items, key=lambda item: (item.get("identity") != "official", item["id"])):
+        group, event = groups.get(item["id"], (None, None))
+        if item["id"] in excluded:
+            continue
+        valid = (group and group.content_hash == item["news"]["content_hash"]
+            and group.content_version == item["news"]["content_version"] and group.prompt_version == GROUP_VERSION
+            and group.review_key == fingerprint(news_review_identity(item["news"])))
+        if valid and (group.relation == "ROUNDUP" or (event and not event.is_active)):
+            continue
+        event_id = event.id if valid and event else None
+        key = ("event", event_id) if event_id else ("content", item["id"])
+        if key in result:
+            result[key]["content_ids"].extend(item["content_ids"])
+        else:
+            result[key] = {**item, "event_id": event_id}
+    return sorted(result.values(), key=lambda item: (item["published_at"], item["id"]), reverse=True)
 
 
 async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None = None) -> list[int]:

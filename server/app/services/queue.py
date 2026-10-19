@@ -49,6 +49,9 @@ class BaseQueue:
     async def enqueue_instant(self) -> str | None:
         raise NotImplementedError
 
+    async def enqueue_editorial(self) -> str | None:
+        raise NotImplementedError
+
     async def aclose(self) -> None:
         pass
 
@@ -88,6 +91,7 @@ class LocalQueue(BaseQueue):
         self._ai_jobs: set[tuple[str, int]] = set()
         self._ai_slots = asyncio.Semaphore(2)
         self._instant_task: asyncio.Task | None = None
+        self._editorial_task: asyncio.Task | None = None
 
     @property
     def redis(self) -> LocalRedis:
@@ -219,6 +223,28 @@ class LocalQueue(BaseQueue):
     async def pending_count(self) -> int | None:
         return len(self._tasks)
 
+    async def enqueue_editorial(self) -> str | None:
+        from app.db import SessionLocal
+        from app.services.news_editorial import group_pending_news, score_pending_news
+        from app.services.news_publication import compose_news_edition
+
+        if self._editorial_task and not self._editorial_task.done():
+            return None
+
+        async def run():
+            try:
+                async with SessionLocal() as session:
+                    await group_pending_news(session, limit=4)
+                    await score_pending_news(session, limit=4)
+                    await compose_news_edition(session)
+            except Exception:
+                logger.exception("local news editorial failed")
+
+        self._editorial_task = asyncio.create_task(run())
+        self._tasks.add(self._editorial_task)
+        self._editorial_task.add_done_callback(self._tasks.discard)
+        return f"local:editorial:{time.time():.0f}"
+
     async def aclose(self) -> None:
         for task in list(self._tasks):
             task.cancel()
@@ -250,6 +276,10 @@ class ArqQueue(BaseQueue):
 
     async def enqueue_instant(self) -> str | None:
         job = await self._pool.enqueue_job("send_instant_notifications", _job_id="instant-notifications")
+        return getattr(job, "job_id", None) if job is not None else None
+
+    async def enqueue_editorial(self) -> str | None:
+        job = await self._pool.enqueue_job("news_editorial_sweep", _job_id="news-editorial")
         return getattr(job, "job_id", None) if job is not None else None
 
     async def pending_count(self) -> int | None:

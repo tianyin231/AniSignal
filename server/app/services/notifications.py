@@ -674,6 +674,17 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
         session, None if delivery.kind == "morning" else keywords, start_at, end_at,
         preferences=user.feed_preferences,
     )
+    edition_news = []
+    preferences = user.feed_preferences or {}
+    candidates = [item for item in candidates if item.get("community") != "ai"]
+    if not preferences.get("communities") or "ai" in preferences["communities"]:
+        from app.services.ai_news import load_bot_news
+        from app.services.news_publication import edition_bot_items
+        edition = await edition_bot_items(session, now=end_at + timedelta(minutes=10)) if delivery.kind == "morning" else None
+        news = edition if edition is not None else await load_bot_news(
+            session, None if delivery.kind == "morning" else keywords, start_at, end_at)
+        excluded = [word.casefold() for word in preferences.get("exclude_keywords", [])]
+        edition_news = [item for item in news if not any(word in (item["title"] + " " + item["text"]).casefold() for word in excluded)]
 
     if delivery.kind == "ai":
         selected, ai_error = await ai_curate(session, user.id, keywords, candidates)
@@ -695,6 +706,8 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
             if reviewed:
                 trusted.extend(reviewed)
         items = await group_candidates(session, trusted)
+
+    items.extend(edition_news)
 
     items = items[:MAX_ITEMS]
     if not items and delivery.source == "schedule" and delivery.kind != "morning":

@@ -27,6 +27,7 @@ from app.models.enums import (
 )
 from app.models.custom_feed import CustomFeed, CustomFeedItem
 from app.models.event import Event, EventRevision, Evidence
+from app.models.editorial import EditorialReceipt, NewsGrouping, NewsEdition
 from app.models.fulfillment import ProductSignal, ProductSignalEvidence, ProductSignalRevision
 from app.models.fulfillment_revision import ProductFulfillmentRevision
 from app.models.product import FULFILLMENT_STAGES, Product
@@ -37,6 +38,9 @@ from app.models.statistics import CollectionDailyStat, ContentDailyStat
 from app.models.user import EmailCode, NotificationDelivery, User, UserKeyword, UserSession
 
 __all__ = [
+    "EditorialReceipt",
+    "NewsGrouping",
+    "NewsEdition",
     "BotTarget",
     "BotDelivery",
     "Base",

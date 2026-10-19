@@ -23,6 +23,9 @@ class Source(Base):
     official_title: Mapped[str | None] = mapped_column(String(255))
     follower_count: Mapped[int | None] = mapped_column(BigInteger)
     identity: Mapped[str] = mapped_column(String(16), default="unknown")
+    # 管理员确认的同一机构/运营主体；跨平台账号据此只计算一次热度。
+    owner_key: Mapped[str | None] = mapped_column(String(64))
+    editorial_tier: Mapped[str | None] = mapped_column(String(16))  # first_party / media
     raw_json: Mapped[dict | None] = mapped_column(JSON)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(
