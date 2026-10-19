@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """阶段 4：评测。查表类精确匹配 + 问答类检索命中。
 
-    ./kb/.venv/bin/python eval.py                 # 全量评测
+    ./kb/.venv/bin/python eval.py                 # 全量评测（混合检索+rerank）
     ./kb/.venv/bin/python eval.py --kind table    # 只评测查表类
+    ./kb/.venv/bin/python eval.py --kind qa --retrieval vector   # 退回 v1 纯向量口径
     ./kb/.venv/bin/python eval.py -v              # 打印每条明细
 
 题库在 eval/questions.jsonl（随代码提交）。每条：
@@ -13,7 +14,9 @@
 
 判分：
   * table —— 探针查 kb.db，和 expect 归一化后精确比对
-  * qa    —— 向量检索 top3，关键词全部命中才算过（考检索+切分，不考生成）
+  * qa    —— 检索 top_k，关键词全部命中才算过（考检索+切分，不考生成）。
+             v2 默认走"向量+BM25 RRF 融合初排 → cross-encoder rerank"，
+             --retrieval vector 可切回 v1 的纯向量口径做同题对比。
 """
 
 from __future__ import annotations
@@ -130,12 +133,16 @@ def run_table(cur, q: dict) -> tuple[bool, str]:
 
 def run_qa(store, q: dict, top_k: int = 3) -> tuple[bool, str, list[retriever.Hit]]:
     vec = store_encoder.encode_queries([q["q"]])[0]
-    hits = store.search(vec, top_k=top_k)
+    # 混合检索要问题原文（BM25 分词 + rerank 都要）；纯向量库不需要
+    kw = {"query": q["q"]} if isinstance(store, retriever.HybridStore) else {}
+    hits = store.search(vec, top_k=top_k, **kw)
     ctx = "\n".join(h.text for h in hits)
     kws = q["expect_keywords"]
     missing = [k for k in kws if norm(k) not in norm(ctx)]
     ok = not missing and bool(hits)
-    detail = f"top{len(hits)} 命中，缺关键词 {missing}" if missing else f"top{len(hits)} 全命中"
+    route = "混合+rerank" if isinstance(store, retriever.HybridStore) else "纯向量"
+    detail = (f"top{len(hits)} 全命中（{route}）" if not missing
+              else f"top{len(hits)} 命中，缺关键词 {missing}（{route}）")
     return ok, detail, hits
 
 
@@ -153,6 +160,9 @@ def main() -> int:
     ap.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
     ap.add_argument("--kind", choices=["table", "qa"], default=None)
     ap.add_argument("--top-k", type=int, default=3)
+    ap.add_argument("--retrieval", default="hybrid", choices=["hybrid", "vector"],
+                    help="qa 用哪条检索链路；vector 是 v1 纯向量口径，留着做同题对比")
+    ap.add_argument("--recall-k", type=int, default=20, help="混合检索每路召回条数 / 精排候选数")
     ap.add_argument("--backend", default="auto", choices=["auto", "torch", "onnx"])
     ap.add_argument("--store", default="qdrant", choices=["qdrant", "numpy"])
     ap.add_argument("--out", type=Path, default=None, help="明细 JSON 输出路径")
@@ -175,7 +185,11 @@ def main() -> int:
         from kblib import embedder as emb
 
         store_encoder = emb.get_encoder(args.backend)
-        store = retriever.get_store(args.store, dim=store_encoder.dim)
+        if args.retrieval == "hybrid":
+            store = retriever.get_hybrid_store(
+                args.store, dim=store_encoder.dim, recall_k=args.recall_k)
+        else:
+            store = retriever.get_store(args.store, dim=store_encoder.dim)
         if store.count() == 0:
             print("向量库是空的，先跑 embed_index.py", file=sys.stderr)
             return 1

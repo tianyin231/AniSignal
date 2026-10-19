@@ -62,13 +62,12 @@ def _curl_download(url: str, dest: Path, timeout: int = 300) -> None:
     tmp.replace(dest)
 
 
-def download_model(repo: str, extra: list[str] | None = None) -> Path:
-    """把 HF 仓库拉到 data/models/<repo 名>/，返回本地目录。"""
+def download_files(repo: str, files: list[str], marker: str = ".complete") -> Path:
+    """把 HF 仓库里指定文件拉到 data/models/<repo 名>/，返回本地目录。"""
     local = MODEL_DIR / repo.replace("/", "__")
-    if (local / ".complete").exists():
+    if (local / marker).exists():
         return local
     local.mkdir(parents=True, exist_ok=True)
-    files = list(NEEDED_FILES) + list(extra or [])
     for rel in files:
         dest = local / rel
         if dest.exists() and dest.stat().st_size > 0:
@@ -87,8 +86,13 @@ def download_model(repo: str, extra: list[str] | None = None) -> Path:
                     dest.unlink()
         if last_err is not None:
             raise RuntimeError(f"下载失败 {rel}: {last_err}")
-    (local / ".complete").touch()
+    (local / marker).touch()
     return local
+
+
+def download_model(repo: str, extra: list[str] | None = None) -> Path:
+    """编码器权重：NEEDED_FILES + extra（ONNX 权重等）。"""
+    return download_files(repo, list(NEEDED_FILES) + list(extra or []))
 
 
 class BaseEncoder:

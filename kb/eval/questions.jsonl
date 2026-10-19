@@ -48,3 +48,4 @@
 {"id":"q18","kind":"qa","q":"100mm连装高炮的射速是多少","expect_keywords":["15-21发每分"],"source_title":"100mm连装高炮"}
 {"id":"q19","kind":"qa","q":"汽油里添加四乙基铅的作用是什么","expect_keywords":["辛烷值"],"source_title":"100/150号航空燃油"}
 {"id":"q20","kind":"qa","q":"独角兽的治疗机制是怎样的","expect_keywords":["治疗机制"],"source_title":"独角兽"}
+{"id":"q21","kind":"qa","q":"举高高是谁","expect_keywords":["埃尔德里奇"],"source_title":"举高高想要举高高"}
