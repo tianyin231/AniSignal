@@ -2,7 +2,12 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 写在公开仓库里的默认令牌：见 SEC-001。留着它只是为了本地开发的开箱即用，
+# 任何非 local_mode 的启动都不允许带着它跑起来。
+_DEFAULT_ADMIN_TOKENS = frozenset({"", "change-me"})
 
 
 class Settings(BaseSettings):
@@ -31,6 +36,25 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @model_validator(mode="after")
+    def _reject_default_admin_token(self) -> "Settings":
+        """SEC-001：非 local_mode 不允许带着默认管理员令牌启动。
+
+        原先 `admin_token` 默认 `change-me`，compose 再用 `${VAR:-change-me}` 兜一次底，
+        `.env.example` 甚至直接把它当建议值——运维一旦漏配环境变量，`/admin/*` 全部接口
+        （用户管理、规则引擎、AI 密钥、bot 通道）就对一个写在公开仓库里的字符串开放，
+        且没有任何启动期提示。这里 fail-fast：让进程起不来，而不是静默地裸奔。
+        `local_mode`（`python -m app.local`）保持开箱即用，不受此限。
+        """
+        if not self.local_mode and self.admin_token.strip() in _DEFAULT_ADMIN_TOKENS:
+            raise ValueError(
+                "ANISIGNAL_ADMIN_TOKEN 仍是默认值，拒绝启动。"
+                "请在环境变量或 .env 里设置一个足够长的随机令牌"
+                "（如 python -c \"import secrets; print(secrets.token_urlsafe(32))\"）；"
+                "本地开发可用 ANISIGNAL_LOCAL_MODE=true 跳过本检查。"
+            )
+        return self
 
     # 本地测试模式（python -m app.local 自动开启）：
     # SQLite + 进程内任务执行，不需要 MySQL / Redis / Docker
