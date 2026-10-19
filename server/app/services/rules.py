@@ -50,6 +50,10 @@ logger = logging.getLogger(__name__)
 MAX_TAGS = 8
 # 通知正文截断
 NOTICE_LIMIT = 400
+# 单条规则命中一次最多发多少封邮件。站内用户量不可控，而发信是同步 SMTP（每次
+# 新建连接），全站逐封发会把采集进程连同一个 platform_slot 一起堵死（PERF-012）。
+# 超出部分本轮跳过并记 warning：这是止血，彻底解法是把投递挪进异步队列。
+MAX_EMAIL_RECIPIENTS = 50
 
 
 @dataclass
@@ -483,8 +487,14 @@ async def _push_webhooks(session: AsyncSession, rule: Rule, ctx: _Context) -> in
 
 
 async def _push_emails(session: AsyncSession, rule: Rule, ctx: _Context) -> int:
-    """给开启了邮件通知的已验证活跃用户各发一封（按规则+内容+用户去重）。"""
-    from app.services.notifications import create_delivery, send_admin_email
+    """给开启了邮件通知的已验证活跃用户各发一封（按规则+内容+用户去重）。
+
+    性能边界（PERF-012）：原来是「每用户 1 次去重查询 + 1 次 INSERT/COMMIT/REFRESH +
+    1 次 SMTP」，500 用户 × 10 内容就是 3 万次查询和 5 千次 SMTP 握手，全同步堵在采集
+    任务里。现在收件人截断到 MAX_EMAIL_RECIPIENTS，去重键一次性批量查，投递行批量
+    flush 后统一发信——查询次数从 O(用户数) 降到常数。
+    """
+    from app.services.notifications import beijing_today, send_admin_email
 
     users = list(
         (
@@ -496,6 +506,7 @@ async def _push_emails(session: AsyncSession, rule: Rule, ctx: _Context) -> int:
                     User.status == "active",
                 )
                 .order_by(User.id)
+                .limit(MAX_EMAIL_RECIPIENTS)
             )
         ).scalars()
     )
@@ -503,23 +514,48 @@ async def _push_emails(session: AsyncSession, rule: Rule, ctx: _Context) -> int:
         return 0
     subject = f"[AniSignal 规则] {rule.name}"[:255]
     body = _render_notice(rule, ctx)
-    sent = 0
-    for user in users:
-        dedupe_key = f"rule:{rule.id}:content:{ctx.content.id}:email:{user.id}"
-        existing = await session.scalar(
-            select(NotificationDelivery).where(
-                NotificationDelivery.dedupe_key == dedupe_key
+    keys = {
+        user.id: f"rule:{rule.id}:content:{ctx.content.id}:email:{user.id}" for user in users
+    }
+    # 一次把已有的去重键全捞回来，避免每个用户一次查询
+    existing = set(
+        (
+            await session.execute(
+                select(NotificationDelivery.dedupe_key).where(
+                    NotificationDelivery.dedupe_key.in_(list(keys.values()))
+                )
             )
+        ).scalars()
+    )
+    fresh = [user for user in users if keys[user.id] not in existing]
+    if not fresh:
+        return 0
+    if len(fresh) == MAX_EMAIL_RECIPIENTS:
+        logger.warning(
+            "rule %s email recipients truncated at %s for content %s",
+            rule.id, MAX_EMAIL_RECIPIENTS, ctx.content.id,
         )
-        if existing is not None:
-            continue
-        delivery = await create_delivery(
-            session, user.id, "broadcast", "rules", dedupe_key=dedupe_key
+    # 批量建行：flush 拿 id 但不逐个 commit（send_admin_email 内部会各自提交）
+    rows = [
+        NotificationDelivery(
+            user_id=user.id,
+            kind="broadcast",
+            source="rules",
+            period_date=beijing_today(),
+            dedupe_key=keys[user.id],
+            status="pending",
+            subject=subject,
+            body=body,
+            matched_keywords=[],
+            content_ids=[],
         )
-        delivery.subject = subject
-        delivery.body = body
-        await session.commit()
-        result = await send_admin_email(session, delivery.id)
+        for user in fresh
+    ]
+    session.add_all(rows)
+    await session.flush()
+    sent = 0
+    for row in rows:
+        result = await send_admin_email(session, row.id)
         sent += int(result.get("status") == "sent")
     return sent
 
