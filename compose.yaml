@@ -38,7 +38,9 @@ services:
     environment: &app_env
       ANISIGNAL_DATABASE_URL: mysql+asyncmy://root:${MYSQL_ROOT_PASSWORD:-anisignal}@mysql:3306/anisignal
       ANISIGNAL_REDIS_URL: redis://redis:6379/0
-      ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:-change-me}
+      # SEC-001：缺变量即拒绝启动（`:?` 而不是 `:-change-me`）。
+      # 生成：python -c "import secrets; print(secrets.token_urlsafe(32))"
+      ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:?必须在 .env 设置 ANISIGNAL_ADMIN_TOKEN}
       ANISIGNAL_PUBLIC_BASE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
       ANISIGNAL_YOUTUBE_API_KEY: ${ANISIGNAL_YOUTUBE_API_KEY:-}
       TZ: Asia/Shanghai
