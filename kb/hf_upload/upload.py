@@ -52,9 +52,12 @@ def main() -> int:
                 token=TOKEN)
     print("仓库就绪：", REPO)
 
-    # dataset 卡 + LFS 配置先推
+    # dataset 卡：按游戏选（arknights 有自己的卡）
+    card = KB_DIR / "hf_upload" / (f"README.dataset.{GAME}.md"
+                                   if (KB_DIR / "hf_upload" / f"README.dataset.{GAME}.md").exists()
+                                   else "README.dataset.md")
     api.upload_file(
-        path_or_fileobj=str(KB_DIR / "hf_upload" / "README.dataset.md"),
+        path_or_fileobj=str(card),
         path_in_repo=f"{GAME}/README.md",
         repo_id=REPO, repo_type="dataset", token=TOKEN,
     )
@@ -65,16 +68,26 @@ def main() -> int:
     )
 
     for name in INCLUDE:
-        src = DATA_DIR / name
+        # 先按 data/<game>/<name> 找（arknights 布局），再退回 data/<name>（azurlane 布局）
+        src = DATA_DIR / GAME / name
+        if not src.exists():
+            src = DATA_DIR / name
         if not src.exists():
             print("跳过（不存在）：", name)
             continue
         print("上传：", name)
-        api.upload_folder(
-            folder_path=str(src),
-            path_in_repo=f"{GAME}/{name}",
-            repo_id=REPO, repo_type="dataset", token=TOKEN,
-        )
+        if src.is_dir():
+            api.upload_folder(
+                folder_path=str(src),
+                path_in_repo=f"{GAME}/{name}",
+                repo_id=REPO, repo_type="dataset", token=TOKEN,
+            )
+        else:
+            api.upload_file(
+                path_or_fileobj=str(src),
+                path_in_repo=f"{GAME}/{name}",
+                repo_id=REPO, repo_type="dataset", token=TOKEN,
+            )
     print("完成。拉取：huggingface_hub.snapshot_download(%r, repo_type='dataset')" % REPO)
     return 0
 
