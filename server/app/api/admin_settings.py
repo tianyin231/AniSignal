@@ -10,6 +10,7 @@ from app.db import get_session
 from app.services import settings as settings_service
 from app.services.email_templates import notice_email
 from app.services.mailer import send_email
+from app.services.urls import safe_endpoint, safe_link
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +48,13 @@ async def put_ai(body: dict, session: AsyncSession = Depends(get_session)):
         if isinstance(raw_keys, str):
             raw_keys = raw_keys.replace("，", ",").replace(",", "\n").split("\n")
         api_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+    # base_url 是服务端出站目标，只卡 scheme；内网主机是自托管 LLM 的正当形态
+    # （见 app/services/urls.py 与 SEC-014），不能按公网链接的标准拒。
+    base_url = safe_endpoint(body.get("base_url"))
+    if body.get("base_url") and not base_url:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "base_url 只支持 http / https")
     value = {
-        "base_url": str(body.get("base_url") or "").strip().rstrip("/"),
+        "base_url": (base_url or "").rstrip("/"),
         "api_key": api_key,
         "api_keys": api_keys,
         "model": str(body.get("model") or "").strip(),
@@ -200,11 +206,22 @@ async def put_announcement(body: dict, session: AsyncSession = Depends(get_sessi
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "level 只支持 info / warning")
     if len(text) > 500:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "公告内容不超过 500 字")
+    # SEC-045 / SEC-015：link 原先一个字符都没校验，`javascript:` / `data:` / `file:`
+    # 原样进 site_settings 并由公开端点无鉴权下发。拦住它们的目前只有 NuxtLink 内部的
+    # sanitizeExternalHref——一层仓库之外的 denylist（且不覆盖 `file:`/`about:`），
+    # 换成 `<a :href>` 或框架升级即静默复活。这里在服务端收口，与 SEC-040 同一套判据。
+    raw_link = str(body.get("link") or "").strip()
+    link = safe_link(raw_link)
+    if raw_link and link is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "公告链接只支持站内路径（以 / 开头）或 http(s) 外链",
+        )
     value = {
         "enabled": bool(body.get("enabled")) and bool(text),
         "level": level,
         "text": text,
-        "link": str(body.get("link") or "").strip(),
+        "link": link or "",
     }
     await settings_service.set_setting(session, "announcement", value)
     return value

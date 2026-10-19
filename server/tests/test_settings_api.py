@@ -336,3 +336,77 @@ async def test_media_visibility_roundtrip_and_platform_exclusion(client, admin_h
         json={"default": {"image": "show", "video": "show"}, "platforms": {}},
         headers=admin_headers,
     )
+
+
+async def test_announcement_link_rejects_non_http_schemes(client, admin_headers):
+    """SEC-045 / SEC-015：公告 link 必须在服务端收口，不能只靠 NuxtLink 隐形消毒。
+
+    原先 `link` 一个字符都没校验，`javascript:` / `data:` / `file:` 原样进 site_settings
+    并由公开端点无鉴权下发；挡住它们的只有 NuxtLink 内部的一份 denylist（还不含
+    `file:`/`about:`），换成 `<a :href>` 或框架升级即静默复活。
+    """
+    for bad in [
+        "javascript:alert(document.cookie)",
+        "data:text/html,<script>alert(1)</script>",
+        "vbscript:msgbox(1)",
+        "file:///etc/passwd",
+        "about:blank",
+        "//evil.com",
+        "/\\evil.com",
+        "/\\/evil.com",
+        "https://evil.com\\@good.com",
+        "http://127.0.0.1:8080/admin",
+        "http://169.254.169.254/latest/meta-data",
+        "http://localhost:9000/",
+        "http://internal.nip.io/",
+        "not a url at all",
+    ]:
+        resp = await client.put(
+            "/api/admin/settings/announcement",
+            json={"enabled": True, "text": "公告", "link": bad},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, f"{bad!r} 应被拒（got {resp.status_code}）"
+
+    # 公开端点也不能读到被拒的值
+    resp = await client.get("/api/site-config")
+    assert "javascript:" not in str(resp.json())
+
+
+async def test_announcement_link_accepts_internal_path_and_public_http(client, admin_headers):
+    """同一判据的正面：站内路径与公网 http(s) 必须照旧能存（别把正常配置挡在门外）。"""
+    for good in ["/about", "/account?tab=feed#top", "https://example.com/news", "http://example.com/x"]:
+        resp = await client.put(
+            "/api/admin/settings/announcement",
+            json={"enabled": True, "text": "公告", "link": good},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, f"{good!r} 应放行（got {resp.status_code}）"
+        assert resp.json()["link"] == good
+
+    # 空链接照旧是「没有链接」，不算非法
+    resp = await client.put(
+        "/api/admin/settings/announcement",
+        json={"enabled": True, "text": "公告", "link": ""},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200 and resp.json()["link"] == ""
+
+
+async def test_ai_base_url_rejects_non_http_scheme(client, admin_headers):
+    """AI base_url 是服务端出站目标：只卡 scheme，内网主机（自托管 LLM）必须放行。"""
+    resp = await client.put(
+        "/api/admin/settings/ai",
+        json={"base_url": "file:///etc/passwd", "model": "gpt-4o-mini"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 400
+
+    # docker 内网自托管 LLM：正当部署形态，不能按公网链接标准拒（SEC-014 的教训）
+    resp = await client.put(
+        "/api/admin/settings/ai",
+        json={"base_url": "http://vllm:8000/v1", "model": "gpt-4o-mini"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["base_url"] == "http://vllm:8000/v1"
