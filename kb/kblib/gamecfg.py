@@ -120,7 +120,8 @@ class GameConfig:
     strip_template_name_comments: bool
     # 专用抽取器模块（kblib.extractors.<x>）；不配 = 全走通用实体路
     extractor_module: str | None
-    # 通用实体路：kind → {card_fields, attr_fields, child_templates}
+    # 通用实体路：kind → {name_fields, card_fields, attr_fields, attr_templates,
+    #                     child_templates}
     kinds: dict[str, dict]
     # 整份 YAML 原样透传：pipeline 之外的旋钮（如 audit_pages 的标题分类规则）
     # 走这里，不必为每个开发小工具在 GameConfig 上加字段
