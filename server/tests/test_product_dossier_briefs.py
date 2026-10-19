@@ -224,6 +224,32 @@ async def test_heat_score_counts_daily_hits(session):
     assert await product_dossier.heat_score(session, product, today) == round(3 + 2 / 6, 2)
 
 
+async def test_heat_score_buckets_a_full_week(session):
+    """热度分按 UTC 天分桶：一次分组查询要覆盖 7 天，桶不能错位（PERF-015）。"""
+    product = await _product(session)
+    now = utcnow()
+    plan = {0: 1, 1: 2, 2: 3, 3: 3, 4: 3, 5: 3, 6: 3}
+    for offset, count in plan.items():
+        for index in range(count):
+            await _content(
+                session,
+                external_id=f"week-{offset}-{index}",
+                title="鸣潮 手办 开订",
+                keywords=["鸣潮 手办"],
+                collected_at=now - timedelta(days=offset),
+            )
+    # 当日 1 + 其余 6 天日均 (2+3×5)/6
+    assert await product_dossier.heat_score(session, product, now) == round(1 + 17 / 6, 2)
+    # daily_hits 仍按单天取数
+    assert await product_dossier.daily_hits(session, product, now.date()) == 1
+    assert await product_dossier.daily_hits(session, product, (now - timedelta(days=2)).date()) == 3
+    # 没有监控词的商品：零成本返回
+    other = await _product(session, slug="wuwa-plush", name="玩偶")
+    other.watch_terms = []
+    await session.commit()
+    assert await product_dossier.heat_score(session, other, now) == 0.0
+
+
 async def test_heat_score_ignores_hidden_and_other_community(session):
     product = await _product(session)
     await _content(
