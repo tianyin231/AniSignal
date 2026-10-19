@@ -34,3 +34,360 @@ chunk:
                             # 所以这个后缀实际不命中——台词走 ark_voice_lines 表
   fields_chunk_min: 60
   max_images_per_page: 16
+
+parse:
+  min_infobox_fields: 3    # 敌人/道具的 infobox 普遍 5~10 个字段，语音表只有 3 个
+
+  # PRTS 把模板写成了 `{{CharinfoV2\n<!--下方为自动更新部分-->|职业=…}}`，注释整个
+  # 落在模板名里。不剥的话干员页一个都匹配不上白名单（首轮全量 parse 只认出 1 个
+  # 干员，就是这个原因）。碧蓝航线不开——它那边唯一的样例是模板定义页。
+  strip_template_name_comments: true
+
+  # 展示型模板：PRTS 的模板参数顺序是给机器用的，通用兜底只会取出机器值。
+  #   {{color|#0098DC|+30}}      色值在 1，给人看的 "+30" 在 2
+  #   {{术语|ba.stun|晕眩}}      词条 key 在 1
+  #   {{+|70|+70}} {{*|3%|+3%}}  新值在 1，带符号增量在 2
+  #   {{mdi|alpha-x-box-outline}} 图标名，一个字符都不该出现在正文里
+  # 值 = 按顺序渲染哪几个参数（位置参数写 "1"/"2"…，命名参数写名字）；
+  # 空列表 = 渲染成空。1500 页样本里这些模板出现 ~1.2 万次。
+  display_templates:
+    color: ["2"]
+    术语: ["2"]
+    "+": ["2"]
+    "*": ["2"]
+    VoiceData/word: ["2"]      # {{VoiceData/word|中文|台词}} → 只留中文台词
+    材料消耗: ["1", "2"]        # {{材料消耗|家具零件|5}}
+    数量: ["num"]
+    关卡报酬: ["1", "2"]
+    家具: ["1"]
+    异常效果: ["1"]
+    攻击范围: ["1"]
+    道具图标: ["1"]
+    变动数值lite: ["2", "3"]
+    编队单位: ["1"]
+    popup: ["内容"]
+    Cbox2: ["title", "text"]
+    情报凭证转换表/家具: ["名称", "价格", "数量"]
+    关卡链接: ["1"]
+    剧情跳转/关卡: ["1", "2"]
+    特殊机制: ["1"]
+    装置出场活动标签: ["页面", "后缀"]
+    活动里程碑2: ["exp", "2", "3", "4"]
+    PassageSwitch: ["content"]
+    exlink: ["2"]
+    Exlink: ["2"]
+    复刻转换: ["1"]
+    mdi: []                    # 图标名，噪音
+    收藏品/角标: []
+    模板:收藏品/角标: []
+    DrName: []
+
+  # infobox 白名单：模板名 → (kind, category)。命名空间 10 下的模板名（不带"模板:"）。
+  # 同页多个时取页面上最先出现的那个（关卡页 普通关卡信息 在 突袭关卡信息 前面）。
+  infobox_templates:
+    CharinfoV2: {kind: operator, category: operator}
+    敌人信息/common2: {kind: enemy, category: enemy}
+    敌人信息/common: {kind: enemy, category: enemy}
+    道具信息: {kind: item, category: item}
+    普通关卡信息: {kind: stage, category: stage}
+    突袭关卡信息: {kind: stage, category: stage_raid}
+    剿灭关卡信息: {kind: stage, category: stage_annihilation}
+    家具信息: {kind: furniture, category: furniture}
+    装置信息: {kind: device, category: device}
+    收藏品/common: {kind: collectible, category: collectible}
+    VoiceTable: {kind: voice, category: voice}
+
+  infobox_template_prefixes: {}
+
+  legacy_infobox_template_names: []
+
+  # 标题长得像关卡号的页，即使没有 infobox 也算 stage（PRTS 关卡页都带 infobox，
+  # 这条只是兜底）
+  title_patterns:
+    - {regex: '^[A-Z]{1,4}-\d+', kind: stage}
+
+  new_kinds: [operator, enemy, item, stage, furniture, device, collectible, voice]
+
+  card_field_keys: {}      # 通用实体路的 card 由 card_fields 显式渲染，不需要跳过清单
+
+  # PRTS 的导航/样板模板（切 chunk 时整段丢弃）。按前缀收，子页名（…/卫戍协议、
+  # …/store、…/导航图标框）自动归队
+  nav_template_prefixes:
+    - Navigator
+    - 导航
+    - pathnav
+    - 剧情导航
+    - 敌人导航
+    - 道具导航
+    - 关卡导航
+    - 干员导航
+    - 衍生作品导航
+    - 面包屑
+    - 筛选
+    - 轮播
+    - 折叠
+    - 展开
+    - 选项卡
+    - 切换标签
+    - CSS
+    - JS
+    - ResourceLoader
+    - 排版
+    - 颜色
+    - 字体
+    - Font
+    - 术语
+    - 修正
+    - 变动数值
+    - 道具图标
+    - 价格
+    - 锚点
+    - 参阅
+    - 微博
+    - 提示
+    - 注意
+    - 备注
+    - 消歧义
+    - Math
+
+  # 切 chunk 时整段丢弃的 section 标题（精确/包含匹配）
+  noise_section_keywords:
+    - 导航
+    - 分类
+    - 参见
+    - 外部链接
+    - 参考文献
+    - 注释
+    - 更新历史
+    - 更新日志
+    - 公告
+    - 统计信息
+    - 模型
+    - 相关页面
+
+  # ---------------- 通用实体路：8 族的 kind spec ----------------
+  # name_fields  卡片标题用哪个字段当实体名（都不命中就用页标题）
+  # card_fields  渲染卡片摘要 chunk 的 [标签, 字段名]（标签可以 == 字段名）
+  # attr_fields  额外落 entity_attrs 的字段（查表探针直接按 attr 查）
+  # child_templates 页内子模板 → 行。columns 是"列名: 字段名"映射，
+  #               rows_from 用正则把编号字段（天赋N/技能N描述/敌人N）拆成多行，
+  #               {0} 是正则捕获组，@key 是"值就是这个字段本身"
+  kinds:
+    operator:
+      name_fields: [干员名]
+      card_fields:
+        - [职业, 职业]
+        - [分支, 分支]
+        - [稀有度, 稀有度]
+        - [特性, 特性]
+        - [情报编号, 情报编号]
+        - [所属, 所属国家]
+        - [位置, 位置]
+        - [标签, 标签]
+        - [画师, 画师]
+      attr_fields: [干员名, 干员外文名, 干员序号, 职业, 分支, 稀有度, 特性, 情报编号,
+                    所属国家, 所属组织, 所属团队, 位置, 标签, 画师,
+                    中文配音, 日文配音, 韩文配音, 英文配音]
+      child_templates:
+        - template: 属性
+          table: ark_operator_basic
+          columns: {再部署: 再部署, 部署费用: 部署费用, 阻挡数: 阻挡数,
+                    攻击速度: 攻击速度, 所属势力: 所属势力, 初始模组名: 初始模组名}
+          rows_from:
+            - pattern: '^精英(\d)_(1级|满级)_(.+)$'
+              table: ark_operator_stats
+              columns: {stage: '{0}', level: '{1}', stat: '{2}', value: '@key'}
+            - pattern: '^信赖加成_(.+)$'
+              table: ark_operator_trust
+              columns: {stat: '{0}', value: '@key'}
+        - template: 天赋列表3
+          occurrence: true      # 干员有两块：第一天赋一块、潜能增强一块，都要
+          table: ark_operator_talents
+          columns: {group: 天赋}
+          rows_from:
+            - pattern: '^天赋(\d+)$'
+              columns: {index: '{0}', name: '@key', condition: '天赋{0}条件',
+                        effect: '天赋{0}效果', potential: ''}
+            - pattern: '^潜能增强_天赋(\d+)$'
+              columns: {index: '{0}', name: '@key',
+                        condition: '潜能增强_天赋{0}条件',
+                        effect: '潜能增强_天赋{0}效果', potential: '1'}
+        # 技能2 是新版、技能 是老版，参数一模一样，混在不同干员页上
+        - template: [技能2, 技能]
+          occurrence: true
+          table: ark_operator_skills
+          columns: {name: 技能名, name_jp: 技能名jp, name_en: 技能名en,
+                    type1: 技能类型1, type2: 技能类型2}
+          rows_from:
+            - pattern: '^技能(\d+)描述$'
+              table: ark_operator_skill_levels
+              columns: {level: '{0}', description: '@key', initial: '技能{0}初始',
+                        cost: '技能{0}消耗', duration: '技能{0}持续'}
+        - template: 潜能提升
+          table: ark_operator_potential
+          rows_from:
+            - pattern: '^潜能(\d)$'
+              columns: {index: '{0}', effect: '@key'}
+        - template: 干员攻击范围
+          table: ark_operator_range
+          rows_from:
+            - pattern: '^精英(\d)范围$'
+              columns: {stage: '{0}', range: '@key'}
+        - template: 干员获得方式
+          table: ark_operator_acquisition
+          columns: {source: 获得方式, online_at: 上线时间, override: 覆盖, prefix: 前缀}
+        - template: 后勤技能
+          table: ark_operator_ri_skill
+          rows_from:
+            - pattern: '^后勤技能([\d\-]+)$'
+              columns: {slot: '{0}', name: '@key'}
+        - template: 人员档案set
+          table: ark_operator_profile
+          columns: {gender: 性别, combat_exp: 战斗经验, birthplace: 出身地,
+                    birthday: 生日, race: 种族, height: 身高,
+                    infection: 矿石病感染情况, infected: 是否感染者,
+                    physical: 物理强度, mobility: 战场机动, endurance: 生理耐受,
+                    tactics: 战术规划, combat_skill: 战斗技巧,
+                    arts_adapt: 源石技艺适应性}
+
+    enemy:
+      name_fields: [名称]
+      card_fields:
+        - [地位级别, 地位级别]
+        - [伤害类型, 伤害类型]
+        - [攻击方式, 攻击方式]
+        - [行动方式, 行动方式]
+        - [描述, 描述]
+      attr_fields: [名称, index, 地位级别, 伤害类型, 攻击方式, 行动方式, 种类,
+                    登场活动, 描述]
+      child_templates:
+        - template: 敌人信息/levelcontent
+          occurrence: true
+          table: ark_enemy_levels
+          columns: {index: index, name: 名称, rank: 地位, attack_type: 攻击方式,
+                    move_type: 行动方式, count: 数量, hp: 最大生命值, atk: 攻击力,
+                    def: 防御力, res: 法术抗性, move_speed: 移动速度,
+                    aspd: 攻击速度, interval: 攻击间隔, radius: 攻击范围半径,
+                    weight: 重量等级, damage_resist: 损伤抵抗,
+                    element_resist: 元素抗性, taunt: 基础嘲讽等级,
+                    stun_resist: 眩晕抗性, silence_resist: 沉默抗性,
+                    sleep_resist: 沉睡抗性, freeze_resist: 冻结抗性,
+                    levitate_resist: 浮空抗性, tremble_resist: 战栗抗性,
+                    fear_resist: 恐惧抗性, paralysis_resist: 麻痹抗性,
+                    inspire_resist: 诱导抗性, teleport_resist: 传送抗性,
+                    anchor_resist: 缚地抗性, talent: 天赋}
+          rows_from:
+            - pattern: '^技能(\d+)$'
+              table: ark_enemy_skills
+              columns: {index: '{0}', name: '@key', effect: '技能{0}效果',
+                        initial: '技能{0}初始', cost: '技能{0}消耗'}
+
+    item:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [分类, 分类]
+        - [用途, 用途]
+        - [获得方式, 获得方式]
+        - [描述, 描述]
+      attr_fields: [名称, 稀有度, 分类, 用途, 获得方式, itemId, id, 描述]
+      child_templates:
+        - template: 道具价格
+          table: ark_item_price
+          columns: {currency: 采购道具, currency_count: 采购道具数量,
+                    price: 采购道具价格, model_count: 参数模型数量,
+                    model_price: 参数模型价格}
+        - template: 道具配方/加工站
+          table: ark_item_recipe_workshop
+          columns: {product: 产物, product_count: 产物数量, lmd_cost: 龙门币消耗,
+                    mood_cost: 心情消耗, workshop_level: 加工站等级需求}
+          rows_from:
+            - pattern: '^原料(\d+)$'
+              table: ark_item_ingredients
+              columns: {index: '{0}', name: '@key', count: '原料{0}数量'}
+
+    stage:
+      name_fields: [关卡名]
+      card_fields:
+        - [关卡代号, 关卡代号]
+        - [关卡类型, 关卡类型]
+        - [难度, 关卡难度]
+        - [推荐等级, 推荐等级]
+        - [所属区域, 所属区域]
+        - [描述, 关卡描述]
+      attr_fields: [关卡代号, 关卡名, 关卡类型, 关卡难度, 推荐等级, 所属区域,
+                    解锁条件, 部署上限, 初始COST, COST上限, 敌人数量, 地图大小,
+                    作战消耗, 演习消耗, 关卡描述]
+      child_templates:
+        - template: 敌方情报
+          table: ark_stage_enemies
+          rows_from:
+            - pattern: '^敌人(\d+)$'
+              columns: {index: '{0}', name: '@key', count: '敌人{0}数量',
+                        level: '敌人{0}级别', hp: '敌人{0}生命值',
+                        atk: '敌人{0}攻击力', defense: '敌人{0}防御力'}
+
+    furniture:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [稀有度, 稀有度]
+        - [氛围, 氛围]
+        - [所属套装, 所属套装]
+        - [描述, 描述]
+      attr_fields: [名称, 类型, 稀有度, 氛围, 大小, 分解获得, 用途, 获得方式,
+                    所属套装, 所属组件]
+
+    device:
+      name_fields: [名称]
+      card_fields:
+        - [英文名, 英文名]
+        - [攻击范围, 攻击范围]
+        - [部署费用, 部署费用]
+        - [阻挡数, 阻挡数]
+        - [再部署时间, 再部署时间]
+      attr_fields: [名称, 英文名, 攻击范围, 部署费用, 阻挡数, 攻击间隔, 再部署时间,
+                    技力恢复速度, 嘲讽等级, 阵营, 实体类型, 部署条件, 撤回策略]
+      child_templates:
+        - template: 装置技能
+          occurrence: true
+          table: ark_device_skills
+          columns: {name: 技能名, type1: 技能类型1, type2: 技能类型2,
+                    range: 技能范围, note: 备注}
+          rows_from:
+            - pattern: '^技能(\d+)描述$'
+              table: ark_device_skill_levels
+              columns: {level: '{0}', description: '@key', initial: '技能{0}初始',
+                        cost: '技能{0}消耗'}
+
+    collectible:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [描述, 描述]
+      attr_fields: [名称, 稀有度, iconId]
+      child_templates:
+        - template: 收藏品/common
+          table: ark_collectible_themes
+          rows_from:
+            - pattern: '^主题(\d+)$'
+              columns: {index: '{0}', theme: '@key', price: '售价{0}',
+                        effect: '效果{0}', badge: '角标{0}',
+                        obtain: '获取条件{0}', unlock: '解锁条件{0}'}
+
+    voice:
+      name_fields: []
+      card_fields:
+        - [语音key, 语音key]
+        - [路径, 路径]
+      attr_fields: [语音key, 路径, 表格标题]
+      child_templates:
+        - template: VoiceTable
+          occurrence: true
+          table: ark_voice_lines
+          columns: {table_title: 表格标题, voice_key: 语音key, path: 路径}
+          rows_from:
+            - pattern: '^标题(\d+)$'
+              table: ark_voice_lines
+              columns: {index: '{0}', title: '@key', line: '台词{0}',
+                        file: '语音{0}', trigger_type: '触发类型{0}'}
