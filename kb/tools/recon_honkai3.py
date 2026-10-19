@@ -129,21 +129,40 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=40)
     ap.add_argument("--params", type=int, default=12)
     ap.add_argument("--titles", nargs="*", default=None)
+    ap.add_argument("--from-raw", action="store_true",
+                    help="不抓网，直接扫 data/<game>/raw 的分片（全量普查用）")
     args = ap.parse_args()
 
     cfg = gamecfg.load_game("honkai3")
     # game= 必须给：不传的话 MediaWikiClient 按默认游戏（azurlane）读 api_url
     client = MediaWikiClient(rps=cfg.rps, game=cfg.name)
 
-    titles = list(client.iter_all_titles(namespace=0))
-    print(f"ns0 标题总数: {len(titles)}")
+    if args.from_raw:
+        # 全量普查：直接扫已抓完的分片，不打网。fetch.py 的自愈续跑保证分片里
+        # 没有重复标题，所以这里不去重。
+        import gzip
 
-    if args.titles:
-        picked = [t for t in args.titles if t in titles]
+        picked = None
+        pages: list[tuple[str, str]] = []
+        for p in sorted(cfg.raw_dir.glob("pages-*.jsonl.gz")):
+            with gzip.open(p, "rt", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    d = json.loads(line)
+                    pages.append((d["title"], d.get("wikitext", "")))
+        print(f"raw 分片: {len(pages)} 篇（{cfg.raw_dir}）")
     else:
-        step = max(1, len(titles) // args.sample)
-        picked = titles[::step][: args.sample]
-    print(f"抽样: {len(picked)} 篇")
+        titles = list(client.iter_all_titles(namespace=0))
+        print(f"ns0 标题总数: {len(titles)}")
+        if args.titles:
+            picked = [t for t in args.titles if t in titles]
+        else:
+            step = max(1, len(titles) // args.sample)
+            picked = titles[::step][: args.sample]
+        print(f"抽样: {len(picked)} 篇")
+        pages = []
 
     tpl_count: collections.Counter[str] = collections.Counter()
     tpl_params: dict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
@@ -151,26 +170,42 @@ def main() -> int:
     sections: collections.Counter[str] = collections.Counter()
     n_pages = 0
 
-    bs = cfg.batch_titles
-    for i in range(0, len(picked), bs):
-        batch = picked[i:i + bs]
-        recs, _ = client.fetch_revisions_safe(batch)
-        for r in recs:
-            wt = strip_comments(r["wikitext"])
+    if args.from_raw:
+        for title, wt_raw in pages:
+            wt = strip_comments(wt_raw)
             n_pages += 1
             c: collections.Counter[str] = collections.Counter()
             for name, params in top_level_templates(wt):
-                # 解析器函数（#if/#ask/…）和表格不是模板
                 if name.startswith("#"):
                     continue
                 tpl_count[name] += 1
                 c[name] += 1
                 for k in params:
                     tpl_params[name][k] += 1
-            page_tpls[r["title"]] = c
+            page_tpls[title] = c
             for h in re.findall(r"^==+\s*(.+?)\s*==+\s*$", wt, flags=re.M):
                 sections[h.strip()] += 1
-        print(f"  ...{n_pages}/{len(picked)}", file=sys.stderr)
+    else:
+        bs = cfg.batch_titles
+        for i in range(0, len(picked), bs):
+            batch = picked[i:i + bs]
+            recs, _ = client.fetch_revisions_safe(batch)
+            for r in recs:
+                wt = strip_comments(r["wikitext"])
+                n_pages += 1
+                c: collections.Counter[str] = collections.Counter()
+                for name, params in top_level_templates(wt):
+                    # 解析器函数（#if/#ask/…）和表格不是模板
+                    if name.startswith("#"):
+                        continue
+                    tpl_count[name] += 1
+                    c[name] += 1
+                    for k in params:
+                        tpl_params[name][k] += 1
+                page_tpls[r["title"]] = c
+                for h in re.findall(r"^==+\s*(.+?)\s*==+\s*$", wt, flags=re.M):
+                    sections[h.strip()] += 1
+            print(f"  ...{n_pages}/{len(picked)}", file=sys.stderr)
 
     print(f"\n实际取到正文: {n_pages} 篇")
     print(f"\n===== 顶层模板分布 top{args.top}（模板名: 出现篇数/总次数）=====")
