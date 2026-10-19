@@ -941,12 +941,20 @@ async def list_email_codes(
     limit: int = Query(default=20, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
 ):
-    """最近验证码（SMTP 未配置时的开发/排查通道；仅发信失败的码保留明文）。"""
+    """最近验证码的**投递状态**（仅排障用）。
+
+    SEC-011：这里原先返回 `code.code_plain`，等于把全站最近 50 条注册/找回密码验证码连
+    邮箱一起列出。读到这个端点即可对任意账号走完「忘记密码 → 在这里读码 → 重置密码」的
+    接管链，全程不需要原密码、不需要碰邮箱；再叠加 `ANISIGNAL_ADMIN_TOKEN` 默认值
+    （SEC-001）则连凭据都不需要。校验码本身走 `code_hash` 比对，排障不需要明文，
+    所以这里只回投递状态，且密码重置类一律不列（它正是接管链的入口）。
+    """
     from app.models import EmailCode, User
 
     rows = await session.execute(
         select(EmailCode, User.email)
         .join(User, EmailCode.user_id == User.id)
+        .where(EmailCode.purpose != "reset")
         .order_by(EmailCode.id.desc())
         .limit(limit)
     )
@@ -955,9 +963,9 @@ async def list_email_codes(
             "id": code.id,
             "email": email,
             "purpose": code.purpose,
-            "code": code.code_plain,
             "expires_at": code.expires_at,
             "used": code.used_at is not None,
+            "attempts": code.attempts,
             "sent_via_smtp": code.code_plain is None,
         }
         for code, email in rows
