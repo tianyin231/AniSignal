@@ -76,6 +76,11 @@ def existing_index(store: retriever.VectorStore) -> tuple[dict[str, tuple[int, s
     """
     out: dict[str, tuple[int, str]] = {}
     max_id = -1
+    # 新游戏第一次跑 --append 时 collection 还一个点都没有：upsert 自己是会
+    # ensure_collection 的，但 scroll 不会，直接 404。这里补一次（已存在就是
+    # 一次 GET，幂等）。numpy 兜底库没有这个方法，跳过即可。
+    if hasattr(store, "ensure_collection"):
+        store.ensure_collection()
     if hasattr(store, "iter_payloads"):
         for pid, payload in store.iter_payloads():
             max_id = max(max_id, pid)
