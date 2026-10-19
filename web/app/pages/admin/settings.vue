@@ -13,6 +13,9 @@ const toast = useAdminToast()
 const stamp = () => new Date().toLocaleTimeString('zh-CN', { hour12: false })
 const error = ref('')
 const notice = ref('')
+// 加载失败时表单停在空默认值，和「还没配过」长得一模一样；此时保存会用默认值整体
+// 覆盖真实配置（QUAL-077），所以必须把「没读到」和「空配置」在界面上区分开。
+const loadFailed = ref(false)
 
 // ---------- SMTP ----------
 interface SmtpView {
@@ -76,6 +79,7 @@ const setPlatformMode = (key: string, kind: 'image' | 'video', event: Event) => 
 }
 
 async function saveMediaVisibility() {
+  if (!guardLoaded()) return
   startBusy('saveMediaVisibility')
   error.value = notice.value = ''
   try {
@@ -97,28 +101,47 @@ const TEXT_LABELS: Record<string, string> = {
 }
 const texts = ref<Record<string, string>>({})
 
+// 配置没读成功时一律不许保存：服务端这几个 PUT 都是整体替换语义，拿默认值存回去
+// 会把真实 SMTP / 公告 / 文案覆盖掉，且 site_settings 是单行 JSON、无历史可回滚。
+const guardLoaded = (): boolean => {
+  if (loadFailed.value) {
+    toast.err('配置未加载成功，已禁止保存——请先重试加载')
+    return false
+  }
+  return true
+}
+
 async function refresh() {
-  const data = await api<{ smtp: SmtpView; onepush: OnePushView; announcement: typeof announcement; texts: Record<string, string> }>(
-    '/api/admin/settings',
-  )
-  smtpInfo.value = data.smtp
-  smtp.host = data.smtp.host || ''
-  smtp.port = data.smtp.port || 587
-  smtp.user = data.smtp.user || ''
-  smtp.from = data.smtp.from || ''
-  smtp.tls_mode = data.smtp.tls_mode
-  smtp.password = ''
-  onepushInfo.value = data.onepush
-  onepush.enabled = data.onepush.enabled
-  onepush.config_yaml = ''
-  Object.assign(announcement, data.announcement)
-  texts.value = { ...data.texts }
-  const mv = data.media_visibility ?? { default: { image: 'show', video: 'show' }, platforms: {} }
-  mediaVisibility.default = { image: mv.default?.image ?? 'show', video: mv.default?.video ?? 'show' }
-  mediaVisibility.platforms = mv.platforms ?? {}
+  try {
+    const data = await api<{ smtp: SmtpView; onepush: OnePushView; announcement: typeof announcement; texts: Record<string, string> }>(
+      '/api/admin/settings',
+    )
+    smtpInfo.value = data.smtp
+    smtp.host = data.smtp.host || ''
+    smtp.port = data.smtp.port || 587
+    smtp.user = data.smtp.user || ''
+    smtp.from = data.smtp.from || ''
+    smtp.tls_mode = data.smtp.tls_mode
+    smtp.password = ''
+    onepushInfo.value = data.onepush
+    onepush.enabled = data.onepush.enabled
+    onepush.config_yaml = ''
+    Object.assign(announcement, data.announcement)
+    texts.value = { ...data.texts }
+    const mv = data.media_visibility ?? { default: { image: 'show', video: 'show' }, platforms: {} }
+    mediaVisibility.default = { image: mv.default?.image ?? 'show', video: mv.default?.video ?? 'show' }
+    mediaVisibility.platforms = mv.platforms ?? {}
+    loadFailed.value = false
+  } catch (exc: any) {
+    // 不要 Object.assign：表单保持初值只是「看起来空」，读失败必须显式报出来
+    loadFailed.value = true
+    error.value = exc?.data?.detail ?? exc?.message ?? '配置加载失败'
+    toast.err('配置加载失败，请勿保存（当前显示的是默认值，不是真实配置）')
+  }
 }
 
 async function saveOnepush() {
+  if (!guardLoaded()) return
   startBusy('saveOnepush')
   error.value = notice.value = ''
   try {
@@ -137,6 +160,7 @@ async function saveOnepush() {
 }
 
 async function testOnepush() {
+  if (!guardLoaded()) return
   if (busy.value) return
   startBusy('testOnepush')
   onepushTestResult.value = ''
@@ -156,6 +180,7 @@ async function testOnepush() {
 onMounted(refresh)
 
 async function saveSmtp() {
+  if (!guardLoaded()) return
   startBusy('saveSmtp')
   error.value = notice.value = ''
   try {
@@ -171,6 +196,7 @@ async function saveSmtp() {
 }
 
 async function sendTest() {
+  if (!guardLoaded()) return
   if (!testTo.value.trim() || busy.value) return
   startBusy('sendTest')
   testResult.value = ''
@@ -190,6 +216,7 @@ async function sendTest() {
 }
 
 async function saveAi() {
+  if (!guardLoaded()) return
   startBusy('saveAi')
   error.value = notice.value = ''
   try {
@@ -205,6 +232,7 @@ async function saveAi() {
 }
 
 async function testAi() {
+  if (!guardLoaded()) return
   if (busy.value) return
   startBusy('testAi')
   aiTestResult.value = ''
@@ -221,6 +249,7 @@ async function testAi() {
 }
 
 async function summarizeAll() {
+  if (!guardLoaded()) return
   if (!confirm('为缺少摘要的事件批量生成 AI 摘要？')) return
   startBusy('summarizeAll')
   try {
@@ -234,6 +263,7 @@ async function summarizeAll() {
 }
 
 async function saveAnnouncement() {
+  if (!guardLoaded()) return
   startBusy('saveAnnouncement')
   error.value = notice.value = ''
   try {
@@ -247,6 +277,7 @@ async function saveAnnouncement() {
 }
 
 async function saveTexts() {
+  if (!guardLoaded()) return
   startBusy('saveTexts')
   error.value = notice.value = ''
   try {
@@ -271,6 +302,15 @@ async function saveTexts() {
 
     <p v-if="notice" class="panel px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400">{{ notice }}</p>
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+
+    <div v-if="loadFailed" class="panel border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
+      <p class="font-medium">配置加载失败，请勿保存。</p>
+      <p class="mt-1 text-xs leading-relaxed opacity-90">
+        下面显示的是默认值而不是真实配置；这些设置项的服务端接口是整体替换语义，
+        此时保存会把真实 SMTP、公告与文案覆盖掉，且没有历史可回滚。
+      </p>
+      <button class="mt-2 rounded-md border border-rose-500/40 px-3 py-1.5 text-xs" :disabled="busy" @click="refresh">重新加载</button>
+    </div>
 
     <!-- SMTP -->
     <section class="panel p-5">
@@ -312,7 +352,7 @@ async function saveTexts() {
         </div>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
-        <button class="btn-primary inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy" @click="saveSmtp">
+        <button class="btn-primary inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy || loadFailed" @click="saveSmtp">
           <Save :size="14" /> {{ busyWhat === 'saveSmtp' ? '保存中…' : '保存 SMTP' }}
         </button>
         <label for="smtp-test-to" class="sr-only">测试收件邮箱</label>
@@ -331,7 +371,7 @@ async function saveTexts() {
             按平台控制封面图片与来源链接的展示；全站默认对未单独设置的平台生效，保存即生效。
           </p>
         </div>
-        <button class="btn-primary px-4 py-2 text-sm" :disabled="busy" @click="saveMediaVisibility">
+        <button class="btn-primary px-4 py-2 text-sm" :disabled="busy || loadFailed" @click="saveMediaVisibility">
           <Save :size="14" class="mr-1 inline" />{{ busyWhat === 'saveMediaVisibility' ? '保存中…' : '保存媒体可见性' }}
         </button>
       </div>
@@ -422,7 +462,7 @@ async function saveTexts() {
         <p class="mt-1.5 text-xs text-slate-500 dark:text-zinc-400">已配置时留空保存会保留原参数；关闭开关只停止自动发送，仍可执行测试。</p>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
-        <button class="btn-primary inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy" @click="saveOnepush">
+        <button class="btn-primary inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy || loadFailed" @click="saveOnepush">
           <Save :size="14" /> {{ busyWhat === 'saveOnepush' ? '保存中…' : '保存 OnePush' }}
         </button>
         <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-slate-900/10 px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15" :disabled="busy || !onepushInfo?.configured" @click="testOnepush">
@@ -454,7 +494,7 @@ async function saveTexts() {
         </div>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
-        <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveAi">{{ busyWhat === 'saveAi' ? '保存中…' : '保存 LLM 配置' }}</button>
+        <button class="btn-primary px-4 py-2" :disabled="busy || loadFailed" @click="saveAi">{{ busyWhat === 'saveAi' ? '保存中…' : '保存 LLM 配置' }}</button>
         <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="testAi">{{ busyWhat === 'testAi' ? '测试中…' : '连通测试' }}</button>
         <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="summarizeAll">{{ busyWhat === 'summarizeAll' ? '执行中…' : '批量补事件摘要' }}</button>
         <span v-if="aiTestResult" class="text-xs" :class="aiTestResult.includes('失败') || aiTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ aiTestResult }}</span>
@@ -484,7 +524,7 @@ async function saveTexts() {
         <textarea v-model="announcement.text" rows="2" maxlength="500" placeholder="公告内容，如：今晚 22:00-23:00 系统维护，期间采集可能暂停。"
           class="textarea w-full px-3 py-2 text-sm" />
       </div>
-      <button class="btn-primary mt-3 px-4 py-2" :disabled="busy" @click="saveAnnouncement">{{ busyWhat === 'saveAnnouncement' ? '保存中…' : '保存公告' }}</button>
+      <button class="btn-primary mt-3 px-4 py-2" :disabled="busy || loadFailed" @click="saveAnnouncement">{{ busyWhat === 'saveAnnouncement' ? '保存中…' : '保存公告' }}</button>
     </section>
 
     <!-- 文案区域 -->
@@ -496,7 +536,7 @@ async function saveTexts() {
           <textarea v-model="texts[key]" rows="2" class="textarea mt-1 w-full px-3 py-2 text-sm" />
         </div>
       </div>
-      <button class="btn-primary mt-4 px-4 py-2" :disabled="busy" @click="saveTexts">{{ busyWhat === 'saveTexts' ? '保存中…' : '保存文案' }}</button>
+      <button class="btn-primary mt-4 px-4 py-2" :disabled="busy || loadFailed" @click="saveTexts">{{ busyWhat === 'saveTexts' ? '保存中…' : '保存文案' }}</button>
     </section>
   </div>
 </template>
