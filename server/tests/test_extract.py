@@ -137,9 +137,13 @@ async def test_delay_notice_marks_maintenance_and_pushes(client, session, monkey
     )
     await session.commit()
 
+    # 延期后的开始时间必须晚于上面的维护开始时间（utcnow()+1h），否则延迟标记的
+    # 比较 `start_at <= entry["start_at"]` 恒为 False。用相对时间：硬编码绝对日期
+    # 一旦被墙钟走过，这条链路就永久静默失效（QUAL-064）。
+    delayed_start = utcnow() + timedelta(hours=3)
     payload = (
-        '{"schedules": [{"title": "版本更新停机维护（延期）", "start_at": "2026-09-13T20:00:00+08:00", '
-        '"end_at": null, "kind": "delay"}], "codes": []}'
+        '{"schedules": [{"title": "版本更新停机维护（延期）", "start_at": "%s", '
+        '"end_at": null, "kind": "delay"}], "codes": []}' % delayed_start.isoformat()
     )
     fake_chat, fake_usage = _mock_ai(payload)
     monkeypatch.setattr(extract_module, "chat", fake_chat)
