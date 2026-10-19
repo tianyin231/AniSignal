@@ -176,4 +176,11 @@ v3 新增 4 族：关卡图鉴 1984、塞壬图鉴 93、飞行器性能数据 88
 ./.venv/bin/python tools/raw_lookup.py 企业 拉菲 --grep "技能1名"   # 回查原始 wikitext
 ./.venv/bin/python tools/export_onnx.py --verify                     # 重新导出 ONNX int8
 tools/fetch_loop.sh                                                  # 断点续拉直到抓完
+tools/embed_resume.sh arknights                                      # embedding 断点续跑（见下）
 ```
+
+`tools/embed_resume.sh` 是 `embed_index.py --append` 的长任务启动壳，比裸跑 python 多两件事：
+把 `oom_score_adj` 设成 1000（2 核 7G 的机器上内存见底时让 kernel 先杀自己，别误伤常驻的
+qdrant 或旁边 agent 的进程），以及 `python -u`（逐批进度实时落盘，被 kill 后能看出死在哪一批）。
+方舟这轮 120114 个 chunk 就是靠它三次续跑补齐的：被机器重启杀掉后重跑同一条命令，
+`--append` 按 chunk_id 对账，库里已有且文本一致的一个向量都不重算。
