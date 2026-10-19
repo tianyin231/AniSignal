@@ -109,6 +109,9 @@ class GameConfig:
     infobox_template_prefixes: dict[str, tuple[str, str]]
     legacy_infobox_template_names: frozenset[str]
     title_patterns: tuple[tuple[re.Pattern[str], str], ...]
+    # `title_patterns` 里 `skip: true` 的条目：标题长这样就直接不抓（原神的
+    # `^Data:` 32,561 篇地图数据页），不占 parse 的名额
+    title_skip_patterns: tuple[re.Pattern[str], ...]
     new_kinds: frozenset[str]
     card_field_keys: dict[str, frozenset[str]]
     nav_template_prefixes: tuple[str, ...]
@@ -116,8 +119,15 @@ class GameConfig:
     min_infobox_fields: int
     # 展示型模板渲染表：模板名 → 要渲染的参数名（位置参数写 "1"/"2"…，空元组=渲染成空）
     display_templates: dict[str, tuple[str, ...]]
+    # 实体模板裹在 <div>/<span> 里时，匹配顶层模板要不要穿透这些 HTML 容器
+    # （不穿透其它模板）。BWIKI 原神必须开，PRTS/碧蓝不开——行为与 v2/v3 一致
+    descend_html_tags: bool
     # 模板名里嵌 HTML 注释时是否剥掉再比对（PRTS 的 CharinfoV2 就嵌了一行）
     strip_template_name_comments: bool
+    # to_plain 之前是否先用正则删掉解析函数。原神必须开：它的 SMW 查询
+    # （{{#ask:[[分类:X]][[时间::<]] |?名称 …}}）mwparserfromhell 拆不出一棵
+    # 完整的模板树，会整坨漏进正文。碧蓝/明日方舟没这问题，默认关
+    strip_parser_functions: bool
     # 专用抽取器模块（kblib.extractors.<x>）；不配 = 全走通用实体路
     extractor_module: str | None
     # 通用实体路：kind → {card_fields, attr_fields, child_templates}
@@ -245,7 +255,13 @@ def load_game(name: str | None = None) -> GameConfig:
             _as_tuple_str(parse.get("legacy_infobox_template_names"))),
         title_patterns=tuple(
             (re.compile(str(p["regex"])), str(p["kind"]))
-            for p in (parse.get("title_patterns") or []) if p.get("regex")
+            for p in (parse.get("title_patterns") or [])
+            if p.get("regex") and p.get("kind") and not p.get("skip")
+        ),
+        title_skip_patterns=tuple(
+            re.compile(str(p["regex"]))
+            for p in (parse.get("title_patterns") or [])
+            if p.get("regex") and p.get("skip")
         ),
         new_kinds=frozenset(_as_tuple_str(parse.get("new_kinds"))),
         card_field_keys=_as_frozensets(parse.get("card_field_keys")),
@@ -253,7 +269,9 @@ def load_game(name: str | None = None) -> GameConfig:
         noise_section_keywords=_as_tuple_str(parse.get("noise_section_keywords")),
         min_infobox_fields=int(parse.get("min_infobox_fields", 5)),
         display_templates=_as_display(parse.get("display_templates")),
+        descend_html_tags=bool(parse.get("descend_html_tags", False)),
         strip_template_name_comments=bool(parse.get("strip_template_name_comments", False)),
+        strip_parser_functions=bool(parse.get("strip_parser_functions", False)),
         extractor_module=(str(parse["extractor_module"]) if parse.get("extractor_module") else None),
         kinds={str(k): (v or {}) for k, v in (parse.get("kinds") or {}).items()},
         raw=raw,

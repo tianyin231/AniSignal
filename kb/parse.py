@@ -255,7 +255,8 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
 
     with open(chunks_path, "w", encoding="utf-8") as cf, \
             cleantext.wiki_style(cfg.display_templates,
-                                 cfg.strip_template_name_comments):
+                                 cfg.strip_template_name_comments,
+                                 cfg.strip_parser_functions):
         # chunk_id 分配：prose/card 走老计数器（azurlane v2 已入向量库的 id 一个都
         # 不能变，否则增量 upsert 会退化成全量重建）；配置里 new_kinds 声明的 kind
         # 走 x 前缀的另一个计数器，两边互不干扰
@@ -288,7 +289,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
             wc = cleantext.parse_wikitext(wikitext)
             found = cleantext.find_top_level_infobox(
                 wc, infobox_names, cfg.legacy_infobox_template_names,
-                cfg.infobox_template_prefixes)
+                cfg.infobox_template_prefixes, descend_tags=cfg.descend_html_tags)
             kind, category, fields = "other", None, {}
             body_wikitext = wikitext
 
@@ -325,7 +326,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
                 ctx = ExtractCtx(
                     title=title, page_id=rec.get("page_id"), kind=kind, category=category,
                     fields=fields, cfg=cfg, wikitext=wikitext, body_wikitext=body_wikitext,
-                    top_level_templates=list(wc.filter_templates(recursive=False)) if wc else [],
+                    top_level_templates=cleantext.iter_templates(wc, cfg.descend_html_tags) if wc else [],
                 )
                 if spec:
                     result = spec[0](ctx)
@@ -390,7 +391,8 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
             emit_pack(cleantext.gallery_lines(wikitext), "图库", "gallery", title, url, images)
             emit_pack(cleantext.hidden_lines(wikitext), "隐藏正文", "hidden", title, url, images)
             emit_pack(cleantext.template_dump(body_wikitext, exclude=str(found) if found else None,
-                                             nav_prefixes=cfg.nav_template_prefixes),
+                                             nav_prefixes=cfg.nav_template_prefixes,
+                                             descend_tags=cfg.descend_html_tags),
                       "模板数据", "template", title, url, images)
             if fields:
                 voice = [f"{scene}：{line}" for scene, line in

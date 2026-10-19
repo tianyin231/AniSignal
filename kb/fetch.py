@@ -251,6 +251,21 @@ def load_titles(client: MediaWikiClient, cache: Path) -> list[str]:
     return titles
 
 
+def drop_skipped(titles: list[str], patterns) -> list[str]:
+    """按配置里 `title_patterns: {skip: true}` 的条目剔掉不该抓的标题。
+
+    原神的 `^Data:` 是 32,561 篇地图数据页（SMW 的 Data: 伪命名空间，全在 ns0
+    的 allpages 里），不剔的话全量抓取多背一倍的量、parse 还认不出任何实体。
+    标题缓存存的是 API 原始清单，剔放在每轮加载之后——改 skip 规则不用清缓存。
+    """
+    if not patterns:
+        return titles
+    keep = [t for t in titles if not any(rx.match(t) for rx in patterns)]
+    log.info("按 skip 规则剔除 %d 篇（%d → %d）", len(titles) - len(keep),
+             len(titles), len(keep))
+    return keep
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="抓取 wiki 全量 wikitext（一游戏一配置）")
     ap.add_argument("--game", default=None,
@@ -284,6 +299,10 @@ def main() -> int:
     titles = load_titles(client, args.titles_cache or cfg.titles_cache)
     if not titles:
         log.error("没拿到任何标题")
+        return 1
+    titles = drop_skipped(titles, cfg.title_skip_patterns)
+    if not titles:
+        log.error("剔除 skip 规则后一个标题都不剩")
         return 1
     log.info("%s：共 %d 篇条目（%s）", cfg.label, len(titles), cfg.wiki_base)
 
