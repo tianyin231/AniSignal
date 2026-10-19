@@ -481,8 +481,8 @@ async def _deliver_email(session: AsyncSession, brief: DailyBrief) -> int:
 
 
 async def _deliver_qq(session: AsyncSession, brief: DailyBrief) -> int:
-    """推给每个启用的机器人目标（critical 穿透静默时段， dedupe key 按简报唯一）。"""
-    from app.models import BotTarget
+    """推给每个启用的机器人目标（critical 穿透静默时段，dedupe key 按简报 × 目标唯一）。"""
+    from app.models import BotDelivery, BotTarget
     from app.services.bot import create_delivery
 
     targets = list(
@@ -491,9 +491,18 @@ async def _deliver_qq(session: AsyncSession, brief: DailyBrief) -> int:
     if not targets:
         return 0
     subject, body = render_brief_text(brief)
+    delivered = 0
     for target in targets:
-        await create_delivery(session, target, "critical", f"{subject}\n\n{body}", f"brief:{brief.id}")
-    return len(targets)
+        # key 必须带 target.id：只按 brief.id 去重时，第一个目标建好的行会挡住后面
+        # 所有目标，多群场景下简报只进一个群，而返回计数仍是 len(targets)（假账）。
+        key = f"brief:{brief.id}:{target.id}"
+        existed = await session.scalar(
+            select(BotDelivery.id).where(BotDelivery.dedupe_key == key)
+        )
+        await create_delivery(session, target, "critical", f"{subject}\n\n{body}", key)
+        if existed is None:
+            delivered += 1
+    return delivered
 
 
 async def deliver_brief(session: AsyncSession, brief: DailyBrief) -> dict:

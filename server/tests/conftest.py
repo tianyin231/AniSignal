@@ -71,3 +71,22 @@ async def client(session_factory, fake_queue):
 @pytest.fixture
 def admin_headers():
     return {"X-Admin-Token": "test-admin-token"}
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch, request):
+    """出站请求的 DNS 复核默认不依赖真实解析。
+
+    沙箱/CI 的网络会把所有外部域名解析到 198.18.0.0/15 保留段（`is_private=True`），
+    真实解析会让每个走 SSRF 收敛的用例都被判内网而拒发，失败信息还很难懂。这里统一
+    桩成公网 IP；需要真实 getaddrinfo 的用例（非点分 IP 字面量等绕过写法）打
+    `@pytest.mark.real_dns` 跳过本桩。
+    """
+    if request.node.get_closest_marker("real_dns"):
+        return
+    from app.services import webhooks as webhooks_module
+
+    async def _fake(host: str) -> tuple[str, ...]:
+        return ("93.184.216.34",)
+
+    monkeypatch.setattr(webhooks_module, "_resolved_addresses", _fake)

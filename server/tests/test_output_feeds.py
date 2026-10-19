@@ -135,23 +135,6 @@ def _stub_post(monkeypatch, outcomes) -> _FakeClients:
     return fake
 
 
-@pytest.fixture(autouse=True)
-def _public_dns(monkeypatch, request):
-    """投递前的 DNS 复核默认不依赖真实解析。
-
-    沙箱/CI 的网络会把所有外部域名解析到 198.18.0.0/15 保留段（is_private=True），
-    真实解析会让每个 webhook 用例都被判内网而拒发。这里统一桩成公网 IP，需要真实
-    getaddrinfo 的用例（十进制/短形式/IPv4-mapped 字面量）打 `real_dns` 标记。
-    """
-    if request.node.get_closest_marker("real_dns"):
-        return
-
-    async def _fake(host: str) -> tuple[str, ...]:
-        return ("93.184.216.34",)
-
-    monkeypatch.setattr(webhooks_module, "_resolved_addresses", _fake)
-
-
 # ---------- token 与 RSS 渲染 ----------
 
 

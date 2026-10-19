@@ -881,7 +881,7 @@ async def test_deliver_brief_sends_email_and_qq(session):
     from app.models import BotDelivery
 
     rows = list((await session.execute(select(BotDelivery))).scalars())
-    assert len(rows) == 1 and rows[0].dedupe_key == f"brief:{brief.id}"
+    assert len(rows) == 1 and rows[0].dedupe_key == f"brief:{brief.id}:{target.id}"
     # 邮件投递落库（SMTP 未配置时状态为 failed，但记录可查）
     deliveries = list((await session.execute(select(NotificationDelivery))).scalars())
     assert [d.user_id for d in deliveries] == [user.id]
@@ -904,6 +904,36 @@ async def test_deliver_brief_dedupes_per_user(session):
     assert len(list((await session.execute(select(NotificationDelivery))).scalars())) == 1
     # 机器人投递按简报去重（create_delivery 幂等）
     assert len(list((await session.execute(select(BotDelivery))).scalars())) == 1
+
+
+async def test_deliver_brief_reaches_every_enabled_bot_target(session):
+    """dedupe key 必须带 target.id：只按 brief.id 去重会挡住第一个目标之外的所有群（QUAL-016）。"""
+    from app.models import BotDelivery
+
+    first = BotTarget(name="一群", umo="qq:g1", enabled=True, config={})
+    second = BotTarget(name="二群", umo="qq:g2", enabled=True, config={})
+    disabled = BotTarget(name="停用群", umo="qq:g3", enabled=False, config={})
+    session.add_all([first, second, disabled])
+    await session.flush()
+    brief, _ = await briefing.generate_brief(session, date(2026, 10, 17))
+
+    result = await briefing.deliver_brief(session, brief)
+    assert result["qq"] == 2  # 只数启用的，且每个目标各一条
+    assert result["status"] == "sent"
+
+    rows = list((await session.execute(select(BotDelivery))).scalars())
+    assert sorted(row.target_id for row in rows) == sorted([first.id, second.id])
+    assert {row.dedupe_key for row in rows} == {
+        f"brief:{brief.id}:{first.id}",
+        f"brief:{brief.id}:{second.id}",
+    }
+    for row in rows:
+        assert "▎" in row.body  # 正文真的推进去了，不是空壳
+
+    # 重推不重复建行，也不虚报计数
+    again = await briefing.deliver_brief(session, brief)
+    assert again["qq"] == 0
+    assert len(list((await session.execute(select(BotDelivery))).scalars())) == 2
 
 
 async def test_deliver_brief_marks_failed_without_channels(session):
