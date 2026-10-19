@@ -27,7 +27,11 @@ KEEP_TABLE = ["t01", "t02", "t03", "t04", "t05", "t06", "t07", "t08", "t09", "t1
               "t23", "t25", "t27", "t28", "t29", "t30", "t33", "t35", "t36", "t32"]
 
 
-def q(cur: sqlite3.Cursor, sql: str, args: tuple) -> str | None:
+def q(cur: sqlite3.Cursor, sql: str, args: tuple, probe: str = "") -> str | None:
+    """取期望值。child_list 要的是全表按 sort 串起来的一整串（和 eval 的探针同口径），
+    只取第一行会和 eval 实得差一截。"""
+    if probe == "child_list":
+        return qlist(cur, sql, args)
     row = cur.execute(sql, args).fetchone()
     return None if row is None or row[0] is None else str(row[0])
 
@@ -225,7 +229,7 @@ def main() -> int:
     for tid, question, probe, pargs, sql, sqlargs in TABLE + EXTRA_TABLE:
         if tid not in KEEP_TABLE:
             continue
-        expect = q(cur, sql, sqlargs)
+        expect = q(cur, sql, sqlargs, probe)
         if not expect:
             bad.append(f"{tid} 查不到期望值：{question}")
             continue
