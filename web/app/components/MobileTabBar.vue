@@ -18,7 +18,7 @@ const home = computed(() => {
 })
 
 const tabs = computed(() => [
-  { key: 'home', label: '首页', icon: House, to: home.value, active: route.path === '/' || route.path === '/ai' },
+  { key: 'home', label: '首页', icon: House, to: home.value, active: route.path === '/' },
   { key: 'calendar', label: '日历', icon: CalendarDays, to: { path: '/calendar', query: { community: scope.value } }, active: route.path === '/calendar' },
   { key: 'events', label: '事件', icon: Layers, to: { path: '/events', query: { community: scope.value } }, active: route.path.startsWith('/events') },
   { key: 'products', label: '商品', icon: Package, to: { path: '/products', query: { community: scope.value } }, active: route.path.startsWith('/products') },

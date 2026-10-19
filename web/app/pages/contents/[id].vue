@@ -66,13 +66,6 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
   <div class="space-y-4">
     <BackButton :fallback="d.community === 'ai' ? '/ai' : '/contents'" :label="d.community === 'ai' ? '返回 AI 快讯' : '返回内容库'" />
 
-    <section v-if="d.community === 'ai'" class="panel p-4 sm:p-5">
-      <p class="text-xs font-medium text-amber-700 dark:text-amber-300">{{ d.news?.kind === 'rumor' ? '传闻线索' : '二手报道' }} · 待核实</p>
-      <h2 v-if="d.news" class="mt-2 text-2xl font-bold leading-snug text-ink">{{ d.news.headline }}</h2>
-      <p v-if="d.news" class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">{{ d.news.summary }}</p>
-      <p class="mt-3 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">摘要仅依据来源标题与简介整理，未核对完整视频及一手消息。下方保留原始标题和简介；视频发布时间不代表事件发生时间。</p>
-    </section>
-
     <!-- 头部 -->
     <section class="panel p-4 sm:p-5">
       <div class="flex flex-wrap items-center gap-2 text-xs">
@@ -84,10 +77,13 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
         </span>
         <span class="chip bg-slate-500/10 text-slate-500 dark:text-zinc-400">{{ contentTypeLabels[d.content_type] ?? d.content_type }}</span>
         <span :class="identityMeta[d.identity as Identity]?.text">{{ identityMeta[d.identity as Identity]?.label ?? d.identity }}</span>
+        <span v-if="d.news" class="inline-flex h-5 items-center rounded-md px-1.5 font-semibold" :class="d.news.kind === 'rumor' ? 'bg-warn/10 text-warn' : 'bg-ai-soft text-ai-ink'">{{ d.news.kind === 'rumor' ? '传闻线索' : '报道' }}</span>
         <span class="chip" :class="d.preview_mode === 'external_only' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'">{{ previewLabel }}</span>
         <span v-if="d.version" class="mono ml-auto text-slate-400">v{{ d.version }}</span>
       </div>
-      <h1 class="mt-3 text-2xl font-bold leading-snug text-ink">{{ d.title }}</h1>
+      <h1 class="mt-3 text-2xl font-bold leading-snug text-ink">{{ d.news?.headline || d.title }}</h1>
+      <p v-if="d.news" class="mt-2 text-sm leading-relaxed text-ink-2">{{ d.news.summary }}</p>
+      <p v-if="d.news && d.news.headline !== d.title" class="mt-2 text-xs text-muted">原标题 {{ d.title }}</p>
       <div v-if="d.matched_keywords?.length" class="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
         <span class="text-slate-400 dark:text-zinc-500">命中关键词</span>
         <span v-for="k in d.matched_keywords" :key="k" class="rounded bg-blue-500/10 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">{{ k }}</span>

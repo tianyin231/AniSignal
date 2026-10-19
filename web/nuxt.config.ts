@@ -1,5 +1,8 @@
 import tailwindcss from '@tailwindcss/vite'
 
+// 默认连本机 8000。预览生产数据时用 ANISIGNAL_API_PROXY 指到另一条隧道，避免挤掉已占用的 8000。
+const apiProxy = process.env.ANISIGNAL_API_PROXY || 'http://127.0.0.1:8000'
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: false },
@@ -9,7 +12,7 @@ export default defineNuxtConfig({
   nitro: { compressPublicAssets: true },
   runtimeConfig: {
     // SSR 服务端直连 FastAPI（app 容器内同网络命名空间）
-    apiSsrBase: 'http://127.0.0.1:8000',
+    apiSsrBase: apiProxy,
     public: {
       // 浏览器端走同源（默认空串），由 Nitro 代理到 FastAPI，不再暴露 API 端口
       apiBase: '',
@@ -18,9 +21,9 @@ export default defineNuxtConfig({
   routeRules: {
     // 后端所有 HTTP API 都在 /api/** 下（含 /api/admin 管理接口）；
     // /admin/** 是 Nuxt 页面路由，不代理
-    '/api/**': { proxy: 'http://127.0.0.1:8000/api/**' },
+    '/api/**': { proxy: `${apiProxy}/api/**` },
     // RSS 订阅源：后端生成 XML，这里映射到站点根路径
-    '/rss.xml': { proxy: 'http://127.0.0.1:8000/api/rss.xml' },
+    '/rss.xml': { proxy: `${apiProxy}/api/rss.xml` },
   },
   vite: {
     plugins: [tailwindcss()],
