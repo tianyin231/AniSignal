@@ -259,13 +259,18 @@ async def apply_rules(
         ).all()
     )
 
+    # keyword_expr 每条规则只解析一次。原先 parse 在 contents × rules 双层循环里，
+    # 同一个表达式被重算 contents 次（SEC-022 建议 4）；表达式最长 1000 字符、规则数
+    # 不可控，批量回填时这是纯浪费。容错语义不变：parse 自身是容错解析不抛，抛的只有
+    # _condition_reason，try 仍包着它。
+    compiled = [(rule, boolean_query.parse(rule.keyword_expr)) for rule in rules]
+
     matches: list[_Match] = []
     for ctx in contexts:
-        for rule in rules:
+        for rule, parsed in compiled:
             if (rule.id, ctx.content.id) in done:
                 continue
             try:
-                parsed = boolean_query.parse(rule.keyword_expr)
                 matched, reason = _condition_reason(rule, ctx, parsed)
             except Exception as exc:  # noqa: BLE001 - 单条规则条件失败不影响其它规则
                 stats.errors += 1
