@@ -194,9 +194,9 @@ def _child_rows(ctx: ExtractCtx, spec: dict) -> list[Row]:
         nodes = nodes[:1]
     rows: list[Row] = []
     for idx, node in enumerate(nodes, start=1):
-        # positional=True：子模板大量用位置参数传值（任务描述/人物对话/人物出场），
-        # 只收命名参数的话这三张表一行都不会有
-        fields = cleantext.infobox_fields(node, positional=True)
+        # positional：子模板大量用位置参数传值（任务描述/人物对话/人物出场），
+        # 只收命名参数的话这三张表一行都不会有。默认关（见 GameConfig 注释）
+        fields = cleantext.infobox_fields(node, positional=ctx.cfg.child_positional_params)
         if not fields:
             continue
         table = str(spec.get("table", "") or "")

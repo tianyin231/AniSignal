@@ -66,6 +66,9 @@ parse:
   # 完整模板树（拆成 Text('{{#ask:') + Wikilink + Text('\\n|?名称…') 一串碎片），
   # 一页能有好几个，不删就是一坨 DSL 原文漏进正文 chunk
   strip_parser_functions: true
+  # 子表收位置参数（'1'/'2'…）：`{{人物对话|左|丽莎|台词}}`、`{{任务描述|描述|地点}}`
+  # 全靠位置传值，不收这三张表一行都没有。默认关，见 GameConfig.child_positional_params
+  child_positional_params: true
 
   # 展示型模板：参数顺序是给机器用的，通用兜底只会掏出机器值。
   #   {{卡牌图标|UI|元素|冰}}                UI/元素 是 key，冰 在 3（200 次）
