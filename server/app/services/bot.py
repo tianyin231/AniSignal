@@ -250,6 +250,11 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
             candidates = [c for c in candidates if is_recent_item(c, now)]
             candidates.extend({**c, "is_supplement": True} for c in supplements
                               if c.get("published_at") and c["collected_at"] < now and c["identity"] == "official")
+            if any(COMMUNITIES[key].domain == "news" for key in selected):
+                from app.services.news_publication import edition_bot_items
+                edition = await edition_bot_items(session, now=now, keywords=keywords)
+                if edition is not None:
+                    candidates = [c for c in candidates if not c.get("news")] + edition
         if query:
             candidates = [c for c in candidates if query.casefold() in (c["title"] + c["text"]).casefold()]
         candidates = [c for c in candidates if c["strength"] == "strong"]
@@ -503,12 +508,14 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     usable = [item for item in scoped if not is_empty_dynamic_item(item)]
     invalid_review = False
     if any(item.get("news") for item in usable):
-        from app.services.ai_news import approved_news_query
+        from app.services.ai_news import approved_news_query, news_review_identity
 
         query = (await approved_news_query(session)).where(RawContent.id.in_([item["id"] for item in usable]))
         approved = {raw.id: review.news for raw, version, source, review in (await session.execute(query)).all()}
-        invalid_review = any(item.get("news") and item["news"] != approved.get(item["id"]) for item in usable)
-        usable = [item for item in usable if not item.get("news") or item["news"] == approved.get(item["id"])]
+        def same_review(item):
+            return item["id"] in approved and news_review_identity(item["news"]) == news_review_identity(approved[item["id"]])
+        invalid_review = any(item.get("news") and not same_review(item) for item in usable)
+        usable = [item for item in usable if not item.get("news") or same_review(item)]
     empty_sources = any(is_empty_dynamic_item(item) for item in scoped)
     # 早报拆条和兑换码各自有有效期；普通即时消息不能用刚入队的时间续命。
     if row.kind in {"updates", "critical"} and not brief.get("scheduled_at") and brief.get("mode") != "notice":

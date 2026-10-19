@@ -14,6 +14,7 @@
 | `app/services/events.py` | 规则事件归并、证据关联与人工修正保护。 |
 | `app/services/ai.py`、`curation.py` | 可选摘要、翻译、内容筛选及用量记录。 |
 | `app/services/ai_news.py`、`app/api/ai_news.py` | AI 快讯的审核准入、主题筛选、来源追溯与公开读取。 |
+| `app/services/news_editorial.py`、`news_publication.py`、`editorial_calls.py` | AI 快讯的事件归组、双次评分、来源热度、固定日报、调用回执和额度。 |
 | `app/services/custom_feeds.py` | 用户 B 站 UID／关键词定制监控，使用独立条目存储。 |
 | `app/services/notifications.py`、`bot.py` | 邮件早报、手动通知、投递记录与可选 AstrBot 集成。 |
 | `app/scheduler/`、`app/worker/` | 定时调度与后台任务。 |
@@ -46,6 +47,6 @@ uv run pytest
 
 迁移位于 `alembic/`，完整部署在应用启动时执行 `alembic upgrade head`。新增字段时应考虑存量回填；SQLite 本地模式不代替 MySQL 迁移验证。
 
-配置定义见 [app/config.py](app/config.py)。SMTP、AI 和机器人均需要额外服务配置；邮件早报与定制监控已有任务实现，是否启用取决于部署配置。当前事件归并仍以规则为主，不宣称跨语言 AI 语义合并。
+配置定义见 [app/config.py](app/config.py)。SMTP、AI 和机器人均需要额外服务配置；邮件早报与定制监控已有任务实现，是否启用取决于部署配置。游戏事件按规则归并，AI 快讯采用独立的模型归组与编辑评分链路，准确性需要通过真实样本持续核对。
 
 [项目维护参考](../.agents/skills/anisignal/SKILL.md)与[早期设计](../docs/superpowers/specs/2026-08-12-wuthering-waves-event-radar-design.md)保留历史背景；旧日期的功能状态、主题范围与运维示例应以当前代码和部署配置复核。

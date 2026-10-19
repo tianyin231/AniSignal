@@ -39,7 +39,7 @@ Screenshot of the product tour, with clearly labeled sample data. [Try the inter
 | **Collection** | Keyword, account, and announcement targets with polling intervals, co-occurring terms, popularity thresholds, and source health. |
 | **Reading** | An aggregated home and individual sections, with platform, category, and keyword filters, previews, and original links. |
 | **Traceable events** | Eligible official announcements grouped with key facts, source evidence, revision history, and preserved manual corrections. |
-| **AI news** | A dedicated feed for model, product, and industry updates, with report/rumor labels, topic filters, and source links. |
+| **AI news** | Event grouping, independent-source heat, and two-pass selection for model and industry updates, with developments, daily editions, and source links. |
 | **Product progress** | Official updates, consumer arrivals, and quality feedback, with unverified candidates distinguished from verified signals. |
 | **Personal watches** | Keyword feeds over collected content, or independent Bilibili UID/keyword monitors with public or private visibility. |
 | **Delivery** | Optional summaries, translation, and screening; morning digests and on-demand email; AstrBot session notifications and queries. |

@@ -2,10 +2,12 @@
 
 import logging
 from datetime import timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 
 from app.api.admin import get_queue
 from app.api.deps import require_admin
@@ -25,6 +27,83 @@ from app.services.ai import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin/ai", dependencies=[Depends(require_admin)])
+
+
+class EditorialPolicyBody(BaseModel):
+    enabled: bool = True
+    score_enabled: bool = True
+    first_party_threshold: int = Field(default=60, ge=0, le=100)
+    media_threshold: int = Field(default=76, ge=0, le=100)
+    calls_per_minute: int = Field(default=12, ge=0, le=1000)
+    calls_per_hour: int = Field(default=100, ge=0, le=10000)
+    calls_per_day: int = Field(default=300, ge=0, le=100000)
+    group_model: str = Field(default="", max_length=64)
+    score_model: str = Field(default="", max_length=64)
+
+
+class EditorialSourceBody(BaseModel):
+    owner_key: str | None = Field(default=None, max_length=64)
+    editorial_tier: Literal["first_party", "media"] | None = None
+
+
+@router.get("/editorial")
+async def editorial_status(session: AsyncSession = Depends(get_session)):
+    from app.models import EditorialReceipt, RawContent, Source
+    from app.services.editorial_calls import get_policy
+
+    receipts = list(await session.scalars(select(EditorialReceipt).order_by(EditorialReceipt.id.desc()).limit(20)))
+    sources = list(await session.scalars(select(Source).where(Source.id.in_(
+        select(RawContent.source_id).where(RawContent.community == "ai"))).order_by(Source.name, Source.id)))
+    return {"policy": await get_policy(session), "receipts": [{"id": r.id, "task": r.task, "ref_id": r.ref_id,
+        "status": r.status, "model": r.model, "attempts": r.attempts, "error": r.error, "updated_at": r.updated_at} for r in receipts],
+        "sources": [{"id": s.id, "name": s.name or s.external_id, "platform": s.platform,
+            "owner_key": s.owner_key, "editorial_tier": s.editorial_tier,
+            "identity": s.identity} for s in sources]}
+
+
+@router.put("/editorial")
+async def update_editorial(body: EditorialPolicyBody, session: AsyncSession = Depends(get_session)):
+    from app.services.editorial_calls import POLICY_KEY
+    body.group_model, body.score_model = body.group_model.strip(), body.score_model.strip()
+    await settings_service.set_setting(session, POLICY_KEY, body.model_dump())
+    return body
+
+
+@router.patch("/editorial/sources/{source_id}")
+async def update_editorial_source(source_id: int, body: EditorialSourceBody, session: AsyncSession = Depends(get_session)):
+    from app.models import Source
+    source = await session.get(Source, source_id)
+    if source is None:
+        raise HTTPException(404, "来源不存在")
+    source.owner_key = (body.owner_key or "").strip().casefold() or None
+    source.editorial_tier = body.editorial_tier
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/editorial/run")
+async def run_editorial(queue=Depends(get_queue)):
+    try:
+        job = await queue.enqueue_editorial()
+    except Exception as exc:
+        raise HTTPException(503, "资讯编辑队列暂不可用") from exc
+    return {"queued": job is not None}
+
+
+@router.post("/editorial/receipts/{receipt_id}/retry")
+async def retry_editorial_receipt(receipt_id: int, body: dict, session: AsyncSession = Depends(get_session)):
+    from app.models import EditorialReceipt
+    receipt = await session.get(EditorialReceipt, receipt_id)
+    if receipt is None:
+        raise HTTPException(404, "调用回执不存在")
+    if body.get("confirmed") is not True:
+        raise HTTPException(400, "请先核对上游请求，重试可能再次计费")
+    if receipt.status == "pending" and receipt.updated_at > utcnow() - timedelta(minutes=10):
+        raise HTTPException(409, "请求仍在执行，请稍后核对")
+    receipt.status, receipt.attempts, receipt.error = "failed", 0, "管理员核对后允许重试"
+    receipt.updated_at = utcnow() - timedelta(minutes=11)
+    await session.commit()
+    return {"ok": True}
 
 
 @router.get("/config")

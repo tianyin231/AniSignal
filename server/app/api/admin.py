@@ -651,6 +651,11 @@ async def split_event_endpoint(
         if str(exc) in {"event_not_found", "evidence_not_found"}:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if event.category == "ai_news":
+        from app.models import NewsGrouping
+        from sqlalchemy import update
+        await session.execute(update(NewsGrouping).where(NewsGrouping.raw_content_id.in_(body.content_ids))
+            .values(event_id=event.id, story_id=event.id))
     await session.commit()
     await session.refresh(event)
     return (await events_to_out(session, [event], include_detail=True))[0]
@@ -706,6 +711,10 @@ async def merge_events(
     target = await session.get(Event, body.target_id)
     if source is None or target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "event not found")
+    if (source.category == "ai_news" or target.category == "ai_news") and (
+        source.category != target.category or source.community != target.community
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "资讯事件只能在同一分区内合并")
 
     existing = set(
         await session.scalars(
@@ -723,6 +732,14 @@ async def merge_events(
         moved += 1
     source.is_active = False
     source.manual_locked = True
+    if source.category == "ai_news":
+        from app.models import NewsGrouping
+        from sqlalchemy import update
+        target_story = await session.scalar(select(NewsGrouping.story_id).where(NewsGrouping.event_id == target.id).limit(1)) or target.id
+        await session.execute(update(NewsGrouping).where(NewsGrouping.event_id == source.id)
+            .values(event_id=target.id, story_id=target_story))
+        await session.execute(update(NewsGrouping).where(NewsGrouping.story_id == source.id).values(story_id=target_story))
+        target.manual_locked = True
     session.add(
         EventRevision(
             event_id=target.id,

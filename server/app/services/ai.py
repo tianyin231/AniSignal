@@ -236,6 +236,8 @@ async def summarize_event(
     event = await session.get(Event, event_id)
     if event is None:
         return {"status": "skipped", "reason": "event_not_found"}
+    if event.category == "ai_news":
+        return {"status": "skipped", "reason": "news_has_reviewed_summary"}
     if (event.manual_locked or event.summary_status == "manual") and not force:
         return {"status": "skipped", "reason": "manual_locked"}
 
