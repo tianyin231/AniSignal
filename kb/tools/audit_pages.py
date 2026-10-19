@@ -72,44 +72,48 @@ def main() -> int:
     # 顺带把每页 wikitext 里出现的所有"图鉴/数据"类模板名记下来，找第 10 种
     LIKE_RX = re.compile(r"^\s*{{\s*([^{}|\n]+?)\s*(?:\|[^}]*)?$", re.M)
 
-    for shard in sorted(source.glob("*.jsonl.gz")):
-        with gzip.open(shard, "rt", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                rec = json.loads(line)
-                title = rec["title"]
-                wt = rec["wikitext"]
-                total += 1
+    # 必须和 parse.py 用同一套进程级开关：星铁/方舟的模板名里嵌 HTML 注释，
+    # 不开 strip_template_name_comments 的话 `光锥图鉴<!--备注-->` 匹配不上白名单，
+    # 146 个光锥会被误判成 other（审计工具自己得先和 driver 对齐，否则越审计越错）。
+    with cleantext.wiki_style(cfg.display_templates, cfg.strip_template_name_comments):
+        for shard in sorted(source.glob("*.jsonl.gz")):
+            with gzip.open(shard, "rt", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    rec = json.loads(line)
+                    title = rec["title"]
+                    wt = rec["wikitext"]
+                    total += 1
 
-                found = cleantext.top_level_infobox(
-                    wt, infobox_names, cfg.legacy_infobox_template_names,
-                    tuple(cfg.infobox_template_prefixes))
-                if found:
-                    kind = (cfg.kind_of(cleantext.infobox_template_name(
-                        found[0], tuple(cfg.infobox_template_prefixes))) or ("other",))[0]
-                else:
-                    kind = next((k for rx, k in cfg.title_patterns if rx.match(title)), "other")
-                if kind == "other":
-                    other_break[classify(title, wt, title_rules)] += 1
-                kinds[kind] += 1
+                    found = cleantext.top_level_infobox(
+                        wt, infobox_names, cfg.legacy_infobox_template_names,
+                        tuple(cfg.infobox_template_prefixes))
+                    if found:
+                        kind = (cfg.kind_of(cleantext.infobox_template_name(
+                            found[0], tuple(cfg.infobox_template_prefixes))) or ("other",))[0]
+                    else:
+                        kind = next((k for rx, k in cfg.title_patterns if rx.match(title)), "other")
+                    if kind == "other":
+                        other_break[classify(title, wt, title_rules)] += 1
+                    kinds[kind] += 1
 
-                for k, rx in FEATURES.items():
-                    if rx.search(wt):
-                        feat[k] += 1
+                    for k, rx in FEATURES.items():
+                        if rx.search(wt):
+                            feat[k] += 1
 
-                # infobox 候选：顶层模板里带"图鉴"或字段很多的
-                for m in LIKE_RX.finditer(wt[:4000]):
-                    n = m.group(1).strip()
-                    if "图鉴" in n or "信息" in n or "数据" in n or "档案" in n:
-                        all_infobox_like[n] += 1
+                    # infobox 候选：顶层模板里带"图鉴"或字段很多的
+                    for m in LIKE_RX.finditer(wt[:4000]):
+                        n = m.group(1).strip()
+                        if "图鉴" in n or "信息" in n or "数据" in n or "档案" in n:
+                            all_infobox_like[n] += 1
 
-                if kind == "other" and len(wt) > 3000:
-                    body = cleantext.to_plain(found[1] if found else wt)
-                    if len(body) < 200:
-                        zero_chunk.append({"title": title, "len": len(wt),
-                                           "body": len(body)})
+                    if kind == "other" and len(wt) > 3000:
+                        body = cleantext.to_plain(found[1] if found else wt)
+                        if len(body) < 200:
+                            zero_chunk.append({"title": title, "len": len(wt),
+                                               "body": len(body)})
 
     result = {
         "pages": total,

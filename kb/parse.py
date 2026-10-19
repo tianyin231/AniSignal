@@ -390,7 +390,8 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
             emit_pack(cleantext.gallery_lines(wikitext), "图库", "gallery", title, url, images)
             emit_pack(cleantext.hidden_lines(wikitext), "隐藏正文", "hidden", title, url, images)
             emit_pack(cleantext.template_dump(body_wikitext, exclude=str(found) if found else None,
-                                             nav_prefixes=cfg.nav_template_prefixes),
+                                             nav_prefixes=cfg.nav_template_prefixes,
+                                             in_tags=cfg.dump_templates_in_tags),
                       "模板数据", "template", title, url, images)
             if fields:
                 voice = [f"{scene}：{line}" for scene, line in

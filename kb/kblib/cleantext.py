@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 import re
 from contextlib import contextmanager
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 import mwparserfromhell
 
@@ -450,14 +450,34 @@ def hidden_lines(wikitext: str) -> list[str]:
     return out
 
 
+def _outer_templates(nodes: Any) -> Iterator[Any]:
+    """收"不在别的模板参数里"的模板节点。
+
+    `wc.filter_templates(recursive=False)` 只给根级节点，`recursive=True` 又把嵌在
+    参数里的子模板也翻出来（转存时父子内容会重复一遍）。这里取中间那一层：Tag
+    内容继续下钻（`<div id="srCharGuide">` 里裹着整页成就表），Template 参数不下钻。
+    """
+    for n in nodes:
+        name = type(n).__name__
+        if name == "Template":
+            yield n
+        elif name == "Tag":
+            contents = getattr(n, "contents", None)
+            if contents is not None and getattr(contents, "nodes", None):
+                yield from _outer_templates(contents.nodes)
+
+
 def template_dump(src: Any, exclude: Any = None,
-                  nav_prefixes=None) -> list[str]:
+                  nav_prefixes=None, in_tags: bool = False) -> list[str]:
     """数据型模板的全参数转存。
 
     `_plain_template` 的通用兜底只取无名参数 1，像 `{{世界巡游|1=物资|1n=…}}`
     （整页是 100 级奖励表）、`{{每月签到}}`（116KB）、`{{InfoBox}}`、
     `{{META图鉴}}`（介绍字段几千字）这种"参数即正文"的模板就只剩两个字。
     这里把这类模板的所有参数摊平，交给调用方另切 chunk。
+
+    in_tags=True 时连 <div>/<span> 里的模板一起转存（星铁 BWIKI 的成就表、
+    配装详表都裹在 div 里），见 _outer_templates。
     """
     wc = src if not isinstance(src, str) else parse_wikitext(src)
     if wc is None:
@@ -466,7 +486,9 @@ def template_dump(src: Any, exclude: Any = None,
     if nav_prefixes is None:
         nav_prefixes = load_game(DEFAULT_GAME).nav_template_prefixes
     out: list[str] = []
-    for tpl in wc.filter_templates(recursive=False):
+    pool: Iterable[Any]
+    pool = _outer_templates(wc.nodes) if in_tags else wc.filter_templates(recursive=False)
+    for tpl in pool:
         raw = str(tpl)
         if skip and raw == skip:
             continue

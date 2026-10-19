@@ -114,6 +114,11 @@ class GameConfig:
     nav_template_prefixes: tuple[str, ...]
     noise_section_keywords: tuple[str, ...]
     min_infobox_fields: int
+    # 模板转存（template_dump）是否连 <div> 里的模板一起收。星铁 BWIKI 把成就表/
+    # 配装详表整页塞进 `<div id="srCharGuide">`，mwparserfromhell 的
+    # filter_templates(recursive=False) 看不到 Tag 内容里的节点，只收根级模板
+    # 会把这 500K 字全丢掉。默认 false：碧蓝航线/方舟的输出一个字节不变。
+    dump_templates_in_tags: bool
     # 展示型模板渲染表：模板名 → 要渲染的参数名（位置参数写 "1"/"2"…，空元组=渲染成空）
     display_templates: dict[str, tuple[str, ...]]
     # 模板名里嵌 HTML 注释时是否剥掉再比对（PRTS 的 CharinfoV2 就嵌了一行）
@@ -252,6 +257,7 @@ def load_game(name: str | None = None) -> GameConfig:
         nav_template_prefixes=_as_tuple_str(parse.get("nav_template_prefixes")),
         noise_section_keywords=_as_tuple_str(parse.get("noise_section_keywords")),
         min_infobox_fields=int(parse.get("min_infobox_fields", 5)),
+        dump_templates_in_tags=bool(parse.get("dump_templates_in_tags", False)),
         display_templates=_as_display(parse.get("display_templates")),
         strip_template_name_comments=bool(parse.get("strip_template_name_comments", False)),
         extractor_module=(str(parse["extractor_module"]) if parse.get("extractor_module") else None),
