@@ -158,7 +158,10 @@ def probe_entity_json(cur, cfg, title: str, key: str) -> str | None:
 def _child_where(cur, cfg, table: str, title: str, column: str,
                  where: dict | None) -> tuple[str, list]:
     """拼子表查询：表名/列名必须在配置里声明过，防止题库里的字符串直接进 SQL。"""
-    allowed = child_table_columns(cfg).get(table)
+    allowed = list(child_table_columns(cfg).get(table) or [])
+    # page_title/sort/template 是子表骨架列（CHILD_TABLE_COLUMNS），配置里不声明
+    # 但每张表都有——题库按 sort 取"第几个技能"这类问法得能过白名单
+    allowed += [c for c in CHILD_SYS_COLUMNS if c not in allowed]
     if not allowed:
         raise ValueError(f"游戏 {cfg.name} 没有声明子表 {table}")
     if column not in allowed:
