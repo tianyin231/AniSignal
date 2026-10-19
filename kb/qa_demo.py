@@ -33,7 +33,7 @@ def generate(question, chunks):
     )
     body = json.dumps({
         "model": MODEL,
-        "max_tokens": 600,
+        "max_tokens": 1500,
         "messages": [{"role": "user", "content": prompt}],
     }).encode()
     req = urllib.request.Request(
