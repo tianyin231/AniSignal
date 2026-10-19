@@ -228,6 +228,44 @@ BM25 索引 **120114 docs / 188010 词条**（jieba 分词，232s 建完，84.7 
 检索也拉不到模板原文 chunk，模型按提示词要求回了"无法确定"而不是编一个——对 bot 来说
 这个失败模式比 hallucination 好，但确实是下一轮要补的。
 
+### 鸣潮（mingchao）
+
+| 指标 | 数值 |
+|---|---|
+| 抓取篇数 | 1779（ns0 非重定向正文全量，5 个 gzip 分片）+ 21 个重定向别名 |
+| 带 infobox 页 | 1304（结构化抽取率 87.0%，全页占比 63.8%） |
+| **chunk 数** | **5247**（prose 1679 / card 1304 / template 1417 / fields 745 / hidden 102；186.7 万字） |
+| **向量数** | **5247**（qdrant collection `mingchao_kb`，chunk/向量逐条对账：文本全一致、0 缺 0 多 0 变） |
+| SQLite 表 | 13 张（`entities` 1304 / `entity_attrs` 8778 + 8 张 `mc_*` 子表 + `aliases` 21 + `pages`/`page_images`/`parse_stats`） |
+| 实体分布 | 道具 461 / 名词注释 409 / 声骸 138 / 武器 121 / 共鸣者 59 / 敌人 59 / 声骸合鸣 34 / 探索报告 15 / 活动 5 / NPC 3 |
+
+`mc_*` 子表：`mc_resonator_stats` 1657 行（59 页，38 页有完整 14 级表）、
+`mc_resonator_skills` 49（另 10 页 wiki 上就是空模板壳，编辑没填）、
+`mc_resonator_innate` 285（98 固有技能 + 187 属性加成）、`mc_resonator_chains` 348、
+`mc_resonator_stories` 432（270 故事 + 162 珍贵之物）、`mc_weapon_ascension` 715、
+`mc_exploration_reports` 30。
+
+鸣潮这一版把 `rows_from` 的 `const` 也纳入子表 DDL（`extractors/__init__.py`）：
+「共鸣者/档案」模板里故事 N 和珍贵之物 N 是两条独立 pattern、**index 都从 1 起**，
+不带一列 `const: {category}` 区分的话 `where index=1` 取到哪条全看 sort——
+评测题 t26/t27 以前就是用 `index=None` 占位绕过的，expect 因此错填成故事1 的名字。
+
+**eval 通过率**（50 题：查表 30 + 问答 20，混合检索 top-20 → rerank → top-3）：
+查表 30/30 = 100%；问答 20/20 = 100%；**总计 50/50 = 100.0%**
+（明细见 `data/mingchao/eval_report.json`）。BM25 索引 5247 docs / 53141 词条 / 7.3 MB（35s）。
+
+问答短板和方舟是同一类，但**根因更具体、也更值得记住**：`图鉴字段` chunk 的文本
+一个字的页名都不带（`技能描述: 施放变奏技能时……`），向量上跟本页卡片几乎不沾边，
+BM25 那条路也匹配不到实体名。于是问「永夜长明的武器技能有什么效果」时，top3 是
+"本页卡片 + 两个不相干武器页"，答案明明在 `x0002837` 却排不进来。
+修法不是加 chunk（chunk_id 全局递增，插一个 per-page chunk 会让后面所有 id 错位、
+增量 upsert 退化成全量重建），而是把长描述字段补进 `card_fields`：
+weapon+`技能描述`、enemy+`描述`、echo+`技能简述`、item+`次要描述,故事`、
+exploration+`50%内容,100%内容`。关键前提是鸣潮的 `parse.card_field_keys` 是 `{}`，
+这些字段**不会**从 fields chunk 里被剔掉，所以 chunk 条数一分不变——重跑 parse 后
+5247 个 chunk_id 逐个一致，只有 694 个 card chunk 的文本变了，`--append` 按
+chunk_id 原地覆盖这 694 个、跳过 4553 个文本一致的，重嵌从"全库 5247"降到 694。
+
 ## 开发小工具
 
 ```bash
