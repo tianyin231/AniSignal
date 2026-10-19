@@ -77,6 +77,35 @@ async def test_official_announcements_merged_into_event(session):
     assert stats.events_created >= 1
 
 
+async def test_load_classified_contents_uses_only_latest_version(session):
+    """聚合只认每个内容的最新版本，且不为旧版本多载一行（PERF-014）。"""
+    from app.models import ContentVersion
+    from app.services.events import load_classified_contents
+
+    await ingest_items(session, "bilibili_search", [await _video("BVlatest", "旧标题")])
+    raw = await session.scalar(select(RawContent).where(RawContent.external_id == "BVlatest"))
+    await ingest_items(session, "bilibili_search", [await _video("BVother", "另一条内容")])
+
+    # 手工再造两个版本：v2 改标题、v3 改标题 + 分类
+    session.add_all(
+        [
+            ContentVersion(raw_content_id=raw.id, version=2, title="新标题", text="第二版正文"),
+            ContentVersion(
+                raw_content_id=raw.id, version=3, title="最新标题", text="第三版正文", category="delay"
+            ),
+        ]
+    )
+    await session.commit()
+
+    rows = await load_classified_contents(session)
+    by_id = {row.raw_id: row for row in rows}
+    assert len(rows) == len(by_id)  # 一条内容一行，不被旧版本放大
+    assert len(rows) == 2
+    assert by_id[raw.id].title == "最新标题"
+    assert by_id[raw.id].text == "第三版正文"
+    assert by_id[raw.id].category == "delay"
+
+
 async def test_aggregation_idempotent(session):
     await _seed_rules(session)
     a = dict(VIDEO_RAW, bvid="BVidem", title="爱弥斯联名键盘延期发货公告", owner_mid=1955897084, owner_name="鸣潮")
