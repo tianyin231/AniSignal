@@ -49,6 +49,7 @@ from app.schemas.api import (
     RuleCreate,
     RuleOut,
     RunTriggerOut,
+    validate_target_value,
 )
 from app.services.queue import ArqQueue, BaseQueue, LocalQueue
 from app.services.views import events_to_out, product_to_out
@@ -142,18 +143,25 @@ async def update_target(
     if body.interval_minutes is not None:
         target.interval_minutes = body.interval_minutes
     if body.target_value is not None and body.target_value != target.target_value:
+        # 目标类型不能改，格式校验按既有 (platform, target_type) 组合来判
+        try:
+            new_value = validate_target_value(
+                target.platform, target.target_type, body.target_value
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
         duplicate = await session.scalar(
             select(CollectTarget).where(
                 CollectTarget.platform == target.platform,
                 CollectTarget.target_type == target.target_type,
-                CollectTarget.target_value == body.target_value,
+                CollectTarget.target_value == new_value,
                 CollectTarget.community == target.community,
                 CollectTarget.id != target.id,
             )
         )
         if duplicate is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "target already exists")
-        target.target_value = body.target_value
+        target.target_value = new_value
     if body.tier is not None:
         target.tier = body.tier
     if body.community is not None:
@@ -745,6 +753,10 @@ async def create_product(body: ProductCreate, session: AsyncSession = Depends(ge
     if body.create_bilibili_target:
         # 搜索词默认使用完整商品名，避免以角色名等宽泛匹配词采回大量无关内容。
         keyword = (body.monitor_keyword or "").strip() or body.name.strip()
+        try:
+            keyword = validate_target_value("bilibili", "keyword_search", keyword)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
         target = await session.scalar(
             select(CollectTarget).where(
                 CollectTarget.platform == "bilibili",

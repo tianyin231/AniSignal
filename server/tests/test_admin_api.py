@@ -89,6 +89,94 @@ async def test_target_crud_flow(client, admin_headers, session):
     assert await session.get(CollectTarget, created["id"]) is None
 
 
+async def test_target_value_rejects_option_like_and_malformed_values(client, admin_headers):
+    """target_value 会进 bili CLI argv：入口必须挡住选项注入与格式错误（SEC-025/032）。
+
+    注意真正的注入向量是「以 - 开头」——argv 是列表，`鸣潮 --type user` 整串只是
+    一个位置参数，不会被 argparse 当成选项；只有以 `-` 开头的值才会被解析成选项。
+    """
+    resp = await client.post(
+        "/api/admin/collect-targets",
+        json={
+            "platform": "bilibili",
+            "target_type": "keyword_search",
+            "target_value": "-o /tmp/x",
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 422
+
+    resp = await client.post(
+        "/api/admin/collect-targets",
+        json={
+            "platform": "bilibili",
+            "target_type": "keyword_search",
+            "target_value": "--type user",
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 422
+
+    # 账号型目标必须是数字 MID
+    resp = await client.post(
+        "/api/admin/collect-targets",
+        json={"platform": "bilibili", "target_type": "account_videos", "target_value": "1955897084 -o x"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 422
+
+    # 控制字符同样拒绝
+    resp = await client.post(
+        "/api/admin/collect-targets",
+        json={
+            "platform": "bilibili",
+            "target_type": "keyword_search",
+            "target_value": "鸣潮\nBcc: x@y.z",
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 422
+
+    # 合法值照常通过
+    resp = await client.post(
+        "/api/admin/collect-targets",
+        json={
+            "platform": "bilibili",
+            "target_type": "account_dynamics",
+            "target_value": "1955897084",
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 201
+    target_id = resp.json()["id"]
+
+    # 更新路径同样校验（按既有 platform/target_type 判）
+    resp = await client.put(
+        f"/api/admin/collect-targets/{target_id}",
+        json={"target_value": "--no-cache"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 400
+
+
+async def test_bili_collector_refuses_unauthorized_options():
+    """argv 白名单：外部数据里的选项不许进 create_subprocess_exec（SEC-025）。"""
+    import pytest
+
+    from app.collectors.bilibili import BilibiliCollector
+    from app.collectors.base import CollectorError
+
+    collector = BilibiliCollector()
+    for bad in (
+        ("search", "鸣潮", "-o", "/tmp/x"),
+        ("dynamics", "123", "--output", "json"),
+        ("user", "-n", "10"),
+        ("video", "-o", "json"),
+    ):
+        with pytest.raises(CollectorError):
+            await collector._run(*bad)
+
+
 async def test_trigger_run(client, admin_headers, fake_queue):
     resp = await client.post(
         "/api/admin/collect-targets",

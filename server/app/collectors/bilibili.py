@@ -64,6 +64,19 @@ def _circuit_reset(command: str) -> None:
     _CIRCUIT_STATE.pop(command, None)
 
 
+# bili CLI 的选项白名单：_run 只放行这些以 `-` 开头的参数。其余任何以 `-` 开头的
+# 值（来自 collect_targets.target_value 或上游 JSON 的 bvid）一律拒绝执行——
+# 否则外部数据会被 CLI 当选项解析（`-o` 写文件 / `--type` 换命令，参数劫持）。
+_BILI_FLAGS = frozenset({"--type", "--videos", "--no-cache", "-n", "-o"})
+
+
+def _guard_argv(args: tuple[str, ...]) -> None:
+    """拒绝把外部数据当成 CLI 选项传入（第一个参数是命令名，其余按白名单判）。"""
+    for arg in args[1:]:
+        if arg.startswith("-") and arg not in _BILI_FLAGS:
+            raise CollectorError(f"bili 参数含未授权选项 {arg!r}，已拒绝执行")
+
+
 class BilibiliCollector:
     platform = Platform.BILIBILI
 
@@ -78,8 +91,12 @@ class BilibiliCollector:
 
         风控门禁拒绝不重试：门禁按 IP 持续生效，秒级重试无意义；
         连续两次拒绝即熔断该命令一段时间，冷却到期后由下一次调用自然探测。
+
+        argv 全部来自受控集合：命令名 + `_BILI_FLAGS` 白名单 + 已校验的目标值，
+        不走 shell（create_subprocess_exec），因此不存在 shell 注入面。
         """
         command = args[0] if args else ""
+        _guard_argv(args)
         if _circuit_open(command):
             raise BiliRiskControlError(
                 f"bili {command} skipped: circuit open after risk-control refusals"
@@ -111,7 +128,10 @@ class BilibiliCollector:
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self._timeout)
         except TimeoutError:
+            # kill 之后必须 wait：只 kill 不回收会留下僵尸进程，PIPE fd 也不释放，
+            # worker 长期跑下来会耗尽文件描述符（EMFILE），表现为采集随机全挂。
             proc.kill()
+            await proc.wait()
             raise CollectorError(f"bili command timed out after {self._timeout}s: {args}") from None
         if proc.returncode != 0:
             stderr_text = stderr.decode(errors="replace")

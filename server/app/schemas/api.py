@@ -3,7 +3,7 @@
 import re
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _none_to_list(v):
@@ -13,6 +13,37 @@ from app.communities import DEFAULT_COMMUNITY as _DEFAULT_COMMUNITY, community_p
 from app.models.enums import Platform, TargetType
 
 COMMUNITY_PATTERN = _community_pattern()
+
+# 采集目标取值按 (platform, target_type) 收敛：这些值最终会进子进程 argv（bili CLI）
+# 或外部请求参数，入口不拦就等于把参数注入面敞开（审计 SEC-025 / SEC-032）。
+_TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
+    ("bilibili", "keyword_search"): re.compile(r"^[^\x00-\x1f\x7f]{1,64}$"),
+    ("bilibili", "account_videos"): re.compile(r"^\d{1,20}$"),
+    ("bilibili", "account_dynamics"): re.compile(r"^\d{1,20}$"),
+    ("miyoushe", "keyword_search"): re.compile(r"^[^\x00-\x1f\x7f]{1,64}$"),
+    ("kuro_cn", "notices"): re.compile(r"^default$"),
+    ("kuro_global", "notices"): re.compile(r"^default$"),
+    ("youtube", "channel_rss"): re.compile(r"^[A-Za-z0-9_-]{10,64}$"),
+}
+
+
+def validate_target_value(platform, target_type, value) -> str:
+    """按平台与目标类型收敛 target_value；返回规整值，不合法抛 ValueError。
+
+    三条硬规则对所有组合生效：非空、不以 `-` 开头（否则会被 CLI 当选项解析）、
+    不含控制字符。已登记的组合再按各自格式校验（账号必须是数字 MID 等）。
+    """
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("target_value 不能为空")
+    if text.startswith("-"):
+        raise ValueError("target_value 不能以 - 开头（会被采集命令当作选项解析）")
+    if any(char.isspace() and char != " " for char in text):
+        raise ValueError("target_value 不能包含制表符/换行等控制字符")
+    pattern = _TARGET_VALUE_RULES.get((str(platform), str(target_type)))
+    if pattern is not None and not pattern.match(text):
+        raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")
+    return text
 
 
 class CollectTargetCreate(BaseModel):
@@ -28,6 +59,17 @@ class CollectTargetCreate(BaseModel):
     community: str = Field(default=_DEFAULT_COMMUNITY, pattern=COMMUNITY_PATTERN)
     # 监控意图：自然语言描述"这个目标到底在乎什么"（空 = 不送 AI 打标）
     intent: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _check_target_value(self):
+        # 格式依赖 platform + target_type 两个字段，只能用 model_validator
+        try:
+            self.target_value = validate_target_value(
+                self.platform, self.target_type, self.target_value
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        return self
 
 
 class CollectTargetUpdate(BaseModel):
