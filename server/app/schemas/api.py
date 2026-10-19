@@ -2,8 +2,11 @@
 
 import re
 from datetime import date, datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, AfterValidator, field_validator, model_validator
+
+from app.services.urls import is_public_http_url
 
 
 def _none_to_list(v):
@@ -13,6 +16,43 @@ from app.communities import DEFAULT_COMMUNITY as _DEFAULT_COMMUNITY, community_p
 from app.models.enums import Platform, TargetType
 
 COMMUNITY_PATTERN = _community_pattern()
+
+# 出参 URL 的统一收敛（SEC-035）：这些字段的值原样来自 raw_contents.url 与
+# normalized_json.media，采集层与解析层都不校验 scheme，而前端有 19 处裸
+# `<a :href>` / `<img :src>` 直接绑定——采集来的 `javascript:` / `data:` 会变成
+# 存储型 XSS，内网 URL 则把拓扑暴露给公开端点。schema 是最后一个能统一收口的点，
+# 非法值一律置 None（字段本就是 Optional），调用方按"没有链接"渲染。
+def _safe_link_url(value: str | None) -> str | None:
+    """链接字段：必须是公网 http(s)，否则置 None。"""
+    if value is None:
+        return None
+    return value if is_public_http_url(value.strip()) else None
+
+
+def _safe_media_url(value: str | None) -> str | None:
+    """封面/图片 URL：只卡 scheme，不卡 host。
+
+    与链接字段区别对待：封面来自各家 CDN，其中不乏未登记主机，按公网链接的标准拒会把
+    正常封面静默清空（用户看到的是裂图，看不出是校验干的）。XSS 向量是 scheme
+    （`javascript:` / `data:` / `vbscript:`），卡住它就够。
+    """
+    if value is None:
+        return None
+    candidate = value.strip()
+    if candidate.lower().startswith(("http://", "https://")) and "\\" not in candidate:
+        return candidate
+    return None
+
+
+def _safe_media_urls(value) -> list[str]:
+    """`media` 列表版：逐个卡 scheme，非法项直接丢掉（列表没有"None 占位"的语义）。"""
+    if not isinstance(value, list):
+        return []
+    return [u for u in (_safe_media_url(item) for item in value if isinstance(item, str)) if u]
+
+
+SafeLinkUrl = Annotated[str | None, AfterValidator(_safe_link_url)]
+SafeMediaUrl = Annotated[str | None, AfterValidator(_safe_media_url)]
 
 # 采集目标取值按 (platform, target_type) 收敛：这些值最终会进子进程 argv（bili CLI）
 # 或外部请求参数，入口不拦就等于把参数注入面敞开（审计 SEC-025 / SEC-032）。
@@ -132,7 +172,7 @@ class ContentItemOut(BaseModel):
     content_type: str
     external_id: str
     community: str = _DEFAULT_COMMUNITY
-    url: str | None
+    url: SafeLinkUrl
     published_at: datetime | None
     collected_at: datetime
     source_name: str | None = None
@@ -155,7 +195,7 @@ class PublicContentItem(BaseModel):
     platform: Platform
     content_type: str
     external_id: str
-    url: str | None
+    url: SafeLinkUrl
     title: str | None
     text_excerpt: str | None
     published_at: datetime | None
@@ -164,7 +204,7 @@ class PublicContentItem(BaseModel):
     identity: str
     category: str | None = None
     metrics: dict | None
-    cover: str | None
+    cover: SafeMediaUrl
     preview_mode: str  # full / partial / external_only
     matched_keywords: list[str] = []
     community: str = _DEFAULT_COMMUNITY
@@ -188,7 +228,7 @@ class ContentDetailOut(BaseModel):
     platform: Platform
     content_type: str
     external_id: str
-    url: str | None
+    url: SafeLinkUrl
     title: str | None
     text: str | None
     text_html: str | None = None  # 含 HTML 的正文经 bleach 消毒后返回
@@ -198,7 +238,7 @@ class ContentDetailOut(BaseModel):
     source_name: str | None = None
     source_identity: str | None = None
     identity: str
-    media: list[str] = []
+    media: list[str] = Field(default_factory=list)
     metrics: dict | None = None
     metrics_history: list[ContentMetricPoint] = []
     event: dict | None = None
@@ -206,6 +246,13 @@ class ContentDetailOut(BaseModel):
     matched_keywords: list[str] = []
     version: int | None = None
     preview_mode: str
+
+    @field_validator("media", mode="before")
+    @classmethod
+    def _filter_media(cls, value):
+        # SEC-035：media 原样来自 normalized_json，前端 19 处裸 `<img :src>` 之一
+        # 直接绑它。非 http(s) 的项在这里丢掉，见 _safe_media_urls 的说明。
+        return _safe_media_urls(value)
 
 
 class PublicSource(BaseModel):
@@ -327,7 +374,7 @@ class EventSourceOut(BaseModel):
     title: str | None = None
     region: str
     published_at: datetime | None
-    url: str | None
+    url: SafeLinkUrl
     content_id: int | None = None
     identity: str = "unknown"
 
@@ -389,7 +436,7 @@ class ProductEvidenceOut(BaseModel):
     identity: str
     category: str | None = None
     published_at: datetime | None = None
-    url: str | None = None
+    url: SafeLinkUrl = None
 
 
 class FulfillmentAxisOut(BaseModel):
@@ -433,7 +480,7 @@ class ProductSignalOut(BaseModel):
     content_title: str | None = None
     platform: str
     account: str | None = None
-    url: str | None = None
+    url: SafeLinkUrl = None
     review_note: str | None = None
     updated_at: datetime | None = None
     ai_hint: dict | None = None
