@@ -1,0 +1,36 @@
+# 明日方舟（PRTS wiki）——第二款游戏，验证"一游戏一配置"能不能零代码换 wiki。
+#
+# 结构化路全部走 parse.kinds 的通用实体路（entities + entity_attrs + 这里声明的
+# 子表）：CharinfoV2（干员）/敌人信息（敌人）/道具信息（道具）/关卡信息（关卡）…
+# 一共 8 族，kblib/extractors/azurlane.py 那种专用抽取器一行都没写。
+#
+# 字段名都是 PRTS wikitext 里的原样参数名（ spike 抓 阿米娅/夜刀/源石虫/装置/
+# 至纯源石/0-1 坍塌 等样本 + 扫 1.1 万页顶层模板分布后定的），全量抓完再用
+# tools/audit_pages.py 复核一遍。
+name: arknights
+label: 明日方舟
+wiki_base: https://prts.wiki
+api_url: https://prts.wiki/api.php
+user_agent: anisignal-kb/0.1 (offline knowledge-base build; polite 1 req/s)
+data_dir: data/arknights
+eval_dir: eval/arknights
+chunk_id_prefix: arknights
+collection: arknights_kb
+namespaces: [0]
+
+fetch:
+  rps: 1.0                 # PRTS 是社区维护的小 wiki，比 BWIKI 更客气一点
+  batch_titles: 20
+  timeout: 180
+  max_retries: 6
+  backoff_cap: 60
+  shard_pages: 500
+
+chunk:
+  min: 60
+  target: 420
+  max: 900
+  voice_field_suffix: 台词  # PRTS 的台词参数叫 台词N，没有一个字段叫"…台词"，
+                            # 所以这个后缀实际不命中——台词走 ark_voice_lines 表
+  fields_chunk_min: 60
+  max_images_per_page: 16
