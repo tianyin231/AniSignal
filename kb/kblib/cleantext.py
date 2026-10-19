@@ -22,9 +22,11 @@ _CAT_PREFIXES = ("分类:", "category:", "Category:")
 _FILE_PREFIXES = ("file:", "image:", "文件:", "檔案:", "档案:")
 
 # 整个标签连内容一起丢掉的 HTML 标签
+# bstyle 是 BWIKI 私有的样式块（<bstyle>.name-section{…}</bstyle>），不在标准
+# HTML 里，不显式丢掉会按"未知标签保留内容"把一整段 CSS 漏进正文。
 _DROP_TAGS = {
     "ref", "references", "nowiki", "gallery", "timeline", "syntaxhighlight",
-    "source", "math", "code", "pre", "imagemap", "inputbox", "quiz",
+    "source", "math", "code", "pre", "imagemap", "inputbox", "quiz", "bstyle",
 }
 # 只保留内部文本的标签（解开）
 _UNWRAP_TAGS = {
@@ -191,6 +193,19 @@ def _plain_template(tpl: Any, depth: int) -> str:
     name = template_name(tpl)
     params = {str(p.name).strip(): p.value for p in tpl.params}
 
+    # 解析器函数把正文塞进了"模板名"里。`{{#replace:第18次维检：…}}` 冒号后紧跟
+    # 非空白、中间没有 |，mwparserfromhell 就把整段都当成模板名（name ==
+    # "#replace:第18次维检：…"），通用兜底只取参数 1 → 整段内容凭空消失。鸣潮
+    # BWIKI 的 道具/* 页（日记/记录日志/书籍/生态调查）28 处 9000 字全是这个写法。
+    # 规则：名字以 # 开头、冒号后那段够长（>=12，排除 {{#css:x}} {{#var:a}} 这种
+    # 真解析器函数的短参数）且不含模板语法（排除 {{#if:{{{参数名|}}}}})就当正文渲染。
+    # 别的游戏没有这种写法，输出一个字节不变。
+    if name.startswith("#") and ":" in name:
+        tail = _plain(tpl.name, depth + 1).split(":", 1)[1].strip()
+        if len(tail) >= 12 and "{{" not in tail:
+            # 编辑在 #replace 里写字时用字面量 \n 换行，还原成真换行再进正文
+            return tail.replace("\\n", "\n")
+
     # 游戏配置声明的展示型模板（PRTS 的 color/术语/+/*…），优先于 _VALUE_TEMPLATES。
     # 必须先查配置：星铁 BWIKI 的 {{颜色|描述2|50%/100%}} 和 {{颜色|冰|冰属性}} 给人看的
     # 值都在位置参数 2（参数 1 是机器键），而下面的 _VALUE_TEMPLATES 兜底取参数 1，
@@ -233,6 +248,12 @@ def to_plain(text: str) -> str:
     out = _plain(wc)
     out = re.sub(r"'''?", "", out)          # 粗体/斜体标记
     out = re.sub(r"__[A-Z]+__", "", out)     # __TOC__ / __NOTOC__
+    # 解析失败的解析器函数残骸：`{{#css: …}}`/`{{#ask: …}}` 冒号后带空格时
+    # mwparserfromhell 不认它是模板，整块以 Text 原样漏进正文（鸣潮 105 页
+    # 4 万字符，最坏的是 共鸣者/武器/敌人 这些索引页）。纯噪音，整块删掉。
+    # (?:(?!\{\{).)*? 是不跨越下一个 {{ 的非贪婪匹配——万一某块没写全闭合，
+    # 也不会把后面一整页的正文一起吞掉。
+    out = re.sub(r"\{\{#(?:(?!\{\{).)*?\}\}", "", out, flags=re.S)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip()
 
