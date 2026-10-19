@@ -47,13 +47,36 @@ MediaWiki API 批量拉 wikitext，只拉文本不下载图片。几个为"随�
 
 两条路并行：
 
-- **结构化路**：infobox 模板（舰娘/装备/指挥喵图鉴等 9 类）→ SQLite `data/kb.db`，
-  表：`ships / equipments / skills / ship_stats / ship_slots / cats / pages / parse_stats`。
+- **结构化路**：infobox 模板（v2 的舰娘/装备/指挥喵 9 类，v3 补的关卡图鉴/原型舰性能数据/
+  塞壬图鉴/同人角色 4 族）→ SQLite `data/kb.db`，
+  表：`ships / equipments / skills / ship_stats / ship_slots / cats / stages / ship_perf /
+  sirens / fan_ships / pages / parse_stats / aliases / page_images`。
   查表类问答直接走这里，精确匹配判分。
 - **文本路**：正文清洗（去导航模板、编辑标记、分类、"最后编辑于"噪音）→ 按语义切 chunk
   （一段讲一件事，`heading` 保留层级）→ `data/chunks.jsonl`，每行
-  `{chunk_id, text, source_title, source_url, heading, kind}`，`kind=card` 的是 infobox
-  结构化摘要（数值/技能名都在这），`kind=prose` 的是正文段落。
+  `{chunk_id, text, source_title, source_url, heading, kind, images?}`，`kind=card` 的是
+  infobox 结构化摘要（数值/技能名都在这），`kind=prose` 的是正文段落。
+
+v3 覆盖率审计（`docs/kb-coverage-audit.md`，漏了什么/补了什么/为什么不补）查出 v2 解析
+整体丢掉六类内容，逐类补捞，**老 chunk 一个不动、只新增**：
+
+- `kind=template`：通用模板兜底从"只取无名参数 1"改全参输出，`{{世界巡游}}`（整页 100 级
+  奖励表）、`{{每月签到}}` 这类数据型模板不再只剩一行；
+- `kind=fields`：infobox 一被抽取就从正文消失，>120 字的长字段（如 `META图鉴.介绍`）单独
+  成 chunk，不再只躺在 `fields_json` 里检索不到；
+- `kind=voice`：`*台词` 字段按"场景：台词"逐条入向量库（v2 只进了 SQLite）；
+- `kind=gallery`：`<gallery>` 图注（画师名、日期、装备名）以"文件名 说明"成对保留；
+- `kind=hidden`：HTML 注释里编辑藏起来的旧版正文（>800 字）整段捞回；
+- `kind=card`（新族）：关卡图鉴/原型舰/塞壬/同人角色的卡片摘要，走 `x` 前缀 chunk_id，
+  不挤占 v2 老 id。
+
+另外两条零成本增强：
+
+- **图片直链**：解析时把页面引用的文件名经 `prop=imageinfo&iiprop=url` 批量换成真实 URL
+  （`tools/fetch_images.py`，结果落 `data/image_urls.json` 缓存，**只记 URL 不下载**），
+  写进 chunk payload 的 `images` 字段（每页最多 16 张）+ `page_images` 表，
+  bot 回答时可直接甩 wiki 原链配图。
+- **重定向别名**：759 个别名页进 `aliases` 表，别名本身也能被检索到（内容在目标页里）。
 
 ### 3. embed_index.py —— 向量索引
 
@@ -81,12 +104,13 @@ MediaWiki API 批量拉 wikitext，只拉文本不下载图片。几个为"随�
 |---|---|
 | 抓取篇数 | 18573 / 18574（1 篇 Flow 页放弃，见 manifest.failed_titles） |
 | 原始 wikitext | ~30 MB（39 个 gzip 分片） |
-| 带 infobox 页 | 2139 |
-| **结构化抽取率** | **100.0%**（占带 infobox 页；全页占比 11.5%） |
-| chunk 数 | 33674（prose 31569 + card 2105） |
-| 向量数 | 33536（qdrant collection `blhx_kb`，chunk 总数 33674，差 138 为尾部未flush/去重） |
-| data/ 磁盘占用 | ~388 MB（原始 30 + kb.db 18 + chunks 51 + 向量库 174 + 模型另计 ~121 MB） |
-| 页面类型分布 | ship 953 / equipment 1152 / stage 147 / cat 34 / other 16287 |
+| 带 infobox 页 | 4399 |
+| **结构化抽取率** | **99.9%**（占带 infobox 页；全页占比 23.6%） |
+| chunk 数 | 53697（prose 31569 / card 4365 / template 8189 / fields 3696 / voice 3004 / gallery 2137 / hidden 737） |
+| 向量数 | 53697（qdrant collection `blhx_kb`，与 chunks.jsonl 行数一致；v2 尾部没 flush 的 138 个超长 chunk 已补齐） |
+| SQLite 表 | 14 张（v2 的 8 张 + `stages` / `ship_perf` / `sirens` / `fan_ships` / `aliases` / `page_images`） |
+| data/ 磁盘占用 | ~600 MB（原始 30 + kb.db 29 + chunks 91 + 向量库 330 + 模型另计 ~121 MB） |
+| 页面类型分布 | ship 953 / equipment 1152 / stage 2000 / ship_perf 105 / siren 93 / fan_ship 78 / cat 34 / other 14158 |
 
 **eval 通过率**：
 - v1（2026-10-19，纯向量 top-3）：查表 30/30 = 100%；问答 9/20 = 45%；总计 39/50 = 78%
@@ -98,7 +122,10 @@ MediaWiki API 批量拉 wikitext，只拉文本不下载图片。几个为"随�
   剩余检索短板主要是装备数值/配装指南类长尾（q07/q17/q18）。
 
 infobox 模板分布：舰娘图鉴 953、舰炮图鉴 298、特殊兵装图鉴 259、设备图鉴 216、
-舰载机图鉴 177、防空炮图鉴 120、鱼雷图鉴 80、指挥喵图鉴 34、导弹图鉴 2。
+舰载机图鉴 177、防空炮图鉴 120、鱼雷图鉴 80、指挥喵图鉴 34、导弹图鉴 2；
+v3 新增 4 族：关卡图鉴 1984、塞壬图鉴 93、飞行器性能数据 88、同人角色 78、
+原型舰性能数据 16、原型舰性能数据（潜艇）1（聚合/导航模板 `装备图鉴` 827、`关卡图鉴汇总` 196
+不抽，明细见 `docs/kb-coverage-audit.md` 第 4 节）。
 
 ## 开发小工具
 
