@@ -215,6 +215,40 @@ BM25 索引 **120114 docs / 188010 词条**（jieba 分词，232s 建完，84.7 
 目前只以原文形态进 template chunk，没进 `entity_attrs`——全库 0 个实体有 `种族`/`性别`/`出身地`
 属性，463 个干员的种族出身地因此查不到表。补上之后 q04 这类题查表和检索两条路都能通。
 
+### 崩坏3（honkai3）
+
+| 指标 | 数值 |
+|---|---|
+| 抓取篇数 | 1837 / 1837（ns0 全量，92 次请求，113s） |
+| 带 infobox 页 | 1188 |
+| **结构化抽取率** | **98.5%**（占带 infobox 页；全页占比 63.7%） |
+| chunk 数 | 2199（card 1176 / prose 270 / fields 739 / template 10 / gallery 3 / hidden 1） |
+| 向量数 | 2199（qdrant collection `honkai3_kb`，与 chunks.jsonl 行数一致） |
+| SQLite 表 | `entities` 1176 / `entity_attrs` 16533 + `h3_battlesuit_sp_skills` 16 + `aliases` 33 + `page_images` 270 |
+| 页面类型分布 | stigmata 458 / weapon 264 / stigmata_set 128 / battlesuit 94 / badge 67 / dorm_roster 55 / dorm_stigmata 38 / character 32 / boss 27 / furniture 17 / elf 8 / story 50 / other 599 |
+
+**崩坏3 是四款里唯一 infobox 驱动的站**：条目页基本只有一张图鉴模板、没有正文
+（`{{圣痕图鉴}}` 页整页就一个模板，314 字）。所以结构化路是主力、文本路只补漏
+（补捞 chunk 1929 vs prose 270），和前两款的比例正好反过来。这也意味着
+`card_fields` 必须把长描述字段（技能效果/介绍/boss简述）收进去——否则这些页的
+chunk 只剩"图鉴字段"，而图鉴字段 chunk 一个字的页名都不带，向量上召不回本页。
+
+模板名里嵌 HTML 注释（`{{女武神装甲 | <!--- 基本信息 ---> | |装甲名=…}}`），
+`strip_template_name_comments: true` 不开的话 infobox 白名单一个都匹配不上。
+展示型模板取值位置和鸣潮**正好相反**：崩坏3 是包色高亮 `{{蓝色|8.0}}` `{{黄色|QTE}}`，
+内容本身就是参数 1；鸣潮是 `{{颜色|技能|普攻}}` 机器键在 1、人看的在 2。
+
+**eval 通过率**（50 题：查表 30 + 问答 20，混合检索 top-20 → rerank → top-3）：
+查表 30/30 = 100%；问答 20/20 = 100%；**总计 50/50 = 100%**
+（明细见 `data/honkai3/eval_honkai3.json`）。
+
+比前两款高，但不是模型变强了，是两个站形态差异带来的：
+① 崩坏3 的问答答案几乎全在 card chunk 里（上面说的 infobox 驱动），而 card chunk
+   带实体名 + 一句人话摘要，向量和 BM25 两路都好召；
+② 题库的 expect 全部从 kb.db / chunk 实取校验过，没有手写错的期望值。
+——也就是说 100% 说明"结构化路覆盖到了该覆盖的页"，不代表泛化检索能力，
+   换一款没有 infobox 的站（比如原神那种正文驱动）不宜直接此外推。
+
 ### qa_demo 抽查（5 问，方舟库）
 
 | 问题 | 路由 | 结果 |
