@@ -26,6 +26,7 @@ from app.models import (
     ProductTrackState,
     RawContent,
     User,
+    WebhookConfig,
 )
 from app.models.content import ContentVersion
 from app.services import briefing, product_dossier
@@ -910,6 +911,55 @@ async def test_deliver_brief_marks_failed_without_channels(session):
     result = await briefing.deliver_brief(session, brief)
     assert result["status"] == "failed"
     assert "没有可用渠道" in (brief.error or "")
+
+
+async def test_price_alert_webhook_only_reaches_the_owner(session, monkeypatch):
+    """到价提醒是用户级事件：只投给设提醒者自己的 webhook，绝不广播全站（SEC-019）。"""
+    from app.services import webhooks as webhooks_module
+
+    class _Ok:
+        status_code = 200
+        text = "ok"
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            calls.append(url)
+            return _Ok()
+
+    calls: list[str] = []
+    monkeypatch.setattr(webhooks_module.httpx, "AsyncClient", _FakeClient)
+
+    product = await _product(session)
+    profile = await product_dossier.ensure_profile(session, product.id)
+    profile.price_current = 188.0
+    await session.commit()
+    owner = await _user(session, email="owner@t.com")
+    bystander = await _user(session, email="bystander@t.com")
+    own_hook = WebhookConfig(user_id=owner.id, url="https://hooks.example.com/own", enabled=True)
+    other_hook = WebhookConfig(
+        user_id=bystander.id, url="https://hooks.example.com/other", enabled=True
+    )
+    session.add_all([own_hook, other_hook])
+    await session.flush()
+    await product_dossier.set_price_alert(session, owner.id, product.id, 200)
+
+    result = await product_dossier.sweep_price_alerts(session)
+    assert result["triggered"] == 1
+    # 只有提醒所属用户的渠道收到 POST，另一个用户的 webhook 零请求
+    assert calls == ["https://hooks.example.com/own"]
+    from app.models import WebhookDelivery
+
+    rows = list((await session.execute(select(WebhookDelivery))).scalars())
+    assert [row.webhook_id for row in rows] == [own_hook.id]
 
 
 async def test_run_daily_brief_end_to_end(session):
