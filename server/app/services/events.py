@@ -112,24 +112,40 @@ def _build_facts(category: str, cluster: list, product=None) -> list:
 
 
 async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
-    """全部内容 + 最新版本（含分类）+ 来源身份。"""
+    """全部内容 + 最新版本（含分类）+ 来源身份。
+
+    只取每个内容的最新版本：旧版本由 seen 集合在 Python 里丢，但 outer join 仍然把
+    每一版全文都从库里捞了回来（10,000 内容 × 3 版 = 30,000 行带 text 进内存）。
+    改成 join 「raw_content_id → max(version)」子查询，与 similarity/curation 同款写法。
+    """
     excluded_ids = set(
         await session.scalars(
             select(Evidence.raw_content_id).where(Evidence.role == "excluded")
         )
     )
+    latest = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("version"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
     rows = await session.execute(
         select(RawContent, ContentVersion, Source)
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id, isouter=True)
+        .join(latest, latest.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest.c.rid)
+            & (ContentVersion.version == latest.c.version),
+        )
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .order_by(RawContent.id, ContentVersion.version.desc())
+        .order_by(RawContent.id)
     )
-    seen: set[int] = set()
     result: list[ContentRow] = []
     for raw, version, source in rows:
-        if raw.id in seen or raw.id in excluded_ids or version is None:
+        if raw.id in excluded_ids:
             continue
-        seen.add(raw.id)
         published = raw.published_at
         if published is not None and published.tzinfo is not None:
             published = to_naive_utc(published)
