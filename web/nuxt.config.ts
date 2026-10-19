@@ -28,13 +28,13 @@ export default defineNuxtConfig({
   app: {
     head: {
       htmlAttrs: { lang: 'zh-CN' },
-      title: 'AniSignal · 游戏事件雷达',
+      title: 'AniSignal · 让重要的变化，找到你',
       link: [
         { rel: 'icon', type: 'image/png', href: '/favicon.png' },
         { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
       ],
       meta: [
-        { name: 'description', content: '鸣潮 / 碧蓝航线跨平台事件聚合与商品履约追踪' },
+        { name: 'description', content: '自托管信号台。公开更新汇成可追溯的事件，并按你的关注送达。' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
       ],
       script: [

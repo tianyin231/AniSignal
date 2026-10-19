@@ -2,7 +2,7 @@
 
 [产品首页](../README.md) · [功能指南](../docs/features.md) · [部署指南](../docs/deployment.md)
 
-后端负责多源采集、分类与版本化入库、规则事件归并、证据追溯、个人监控及通知。主要组件为 FastAPI、SQLAlchemy、Alembic 和 arq；完整部署使用 MySQL 与 Redis，本地模式使用 SQLite 与进程内队列。
+信号台的采集、归并与送达层。FastAPI、SQLAlchemy、Alembic 与 arq 负责接口、模型、迁移和后台任务；完整部署使用 MySQL 与 Redis，本地模式使用 SQLite 与进程内队列。
 
 ## 主要模块
 
@@ -13,6 +13,7 @@
 | `app/services/collect.py`、`ingest.py` | 采集编排、降噪、来源状态、幂等入库及解析版本。 |
 | `app/services/events.py` | 规则事件归并、证据关联与人工修正保护。 |
 | `app/services/ai.py`、`curation.py` | 可选摘要、翻译、内容筛选及用量记录。 |
+| `app/services/ai_news.py`、`app/api/ai_news.py` | AI 快讯的审核准入、主题筛选、来源追溯与公开读取。 |
 | `app/services/custom_feeds.py` | 用户 B 站 UID／关键词定制监控，使用独立条目存储。 |
 | `app/services/notifications.py`、`bot.py` | 邮件早报、手动通知、投递记录与可选 AstrBot 集成。 |
 | `app/scheduler/`、`app/worker/` | 定时调度与后台任务。 |

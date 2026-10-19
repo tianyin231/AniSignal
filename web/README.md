@@ -2,7 +2,7 @@
 
 [产品首页](../README.md) · [功能指南](../docs/features.md) · [部署指南](../docs/deployment.md)
 
-基于 Nuxt 4、Tailwind CSS 4 和 TypeScript。前端呈现聚合首页、分区内容、事件证据、商品进展、公开定制监控、账号中心与管理后台；数据来自后端 API，而不是固定写入页面的内容目录。
+信号台的阅读界面，基于 Nuxt 4、Tailwind CSS 4 与 TypeScript。聚合首页、分区、事件证据、商品进展、定制监控、账号中心与管理后台都从后端 API 取数。
 
 ## 运行与构建
 
@@ -27,6 +27,7 @@ npm run build
 | 位置 | 内容 |
 | --- | --- |
 | `app/pages/index.vue` | 聚合首页与分区视角。 |
+| `app/pages/intro.vue`、`ai.vue` | 产品交互介绍，以及独立的 AI 快讯分区。 |
 | `app/pages/contents/`、`events/`、`products/` | 内容预览、事件证据与商品进展。 |
 | `app/pages/custom/`、`account.vue` | 公开独立监控，以及个人关注、监控与通知设置。 |
 | `app/pages/official.vue`、`search.vue`、`sources.vue`、`stats.vue` | 官方动态、站内检索、来源健康与统计。 |
