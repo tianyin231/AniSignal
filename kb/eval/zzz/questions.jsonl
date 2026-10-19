@@ -1,0 +1,50 @@
+{"id": "t01", "kind": "table", "q": "艾莲是什么属性的代理人", "probe": "entity_attr", "args": {"title": "艾莲", "attr": "属性"}, "expect": "冰"}
+{"id": "t02", "kind": "table", "q": "雅属于哪个阵营", "probe": "entity_attr", "args": {"title": "雅", "attr": "阵营"}, "expect": "对空六课"}
+{"id": "t03", "kind": "table", "q": "「11号」的稀有度是多少", "probe": "entity_attr", "args": {"title": "「11号」", "attr": "稀有度"}, "expect": "S"}
+{"id": "t04", "kind": "table", "q": "青衣的特性是什么", "probe": "entity_attr", "args": {"title": "青衣", "attr": "特性"}, "expect": "击破"}
+{"id": "t05", "kind": "table", "q": "猫又的伤害类型是什么", "probe": "entity_attr", "args": {"title": "猫又", "attr": "伤害类型"}, "expect": "斩击"}
+{"id": "t06", "kind": "table", "q": "柏妮思是什么种族的代理人", "probe": "entity_attr", "args": {"title": "柏妮思", "attr": "种族"}, "expect": "人类"}
+{"id": "t07", "kind": "table", "q": "悠真的生日是哪天", "probe": "entity_attr", "args": {"title": "悠真", "attr": "生日"}, "expect": "7月19日"}
+{"id": "t08", "kind": "table", "q": "格莉丝的中文配音是谁", "probe": "entity_attr", "args": {"title": "格莉丝", "attr": "中文CV"}, "expect": "小敢"}
+{"id": "t09", "kind": "table", "q": "简的英文名是什么", "probe": "entity_attr", "args": {"title": "简", "attr": "英文名称"}, "expect": "Jane Doe"}
+{"id": "t10", "kind": "table", "q": "露西的身高是多少", "probe": "entity_attr", "args": {"title": "露西", "attr": "身高"}, "expect": "152cm"}
+{"id": "t11", "kind": "table", "q": "薇薇安是哪个阵营的", "probe": "entity_attr", "args": {"title": "薇薇安", "attr": "阵营"}, "expect": "反舌鸟"}
+{"id": "t12", "kind": "table", "q": "仪玄的外号是什么", "probe": "entity_attr", "args": {"title": "仪玄", "attr": "昵称/外号"}, "expect": "师父"}
+{"id": "t13", "kind": "table", "q": "嵌合编译器的稀有度是多少", "probe": "entity_attr", "args": {"title": "嵌合编译器", "attr": "稀有度"}, "expect": "S"}
+{"id": "t14", "kind": "table", "q": "嵌合编译器的副词条是什么", "probe": "entity_attr", "args": {"title": "嵌合编译器", "attr": "副词条"}, "expect": "穿透率"}
+{"id": "t15", "kind": "table", "q": "德玛拉电池Ⅱ型的武器技能叫什么", "probe": "entity_attr", "args": {"title": "德玛拉电池Ⅱ型", "attr": "武器技能名称"}, "expect": "电光石火"}
+{"id": "t16", "kind": "table", "q": "巴特勒的稀有度是多少", "probe": "entity_attr", "args": {"title": "巴特勒", "attr": "稀有度"}, "expect": "S"}
+{"id": "t17", "kind": "table", "q": "巴特勒的主动技「茶歇时间」叫什么", "probe": "entity_attr", "args": {"title": "巴特勒", "attr": "技能a"}, "expect": "茶歇时间"}
+{"id": "t18", "kind": "table", "q": "驱动盘「自由蓝调」的TAG有哪些", "probe": "entity_attr", "args": {"title": "自由蓝调", "attr": "TAG"}, "expect": "异常精通、异常积蓄抗性降低、不可叠加"}
+{"id": "t19", "kind": "table", "q": "驱动盘「自由蓝调」的两件套效果是什么", "probe": "entity_attr", "args": {"title": "自由蓝调", "attr": "两件套效果"}, "expect": "异常精通提升30点。"}
+{"id": "t20", "kind": "table", "q": "音擎能源模块属于什么材料分类", "probe": "entity_attr", "args": {"title": "音擎能源模块", "attr": "材料分类"}, "expect": "养成材料"}
+{"id": "t21", "kind": "table", "q": "音擎能源模块的类型是什么", "probe": "entity_attr", "args": {"title": "音擎能源模块", "attr": "类型"}, "expect": "音擎经验"}
+{"id": "t22", "kind": "table", "q": "泰拉斯奎祸车的弱点是什么", "probe": "entity_attr", "args": {"title": "泰拉斯奎祸车", "attr": "弱点"}, "expect": "电、以太"}
+{"id": "t23", "kind": "table", "q": "泰拉斯奎祸车属于什么敌人类型", "probe": "entity_attr", "args": {"title": "泰拉斯奎祸车", "attr": "类型"}, "expect": "普通"}
+{"id": "t24", "kind": "table", "q": "名片「会搞定的」的意象影画是什么", "probe": "entity_attr", "args": {"title": "「会搞定的」", "attr": "意象影画"}, "expect": "盛宴时分"}
+{"id": "t25", "kind": "table", "q": "雅在10级的生命值是多少", "probe": "child", "args": {"table": "zzz_agent_stats", "title": "雅", "column": "value", "where": {"level": "10", "stat": "生命值"}}, "expect": "837.238"}
+{"id": "t26", "kind": "table", "q": "青衣的第一天赋叫什么", "probe": "child", "args": {"table": "zzz_agent_talents", "title": "青衣", "column": "name", "where": {"index": "1"}}, "expect": "介电击穿"}
+{"id": "t27", "kind": "table", "q": "青衣的六个天赋分别叫什么", "probe": "child_list", "args": {"table": "zzz_agent_talents", "title": "青衣", "column": "name"}, "expect": "介电击穿；四两拨千斤；多喝热水；稳态电弧屏障；童心未泯；奇经八脉"}
+{"id": "t28", "kind": "table", "q": "青衣的普攻叫什么", "probe": "child", "args": {"table": "zzz_agent_skills", "title": "青衣", "column": "skill_name", "where": {"skill": "普攻", "kind": "名称"}}, "expect": "一煞"}
+{"id": "t29", "kind": "table", "q": "雅的第一个技能叫什么", "probe": "child", "args": {"table": "zzz_agent_skills_v3", "title": "雅", "column": "skill_name", "where": {"sort": "1"}}, "expect": "普通攻击：风花"}
+{"id": "t30", "kind": "table", "q": "「墨丘利」1级战术对策一的伤害倍率是多少", "probe": "child", "args": {"table": "zzz_bangboo_skill_attrs", "title": "「墨丘利」", "column": "value", "where": {"index": "1", "level": "1", "name": "伤害倍率"}}, "expect": "800%"}
+{"id": "q01", "kind": "qa", "q": "安比的核心被动波动电压有什么效果", "expect_keywords": ["波动电压", "失衡值"], "source_title": "安比"}
+{"id": "q02", "kind": "qa", "q": "青衣的代理人秘闻写了什么", "expect_keywords": ["代理人秘闻", "青衣"], "source_title": "青衣"}
+{"id": "q03", "kind": "qa", "q": "雅选中时的台词是什么", "expect_keywords": ["除恶务尽"], "source_title": "雅/语音"}
+{"id": "q04", "kind": "qa", "q": "驱动盘「自由蓝调」的四件套效果是什么", "expect_keywords": ["四件套"], "source_title": "自由蓝调"}
+{"id": "q05", "kind": "qa", "q": "嵌合编译器的武器故事讲了什么", "expect_keywords": ["武器故事"], "source_title": "嵌合编译器"}
+{"id": "q06", "kind": "qa", "q": "音擎能源模块可以从哪里获得", "expect_keywords": ["实战模拟室"], "source_title": "音擎能源模块"}
+{"id": "q07", "kind": "qa", "q": "活动「行前采购」什么时候开始", "expect_keywords": ["开始时间"], "source_title": "「行前采购」"}
+{"id": "q08", "kind": "qa", "q": "泰拉斯奎祸车的介绍是什么", "expect_keywords": ["以骸"], "source_title": "泰拉斯奎祸车"}
+{"id": "q09", "kind": "qa", "q": "巴特勒的主动技可以做什么", "expect_keywords": ["能量值"], "source_title": "巴特勒"}
+{"id": "q10", "kind": "qa", "q": "雅的核心被动寒炎有什么效果", "expect_keywords": ["冰焰"], "source_title": "雅"}
+{"id": "q11", "kind": "qa", "q": "猫又的连携技叫什么", "expect_keywords": ["连携技"], "source_title": "猫又"}
+{"id": "q12", "kind": "qa", "q": "邦布「墨丘利」的战术对策二有什么效果", "expect_keywords": ["战术对策二"], "source_title": "「墨丘利」"}
+{"id": "q13", "kind": "qa", "q": "名片「会搞定的」的描述写了什么", "expect_keywords": ["艾莲"], "source_title": "「会搞定的」"}
+{"id": "q14", "kind": "qa", "q": "NPC 卡特所在的店铺是什么", "expect_keywords": ["店铺"], "source_title": null}
+{"id": "q15", "kind": "qa", "q": "零号空洞鸣徽「契合」有什么效果", "expect_keywords": ["效果"], "source_title": null}
+{"id": "q16", "kind": "qa", "q": "角色时装「从周一到周五」的获取途径是什么", "expect_keywords": ["获取"], "source_title": null}
+{"id": "q17", "kind": "qa", "q": "「11号」的档案里她的行动代号是什么", "expect_keywords": ["档案"], "source_title": "「11号」"}
+{"id": "q18", "kind": "qa", "q": "艾莲EP《BITE! 咬合力》的制作人员有哪些", "expect_keywords": ["制作人员", "雷声"], "source_title": "BITE! 咬合力"}
+{"id": "q19", "kind": "qa", "q": "敌人的属性抗性怎么减少", "expect_keywords": ["抗性"], "source_title": null}
+{"id": "q20", "kind": "qa", "q": "比利的额外能力是什么", "expect_keywords": ["额外能力"], "source_title": "比利"}
