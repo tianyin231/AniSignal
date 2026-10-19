@@ -1,0 +1,558 @@
+# 崩坏：星穹铁道（BWIKI：wiki.biligame.com/sr）——第三款游戏，验证"一游戏一配置"
+# 零代码换 wiki 的第三次。
+#
+# 站点验证（2026-10-19，siteinfo）：MediaWiki 1.37.0，articles 7251 / pages 40304 /
+# images 29931，api.php 通畅（候选站里只有 sr 有 api.php；hsr / starrail 两个子域都是空站）。
+# 命名空间 0 非重定向正文 7569 篇——比碧蓝航线（18573）和方舟（19740）小一半多，
+# 抓取/解析/向量化全程压力都小一截。
+#
+# 结构化路全部走 parse.kinds 的通用实体路（arknights 同款，零代码），23 族。
+# 字段名都是星铁 BWIKI wikitext 里的原样参数名：spike 200 篇抽样 + 全量 7569 篇
+# 顶层模板分布扫描（653 种模板，按页去重计数）后定的，全量抓完再用
+# tools/audit_pages.py 复核一遍。
+name: starrail
+label: 崩坏：星穹铁道
+wiki_base: https://wiki.biligame.com/sr
+api_url: https://wiki.biligame.com/sr/api.php
+user_agent: anisignal-kb/0.1 (offline knowledge-base build; polite 1.5 req/s)
+data_dir: data/starrail
+eval_dir: eval/starrail
+chunk_id_prefix: starrail
+collection: starrail_kb
+namespaces: [0]
+
+fetch:
+  rps: 1.5                 # BWIKI 公共站，和碧蓝航线同站同参数，1.5 req/s 实测无 429
+  batch_titles: 20         # BWIKI 有单篇几 MB 的大页（混沌回忆/叙事一览 那些汇总页），
+                           # 一批里混进一个就能把整个响应拖到超时；20 比较稳
+  timeout: 180
+  max_retries: 6
+  backoff_cap: 60
+  shard_pages: 500
+
+chunk:
+  min: 60
+  target: 420
+  max: 900
+  voice_field_suffix: 台词  # 星铁的台词走 sr_voice_lines 子表（角色语音模板），
+                            # 没有一个字段叫"…台词"，这个后缀实际不命中
+  fields_chunk_min: 60
+  max_images_per_page: 16
+
+parse:
+  min_infobox_fields: 5    # 23 族的 infobox 普遍 6~180 个字段，5 是安全下限
+
+  # 星铁 BWIKI 也在模板名里嵌 HTML 注释：
+  #   {{道具<!-- 暂时用不到的条目请不要随手删除，留空即可 -->|…}}
+  #   {{光锥图鉴<!-- 本段为备注信息，以下请在=后填写对应数据-->|…}}
+  #   {{活动信息<!-- 暂时用不上的板块不要删除哦，保持隐藏即可，以备后用 -->|…}}
+  # 不剥的话这些模板一个都匹配不上白名单（和方舟 CharinfoV2 一个毛病）。
+  strip_template_name_comments: true
+
+  # 展示型模板：参数顺序是给机器用的，给人看的在位置参数 2。
+  #   {{颜色|描述2|50%/100%}}  1 是机器键（描述2），2 是技能描述里的实际数值
+  #   {{颜色|冰|冰属性}}        1 是属性键，2 是展示名
+  # 全库 8230 处 {{颜色}}，不开这个表技能描述会整段渲染成"描述2"。
+  #   {{行迹/技能|类型=普攻|名称=呀，漏网之鱼|TAG=单攻|能量=20|…|描述=…}}
+  # 新一代角色（36 个）把整个技能塞进 infobox 的同名嵌套模板里，全是命名参数，
+  # 通用兜底会渲染成空串——技能名和描述在正文路一起消失，所以按参数名逐个点名要。
+  display_templates:
+    颜色: ["2"]
+    行迹/技能: ["类型", "名称", "TAG", "能量", "消耗能量", "战技点", "削韧值", "描述"]
+
+  # infobox 白名单：模板名 → (kind, category)。命名空间 10 下的模板名（不带"模板:"）。
+  # 一页多个时取页面上最先出现的那个（角色页 角色图鉴 在 角色图鉴/技能 前面）。
+  infobox_templates:
+    # ---- 角色 / 光锥 / 遗器（数值最密的三族）----
+    角色图鉴: {kind: character, category: character}
+    光锥图鉴: {kind: lightcone, category: lightcone}
+    遗器套装: {kind: relic_set, category: relic_set}
+    # ---- 敌方 ----
+    敌人: {kind: enemy, category: enemy}
+    # ---- 物品（道具是最大的一族，959 页）----
+    道具: {kind: item, category: item}
+    材料图鉴: {kind: material, category: material}
+    消耗品: {kind: consumable, category: consumable}
+    装备图鉴: {kind: equipment, category: equipment}
+    装饰: {kind: decoration, category: decoration}
+    # ---- 模拟宇宙 / 差分宇宙 ----
+    奇物: {kind: curio, category: curio}
+    祝福: {kind: blessing, category: blessing}
+    差分宇宙方程: {kind: equation, category: equation}
+    # ---- 关卡 / NPC ----
+    关卡: {kind: stage, category: stage}
+    NPC: {kind: npc, category: npc}
+    # ---- 语音（角色 /语音 子页，一页几十条）----
+    角色语音: {kind: voice, category: voice}
+    # ---- 内容族 ----
+    任务: {kind: quest, category: quest}
+    系列任务: {kind: quest_series, category: quest_series}
+    书籍: {kind: book, category: book}
+    # 翁法罗斯角色专属故事书（"X/如我所书"子页），一页 4~5 个章节块，没有别的
+    # infobox。把它登记成 infobox 只是为了给这些页一个 kind：第一个 如我所书 块
+    # 当"卡片"（第一章第一页），剩下的章节由下面的 child_templates 全量抽。
+    如我所书: {kind: book, category: book}
+    活动信息: {kind: activity, category: activity}
+    专辑: {kind: album, category: album}
+    短信内容: {kind: message, category: message}
+    交互事件: {kind: interaction, category: interaction}
+    组件: {kind: component, category: component}
+
+  infobox_template_prefixes: {}
+  legacy_infobox_template_names: []
+
+  # 星铁关卡页都带 infobox，不需要标题模式兜底
+  title_patterns: []
+
+  new_kinds: [character, lightcone, relic_set, enemy, item, material, consumable,
+              equipment, decoration, curio, blessing, equation, stage, npc, voice,
+              quest, quest_series, book, activity, album, message, interaction, component]
+
+  card_field_keys: {}
+
+  # 切 chunk 时整段丢弃的模板（导航/样板/编辑器残留）。按前缀收，
+  # 子页名（…/卫戍协议、角色贺图/帕姆展览馆、折叠面板（特殊敌方））自动归队。
+  nav_template_prefixes:
+    - 导航                  # WIKI底部导航 / 角色导航 / 图鉴导航 / 星球导航 / 编年史导航…
+    - 面包屑
+    - 提示                  # 提示 / 提示消息 / 推荐角色提示 / 主观提示
+    - 警告                  # 短信警告
+    - 折叠                  # 折叠 / 折叠面板 / 折叠面板（特殊敌方）/ 折叠框
+    - 展开
+    - 切换板                # tab 切换的骨架，正文在别处
+    - tabber
+    - 选项卡
+    - 切换标签
+    - 说明框
+    - 左侧目录
+    - 多义词
+    - 消歧义
+    - 施工中
+    - 待补充
+    - 需要帮助
+    - 攻略点赞
+    - 角色攻略头
+    - 角色筛选
+    - 角色贺图
+    - 头像
+    - 黑幕
+    - 背景颜色
+    - 颜色
+    - 图标
+    - ResourceLoader
+    - bstyle
+    - columns
+    - HideFinish
+    - FatesAtlas
+    - B站视频
+    - 视频
+    - 微博
+    - 更新日志
+    - 公告
+    - 注意
+    - 备注
+    - 引用
+    - 外部链接
+    - 友情链接
+    - Math
+    - CSS
+    - JS
+    - 排版
+
+  # 切 chunk 时整段丢弃的 section 标题（包含匹配）。
+  # 注意别写太宽：星铁有 228 个"活动说明"、62 个"规则说明"、41 个"遗器说明"、
+  # 40 个"光锥说明"全是正文，只能精确收"变更历史/更新历史"这类纯变更日志。
+  noise_section_keywords:
+    - 导航
+    - 分类
+    - 参见
+    - 外部链接
+    - 参考文献
+    - 参考资料
+    - 参考链接
+    - 注释
+    - 变更历史
+    - 更新历史
+    - 历史调整
+    - 历史记录
+    - 更新日志
+    - 公告
+    - 统计信息
+    - 相关页面
+
+  # ---------------- 通用实体路：23 族的 kind spec ----------------
+  # name_fields  卡片标题用哪个字段当实体名（都不命中就用页标题）
+  # card_fields  渲染卡片摘要 chunk 的 [标签, 字段名]
+  # attr_fields  额外落 entity_attrs 的字段（查表探针直接按 attr 查）
+  # child_templates 页内子模板 → 行。columns 是"列名: 字段名"映射，
+  #               rows_from 用正则把编号字段（星魂N/技能N属性/敌人N）拆成多行，
+  #               {0} 是正则捕获组，@key 是"值就是这个字段本身"
+  kinds:
+    character:
+      name_fields: [名称]
+      card_fields:
+        - [性别, 性别]
+        - [稀有度, 稀有度]
+        - [限定, 限定]
+        - [阵营, 阵营]
+        - [命途, 命途]
+        - [元素属性, 元素属性]
+        - [角色定位, 角色定位]
+        - [实装日期, 实装日期]
+        - [种族, 种族]
+        - [中文CV, 中文CV]
+      attr_fields: [名称, 外文名, 称号, 全名, 性别, 稀有度, 限定, 阵营, 命途,
+                    命途材料, 元素属性, TAG, 星魂TAG, 实装日期, 实装版本, 角色定位,
+                    昵称/外号, 派系, 体型, 种族, 短信签名, 所在位置,
+                    中文CV, 日文CV, 英文CV, 韩文CV]
+      child_templates:
+        # ---- 新一代技能格式（36 个角色）：整块嵌在 infobox 字段里，得递归找 ----
+        # {{行迹/技能|类型=普攻|名称=呀，漏网之鱼|TAG=单攻|能量=20|战技点=1|削韧值=10|描述=…}}
+        - template: 行迹/技能
+          recursive: true
+          occurrence: true
+          table: sr_character_skills
+          columns: {slot: 类型, name: 名称, tag: TAG, energy: 能量,
+                    sp: 战技点, toughness: 削韧值, description: 描述}
+          rows_from:
+            # 技能数值成长：属性1=护盾盾量 / 属性1数据=38.0%防御力+190.0
+            - pattern: '^属性(\d+)$'
+              table: sr_character_skill_attrs
+              columns: {index: '{0}', name: '@key', value: '属性{0}数据'}
+            # 老命名（101 处）：属性 / 属性数据 各一个
+            - pattern: '^属性$'
+              const: {index: '1'}
+              table: sr_character_skill_attrs
+              columns: {name: '@key', value: '属性数据'}
+        # ---- 老一代技能格式（51+42 个角色）：普攻/战技/… 是平铺的命名字段 ----
+        # 只认 `X描述` 这种老格式独有的键：新一代角色的 `普攻` 字段被
+        # display_templates 渲染成了整段技能文本，按 `^普攻$` 匹配会得到
+        # "普攻 呀，漏网之鱼 单攻 20 …" 这种半篇文章当技能名。
+        # 模板名两代都列：角色图鉴/技能（51 页）和 角色/技能（42 页）参数名一样。
+        - template: [角色图鉴/技能, 角色/技能]
+          # 顶层 table 只给 rows_from 兜底用（本块没有顶层 columns，不会另出一行）。
+          # 不写它 _pattern_rows 的 table 就是空串，整块静默不产出行。
+          table: sr_character_skills
+          rows_from:
+            - pattern: '^普攻描述$'
+              const: {slot: 普攻}
+              columns: {name: 普攻, tag: 普攻TAG, toughness: 普攻削韧值,
+                        bonus: 普攻效果加成, description: '@key'}
+            - pattern: '^战技描述$'
+              const: {slot: 战技}
+              columns: {name: 战技, tag: 战技TAG, toughness: 战技削韧值,
+                        bonus: 战技效果加成, description: '@key'}
+            - pattern: '^终结技描述$'
+              const: {slot: 终结技}
+              columns: {name: 终结技, tag: 终结技TAG, toughness: 终结技削韧值,
+                        bonus: 终结技效果加成, description: '@key'}
+            - pattern: '^天赋描述$'
+              const: {slot: 天赋}
+              columns: {name: 天赋, tag: 天赋TAG, toughness: 天赋削韧值,
+                        bonus: 天赋效果加成, description: '@key'}
+            - pattern: '^秘技描述$'
+              const: {slot: 秘技}
+              columns: {name: 秘技, tag: 秘技TAG, toughness: 秘技削韧值,
+                        description: '@key'}
+        # 技能块有两代模板：新版 角色图鉴/技能（51 页，带 属性NLV M 明细）、
+        # 老版 角色/技能（42 页，只有描述），参数名一模一样，写一组抽进同一张表
+        - template: [角色图鉴/技能, 角色/技能]
+          occurrence: true
+          table: sr_character_skill_block
+          columns: {命途: 命途, 命途材料: 命途材料}
+          rows_from:
+            - pattern: '^星魂(\d+)$'
+              table: sr_character_eidolons
+              columns: {index: '{0}', name: '@key', effect: '星魂{0}描述'}
+            - pattern: '^(普攻|战技|终结技|天赋)属性(\d+)LV(\d+)$'
+              table: sr_character_skill_levels
+              columns: {slot: '{0}', prop: '{1}', level: '{2}', value: '@key'}
+            - pattern: '^额外能力(\d+)$'
+              table: sr_character_traces
+              columns: {index: '{0}', name: '@key', description: '额外能力{0}描述'}
+            - pattern: '^属性加成(\d+)$'
+              table: sr_character_bonus
+              columns: {index: '{0}', name: '@key', value: '属性加成{0}数值'}
+
+    lightcone:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [命途, 命途]
+        - [相关角色, 相关角色]
+        - [技能名称, 技能名称]
+        - [获取方式, 获取方式]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 命途, 命途材料, 相关角色, 技能名称, 获取方式,
+                    光锥TAG, 实装日期, 实装版本, 晋阶材料]
+      # infobox 自己就是个顶层模板，把它同时登记成 child_template，就能用 rows_from
+      # 把编号字段拆行——不用给 parse 加任何新概念。
+      # 晋阶数值：生命值=53（1 级基数）/ 20生命值 / 20+生命值 / … / 80生命值
+      child_templates:
+        - template: 光锥图鉴
+          rows_from:
+            - pattern: '^(\d+)(\+?)(生命值|攻击力|防御力)$'
+              table: sr_lightcone_stats
+              columns: {level: '{0}', stat: '{2}', value: '@key'}
+
+    relic_set:
+      name_fields: [名称]
+      card_fields:
+        - [类别, 类别]
+        - [两件套效果, 两件套效果]
+        - [获取方式, 获取方式]
+        - [实装版本, 实装版本]
+        - [TAG, TAG]
+      attr_fields: [名称, 类别, 两件套效果, 四件套效果, 获取方式, 获取途径, 实装版本,
+                    TAG, 位面球, 连结绳]
+
+    enemy:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [分类, 分类]
+        - [系列, 系列]
+        - [弱点, 弱点]
+        - [攻击属性, 攻击属性]
+        - [介绍, 介绍]
+      attr_fields: [名称, 实装版本, 系列, 分类, 类型, 别称, 弱点, 攻击属性,
+                    刷新时间, 出现地点, 掉落系列素材, 掉落素材, 掉落期望, TAG,
+                    速度, 韧性, 召唤物, 血量比例总,
+                    物抗, 火抗, 冰抗, 雷抗, 风抗, 虚数抗, 量子抗, 抗性备注, 状态抵抗,
+                    技能数, 大招, 介绍]
+      # 同 lightcone：把 infobox 自己登记成 child_template，用 rows_from 拆编号字段
+      child_templates:
+        - template: 敌人
+          rows_from:
+            - pattern: '^技能(\d+)名称$'
+              table: sr_enemy_skills
+              columns: {index: '{0}', name: '@key', tag: '技能{0}TAG',
+                        description: '技能{0}描述'}
+            - pattern: '^血量(\d+)名字$'
+              table: sr_enemy_phases
+              columns: {index: '{0}', name: '@key', ratio: '血量{0}比例'}
+
+    item:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类型, 类型]
+        - [获取方式, 获取方式]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 类型, 获取方式, 获取途径, 相关任务, 相关活动,
+                    实装版本, 价格, 相关成就, 用处, 相关角色]
+
+    material:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [稀有度, 稀有度]
+        - [获取方式, 获取方式]
+        - [系列材料名, 系列材料名]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 类型, 稀有度, 获取途径, 获取方式, 系列材料名, 实装版本,
+                    相关角色]
+
+    consumable:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [所属地区, 所属地区]
+        - [类型, 类型]
+        - [效果, 效果]
+        - [获取方式, 获取方式]
+      attr_fields: [名称, 稀有度, 所属地区, 类型, 获取方式, 获取途径, 实装版本,
+                    所需材料, 价格, 存在配方, 配方获取途径, 配方价格, 相关成就,
+                    相关角色, 相关活动]
+
+    equipment:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [标签, 标签]
+        - [基础属性, 基础属性]
+        - [获取方式, 获取方式]
+        - [适配角色, 适配角色]
+      attr_fields: [名称, 类型, 标签, 追加羁绊, 基础属性, 描述, 获取方式, 获取途径,
+                    实装版本, 适配角色, 羁绊]
+
+    decoration:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [类型, 类型]
+        - [说明, 说明]
+        - [获取方式, 获取方式]
+      attr_fields: [名称, 稀有度, 类型, 说明, 获取方式, 获得途径, 实装版本,
+                    相关角色, 价格]
+
+    curio:
+      name_fields: [名称]
+      card_fields:
+        - [类型, 类型]
+        - [模式, 模式]
+        - [稀有度, 稀有度]
+        - [差分宇宙效果, 差分宇宙效果]
+        - [模拟宇宙效果, 模拟宇宙效果]
+        - [获取方式, 获取方式]
+      attr_fields: [名称, 类型, 模式, TAG, 稀有度, 实装版本, 获取方式, 获取途径,
+                    差分宇宙, 差分宇宙效果, 模拟宇宙, 模拟宇宙效果, 相关事件]
+
+    blessing:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [命途, 命途]
+        - [模式, 模式]
+        - [类型, 类型]
+        - [差分宇宙效果, 差分宇宙效果]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 命途, 模式, TAG, 实装版本, 类型, 排序, 差分宇宙,
+                    差分宇宙效果, 差分宇宙强化效果, 模拟宇宙, 模拟宇宙效果,
+                    模拟宇宙强化效果, 交错命途, 人间喜剧效果, 人间喜剧强化效果]
+
+    equation:
+      name_fields: [名称]
+      card_fields:
+        - [稀有度, 稀有度]
+        - [命途1, 命途1]
+        - [命途2, 命途2]
+        - [效果, 效果]
+        - [实装版本, 实装版本]
+      attr_fields: [名称, 稀有度, 命途1, 命途1需求, 命途2, 命途2需求, 实装版本,
+                    差分宇宙, 演绎, 推演]
+
+    stage:
+      name_fields: [关卡名称]
+      card_fields:
+        - [关卡类型, 关卡类型]
+        - [开拓力消耗, 开拓力消耗]
+        - [所在地图, 所在地图]
+        - [实装版本, 实装版本]
+        - [建议属性, 建议属性]
+        - [最高难度, 最高难度]
+      attr_fields: [关卡名称, 关卡类型, 关卡介绍, 开拓力消耗, 所在地图, 实装版本,
+                    建议属性, 最高难度, 特殊机制, 首领敌人, 可能遭遇, 首次探索奖励,
+                    掉落遗器]
+
+    npc:
+      name_fields: [名称]
+      card_fields:
+        - [称号, 称号]
+        - [性别, 性别]
+        - [职业, 职业]
+        - [出身, 出身]
+        - [派系, 派系]
+        - [所属, 所属]
+        - [位置, 位置]
+        - [TAG, TAG]
+      attr_fields: [名称, 全名, 外文名, 称号, 性别, 职业, 出身, 派系, 所属, 位置,
+                    所属组织, TAG, 实装版本, 汉语CV, 日语CV, 英语CV, 韩语CV,
+                    存在商店, 商店名称, 存在对话]
+
+    voice:
+      name_fields: [语音类型]
+      card_fields:
+        - [语音文件, 语音文件]
+      attr_fields: [语音类型, 语音文件]
+      child_templates:
+        # 一个 {{角色语音}} 块就是一条台词（含中日英韩四语），一页几十块
+        - template: 角色语音
+          occurrence: true
+          table: sr_voice_lines
+          columns: {voice_type: 语音类型, voice_file: 语音文件,
+                    content: 语音内容, content_jp: 语音内容日语,
+                    content_en: 语音内容英语, content_kr: 语音内容韩语}
+
+    quest:
+      name_fields: [任务名称]
+      card_fields:
+        - [任务地区, 任务地区]
+        - [任务类型, 任务类型]
+        - [所属版本, 所属版本]
+        - [开放等级, 开放等级]
+        - [前置任务, 前置任务]
+        - [后续任务, 后续任务]
+      attr_fields: [任务名称, 任务地区, 任务类型, 所属版本, 任务描述, 出场人物,
+                    任务条件, 任务流程, 奖励, 开放等级, 前置任务, 后续任务,
+                    系列任务, 任务编号, 相关道具, 相关成就, 相关书籍, 领取地点,
+                    相关活动, 时间, 剧情梗概]
+
+    quest_series:
+      name_fields: [系列任务名]
+      card_fields:
+        - [任务类型, 任务类型]
+        - [任务地区, 任务地区]
+        - [所属版本, 所属版本]
+      attr_fields: [系列任务名, 任务类型, 任务地区, 描述, 存在道具, 存在成就,
+                    所属版本, 相关活动, 存在书籍, 相关成就]
+
+    book:
+      name_fields: [书籍名]
+      card_fields:
+        - [类型, 类型]
+        - [所属, 所属]
+        - [卷数, 卷数]
+        - [实装版本, 实装版本]
+      attr_fields: [书籍名, 描述, 编号, 所属, 类型, 卷数, 实装版本, 相关角色,
+                    相关任务, 获取方式]
+      # 如我所书子页：4~5 个 {{如我所书|页码N=…|左页N=…|右页N=…}} 块，occurrence
+      # 按出现顺序编号成章（block 列），每章 5~9 页。chapter 用 @index 取块序号。
+      child_templates:
+        - template: 如我所书
+          occurrence: true
+          table: sr_book_pages
+          rows_from:
+            - pattern: '^页码(\d+)$'
+              columns: {chapter: '@index', index: '{0}', page: '@key',
+                        left: '左页{0}', right: '右页{0}'}
+
+    activity:
+      name_fields: [名称]
+      card_fields:
+        - [所属版本, 所属版本]
+        - [开始时间, 开始时间]
+        - [结束时间, 结束时间]
+        - [类型, 类型]
+        - [条件限制, 条件限制]
+      attr_fields: [名称, 所属版本, 开始时间, 结束时间, 类型, 条件限制, 活动描述,
+                    出场人物, TAG, 角色获取, 光锥获取, 装饰获取, 系列活动, 所属地区,
+                    活动奖励, PV链接]
+
+    album:
+      name_fields: [专辑名]
+      card_fields:
+        - [发行时间, 发行时间]
+        - [专辑类型, 专辑类型]
+        - [出品/发行, 出品/发行]
+        - [曲目数, 曲目数]
+      attr_fields: [专辑名, 发行时间, 专辑类型, 出品/发行, 曲目数, 简介,
+                    官方公告链接, B站视频标题, B站视频BV号, 幕后故事标题,
+                    幕后故事BV号, QQ音乐链接, 酷狗音乐链接, 酷我音乐链接, 制作人员]
+
+    message:
+      name_fields: [短信标题]
+      card_fields:
+        - [人物, 人物]
+        - [版本, 版本]
+        - [签名, 签名]
+      attr_fields: [人物, 短信标题, 版本, 排序, 签名, 接取任务, 任务链接, 活动链接]
+
+    interaction:
+      name_fields: [名称]
+      card_fields:
+        - [地区, 地区]
+        - [所属版本, 所属版本]
+        - [触发地点, 触发地点]
+      attr_fields: [名称, 地区, 所属版本, 奖励, 出场人物, 相关成就, 相关道具,
+                    相关书籍, 触发地点]
+
+    component:
+      name_fields: [名称]
+      card_fields:
+        - [类别, 类别]
+        - [类型, 类型]
+        - [特性, 特性]
+        - [目标特性, 目标特性]
+        - [效果, 效果]
+      attr_fields: [名称, 类别, 类型, 特性, 目标特性, 效果, 实装版本]
