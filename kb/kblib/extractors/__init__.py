@@ -161,14 +161,25 @@ def _pattern_rows(ctx: ExtractCtx, template: str, index: int,
     return rows
 
 
-def _template_nodes(ctx: ExtractCtx, names: Any) -> list[Any]:
-    """页内顶层模板里名字命中的那些（按出现顺序）。names 给单个名字或一组。"""
+def _template_nodes(ctx: ExtractCtx, names: Any, recursive: bool = False) -> list[Any]:
+    """页内模板里名字命中的那些（按出现顺序）。names 给单个名字或一组。
+
+    recursive: true 时连嵌在别的模板参数值里的也要找。星铁 BWIKI 把技能详情整个塞进
+    infobox 的字段值里：`|普攻={{行迹/技能|类型=普攻|名称=呀，漏网之鱼|描述=…}}`，
+    顶层模板池里根本没有 行迹/技能 这个节点——不递归的话 36 个角色的技能名和描述
+    在结构化路和正文路两头一起丢（_plain 对全命名参数的模板兜底返回空串）。
+    """
     if isinstance(names, str):
         names = [names]
     want = {str(n).strip() for n in (names or []) if str(n).strip()}
     if not want:
         return []
-    return [t for t in ctx.top_level_templates if cleantext.template_name(t) in want]
+    if recursive:
+        wc = cleantext.parse_wikitext(ctx.wikitext)
+        pool = list(wc.filter_templates(recursive=True)) if wc else []
+    else:
+        pool = ctx.top_level_templates
+    return [t for t in pool if cleantext.template_name(t) in want]
 
 
 def _child_rows(ctx: ExtractCtx, spec: dict) -> list[Row]:
@@ -180,8 +191,14 @@ def _child_rows(ctx: ExtractCtx, spec: dict) -> list[Row]:
 
     occurrence: true 表示一页会出现多次（每个技能一块、每级敌人一块、第几天赋
     各一块），按出现顺序编号；否则只取第一次出现（属性/CharinfoV2 这类一页一块的）。
+
+    recursive: true 表示连嵌在别的模板里的也要找。星铁 BWIKI 把技能详情整个塞进
+    infobox 的字段值里：`|普攻={{行迹/技能|类型=普攻|名称=呀，漏网之鱼|描述=…}}`，
+    顶层模板池里根本没有 行迹/技能 这个节点——不递归的话 36 个角色的技能名和描述
+    在结构化路和正文路两头一起丢（_plain 对全命名参数的模板兜底返回空串）。
     """
-    nodes = _template_nodes(ctx, spec.get("template"))
+    nodes = _template_nodes(ctx, spec.get("template"),
+                            recursive=bool(spec.get("recursive")))
     if not nodes:
         return []
     if not spec.get("occurrence"):
