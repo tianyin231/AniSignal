@@ -1,7 +1,8 @@
 # 多游戏知识库（kb/）
 
 把游戏 wiki（[碧蓝航线 BWIKI](https://wiki.biligame.com/blhx)、
-[明日方舟 PRTS](https://prts.wiki)）炼成 bot 可检索、可查表的知识库。
+[明日方舟 PRTS](https://prts.wiki)、[原神 BWIKI](https://wiki.biligame.com/ys)）
+炼成 bot 可检索、可查表的知识库。
 四个阶段：**抓取 → 解析 → 向量索引 → 评测**，全程本地跑，不调外部 API（模型 embedding 也是本地 CPU）。
 
 ## 一游戏一配置
@@ -36,13 +37,13 @@ KB_GAME=arknights tools/fetch_loop.sh                      # 反复续跑直到 
 环境：`kb/.venv`（mwparserfromhell / requests / onnxruntime / tokenizers / torch / PyYAML）。
 数据按游戏分目录（`.gitignore` 已排除，只提交代码、配置和文档）：
 
-| | azurlane（默认） | arknights |
-|---|---|---|
-| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` |
-| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` |
-| qdrant collection | `blhx_kb` | `arknights_kb` |
-| chunk_id 前缀 | `blhx:` | `arknights:` |
-| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` |
+| | azurlane（默认） | arknights | genshin |
+|---|---|---|---|
+| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` | `games/genshin.yaml` |
+| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` | `data/genshin/` |
+| qdrant collection | `blhx_kb` | `arknights_kb` | `genshin_kb` |
+| chunk_id 前缀 | `blhx:` | `arknights:` | `genshin:` |
+| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` | `eval/genshin/questions.jsonl` |
 
 azurlane 的 `data_dir` 故意不搬家：`blhx_kb` 的向量、`index_meta.json`、bm25 索引、
 53697 个 chunk_id 全在那儿，一搬家 v2/v3 的成果全部作废。新游戏各自一个目录，互不污染。
@@ -208,6 +209,41 @@ BM25 索引 **120114 docs / 188010 词条**（jieba 分词，232s 建完，84.7 
 目前只以原文形态进 template chunk，没进 `entity_attrs`——全库 0 个实体有 `种族`/`性别`/`出身地`
 属性，463 个干员的种族出身地因此查不到表。补上之后 q04 这类题查表和检索两条路都能通。
 
+### 原神（genshin）
+
+36 族实体**全部走通用实体路，零代码**（配置 400 行，`parse.kinds` 里 36 个 kind →
+`entities` / `entity_attrs` / 38 张 `<kind>_*` 子表）。
+
+| 指标 | 数值 |
+|---|---|
+| 抓取篇数 | 19918（命名空间 0 非重定向正文全量，38 个 gzip 分片 / 29.9 MB，399 次请求 465s，0 失败；另有 `^Data:` 32,561 篇地图数据页按 `title_patterns` 跳过） |
+| 重定向别名 | 2541（`aliases` 表） |
+| 带 infobox 页 | 18843（结构化抽取率 98.3%，全页占比 93.0%） |
+| 实体数 | 18617（`entity_attrs` 191042 行） |
+| 子表 | 38 张 / 102468 行（角色攻略、角色语音表、任务步骤、讨伐楼层、七圣召唤词条…） |
+| **chunk 数** | **70557**（prose 27329 + 补捞 43228：card 18617 / template 15255 / fields 8685 / hidden 639 / gallery 32） |
+| **向量数** | **70557**（qdrant collection `genshin_kb`，与 chunks.jsonl 行数一致） |
+| BM25 | 70557 docs / 175466 词条（平均 107.9 词，448.5s 建完，55.4 MB，落 `data/genshin/bm25/`） |
+| 页面类型分布 | npc 2811 / furnishing 2418 / costume 2357 / quest 2123 / quest_item 1279 / material 816 / consumable 701 / tutorial 689 / tcg_card 652 / enemy 573 / quest_series 472 / event 526 / food 458 |
+
+infobox 模板分布：NPC 2811、摆设图鉴 2418、奇偶装扮 2206、任务 2100、任务道具 1279、
+素材图鉴 816、消耗品图鉴 701、教程 689、卡牌 651、怪物信息栏 573、活动信息 526、
+食物图鉴新 458、系列任务 380、名片 292、武器图鉴 253、圣遗物套装 67、秘境副本 53。
+
+BWIKI 原神的 wikitext 有三处和碧蓝/方舟不一样，各配一个**默认关**的旋钮
+（`parse.descend_html_tags` / `parse.strip_template_name_comments` /
+`parse.strip_parser_functions`，方舟碧蓝一行行为不变）：
+
+1. SMW 查询 `{{#ask:…}}` 解析不出一棵完整模板树，会整坨漏进正文 →
+   在唯一入口 `parse_wikitext()` 里用正则预删（SMW 查询里嵌 `{{PAGENAME}}`，正则要有嵌套版）；
+2. 实体模板全包在 `<div class="row"><div class="col-sm-8">…` 里，
+   `filter_templates(recursive=False)` 看不见 → 只穿透 HTML 容器，不穿透其它模板；
+3. 模板名嵌 HTML 注释 `{{系列任务<!-- … -->}}` → 先剥注释再认模板名。
+
+另外 `parse.child_positional_params: true`：`{{人物对话|左|丽莎|台词}}`、
+`{{任务描述|描述|地点}}` 全靠位置参数传值，只收命名参数的话这两类子表一行都没有
+（默认关，碧蓝/方舟的 `child_templates` 里 digit 别名列为 0，静态核对过零影响）。
+
 ### qa_demo 抽查（5 问，方舟库）
 
 | 问题 | 路由 | 结果 |
@@ -231,8 +267,10 @@ tools/fetch_loop.sh                                                  # 断点续
 tools/embed_resume.sh arknights                                      # embedding 断点续跑（见下）
 ```
 
-`tools/embed_resume.sh` 是 `embed_index.py --append` 的长任务启动壳，比裸跑 python 多两件事：
+`tools/embed_resume.sh` 是 `embed_index.py --append` 的长任务启动壳，比裸跑 python 多三件事：
 把 `oom_score_adj` 设成 1000（2 核 7G 的机器上内存见底时让 kernel 先杀自己，别误伤常驻的
-qdrant 或旁边 agent 的进程），以及 `python -u`（逐批进度实时落盘，被 kill 后能看出死在哪一批）。
+qdrant 或旁边 agent 的进程）、`-v`（逐批"已写入/累计/速率/剩余分钟"是 `log.info`，
+不加 `-v` 就是 WARNING 级别，几小时的活儿日志里只剩开头两行）、以及 `python -u`
+（进度实时落盘，被 kill 后能看出死在哪一批）。
 方舟这轮 120114 个 chunk 就是靠它三次续跑补齐的：被机器重启杀掉后重跑同一条命令，
 `--append` 按 chunk_id 对账，库里已有且文本一致的一个向量都不重算。
