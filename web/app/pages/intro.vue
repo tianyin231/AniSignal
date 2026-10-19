@@ -4,10 +4,10 @@ import { mountProductExperience } from '~/utils/product-experience'
 
 definePageMeta({ layout: false })
 useSeoMeta({
-  title: 'AniSignal · 聚合多平台更新，追踪你关心的变化',
-  description: '关键词驱动的信息采集、事件追踪与订阅工具。多源采集、证据追溯、个人监控与商品进展，通过网站、邮件和 AstrBot QQ 群推送连接你的关注。',
+  title: 'AniSignal · 让重要的变化，找到你',
+  description: '自托管信号台。公开更新汇成可追溯的事件，并按你的关注送达。',
   ogTitle: 'AniSignal · 让重要的变化，找到你',
-  ogDescription: '从多平台信息到可追溯事件，再到关键词定制的关注流、邮件和 QQ 群推送。',
+  ogDescription: '公开更新汇成可追溯的事件。网站阅读，邮件与 AstrBot 按关注送达。',
   ogType: 'website',
 })
 const pageRoot = ref<HTMLElement | null>(null)
@@ -49,7 +49,7 @@ onBeforeUnmount(() => dispose?.())
 <main id="as-main">
 <section class="as-hero as-wrap" aria-labelledby="as-title">
  <div class="as-hero-copy">
-  <span class="as-eyebrow"><i></i> 关键词驱动 · 跨平台信息雷达</span>
+  <span class="as-eyebrow"><i></i> 自托管信号台 · 按关注送达</span>
   <h1 id="as-title">让重要的变化，<br><em>找到你。</em></h1>
   <p class="as-hero-description">信息分散在各个平台，关注不必如此。<br>从采集、筛选到事件追溯，把你关心的更新<br class="as-desktop-br">汇入一处，再送到你常用的地方。</p>
   <div class="as-hero-actions"><a class="as-button" href="/">打开信息工作台 <svg class="as-icon " aria-hidden="true"><use href="#as-i-arrow" /></svg></a><a class="as-button as-button-quiet" href="#workflow">试试关键词定制 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div>
@@ -94,7 +94,7 @@ onBeforeUnmount(() => dispose?.())
   <noscript class="as-noscript">开启 JavaScript 可展开卡片并体验筛选；页面介绍与入口仍可正常阅读。</noscript>
  </div>
 </section>
-<div class="as-source-strip as-wrap"><span>多来源输入，统一阅读</span><div><b>Bilibili</b><b>米游社<small>适配就绪</small></b><b>YouTube <small>RSS</small></b><b>官网公告<small>已适配来源</small></b></div><a href="/sources">查看来源与状态 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div>
+<div class="as-source-strip as-wrap"><span>多来源输入，统一阅读</span><div><b>Bilibili</b><b>X<small>公开账号</small></b><b>YouTube<small>API / RSS</small></b><b>库洛官网</b><b>米游社</b></div><a href="/sources">查看来源与状态 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div>
 <section class="as-section as-wrap" id="capabilities" aria-labelledby="as-capabilities-title">
  <div class="as-section-heading" data-reveal><div><span class="as-overline">01 / THE WHOLE PICTURE</span><h2 id="as-capabilities-title">不止收到消息，<br>更能理解来龙去脉。</h2></div><p>采集、整理、追踪与送达，组成完整的信息链路。<br>当前展示什么，由关键词与采集配置决定。</p></div>
  <div class="as-features"><article class="as-feature as-feature-collection" data-reveal>
@@ -175,7 +175,7 @@ onBeforeUnmount(() => dispose?.())
 </section>
 <section class="as-final as-wrap" data-reveal><div class="as-final-orbits" aria-hidden="true"></div><span class="as-overline">LESS NOISE. MORE SIGNAL.</span><h2>把注意力，<br>留给真正关心的变化。</h2><p>从一个关键词开始，找到适合自己的信息路径。</p><div><a href="/" class="as-button">进入信息工作台 <svg class="as-icon " aria-hidden="true"><use href="#as-i-arrow" /></svg></a><a href="/account" class="as-button as-button-quiet">建立我的关注 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div></section>
 </main>
-<footer class="as-footer as-wrap"><div><a href="/intro" class="as-brand"><span class="as-brand-mark"><img src="/icon.png" alt=""></span>AniSignal</a><p>关键词驱动的信息采集、事件追踪与订阅工具。</p></div><nav aria-label="页脚导航"><a href="/about">关于与边界</a><a href="/sources">来源健康</a><a href="/legal">条款与隐私</a><a href="/bot-rules">机器人守则</a><a href="https://github.com/tianyin231/AniSignal" target="_blank" rel="noopener noreferrer">GitHub <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></nav><span class="as-footer-note">产品试运行 · 功能以当前部署为准</span></footer>
+<footer class="as-footer as-wrap"><div><a href="/intro" class="as-brand"><span class="as-brand-mark"><img src="/icon.png" alt=""></span>AniSignal</a><p>自托管信号台，让重要的变化找到你。</p></div><nav aria-label="页脚导航"><a href="/about">关于与边界</a><a href="/sources">来源健康</a><a href="/legal">条款与隐私</a><a href="/bot-rules">机器人守则</a><a href="https://github.com/tianyin231/AniSignal" target="_blank" rel="noopener noreferrer">GitHub <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></nav><span class="as-footer-note">产品试运行 · 功能以当前部署为准</span></footer>
 </div>
 </template>
 

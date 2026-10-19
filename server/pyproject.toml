@@ -1,7 +1,7 @@
 [project]
 name = "anisignal-server"
 version = "0.1.0"
-description = "AniSignal backend: collectors, scheduler, workers and admin API"
+description = "AniSignal signal desk: collection, traceable events, delivery, and the admin API."
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",

@@ -24,6 +24,8 @@ cp .env.example .env
 | `MYSQL_ROOT_PASSWORD` | 数据库密码，同时用于应用连接串 | 设置另一串随机长密码。当前模板直接拼接连接 URL，使用足够长的随机十六进制值可避免 URL 特殊字符问题。 |
 | `WEB_PORT` | 宿主机端口映射，未设置时为 `8090` | 本机试用填 `127.0.0.1:8090`；裸端口映射不是仅本机监听。 |
 | `DATA_DIR` | MySQL 与 Redis 数据目录，默认 `./data` | 使用持久化目录并规划备份，不提交到仓库。 |
+| `ANISIGNAL_PUBLIC_BASE_URL` | 对外站点地址，用于邮件、订阅等链接 | 对外部署时填写用户实际访问的完整地址。 |
+| `ANISIGNAL_YOUTUBE_API_KEY` | YouTube Data API v3 凭据 | 可选；未配置时使用频道 RSS，API 失败时也会回退 RSS。 |
 
 ```bash
 docker compose up -d --build
@@ -54,21 +56,21 @@ docker compose logs --tail=100 app collector
 
 `server/app/config.py` 使用 `ANISIGNAL_` 前缀，例如 `ANISIGNAL_PUBLIC_BASE_URL`、`ANISIGNAL_SMTP_HOST` 和 `ANISIGNAL_AI_MODEL`。**但 Compose 的 `.env` 不是自动注入容器的配置文件**：只有 `compose.yaml` 引用或 `environment` / `env_file` 传入的变量才会进入服务环境。
 
-当前 Compose 只显式向 `app` 与 `collector` 传入数据库、Redis、管理员 Token 和时区。通过环境变量配置其他字段时，应使用本地 Compose override，把需要的值同时传入相关服务；将变量追加到根目录 `.env` 本身不够。站点设置中已有的 SMTP、AI 等配置入口也可按需使用，实际优先级以代码为准。
+当前 Compose 显式向 `app` 与 `collector` 传入数据库、Redis、管理员 Token、公开站点地址、YouTube API Key 和时区。公开地址与 YouTube Key 可直接在根目录 `.env` 中设置。SMTP、AI 等已有管理端配置入口；通过环境变量配置其他字段时，需要在本地 Compose override 中显式传入，实际优先级以代码为准。
 
-例如，给应用和采集服务传入公开站点地址，可创建不含秘密值的本地 `compose.override.yaml`：
+例如，通过环境变量指定模型名时，可创建不含秘密值的本地 `compose.override.yaml`：
 
 ```yaml
 services:
   app:
     environment:
-      ANISIGNAL_PUBLIC_BASE_URL: ${ANISIGNAL_PUBLIC_BASE_URL}
+      ANISIGNAL_AI_MODEL: ${ANISIGNAL_AI_MODEL}
   collector:
     environment:
-      ANISIGNAL_PUBLIC_BASE_URL: ${ANISIGNAL_PUBLIC_BASE_URL}
+      ANISIGNAL_AI_MODEL: ${ANISIGNAL_AI_MODEL}
 ```
 
-在 `.env` 中设置自己的完整外部地址，再用 `docker compose up -d` 重建相关容器。反向代理改变了对外域名时，也要核对邮件中的链接与静态资源地址。凭据放在受保护的本地配置中，不写入文档或提交记录。
+在 `.env` 中设置对应值后，用 `docker compose up -d` 重建相关容器。反向代理改变了对外域名时，也要更新公开站点地址并核对邮件链接。凭据放在受保护的本地配置中，不写入文档或提交记录。
 
 ### 更新与备份
 
