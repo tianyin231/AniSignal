@@ -1,11 +1,13 @@
-"""v3 覆盖率审计：扫原始分片，逐页统计解析覆盖率与内容类型分布。
+"""覆盖率审计：扫原始分片，逐页统计解析覆盖率与内容类型分布。
 
 输出三张表：
-  1. 内容类型分布（other 16287 拆解）
-  2. 解析丢失疑点：wikitext 很长但 chunk 数为 0 的页
-  3. 特殊语法覆盖：tabber / gallery / 图片引用 / infobox 第 10 种 / 语音台词
+  1. 内容类型分布（other 拆解，规则在 games/<game>.yaml 的 audit.title_rules）
+  2. 解析丢失疑点：wikitext 很长但清洗后没内容的页
+  3. 特殊语法覆盖：tabber / gallery / 图片引用 / infobox 家族 / 语音台词
 
-用法：./.venv/bin/python tools/audit_pages.py
+用法：
+    ./kb/.venv/bin/python tools/audit_pages.py                  # 碧蓝航线
+    ./kb/.venv/bin/python tools/audit_pages.py --game arknights # 明日方舟
 """
 
 from __future__ import annotations
@@ -20,35 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from kblib import cleantext  # noqa: E402
-from kblib.config import (INFOBOX_TEMPLATES, INFOBOX_TEMPLATE_PREFIXES,  # noqa: E402
-                          LEGACY_INFOBOX_TEMPLATE_NAMES, RAW_DIR)
-from parse import TEMPLATE_KINDS  # noqa: E402
-
-STAGE_RE = re.compile(r"^\d+-\d+(Hard)?$|^\d+-SOS$|^SP\d*$|^EX\d*$|^[A-Z]{2}\d*$")
-
-# 标题模式 → 内容类型（按顺序第一个命中的生效）
-TITLE_RULES = [
-    ("指挥官档案", re.compile(r"^指挥官")),
-    ("同人角色", re.compile(r"^同人角色")),
-    ("同人作品", re.compile(r"^同人文|^同人馆")),
-    ("测试/沙盒", re.compile(r"^测试|^沙盒|^示例|^playground", re.I)),
-    ("用户页", re.compile(r"^用户页")),
-    ("编辑教程", re.compile(r"^编辑教程|^碧蓝航线WIKI编辑教程")),
-    ("前方情报", re.compile(r"^前方情报")),
-    ("敌舰/塞壬", re.compile(r"^敌舰|^塞壬|^仲裁者|^测试者|^公海舰队")),
-    ("大型作战/META", re.compile(r"^大型作战|^META|^信标|^舰队科技|^指挥喵|^METAboss攻略要点")),
-    ("碧蓝回忆录(剧情)", re.compile(r"^碧蓝回忆录")),
-    ("模拟器/小游戏", re.compile(r"^舰队模拟器|^建造模拟器|^小游戏|^试作型|JUUs动态|^宿舍计划|^岛屿计划")),
-    ("装备研发", re.compile(r"^装备研发|^研发")),
-    ("换装/外观", re.compile(r"^换装|^外观|^皮肤|^誓约系统|^情人节礼物")),
-    ("活动/直播/专题", re.compile(r"^活动|^复刻|^庆典|^演习|^联动|^专题|^生放送|^日服公式|^已击毁的往期卫星|^碧蓝海事局")),
-    ("世界巡游", re.compile(r"^世界巡游")),
-    ("聊天/动态", re.compile(r"^聊天")),
-    ("舰娘志/杂志", re.compile(r"^碧蓝舰娘志|^碧蓝航线Crosswave|^碧蓝航线WIKI天梯榜")),
-    ("攻略", re.compile(r"攻略|指南|配装|推荐|思路|解析|测评|对比|开荒")),
-    ("关卡", re.compile(r"^\d")),
-]
+from kblib import cleantext, gamecfg  # noqa: E402
 
 # 需要单独点名的语法特征（正文里出现即计数）
 FEATURES = {
@@ -65,8 +39,8 @@ FEATURES = {
 }
 
 
-def classify(title: str, wikitext: str) -> str:
-    for name, rx in TITLE_RULES:
+def classify(title: str, wikitext: str, title_rules) -> str:
+    for name, rx in title_rules:
         if rx.search(title):
             return name
     return "未归类"
@@ -74,12 +48,18 @@ def classify(title: str, wikitext: str) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", type=Path, default=RAW_DIR)
+    ap.add_argument("--game", default=gamecfg.DEFAULT_GAME,
+                    help=f"游戏配置名，默认 {gamecfg.DEFAULT_GAME}")
+    ap.add_argument("--source", type=Path, default=None)
     ap.add_argument("--out", type=Path,
                     default=Path(__file__).resolve().parent / "audit_pages.json")
     args = ap.parse_args()
-
-    infobox_names = set(INFOBOX_TEMPLATES)
+    cfg = gamecfg.load_game(args.game)
+    source = args.source or cfg.raw_dir
+    infobox_names = set(cfg.infobox_templates)
+    # 未归类页拆解规则来自 YAML（碧蓝航线那套），没配就只报"未归类"
+    title_rules = [(str(r.get("name")), re.compile(str(r.get("regex"))))
+                   for r in (cfg.raw.get("audit", {}) or {}).get("title_rules", []) or []]
     kinds = Counter()
     other_break = Counter()
     feat = Counter()
@@ -92,7 +72,7 @@ def main() -> int:
     # 顺带把每页 wikitext 里出现的所有"图鉴/数据"类模板名记下来，找第 10 种
     LIKE_RX = re.compile(r"^\s*{{\s*([^{}|\n]+?)\s*(?:\|[^}]*)?$", re.M)
 
-    for shard in sorted(args.source.glob("*.jsonl.gz")):
+    for shard in sorted(source.glob("*.jsonl.gz")):
         with gzip.open(shard, "rt", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -103,14 +83,16 @@ def main() -> int:
                 wt = rec["wikitext"]
                 total += 1
 
-                found = cleantext.top_level_infobox(wt, infobox_names)
+                found = cleantext.top_level_infobox(
+                    wt, infobox_names, cfg.legacy_infobox_template_names,
+                    tuple(cfg.infobox_template_prefixes))
                 if found:
-                    kind = TEMPLATE_KINDS[cleantext.infobox_template_name(found[0])][0]
-                elif STAGE_RE.match(title):
-                    kind = "stage"
+                    kind = (cfg.kind_of(cleantext.infobox_template_name(
+                        found[0], tuple(cfg.infobox_template_prefixes))) or ("other",))[0]
                 else:
-                    kind = "other"
-                    other_break[classify(title, wt)] += 1
+                    kind = next((k for rx, k in cfg.title_patterns if rx.match(title)), "other")
+                if kind == "other":
+                    other_break[classify(title, wt, title_rules)] += 1
                 kinds[kind] += 1
 
                 for k, rx in FEATURES.items():

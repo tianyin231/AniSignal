@@ -20,11 +20,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .config import DATA_DIR
+from .config import MODEL_DIR
 
 log = logging.getLogger("kb.embedder")
 
-MODEL_DIR = DATA_DIR / "models"
 HF_ENDPOINTS = [
     os.environ.get("HF_ENDPOINT", "https://huggingface.co"),
     "https://hf-mirror.com",

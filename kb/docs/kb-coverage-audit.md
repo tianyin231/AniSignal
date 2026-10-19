@@ -70,6 +70,9 @@ README 列的 9 类之外，wikitext 里还跑着这些图鉴模板：
 | `META图鉴` | 1 | ✅ 不收入结构化表（`介绍` 字段是几千字散文，抽走反而丢内容），走"长字段补 chunk"兜住 |
 | `装备图鉴` / `关卡图鉴汇总` / `换装图鉴列表副本` / `装备图鉴根` | 827 / 196 / 19 / 3 | 聚合/导航模板，不抽 |
 
+篇数是审计脚本的**模板出现数**（含被别族 infobox 抢占的页、嵌套出现），入库行数以 parse
+实际命中为准（如 `原型舰性能数据` 三写法审计 75/4/88，实际入库 105 行：16/1/88）。
+
 ## 5. other 16287 拆解
 
 | 类型 | 篇数 |
@@ -124,3 +127,21 @@ v3 增量 upsert 时把这 138 个一起补上。
 | SQLite 表 | 8 张 | 14 张 | +`stages` 1984 / `ship_perf` 105 / `sirens` 93 / `fan_ships` 78 / `aliases` 759 / `page_images` 17962 |
 | 带 infobox 页 | 2139 | 4399 | 新增 4 族图鉴模板（关卡/原型舰/塞壬/同人角色）进结构化路 |
 | eval（51 题） | 45/51 = 88.2% | 见 `data/eval_report_v3.json` | 补捞内容以"新增 chunk"为主，未改动 v2 已有 chunk 的文本 |
+
+## 9. v3 复现命令（全增量，随时被杀随时重跑）
+
+```bash
+./.venv/bin/python parse.py                                # 重解析：老 chunk id 不变，只新增
+./.venv/bin/python tools/fetch_images.py                   # 图片文件名 → 直链（带缓存，只换缺的）
+./.venv/bin/python tools/check_append.py                   # 对账：新点/文本变了/陈旧点各多少
+./.venv/bin/python embed_index.py --append                 # 增量 upsert（幂等）
+./.venv/bin/python -m kblib.bm25                           # 重建 BM25 关键词索引（约 2 分钟）
+./.venv/bin/python eval.py --out data/eval_report_v3.json  # 51 题回归，对照 88.2%
+```
+
+注意两个坑（都踩过）：
+
+- **BM25 不会自动更新**。`HybridStore` 只 load 不重建，parse 加了新 chunk 后不跑
+  `-m kblib.bm25`，混合检索的关键词那一半就还是旧 chunk 集。
+- **embed 中途被杀**只丢尾部，`--append` 按 chunk_id 对账重跑即续；v3 实际就被杀过一次，
+  重跑同一命令接上。

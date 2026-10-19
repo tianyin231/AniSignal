@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
-"""最小问答 demo：问题 -> 本地向量检索 -> step-5-preview 组织答案。"""
+"""最小问答 demo：问题 -> 查表 + 本地向量检索 -> step-5-preview 组织答案。
+
+    ./kb/.venv/bin/python qa_demo.py 阿米娅二技能叫什么
+    ./kb/.venv/bin/python qa_demo.py --game arknights 塞雷娅天赋
+
+--game 换游戏配置（kb/games/<game>.yaml）：碧蓝航线走 ships/skills 专用表，
+其余游戏走 entities/entity_attrs + 配置声明的子表，两边都是"先查表再检索"。
+"""
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import sqlite3
 import sys
 import urllib.request
 
 from kblib import embedder as emb
-from kblib import retriever
+from kblib import gamecfg, retriever
+from kblib.extractors import child_table_columns
 
 API_BASE = os.environ.get("ANTHROPIC_BASE_URL", "https://api.stepfun.com/step_plan").rstrip("/")
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -22,10 +32,13 @@ def build_context(chunks):
     return "\n\n".join(parts)
 
 
+CFG = None  # main() 里填，generate() 拿去拼 system 提示词
+
+
 def generate(question, chunks):
     ctx = build_context(chunks)
     prompt = (
-        "你是碧蓝航线知识库问答助手。只根据以下资料回答问题，"
+        f"你是{CFG.label}知识库问答助手。只根据以下资料回答问题，"
         "不要编造。如果问题本身不成立（比如问某船的二技能，"
         "但资料显示该船只有一个技能），请根据资料如实指出。\n\n"
         + ctx
@@ -54,49 +67,89 @@ def generate(question, chunks):
     return "".join(texts)
 
 
+def facts_azurlane(cur, ship, question):
+    """碧蓝航线：ships/skills 表（专用抽取器落的那几张）。"""
+    table_facts = []
+    rows = cur.execute(
+        "SELECT slot, name, description FROM skills WHERE ship_title=? ORDER BY slot",
+        (ship,),
+    ).fetchall()
+    if rows:
+        for slot, name, desc in rows:
+            table_facts.append(
+                "%s 的技能%d：%s —— %s" % (ship, slot, name, (desc or "")[:200])
+            )
+        # 问的是第几个技能？
+        want = 0
+        for ch, n in (("一", 1), ("二", 2), ("三", 3), ("四", 4)):
+            if ch + "技能" in question:
+                want = n
+        slots = [r[0] for r in rows]
+        if want and want not in slots:
+            table_facts.append(
+                "注：资料中%s一共只有%d个技能（%s），没有技能%d。"
+                % (ship, len(slots), "、".join("技能%d" % s for s in slots), want)
+            )
+    return table_facts
+
+
+def facts_generic(cur, cfg, title, question):
+    """通用实体路：entities/entity_attrs + 配置声明的子表，全游戏一套代码。"""
+    facts = []
+    row = cur.execute(
+        "SELECT kind, name, category FROM entities WHERE title=?", (title,)
+    ).fetchone()
+    if row:
+        facts.append("%s：%s（%s）" % (title, row[1] or row[0], row[2] or row[0]))
+    for attr, value in cur.execute(
+        "SELECT attr, value FROM entity_attrs WHERE title=? ORDER BY attr", (title,)
+    ):
+        facts.append("%s：%s" % (attr, (value or "")[:200]))
+    n_rows = 0
+    for table, cols in child_table_columns(cfg).items():
+        for r in cur.execute(
+            f'SELECT * FROM "{table}" WHERE page_title=? ORDER BY sort', (title,)
+        ):
+            if n_rows >= 40:
+                break
+            n_rows += 1
+            facts.append("%s｜%s" % (
+                table, "｜".join(f"{c}={v}" for c, v in zip(r.keys(), tuple(r))
+                                if v not in (None, "") and c != "page_title")))
+    return facts
+
+
 def main():
-    question = " ".join(sys.argv[1:]).strip()
-    if not question:
-        print("用法：qa_demo.py <问题>", file=sys.stderr)
-        sys.exit(1)
-    import sqlite3
-    from kblib.config import KB_DB
-    conn = sqlite3.connect(KB_DB)
+    global CFG
+    ap = argparse.ArgumentParser(description="知识库最小问答 demo")
+    ap.add_argument("--game", default=gamecfg.DEFAULT_GAME,
+                    help=f"游戏配置名，默认 {gamecfg.DEFAULT_GAME}")
+    ap.add_argument("question", nargs="+")
+    args = ap.parse_args()
+    question = " ".join(args.question).strip()
+    CFG = gamecfg.load_game(args.game)
+
+    conn = sqlite3.connect(CFG.kb_db)
     cur = conn.cursor()
-    titles = [r[0] for r in cur.execute("SELECT title FROM ships")]
-    # 最长匹配舰船名
-    ship = ""
+    if CFG.extractor_module:
+        titles = [r[0] for r in cur.execute("SELECT title FROM ships")]
+    # 最长匹配实体名（舰船/干员/敌人…）
+    hit = ""
     for t in sorted(titles, key=len, reverse=True):
         if t and t in question:
-            ship = t
+            hit = t
             break
     table_facts = []
     route = "检索"
-    if ship and "技能" in question:
-        rows = cur.execute(
-            "SELECT slot, name, description FROM skills WHERE ship_title=? ORDER BY slot",
-            (ship,),
-        ).fetchall()
-        if rows:
-            route = "查表"
-            for slot, name, desc in rows:
-                table_facts.append(
-                    "%s 的技能%d：%s —— %s" % (ship, slot, name, (desc or "")[:200])
-                )
-            # 问的是第几个技能？
-            want = 0
-            for ch, n in (("一", 1), ("二", 2), ("三", 3), ("四", 4)):
-                if ch + "技能" in question:
-                    want = n
-            slots = [r[0] for r in rows]
-            if want and want not in slots:
-                table_facts.append(
-                    "注：资料中%s一共只有%d个技能（%s），没有技能%d。"
-                    % (ship, len(slots), "、".join("技能%d" % s for s in slots), want)
-                )
+    if hit and CFG.extractor_module and "技能" in question:
+        table_facts = facts_azurlane(cur, hit, question)
+        route = "查表" if table_facts else "检索"
+    elif hit:
+        table_facts = facts_generic(cur, CFG, hit, question)
+        route = "查表" if table_facts else "检索"
     conn.close()
     encoder = emb.get_encoder("onnx")
-    store = retriever.get_hybrid_store("qdrant", dim=encoder.dim)
+    store = retriever.get_hybrid_store("qdrant", dim=encoder.dim, game=CFG.name)
     vec = encoder.encode_queries([question])[0]
     hits = store.search(vec, top_k=5, query=question)
     print("== 路由：%s ==" % route)

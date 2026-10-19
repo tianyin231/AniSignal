@@ -4,7 +4,10 @@
 会被静默丢弃（表现为读超时）。限速、重试、批次拆分逻辑都在这里，换传输方式
 不影响上层。
 
-只读文本，不下载图片；频率默认 1.5 req/s，429/5xx 指数退避。
+wiki 地址、礼貌参数（rps/超时/重试/批次）全部来自游戏配置（games/*.yaml），
+`MediaWikiClient(game="arknights")` 就打 PRTS wiki，客户端代码不分游戏。
+
+只读文本，不下载图片；429/5xx 指数退避。
 """
 
 from __future__ import annotations
@@ -18,15 +21,7 @@ import time
 import urllib.parse
 from typing import Any, Iterator
 
-from .config import (
-    API_URL,
-    BACKOFF_CAP,
-    BATCH_TITLES,
-    DEFAULT_RPS,
-    FETCH_MAX_RETRIES,
-    FETCH_TIMEOUT,
-    USER_AGENT,
-)
+from . import gamecfg
 
 log = logging.getLogger("kb.wikiapi")
 
@@ -45,7 +40,7 @@ class TransientError(RuntimeError):
 class RateLimiter:
     """最小间隔限速器（带抖动，避免和别的请求撞车）。"""
 
-    def __init__(self, rps: float = DEFAULT_RPS) -> None:
+    def __init__(self, rps: float) -> None:
         self.min_interval = 1.0 / max(rps, 0.05)
         self._next = 0.0
 
@@ -58,12 +53,17 @@ class RateLimiter:
 
 
 class MediaWikiClient:
-    def __init__(self, rps: float = DEFAULT_RPS, max_retries: int = FETCH_MAX_RETRIES,
-                 timeout: int = FETCH_TIMEOUT, batch_titles: int = BATCH_TITLES) -> None:
-        self.limiter = RateLimiter(rps)
-        self.max_retries = max_retries
-        self.timeout = timeout
-        self.batch_titles = batch_titles
+    def __init__(self, rps: float | None = None, max_retries: int | None = None,
+                 timeout: int | None = None, batch_titles: int | None = None,
+                 game: str | None = None) -> None:
+        cfg = gamecfg.load_game(game)
+        self.game = cfg
+        self.api_url = cfg.api_url
+        self.user_agent = cfg.user_agent
+        self.limiter = RateLimiter(cfg.rps if rps is None else rps)
+        self.max_retries = cfg.max_retries if max_retries is None else max_retries
+        self.timeout = cfg.timeout if timeout is None else timeout
+        self.batch_titles = cfg.batch_titles if batch_titles is None else batch_titles
         self.request_count = 0
 
     # ---- 底层 ----
@@ -71,7 +71,7 @@ class MediaWikiClient:
         try:
             proc = subprocess.run(
                 [CURL, "-sS", "--compressed", "-m", str(self.timeout),
-                 "-A", USER_AGENT, "-w", STATUS_SEP + "%{http_code}", "--", url],
+                 "-A", self.user_agent, "-w", STATUS_SEP + "%{http_code}", "--", url],
                 capture_output=True, timeout=self.timeout + 20,
             )
         except subprocess.TimeoutExpired as e:
@@ -93,7 +93,7 @@ class MediaWikiClient:
         params = dict(params)
         params.setdefault("format", "json")
         params.setdefault("formatversion", "2")
-        url = API_URL + "?" + urllib.parse.urlencode(params)
+        url = self.api_url + "?" + urllib.parse.urlencode(params)
         last: Exception | None = None
         for attempt in range(self.max_retries):
             self.limiter.wait()
@@ -107,13 +107,14 @@ class MediaWikiClient:
                 raise ApiError(f"HTTP {code}：{body[:200]}")
             except TransientError as e:
                 last = e
-                delay = min(2 ** attempt, BACKOFF_CAP)
+                delay = min(2 ** attempt, self.game.backoff_cap)
                 log.warning("%s，%.1fs 后重试（%d/%d）", e, delay, attempt + 1, self.max_retries)
             except json.JSONDecodeError as e:
                 last = e
                 log.warning("响应不是 JSON，%.1fs 后重试（%d/%d）",
-                            min(2 ** attempt, BACKOFF_CAP), attempt + 1, self.max_retries)
-            time.sleep(min(2 ** attempt, BACKOFF_CAP))
+                            min(2 ** attempt, self.game.backoff_cap), attempt + 1,
+                            self.max_retries)
+            time.sleep(min(2 ** attempt, self.game.backoff_cap))
         raise ApiError(f"请求失败 {url}: {last!r}")
 
     def query(self, **params: Any) -> dict[str, Any]:

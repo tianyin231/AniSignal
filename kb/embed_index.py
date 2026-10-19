@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """阶段 3：本地 embedding → 向量库。
 
-    ./kb/.venv/bin/python embed_index.py                    # 全量重建（先 reset）
+    ./kb/.venv/bin/python embed_index.py                    # 全量重建 azurlane（默认游戏）
+    ./kb/.venv/bin/python embed_index.py --game arknights   # 换成明日方舟的 chunks + arknights_kb
     ./kb/.venv/bin/python embed_index.py --append           # 增量：只 embed 新 chunk
     ./kb/.venv/bin/python embed_index.py --append --delete-stale
     ./kb/.venv/bin/python embed_index.py --backend onnx     # 不装 torch 的轻量后端
@@ -27,13 +28,11 @@ import time
 from pathlib import Path
 
 from kblib import embedder as emb
-from kblib import retriever
-from kblib.config import CHUNKS_PATH, DATA_DIR
+from kblib import gamecfg, retriever
 
 log = logging.getLogger("kb.embed_index")
 
 BATCH = 128
-META_PATH = DATA_DIR / "index_meta.json"
 
 
 def iter_chunks(path: Path, limit: int = 0):
@@ -90,7 +89,10 @@ def existing_index(store: retriever.VectorStore) -> tuple[dict[str, tuple[int, s
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="chunk → embedding → 向量库")
-    ap.add_argument("--chunks", type=Path, default=CHUNKS_PATH)
+    ap.add_argument("--game", default=gamecfg.DEFAULT_GAME,
+                    help=f"游戏配置名（kb/games/<game>.yaml），默认 {gamecfg.DEFAULT_GAME}")
+    ap.add_argument("--chunks", type=Path, default=None,
+                    help="默认取游戏配置的 data_dir/chunks.jsonl")
     ap.add_argument("--backend", default="auto",
                     choices=["auto", "torch", "onnx"], help="embedding 后端")
     ap.add_argument("--store", default="qdrant", choices=["qdrant", "numpy"])
@@ -103,18 +105,21 @@ def main() -> int:
     ap.add_argument("--batch", type=int, default=BATCH)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
+    cfg = gamecfg.load_game(args.game)
+    chunks_path = args.chunks or cfg.chunks_path
+    meta_path = cfg.index_meta_path
 
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING,
                         format="%(asctime)s %(levelname)s %(message)s")
-    if not args.chunks.exists():
-        print(f"找不到 {args.chunks}，先跑 parse.py", file=sys.stderr)
+    if not chunks_path.exists():
+        print(f"找不到 {chunks_path}，先跑 parse.py --game {cfg.name}", file=sys.stderr)
         return 1
 
     t0 = time.time()
     encoder = emb.get_encoder(args.backend)
     print(f"编码器：{encoder.backend} / dim={encoder.dim}")
 
-    store = retriever.get_store(args.store, dim=encoder.dim)
+    store = retriever.get_store(args.store, dim=encoder.dim, game=cfg.name)
     if args.recreate:
         store.reset()
     print(f"向量库：{store.name}")
@@ -151,7 +156,7 @@ def main() -> int:
         log.info("已写入 %d 条", n)
         return n
 
-    chunks = load_sorted(args.chunks, args.limit)
+    chunks = load_sorted(chunks_path, args.limit)
     if args.append:
         existing, max_id = existing_index(store)
         n_in_store = store.count()
@@ -186,6 +191,8 @@ def main() -> int:
     n = store.count()
     elapsed = time.time() - t0
     meta = {
+        "game": cfg.name,
+        "collection": cfg.collection,
         "model": "bge-small-zh",
         "backend": encoder.backend,
         "dim": encoder.dim,
@@ -198,11 +205,13 @@ def main() -> int:
     if args.append:
         meta["append"] = True
         meta["skipped_unchanged"] = n_skipped
-    META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print(f"索引完成：本次 {total} 条 chunk → 库里共 {n} 个向量，耗时 {elapsed:.0f}s")
-    print(f"data/ 占用：{dir_size(DATA_DIR) / 1e6:.1f} MB"
-          f"（模型 {dir_size(emb.MODEL_DIR) / 1e6:.0f} MB，向量库 {dir_size(DATA_DIR / 'qdrant') / 1e6:.0f} MB）")
+    print(f"[{cfg.label}] 索引完成：本次 {total} 条 chunk → {cfg.collection} 共 {n} 个向量，"
+          f"耗时 {elapsed:.0f}s")
+    print(f"data/ 占用：{dir_size(cfg.data_dir) / 1e6:.1f} MB"
+          f"（模型 {dir_size(emb.MODEL_DIR) / 1e6:.0f} MB，"
+          f"向量库 {dir_size(retriever.qdrant_server.QDRANT_STORAGE_DIR) / 1e6:.0f} MB）")
     return 0
 
 
