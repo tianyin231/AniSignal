@@ -385,6 +385,64 @@ async def test_email_channel_creates_delivery_with_rule_notice(session):
     assert stats.notified == 0
 
 
+def _mail_user(session, index: int) -> User:
+    user = User(
+        email=f"mail{index}@t.com",
+        password_hash="x",
+        is_verified=True,
+        notification_enabled=True,
+        status="active",
+    )
+    session.add(user)
+    return user
+
+
+async def test_email_channel_reaches_every_recipient_once(session):
+    """每个收件人一行投递、key 各带 user_id；重跑不重复建行（PERF-012 重构后的口径）。"""
+    content = await _content(session, external_id="BVEmulti", title="鸣潮联名官宣")
+    users = [_mail_user(session, i) for i in range(3)]
+    session.add_all(users)
+    await session.flush()
+    await _rule(session, name="联名播报", actions=[{"type": "notify", "channels": ["email"]}])
+
+    stats = await rules_module.apply_rules(session, [content.id])
+
+    rows = list((await session.execute(select(NotificationDelivery))).scalars())
+    assert sorted(row.user_id for row in rows) == sorted(u.id for u in users)
+    assert {row.dedupe_key for row in rows} == {
+        f"rule:1:content:{content.id}:email:{u.id}" for u in users
+    }
+    assert all(row.source == "rules" and row.subject == "[AniSignal 规则] 联名播报" for row in rows)
+
+    # 重跑：去重键已在，不新增行也不虚报
+    stats = await rules_module.apply_rules(session, [content.id])
+    assert stats.notified == 0
+    assert len(list((await session.execute(select(NotificationDelivery))).scalars())) == 3
+
+
+async def test_email_channel_truncates_recipients(session):
+    """收件人截断到 MAX_EMAIL_RECIPIENTS：同步 SMTP 不能把采集进程堵死（PERF-012）。
+
+    注意截断是「本轮」语义：(规则, 内容) 记账成功后不会重跑，所以排在截断线之外的人
+    这条内容收不到——这是有意的取舍，彻底解法是把投递挪进异步队列（见报告 PERF-012）。
+    """
+    content = await _content(session, external_id="BVEcap", title="鸣潮联名官宣")
+    session.add_all([_mail_user(session, i) for i in range(rules_module.MAX_EMAIL_RECIPIENTS + 5)])
+    await session.flush()
+    await _rule(session, name="联名播报", actions=[{"type": "notify", "channels": ["email"]}])
+
+    await rules_module.apply_rules(session, [content.id])
+
+    rows = list((await session.execute(select(NotificationDelivery))).scalars())
+    assert len(rows) == rules_module.MAX_EMAIL_RECIPIENTS
+    assert len({row.user_id for row in rows}) == rules_module.MAX_EMAIL_RECIPIENTS
+
+    # 记账成功后不重跑，也不会重复发信
+    await rules_module.apply_rules(session, [content.id])
+    rows = list((await session.execute(select(NotificationDelivery))).scalars())
+    assert len(rows) == rules_module.MAX_EMAIL_RECIPIENTS
+
+
 async def test_rule_hit_is_idempotent_and_failed_rule_retries(session):
     """已成功记账的组合不重复执行；失败的组合下轮重试（fail-open 但可恢复）。"""
     content = await _content(session, external_id="BVD1", title="鸣潮联名官宣")
