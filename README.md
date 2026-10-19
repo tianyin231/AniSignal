@@ -8,11 +8,11 @@
 
 自托管的信息信号台。把多平台公开更新汇入一处，保留事件来路，按关注送达。
 
-<img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-111111">
-<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-111111">
-<img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-111111">
-<img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-111111">
-<img alt="自托管" src="https://img.shields.io/badge/%E8%87%AA%E6%89%98%E7%AE%A1-111111">
+<img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;labelColor=3776AB&amp;logo=python&amp;logoColor=white">
+<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&amp;logo=fastapi&amp;logoColor=white">
+<img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-00DC82?style=flat-square&amp;labelColor=00DC82&amp;logo=nuxt&amp;logoColor=white">
+<img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&amp;labelColor=2496ED&amp;logo=docker&amp;logoColor=white">
+<img alt="自托管" src="https://img.shields.io/badge/%E8%87%AA%E6%89%98%E7%AE%A1-7C3AED?style=flat-square">
 
 [在线试运行](http://anisignal.nanamiyako.cn/) · [产品介绍](http://anisignal.nanamiyako.cn/intro) · [快速开始](#快速开始) · [部署指南](docs/deployment.md) · [反馈问题](https://github.com/tianyin231/AniSignal/issues)
 
