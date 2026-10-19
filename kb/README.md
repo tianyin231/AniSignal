@@ -1,7 +1,8 @@
 # 多游戏知识库（kb/）
 
 把游戏 wiki（[碧蓝航线 BWIKI](https://wiki.biligame.com/blhx)、
-[明日方舟 PRTS](https://prts.wiki)）炼成 bot 可检索、可查表的知识库。
+[明日方舟 PRTS](https://prts.wiki)、
+[鸣潮 BWIKI](https://wiki.biligame.com/wutheringwaves)）炼成 bot 可检索、可查表的知识库。
 四个阶段：**抓取 → 解析 → 向量索引 → 评测**，全程本地跑，不调外部 API（模型 embedding 也是本地 CPU）。
 
 ## 一游戏一配置
@@ -36,13 +37,14 @@ KB_GAME=arknights tools/fetch_loop.sh                      # 反复续跑直到 
 环境：`kb/.venv`（mwparserfromhell / requests / onnxruntime / tokenizers / torch / PyYAML）。
 数据按游戏分目录（`.gitignore` 已排除，只提交代码、配置和文档）：
 
-| | azurlane（默认） | arknights |
-|---|---|---|
-| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` |
-| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` |
-| qdrant collection | `blhx_kb` | `arknights_kb` |
-| chunk_id 前缀 | `blhx:` | `arknights:` |
-| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` |
+| | azurlane（默认） | arknights | mingchao |
+|---|---|---|---|
+| 配置 | `games/azurlane.yaml` | `games/arknights.yaml` | `games/mingchao.yaml` |
+| 数据目录 | `data/`（沿用 v1 起的布局） | `data/arknights/` | `data/mingchao/` |
+| qdrant collection | `blhx_kb` | `arknights_kb` | `mingchao_kb` |
+| chunk_id 前缀 | `blhx:` | `arknights:` | `mingchao:` |
+| 题库 | `eval/questions.jsonl` | `eval/arknights/questions.jsonl` | `eval/mingchao/questions.jsonl` |
+| wiki | 碧蓝航线 BWIKI | 方舟 PRTS | 鸣潮 BWIKI（**注意 `wiki.biligame.com/mc` 是我的世界**，鸣潮是 `/wutheringwaves`） |
 
 azurlane 的 `data_dir` 故意不搬家：`blhx_kb` 的向量、`index_meta.json`、bm25 索引、
 53697 个 chunk_id 全在那儿，一搬家 v2/v3 的成果全部作废。新游戏各自一个目录，互不污染。
@@ -51,7 +53,7 @@ azurlane 的 `data_dir` 故意不搬家：`blhx_kb` 的向量、`index_meta.json
 chunk 规则（长短阈值、台词字段后缀、每页图片数）、infobox 模板白名单（模板名 → kind/category，
 支持前缀家族）、标题模式（长得像关卡号就算关卡）、导航/噪音模板清单、`parse.kinds`
 （通用实体路的字段→列名映射）。碧蓝航线另挂 `extractor_module: kblib.extractors.azurlane`
-（舰娘/装备/关卡这些字段语义特异的族走专用抽取器），明日方舟 8 族全走通用实体路，零代码。
+（舰娘/装备/关卡这些字段语义特异的族走专用抽取器），明日方舟 8 族、鸣潮 10 族全走通用实体路，零代码。
 
 ## Pipeline 说明
 
