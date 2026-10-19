@@ -96,9 +96,9 @@ def main():
                 )
     conn.close()
     encoder = emb.get_encoder("onnx")
-    store = retriever.get_store("qdrant", dim=encoder.dim)
+    store = retriever.get_hybrid_store("qdrant", dim=encoder.dim)
     vec = encoder.encode_queries([question])[0]
-    hits = store.search(vec, top_k=5)
+    hits = store.search(vec, top_k=5, query=question)
     print("== 路由：%s ==" % route)
     print("== 检索命中 ==")
     for h in hits:
