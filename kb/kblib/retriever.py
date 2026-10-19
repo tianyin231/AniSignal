@@ -195,8 +195,15 @@ class QdrantVectorStore(VectorStore):
 
     def reset(self) -> None:
         qdrant_server.ensure_server()
-        self._req("DELETE", f"/collections/{self.collection}")
-        log.info("已删除 collection %s", self.collection)
+        # 新游戏第一次跑 --recreate 时 collection 还不存在，DELETE 会 404。
+        # 这时候"已经空了"就是想要的状态，别让整条 pipeline 挂在第一步。
+        try:
+            self._req("DELETE", f"/collections/{self.collection}")
+            log.info("已删除 collection %s", self.collection)
+        except RuntimeError as e:
+            if "404" not in str(e):
+                raise
+            log.info("collection %s 本来就不存在，当作已删除", self.collection)
 
 
 # ---------------------------------------------------------------- 兜底
