@@ -1,0 +1,51 @@
+{"id": "t01", "kind": "table", "q": "甘雨的稀有度是几星", "probe": "entity_attr", "args": {"title": "甘雨", "attr": "稀有度"}, "expect": "5星"}
+{"id": "t02", "kind": "table", "q": "甘雨的称号是什么", "probe": "entity_attr", "args": {"title": "甘雨", "attr": "称号"}, "expect": "循循守月"}
+{"id": "t03", "kind": "table", "q": "甘雨是什么元素属性", "probe": "entity_attr", "args": {"title": "甘雨", "attr": "元素属性"}, "expect": "冰"}
+{"id": "t04", "kind": "table", "q": "甘雨用什么类型的武器", "probe": "entity_attr", "args": {"title": "甘雨", "attr": "武器类型"}, "expect": "弓"}
+{"id": "t05", "kind": "table", "q": "甘雨的命之座叫什么", "probe": "entity_attr", "args": {"title": "甘雨", "attr": "命之座"}, "expect": "仙麟座"}
+{"id": "t06", "kind": "table", "q": "甘雨是什么种族", "probe": "entity_attr", "args": {"title": "甘雨", "attr": "种族"}, "expect": "半仙（麒麟）"}
+{"id": "t07", "kind": "table", "q": "钟离的称号是什么", "probe": "entity_attr", "args": {"title": "钟离", "attr": "称号"}, "expect": "尘世闲游"}
+{"id": "t08", "kind": "table", "q": "钟离的命之座叫什么", "probe": "entity_attr", "args": {"title": "钟离", "attr": "命之座"}, "expect": "岩王帝君座"}
+{"id": "t09", "kind": "table", "q": "雷电将军的称号是什么", "probe": "entity_attr", "args": {"title": "雷电将军", "attr": "称号"}, "expect": "一心净土"}
+{"id": "t10", "kind": "table", "q": "胡桃的命之座叫什么", "probe": "entity_attr", "args": {"title": "胡桃", "attr": "命之座"}, "expect": "引蝶座"}
+{"id": "t11", "kind": "table", "q": "纳西妲是什么种族", "probe": "entity_attr", "args": {"title": "纳西妲", "attr": "种族"}, "expect": "草木化身（世界树最纯净的一枝）"}
+{"id": "t12", "kind": "table", "q": "七七是什么种族", "probe": "entity_attr", "args": {"title": "七七", "attr": "种族"}, "expect": "僵尸"}
+{"id": "t13", "kind": "table", "q": "希格雯是什么种族", "probe": "entity_attr", "args": {"title": "希格雯", "attr": "种族"}, "expect": "美露莘"}
+{"id": "t14", "kind": "table", "q": "试作古华的初始攻击力是多少", "probe": "entity_json", "args": {"title": "试作古华", "key": "初始攻击力"}, "expect": "44"}
+{"id": "t15", "kind": "table", "q": "护摩之杖的武器技能叫什么", "probe": "entity_attr", "args": {"title": "护摩之杖", "attr": "技能名称"}, "expect": "无羁的朱赤之蝶"}
+{"id": "t16", "kind": "table", "q": "护摩之杖的副属性是什么", "probe": "entity_json", "args": {"title": "护摩之杖", "key": "副属性"}, "expect": "暴击伤害"}
+{"id": "t17", "kind": "table", "q": "沉沦之心两件套的效果是什么", "probe": "entity_attr", "args": {"title": "沉沦之心", "attr": "两件套效果"}, "expect": "获得15%水元素伤害加成。"}
+{"id": "t18", "kind": "table", "q": "遗迹守卫是什么类别的怪物", "probe": "entity_attr", "args": {"title": "遗迹守卫", "attr": "怪物类别"}, "expect": "精英"}
+{"id": "t19", "kind": "table", "q": "甜甜花酿鸡属于什么类别的食物", "probe": "entity_attr", "args": {"title": "甜甜花酿鸡", "attr": "类别"}, "expect": "恢复血量"}
+{"id": "t20", "kind": "table", "q": "摩拉的介绍是怎么写的", "probe": "entity_attr", "args": {"title": "摩拉", "attr": "介绍"}, "expect": "通行大陆的钱。世界通用的共同语言，谁人都能理解的贵金属。"}
+{"id": "t21", "kind": "table", "q": "森林书是什么类型的任务", "probe": "entity_attr", "args": {"title": "森林书", "attr": "任务类型"}, "expect": "世界任务"}
+{"id": "t22", "kind": "table", "q": "甘雨这个实体在知识库里归到哪一类", "probe": "entity_field", "args": {"title": "甘雨", "field": "kind"}, "expect": "character"}
+{"id": "t23", "kind": "table", "q": "甘雨的第一层命之座叫什么", "probe": "child", "args": {"title": "甘雨", "table": "genshin_character_constellation", "column": "name", "where": {"index": "1"}}, "expect": "饮露"}
+{"id": "t24", "kind": "table", "q": "甘雨的六层命之座分别叫什么", "probe": "child_list", "args": {"title": "甘雨", "table": "genshin_character_constellation", "column": "name"}, "expect": "饮露；获麟；云行；西狩；折草；履虫"}
+{"id": "t25", "kind": "table", "q": "雷电将军的第一个天赋技能叫什么", "probe": "child", "args": {"title": "雷电将军", "table": "genshin_character_talent", "column": "skill_name", "where": {"sort": "1"}}, "expect": "源流"}
+{"id": "t26", "kind": "table", "q": "甘雨90级的攻击力是多少", "probe": "child", "args": {"title": "甘雨", "table": "genshin_character_stats", "column": "value", "where": {"level": "90", "stat": "攻击力"}}, "expect": "335"}
+{"id": "t27", "kind": "table", "q": "甘雨的中文配音演员是谁", "probe": "child", "args": {"title": "甘雨", "table": "genshin_character_profile", "column": "cv_cn"}, "expect": "林簌"}
+{"id": "t28", "kind": "table", "q": "钟离的日文配音演员是谁", "probe": "child", "args": {"title": "钟离", "table": "genshin_character_profile", "column": "cv_jp"}, "expect": "前野智昭"}
+{"id": "t29", "kind": "table", "q": "甘雨的生日是哪一天", "probe": "child", "args": {"title": "甘雨", "table": "genshin_character_profile", "column": "birthday"}, "expect": "12月2日"}
+{"id": "t30", "kind": "table", "q": "小小的远行·非应急食物任务里小蒙在做什么的第一个选项是什么", "probe": "child", "args": {"title": "小小的远行·非应急食物", "table": "genshin_quest_option", "column": "option", "where": {"index": "1"}}, "expect": "你在做什么呢？"}
+{"id": "q01", "kind": "qa", "q": "甘雨被路人问起长发间的突起时是怎么回答的", "expect_keywords": ["家传的头饰"], "source_title": "甘雨"}
+{"id": "q02", "kind": "qa", "q": "钟离的生活到底有多讲究", "expect_keywords": ["听戏", "讲究"], "source_title": "钟离"}
+{"id": "q03", "kind": "qa", "q": "甘雨是从什么时候开始担任璃月七星秘书的", "expect_keywords": ["初代七星"], "source_title": "甘雨"}
+{"id": "q04", "kind": "qa", "q": "旅行者语音里派蒙把风铃比作什么", "expect_keywords": ["听得见的风"], "source_title": "旅行者语音/空"}
+{"id": "q05", "kind": "qa", "q": "刻晴语音里她贯彻的人生理念是什么", "expect_keywords": ["大声地说出来", "坚决地去行动"], "source_title": "刻晴语音"}
+{"id": "q06", "kind": "qa", "q": "蒂玛乌斯在蒙德城的什么地方摆摊", "expect_keywords": ["喷泉广场", "炼金学者"], "source_title": "蒂玛乌斯"}
+{"id": "q07", "kind": "qa", "q": "护摩之杖的武器技能具体给什么加成", "expect_keywords": ["生命值提升", "攻击力加成"], "source_title": "护摩之杖"}
+{"id": "q08", "kind": "qa", "q": "沉沦之心的四件套效果能提高什么伤害", "expect_keywords": ["普通攻击与重击", "15秒"], "source_title": "沉沦之心"}
+{"id": "q09", "kind": "qa", "q": "遗迹守卫的拍击技能会造成什么伤害", "expect_keywords": ["拍击", "物理伤害"], "source_title": "遗迹守卫"}
+{"id": "q10", "kind": "qa", "q": "遗迹守卫除了拍击还会践踏和什么动作", "expect_keywords": ["践踏", "跃空追击"], "source_title": "遗迹守卫"}
+{"id": "q11", "kind": "qa", "q": "满足沙拉能提升队伍里角色的什么属性", "expect_keywords": ["满足沙拉", "暴击率"], "source_title": "满足沙拉"}
+{"id": "q12", "kind": "qa", "q": "测绘员蛋堡是谁的特色料理", "expect_keywords": ["米卡", "特色料理"], "source_title": "测绘员蛋堡"}
+{"id": "q13", "kind": "qa", "q": "北地苹果焖肉需要准备哪些食材", "expect_keywords": ["北地苹果焖肉", "兽肉"], "source_title": "北地苹果焖肉"}
+{"id": "q14", "kind": "qa", "q": "摩拉在大陆上被当成什么", "expect_keywords": ["通行大陆的钱"], "source_title": "摩拉"}
+{"id": "q15", "kind": "qa", "q": "森林书是个什么性质的任务", "expect_keywords": ["森林书", "世界任务"], "source_title": "森林书"}
+{"id": "q16", "kind": "qa", "q": "坎瑞亚人不靠神之眼是怎么导出元素之力的", "expect_keywords": ["咒语", "言灵"], "source_title": "坎瑞亚"}
+{"id": "q17", "kind": "qa", "q": "降临之剑是通过什么方式拿到手的", "expect_keywords": ["PlayStation", "特典"], "source_title": "降临之剑"}
+{"id": "q18", "kind": "qa", "q": "幻想真境剧诗的舞台效果里危险礼花会造成什么伤害", "expect_keywords": ["危险礼花", "岩元素伤害"], "source_title": "幻想真境剧诗"}
+{"id": "q19", "kind": "qa", "q": "万国诸卷拾遗里盗宝团的笔记提到了什么怪物", "expect_keywords": ["大姐头", "龙王"], "source_title": "万国诸卷拾遗/璃月"}
+{"id": "q20", "kind": "qa", "q": "开幕荒泷派剧场活动里分享画片得到的奖励走什么渠道发放", "expect_keywords": ["游戏内邮件", "30天"], "source_title": "「开幕！荒泷派剧场！」"}
+{"id": "q21", "kind": "qa", "q": "无相之雷濒死时化成的棱晶被全部击破会怎样", "expect_keywords": ["棱晶", "复苏"], "source_title": "无相之雷"}
