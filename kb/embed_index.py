@@ -9,6 +9,12 @@
     ./kb/.venv/bin/python embed_index.py --store numpy      # 无向量库兜底
     ./kb/.venv/bin/python embed_index.py --recreate         # 全量重建
 
+--enc-batch 是内存旋钮：onnx 后端默认内部批 64，512 token 的长 chunk 下注意力矩阵
+能把 2 核 7G 的机器顶到 OOM（实测 bs=64 峰值 >2G、bs=8 只 600M，吞吐差 10%）。
+
+断点续跑：每批 upsert 完即落盘，被 kill 后重跑同一条命令加 --append 就能接着跑
+（按 chunk_id 对账，库里已有且文本一致的跳过，一个向量都不重算）。
+
 --append 的口径（parse 重跑后补新内容用，不动老向量）：
   * chunk_id 已在库里且文本一致 → 跳过（v2 的 33536 个向量一个都不重算）；
   * chunk_id 在库里但文本变了 → 用原 vector id 原地覆盖；
@@ -103,6 +109,10 @@ def main() -> int:
                     help="配合 --append：删掉库里已有、chunks.jsonl 里没了的点")
     ap.add_argument("--limit", type=int, default=0, help="只索引前 N 条（调试）")
     ap.add_argument("--batch", type=int, default=BATCH)
+    ap.add_argument("--enc-batch", type=int, default=0,
+                    help="编码器内部批大小（onnx 默认 64）。BERT 的注意力矩阵随 "
+                         "批大小×序列长平方涨，512 token 的长 chunk 下 bs=64 能把 "
+                         "2 核 7G 的机器顶到 OOM；bs=8 实测吞吐只差 10%、峰值内存降到 1/8")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
     cfg = gamecfg.load_game(args.game)
@@ -117,7 +127,10 @@ def main() -> int:
 
     t0 = time.time()
     encoder = emb.get_encoder(args.backend)
-    print(f"编码器：{encoder.backend} / dim={encoder.dim}")
+    if args.enc_batch > 0 and hasattr(encoder, "batch_size"):
+        encoder.batch_size = args.enc_batch
+    print(f"编码器：{encoder.backend} / dim={encoder.dim}"
+          f"（内部批 {getattr(encoder, 'batch_size', '-')}）")
 
     store = retriever.get_store(args.store, dim=encoder.dim, game=cfg.name)
     if args.recreate:
@@ -153,10 +166,16 @@ def main() -> int:
         store.upsert(points)
         n = len(points)
         buf = []
-        log.info("已写入 %d 条", n)
+        # 落盘即断点：每条 batch upsert 完就能从 --append 接着跑，所以这里把
+        # 累计量/速率/ETA 都打出来——几小时的活儿得能随时看到还剩多久
+        rate = (total + n) / max(1e-6, time.time() - t0)
+        eta = (planned[0] - total - n) / rate if rate > 0 and planned[0] else 0
+        log.info("已写入 %d 条（累计 %d/%s，%.1f 条/s，剩余约 %.0f 分钟）",
+                 n, total + n, planned[0] or "?", rate, eta / 60)
         return n
 
     chunks = load_sorted(chunks_path, args.limit)
+    planned = [len(chunks)]        # flush() 里报 ETA 用（append 后会变，见下）
     if args.append:
         existing, max_id = existing_index(store)
         n_in_store = store.count()
@@ -171,6 +190,7 @@ def main() -> int:
             pending.append(c)
         stale = [pid for pid, _ in existing.values()]
         chunks = pending
+        planned[0] = len(chunks)
         next_id = max_id + 1
         print(f"增量对账：库里 {n_in_store} 个向量 → 跳过 {n_skipped}（文本一致）、"
               f"重算 {len(chunks)}（新 chunk / 文本变了，其中 {len(id_override)} 个原地覆盖）")
