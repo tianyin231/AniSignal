@@ -103,6 +103,17 @@ class GameConfig:
     voice_field_suffix: str
     fields_chunk_min: int
     max_images_per_page: int
+    # 数据型 chunk 的文本是否冠上页名（"姬子｜角色故事1: …"）。fields/template/
+    # prose 这些 chunk 的正文里一个字的页名都不带（页名只在 payload 的
+    # source_title 里），问"姬子的角色故事1讲了什么"时向量跟本页卡片不沾边、
+    # BM25 也匹配不到实体名，答案明明在库里却排不进 top-k。card 的文本开头
+    # 本来就是"名称（页名）"，不加。默认 false：碧蓝航线/方舟输出一个字节不变
+    chunk_title_prefix: bool
+    # 冠名时要不要再带上章节名（"万国诸卷拾遗/璃月｜璃月·杂项 > 天遒谷｜…"）。
+    # 只对 prose 生效：其余 kind 的 heading 是固定类别标签（"图鉴字段"/"模板
+    # 数据"/"语音台词"…），整类 chunk 冠同一个字符串，IDF 近零、对 rerank 零
+    # 信息量，只是噪音。默认 false
+    chunk_heading_prefix: bool
 
     # ---- 解析 ----
     infobox_templates: dict[str, tuple[str, str]]
@@ -253,6 +264,8 @@ def load_game(name: str | None = None) -> GameConfig:
         voice_field_suffix=str(chunk.get("voice_field_suffix", "台词")),
         fields_chunk_min=int(chunk.get("fields_chunk_min", 60)),
         max_images_per_page=int(chunk.get("max_images_per_page", 16)),
+        chunk_title_prefix=bool(chunk.get("chunk_title_prefix", False)),
+        chunk_heading_prefix=bool(chunk.get("chunk_heading_prefix", False)),
         # 解析
         infobox_templates=_as_pairs(parse.get("infobox_templates")),
         infobox_template_prefixes=_as_pairs(parse.get("infobox_template_prefixes")),
