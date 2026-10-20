@@ -55,6 +55,17 @@ NOISE_PARAGRAPH_RES = [
     re.compile(r"^\s*[\d\s\|\-:：,，.。]*$"),
 ]
 
+# heading 是固定类别标签而不是章节路径的 kind。给它们冠章节名等于让整类 chunk
+# 都顶同一个字符串（8685 个 fields chunk 全带"图鉴字段"），IDF 近零、对
+# reranker 零信息量，只是把正文往后挤。card 也不在列——它的文本开头本来就是
+# "名称（页名）"，且 emit() 那一层本来就不碰 card
+LABEL_HEADING_KINDS = frozenset(
+    {"card", "fields", "template", "voice", "gallery", "hidden"})
+
+# 面包屑各级之间的分隔符。全角竖线：jieba 和 BERT 分词都当标点切开，
+# 不会和正文里的词粘在一起
+CRUMB_SEP = "｜"
+
 
 # ---------------------------------------------------------------- 数据库
 def open_db(path: Path, cfg: gamecfg.GameConfig | None = None) -> sqlite3.Connection:
@@ -253,6 +264,33 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
     n_chunks = n_extra = n_images = 0
     failures: list[str] = []
 
+    def titled(title: str, heading: str, text: str, kind: str) -> str:
+        """数据型 chunk 的文本冠上「页名｜章节名」面包屑。
+
+        fields/template/prose 这些 chunk 的正文里一个字的页名都不带（页名在
+        payload 的 source_title、章节在 heading，都不进被 embed/分词的 text）。
+        于是问题里点了页名或章节名时，答案 chunk 只能靠 incidental 词命中：
+        原神 q07（护摩之杖的武器技能）召回得到但 rerank 输给攻略转述句，
+        q18/q19（幻想真境剧诗的舞台效果 / 万国诸卷拾遗的盗宝团笔记）连 BM25
+        都没召回——查询 token「幻想/真境/剧诗/舞台效果」在 chunk 文本里一个都没有。
+
+        card 的文本开头本来就是"名称（页名）"，不用再加。
+
+        在 emit 这一层加：packing 已经结束，chunk 条数和 chunk_id 一分不变，
+        `--append` 靠 md5 对账发现"文本变了"就用原 point id 原地覆盖。
+        """
+        if kind == "card" or not text:
+            return text
+        crumbs = [title] if cfg.chunk_title_prefix else []
+        if cfg.chunk_heading_prefix and heading and kind not in LABEL_HEADING_KINDS:
+            crumbs.append(heading)
+        if not crumbs:
+            return text
+        prefix = CRUMB_SEP.join(c for c in crumbs if c)
+        if not prefix or text.startswith(prefix + CRUMB_SEP):
+            return text
+        return prefix + CRUMB_SEP + text
+
     with open(chunks_path, "w", encoding="utf-8") as cf, \
             cleantext.wiki_style(cfg.display_templates,
                                  cfg.strip_template_name_comments,
@@ -265,7 +303,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
             nonlocal n_extra
             rec = {
                 "chunk_id": f"{cfg.chunk_id_prefix}:x{n_extra:07d}",
-                "text": text,
+                "text": titled(title, heading, text, kind),
                 "source_title": title,
                 "source_url": url,
                 "heading": heading,
@@ -367,7 +405,7 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True,
             for heading, chunk in chunker.chunk_body(body_text):
                 cf.write(json.dumps({
                     "chunk_id": f"{cfg.chunk_id_prefix}:{n_chunks:07d}",
-                    "text": chunk,
+                    "text": titled(title, heading, chunk, "prose"),
                     "source_title": title,
                     "source_url": url,
                     "heading": heading,

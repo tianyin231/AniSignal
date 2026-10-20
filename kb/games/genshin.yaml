@@ -53,6 +53,18 @@ chunk:
   voice_field_suffix: 台词
   fields_chunk_min: 60
   max_images_per_page: 16
+  # 数据型 chunk 的文本冠上「页名｜章节名」面包屑。prose/fields/template 三类
+  # chunk 的正文里一个字的页名和章节名都不带（页名只在 payload 的
+  # source_title、章节只在 heading，都不进被 embed/分词的 text），问题里点了
+  # 页名或章节名时答案 chunk 只能靠 incidental 词命中——48/51 那轮 q07
+  # （护摩之杖的武器技能）召回得到但 rerank 输给攻略转述句，q18/q19
+  # （幻想真境剧诗的舞台效果 / 万国诸卷拾遗的盗宝团笔记）连 BM25 都没召回。
+  # 在 emit 这一层冠名：chunk 条数和 chunk_id 一分不变，--append 只原地覆盖
+  # 变了文本的那批向量。card 的文本开头本来就是"名称（页名）"，不受影响
+  chunk_title_prefix: true
+  # 章节名只对 prose 有意义（其余 kind 的 heading 是"图鉴字段"/"模板数据"这种
+  # 固定类别标签，冠上去只是噪音，见 parse.py 的 LABEL_HEADING_KINDS）
+  chunk_heading_prefix: true
 
 parse:
   min_infobox_fields: 3    # 成就集相关名片 只有 1 参、风之翼图鉴 6 参，门槛高了白瞎一类
