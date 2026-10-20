@@ -84,7 +84,8 @@ export function registerAdapter(app: FastifyInstance) {
           ORDER BY p.sort_at DESC, p.article_id DESC LIMIT ${q.limit} OFFSET ${q.offset}`,
         sql`SELECT count(*)::int AS total FROM publications p WHERE ${where}`,
       ]);
-      return { items: rows.map(r => ({ ...toFeedItemSummary(r), platform: r.platform })), total: counts.total,
+      return { items: rows.map(r => ({ ...toFeedItemSummary(r), platform: r.platform,
+        links: { original: r.url }, originalTitle: r.original_title })), total: counts.total,
         topics: TOPICS.map(t => t.name) };
     });
     internal.get("/bot/items", async req => {

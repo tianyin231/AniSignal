@@ -43,6 +43,7 @@ test("native publication and withdrawal govern both the site and queued bot snap
   await publishArticle("as-1", { releasedAt: new Date(Date.now() - 60_000) });
   const feed = await app.inject({ url: "/internal/anisignal/feed?selected=true", headers });
   assert.equal(feed.statusCode, 200); assert.equal(feed.json().items[0].id, "as-1");
+  assert.equal(feed.json().items[0].links.original, material.url);
   const [p] = await sql`SELECT revision FROM publications WHERE article_id='as-1'`;
   const validate = () => app.inject({ method: "POST", url: "/internal/anisignal/bot/validate", headers,
     payload: [{ id: "as-1", revision: p.revision }] });
