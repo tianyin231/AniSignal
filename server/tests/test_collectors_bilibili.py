@@ -320,23 +320,39 @@ async def test_search_videos_keeps_search_items_while_circuit_open(monkeypatch):
 # ---------- 参数注入：外部值不许长得像 CLI 选项 ----------
 
 
+@pytest.fixture
+def no_subprocess(monkeypatch):
+    """任何 attempt 去 spawn bili 都直接判死：证明是「入口拦住了」，不是命令自己失败。"""
+    calls: list[tuple] = []
+
+    async def fake_exec(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError(f"不应执行 bili：{args}")
+
+    monkeypatch.setattr(bili_module.asyncio, "create_subprocess_exec", fake_exec)
+    return calls
+
+
 @pytest.mark.parametrize("bad", ["-o", "--type", "-n", "--videos", "--no-cache", "-", "--out"])
-async def test_search_rejects_option_like_keyword(bad):
+async def test_search_rejects_option_like_keyword(bad, no_subprocess):
     """外部值恰好等于白名单里的合法 flag 时，也必须被拒（按位置判，不按值判）。"""
     with pytest.raises(CollectorError):
         await BilibiliCollector().search_videos(bad, 5)
+    assert no_subprocess == []
 
 
-async def test_account_rejects_option_like_mid():
+async def test_account_rejects_option_like_mid(no_subprocess):
     with pytest.raises(CollectorError):
         await BilibiliCollector().user_videos("--videos", 5)
     with pytest.raises(CollectorError):
         await BilibiliCollector().user_dynamics("-n", 5)
+    assert no_subprocess == []
 
 
-async def test_keyword_with_control_chars_rejected():
+async def test_keyword_with_control_chars_rejected(no_subprocess):
     with pytest.raises(CollectorError):
         await BilibiliCollector().search_videos("鸣潮\x00", 5)
+    assert no_subprocess == []
 
 
 async def test_guard_argv_blocks_unknown_flag(monkeypatch):
