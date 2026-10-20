@@ -19,6 +19,16 @@ def test_media_rewrite_preserves_external_original_urls():
     assert aihot.public_media('<img src="/api/img-proxy?u=fixture">') == '<img src="/api/ai-news/media?u=fixture">'
 
 
+async def test_public_source_list_excludes_isolated_sources(monkeypatch, engine_config):
+    async def listing(*args, **kwargs):
+        common = {"kind": "rss", "enabled": True, "interval_minutes": 60}
+        return {"totals": {"total": 2}, "rows": [
+            {**common, "id": "public", "name": "公开源", "participation_mode": "editorial"},
+            {**common, "id": "private", "name": "隔离源", "participation_mode": "isolated"}]}
+    monkeypatch.setattr(aihot, "request", listing)
+    assert [r["id"] for r in await aihot.sources()] == ["public"]
+
+
 @pytest.fixture
 def engine_config(monkeypatch):
     config = SimpleNamespace(aihot_url="http://engine.invalid", aihot_token="fixture-bridge-token",
