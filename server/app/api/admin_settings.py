@@ -11,6 +11,7 @@ from app.db import get_session
 from app.services import settings as settings_service
 from app.services.email_templates import notice_email
 from app.services.mailer import send_email
+from app.services.urls import safe_endpoint, safe_link
 
 logger = logging.getLogger(__name__)
 
@@ -184,11 +185,19 @@ async def put_announcement(body: dict, session: AsyncSession = Depends(get_sessi
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "level 只支持 info / warning")
     if len(text) > 500:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "公告内容不超过 500 字")
+    raw_link = str(body.get("link") or "").strip()
+    # 公告 link 会直接进前端 href 并无鉴权下发，非法形态必须显式拒绝而不是静默清空
+    link = safe_link(raw_link) if raw_link else ""
+    if raw_link and link is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "公告链接只接受站内路径（以 / 开头）或 http(s) 地址",
+        )
     value = {
         "enabled": bool(body.get("enabled")) and bool(text),
         "level": level,
         "text": text,
-        "link": str(body.get("link") or "").strip(),
+        "link": link or "",
     }
     await settings_service.set_setting(session, "announcement", value)
     return value

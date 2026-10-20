@@ -541,3 +541,31 @@ async def test_official_links_ai_path_requires_official_identity(client, session
     by_url = {item["url"]: item for item in items}
     assert by_url["https://wutheringwaves.kurogames.com/en/main/news/detail/999"]["label"] != "information"
     assert by_url["https://wutheringwaves.kurogames.com/en/main/news/detail/999"]["title"]
+
+
+async def test_public_content_url_is_scheme_sanitized(client, session):
+    """采集来的 javascript:/data: 不因为进了库就下发到前端 href。"""
+    from sqlalchemy import select as _select
+
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [
+            {**VIDEO_RAW, "bvid": "BVjs0001", "url": "javascript:alert(1)"},
+            {**VIDEO_RAW, "bvid": "BVjs0002", "url": "https://www.bilibili.com/video/BVjs0002"},
+        ],
+    )
+    await session.commit()
+
+    resp = await client.get("/api/contents")
+    assert resp.status_code == 200
+    by_ext = {item["external_id"]: item for item in resp.json()["items"]}
+    assert by_ext["BVjs0001"]["url"] is None
+    assert by_ext["BVjs0002"]["url"] == "https://www.bilibili.com/video/BVjs0002"
+
+    raw_id = (
+        await session.execute(_select(RawContent.id).where(RawContent.external_id == "BVjs0001"))
+    ).scalar_one()
+    detail = await client.get(f"/api/contents/{raw_id}")
+    assert detail.status_code == 200
+    assert detail.json()["url"] is None

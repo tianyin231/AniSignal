@@ -346,3 +346,41 @@ async def test_media_visibility_roundtrip_and_platform_exclusion(client, admin_h
         json={"default": {"image": "show", "video": "show"}, "platforms": {}},
         headers=admin_headers,
     )
+
+
+async def test_announcement_link_rejects_dangerous_scheme(client, admin_headers):
+    """公告 link 无鉴权下发给所有访客并直接进 href，javascript: 必须挡在写入侧。"""
+    for bad in ("javascript:alert(1)", "data:text/html,x", "//evil.com", "/\\evil.com"):
+        resp = await client.put(
+            "/api/admin/settings/announcement",
+            json={"enabled": True, "level": "info", "text": "维护通知", "link": bad},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, bad
+
+    for good in ("/account", "https://example.com/notice"):
+        resp = await client.put(
+            "/api/admin/settings/announcement",
+            json={"enabled": True, "level": "info", "text": "维护通知", "link": good},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, good
+        assert resp.json()["link"] == good
+
+
+async def test_ai_base_url_rejects_non_http_scheme(client, admin_headers):
+    """AI base_url 是服务端出站目标：允许内网自托管地址，但不接受非 http(s)。"""
+    resp = await client.put(
+        "/api/admin/ai/config",
+        json={"base_url": "javascript:alert(1)", "model": "x"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 400
+
+    resp = await client.put(
+        "/api/admin/ai/config",
+        json={"base_url": "http://vllm:8000/v1", "model": "x", "api_key": "k"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["base_url"] == "http://vllm:8000/v1"

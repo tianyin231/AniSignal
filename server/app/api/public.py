@@ -39,6 +39,7 @@ from app.schemas.api import (
     PublicStats,
     StatisticsOverview,
 )
+from app.services.urls import safe_link
 
 router = APIRouter(prefix="/api")
 
@@ -156,7 +157,8 @@ async def list_redeem_codes(
             "community": code.community,
             "expires_at": code.expires_at,
             "created_at": code.created_at,
-            "url": url,
+            # 兑换码页把 url 直接绑到 href，脏 scheme 不下发
+            "url": safe_link(url),
         }
         for code, url in rows
     ]
@@ -862,6 +864,10 @@ async def _collect_official_links(session: AsyncSession, community: str) -> list
             continue
         raw, version, label = hits[0]
         title = (version.title or raw.external_id)[:80]
+        safe = safe_link(url)
+        if not safe:
+            continue  # 非 http(s)/站内路径：不进链接榜
+        url = safe
         items.append(
             {
                 "url": url,
@@ -927,6 +933,10 @@ async def _ai_official_links(session: AsyncSession, community: str) -> list[dict
             # 历史数据可能存有 HTML 实体（&amp;），setAttribute 不解码，必须还原
             url = _clean_url(unescape(str(link.get("url") or "")))
             if not url or url in seen:
+                continue
+            # links 来自 AI 抽取，可能带 javascript:/data: 等形态，统一收敛后再下发
+            url = safe_link(url)
+            if not url:
                 continue
             seen.add(url)
             label = str(link.get("label") or "").strip()

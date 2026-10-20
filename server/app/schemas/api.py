@@ -1,8 +1,12 @@
 """Admin API 的请求/响应 DTO。"""
 
+import re
 from datetime import date, datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, Field, field_validator, model_validator
+
+from app.services.urls import safe_link, safe_link_list, safe_media_url
 
 
 def _none_to_list(v):
@@ -12,6 +16,40 @@ from app.communities import DEFAULT_COMMUNITY as _DEFAULT_COMMUNITY, community_p
 from app.models.enums import Platform, TargetType
 
 COMMUNITY_PATTERN = _community_pattern()
+
+# 出参 URL 收敛：这些字段会进前端的 href/src，采集来的 javascript:/data:/file: 与
+# 反斜杠写法一律收敛成 None（前端按「没有链接」渲染），不把脏 URL 下发。
+SafeLink = Annotated[str | None, BeforeValidator(safe_link)]
+SafeMedia = Annotated[str | None, BeforeValidator(safe_media_url)]
+SafeMediaList = Annotated[list[str], BeforeValidator(safe_link_list)]
+
+# 采集目标取值按 (platform, target_type) 收敛：这些值最终会进子进程 argv（bili CLI）
+# 或外部请求参数，入口不拦就等于把参数注入面敞开。三条硬规则对所有组合生效：
+# 非空、不以 `-` 开头（否则会被 CLI 当选项解析）、不含控制字符。
+_TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
+    ("bilibili", "keyword_search"): re.compile(r"^[^\x00-\x1f\x7f]{1,64}$"),
+    ("bilibili", "account_videos"): re.compile(r"^\d{1,20}$"),
+    ("bilibili", "account_dynamics"): re.compile(r"^\d{1,20}$"),
+    ("miyoushe", "keyword_search"): re.compile(r"^[^\x00-\x1f\x7f]{1,64}$"),
+    ("kuro_cn", "notices"): re.compile(r"^default$"),
+    ("kuro_global", "notices"): re.compile(r"^default$"),
+    ("youtube", "channel_rss"): re.compile(r"^[A-Za-z0-9_-]{2,64}$"),
+}
+
+
+def validate_target_value(platform: object, target_type: object, value: object) -> str:
+    """按平台与目标类型收敛 target_value；返回规整值，不合法抛 ValueError。"""
+    text = str(value if value is not None else "").strip()
+    if not text:
+        raise ValueError("target_value 不能为空")
+    if text.startswith("-"):
+        raise ValueError("target_value 不能以 - 开头（会被采集命令当作选项解析）")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text):
+        raise ValueError("target_value 不能包含制表符/换行等控制字符")
+    pattern = _TARGET_VALUE_RULES.get((str(platform), str(target_type)))
+    if pattern is not None and not pattern.fullmatch(text):
+        raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")
+    return text
 
 
 class CollectTargetCreate(BaseModel):
@@ -25,6 +63,17 @@ class CollectTargetCreate(BaseModel):
     min_views: int = Field(default=0, ge=0, le=10_000_000)
     tier: str = Field(default="general", pattern="^(core|general)$")
     community: str = Field(default=_DEFAULT_COMMUNITY, pattern=COMMUNITY_PATTERN)
+
+    @model_validator(mode="after")
+    def _check_target_value(self):
+        # 格式依赖 platform + target_type 两个字段，只能用 model_validator
+        try:
+            self.target_value = validate_target_value(
+                self.platform, self.target_type, self.target_value
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        return self
 
 
 class CollectTargetUpdate(BaseModel):
@@ -85,7 +134,7 @@ class ContentItemOut(BaseModel):
     content_type: str
     external_id: str
     community: str = _DEFAULT_COMMUNITY
-    url: str | None
+    url: SafeLink
     published_at: datetime | None
     collected_at: datetime
     source_name: str | None = None
@@ -108,7 +157,7 @@ class PublicContentItem(BaseModel):
     platform: Platform
     content_type: str
     external_id: str
-    url: str | None
+    url: SafeLink
     title: str | None
     text_excerpt: str | None
     published_at: datetime | None
@@ -117,7 +166,7 @@ class PublicContentItem(BaseModel):
     identity: str
     category: str | None = None
     metrics: dict | None
-    cover: str | None
+    cover: SafeMedia
     preview_mode: str  # full / partial / external_only
     matched_keywords: list[str] = []
     community: str = _DEFAULT_COMMUNITY
@@ -143,7 +192,7 @@ class ContentDetailOut(BaseModel):
     platform: Platform
     content_type: str
     external_id: str
-    url: str | None
+    url: SafeLink
     title: str | None
     text: str | None
     text_html: str | None = None  # 含 HTML 的正文经 bleach 消毒后返回
@@ -154,7 +203,7 @@ class ContentDetailOut(BaseModel):
     source_name: str | None = None
     source_identity: str | None = None
     identity: str
-    media: list[str] = []
+    media: SafeMediaList = []
     metrics: dict | None = None
     metrics_history: list[ContentMetricPoint] = []
     event: dict | None = None
@@ -283,7 +332,7 @@ class EventSourceOut(BaseModel):
     title: str | None = None
     region: str
     published_at: datetime | None
-    url: str | None
+    url: SafeLink
     content_id: int | None = None
     identity: str = "unknown"
 
@@ -345,7 +394,7 @@ class ProductEvidenceOut(BaseModel):
     identity: str
     category: str | None = None
     published_at: datetime | None = None
-    url: str | None = None
+    url: SafeLink = None
 
 
 class FulfillmentAxisOut(BaseModel):
@@ -398,7 +447,7 @@ class ProductSignalOut(BaseModel):
     content_title: str | None = None
     platform: str
     account: str | None = None
-    url: str | None = None
+    url: SafeLink = None
     review_note: str | None = None
     updated_at: datetime | None = None
     ai_hint: dict | None = None

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.models import CustomFeed, CustomFeedItem, User
 from app.services.auth import get_user_by_token
+from app.services.urls import safe_link, safe_media_url
 
 router = APIRouter(prefix="/api/custom")
 
@@ -126,8 +127,9 @@ async def feed_detail(
             {
                 "id": item.id,
                 "title": item.title,
-                "url": item.url,
-                "cover": item.cover,
+                # 监控详情页把 url/cover 直接绑到 href/src，脏值不下发
+                "url": safe_link(item.url),
+                "cover": safe_media_url(item.cover),
                 "author_name": item.author_name,
                 "view": item.view,
                 "content_type": item.content_type,

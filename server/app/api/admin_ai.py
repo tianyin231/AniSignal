@@ -23,6 +23,7 @@ from app.services.ai import (
     get_ai_config,
     record_usage,
 )
+from app.services.urls import safe_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +128,17 @@ async def put_config(body: dict, session: AsyncSession = Depends(get_session)):
         if isinstance(raw_keys, str):
             raw_keys = raw_keys.replace("，", ",").replace(",", "\n").split("\n")
         api_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+    raw_base = str(body.get("base_url") or "").strip().rstrip("/")
+    # base_url 是服务端出站目标：只卡 scheme（允许自托管内网），但 javascript:/file:
+    # 这类形态不能入库——它会被 httpx 或前端当 URL 使用。
+    base_url = safe_endpoint(raw_base) or ""
+    if raw_base and not base_url:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "base_url 必须是 http(s) 地址（自托管内网地址允许）",
+        )
     value = {
-        "base_url": str(body.get("base_url") or "").strip().rstrip("/"),
+        "base_url": base_url,
         "api_key": api_key,
         "api_keys": api_keys,
         "model": str(body.get("model") or "").strip(),
