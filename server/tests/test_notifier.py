@@ -143,6 +143,14 @@ async def test_mailer_folds_other_control_chars_and_unicode_separators(monkeypat
         assert "\n" not in str(captured["message"]["Subject"])
 
 
+def test_header_text_strips_control_chars_that_split_misses():
+    """str.split() 能吃掉的只是空白类字符；\x00/\x7f/\x9f 这类必须靠正则剥。"""
+    assert mailer._header_text("a\x00b") == "a b"
+    assert mailer._header_text("a\x7fb") == "a b"
+    assert mailer._header_text("a\x9fb") == "a b"
+    assert mailer._header_text("a\x1fb") == "a b"
+
+
 def test_header_text_collapses_and_truncates():
     assert mailer._header_text("a\r\nb\tc") == "a b c"
     assert mailer._header_text(None) == ""
