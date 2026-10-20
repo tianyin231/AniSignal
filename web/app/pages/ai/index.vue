@@ -470,7 +470,7 @@ onBeforeUnmount(() => {
           </ul>
           <p v-else-if="data && !sourceCells.length" class="mt-3 text-xs text-muted">还没有启用的资讯来源。</p>
           <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-            <NuxtLink to="/sources" class="link text-[13px]">全部来源</NuxtLink>
+            <NuxtLink to="/ai/sources" class="link text-[13px]">全部来源</NuxtLink>
             <a href="/api/ai-news/rss.xml" class="link inline-flex items-center gap-1 text-[13px]">订阅 RSS <ArrowUpRight :size="13" aria-hidden="true" /></a>
           </div>
         </section>
