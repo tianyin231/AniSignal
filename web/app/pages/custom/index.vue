@@ -14,8 +14,12 @@ interface CustomFeedCard {
 
 const { api } = usePublicApi()
 const route = useRoute()
-const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
+// 后端公开列表的分页上界是 10000（MAX_PUBLIC_OFFSET），折算成页数后前后端一致；
+// 不夹这一层的话，超过该页时请求会 422，页面却还显示「下一页」
+const MAX_PAGE = Math.floor(10_000 / pageSize) + 1
+const page = computed(() => Math.min(MAX_PAGE, Math.max(1, Number(route.query.page) || 1)))
+
 
 const { data, status, error, refresh } = await useLazyAsyncData(
   () => `custom-feeds-${page.value}`,
@@ -28,7 +32,7 @@ const { data, status, error, refresh } = await useLazyAsyncData(
 )
 
 const items = computed(() => data.value?.items ?? [])
-const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
+const totalPages = computed(() => Math.min(MAX_PAGE, Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize))))
 const router = useRouter()
 function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })

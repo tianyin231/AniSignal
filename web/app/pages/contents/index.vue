@@ -10,13 +10,17 @@ const { t } = useSiteConfig()
 
 const route = useRoute()
 const router = useRouter()
-const page = computed(() => Math.max(1, Number(route.query.page) || 1))
+const pageSize = 30
+// 后端公开列表的分页上界是 10000（MAX_PUBLIC_OFFSET），折算成页数后前后端一致；
+// 不夹这一层的话，超过该页时请求会 422，页面却还显示「下一页」
+const MAX_PAGE = Math.floor(10_000 / pageSize) + 1
+const page = computed(() => Math.min(MAX_PAGE, Math.max(1, Number(route.query.page) || 1)))
 const platform = computed(() => String(route.query.platform || ''))
 const q = computed(() => String(route.query.q || ''))
 const tab = computed(() => String(route.query.tab || 'latest'))
 const searchInput = ref(q.value)
 watch(q, (v) => (searchInput.value = v))
-const pageSize = 30
+
 
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐行标注分区
@@ -51,7 +55,7 @@ const list = computed(() =>
 const trendingDelta = computed(() =>
   new Map((trendingData.value?.items ?? []).map(item => [String(item.id), item.delta_view ?? 0])),
 )
-const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
+const totalPages = computed(() => Math.min(MAX_PAGE, Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize))))
 
 // 平台筛选随分区变化（映射统一在 useGameSection）：碧蓝航线当前只有 B 站来源
 const visiblePlatformTabs = computed(() =>
