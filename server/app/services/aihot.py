@@ -134,7 +134,7 @@ async def bot_items(keywords, start_at, end_at, *, collected_after=None):
     params = {"start": iso(start_at), "end": iso(end_at)}
     if collected_after:
         params["after"] = iso(collected_after)
-    if get_settings().aihot_bot_after:
+    if collected_after and get_settings().aihot_bot_after:
         params["cutover"] = get_settings().aihot_bot_after
     rows = await request("/internal/anisignal/bot/items", params=params)
     result = []
@@ -144,6 +144,7 @@ async def bot_items(keywords, start_at, end_at, *, collected_after=None):
             continue
         item_id = "aihot:" + row["id"]
         news = {"engine": "aihot", "engine_id": row["id"], "revision": row["revision"], "fact_id": row["fact_id"],
+            "allow_backfill": collected_after is None,
             "headline": row["title"], "summary": row["summary"] or "", "kind": "report", "published_at": row["published_at"]}
         result.append({"id": item_id, "community": "ai", "title": row["title"], "source_title": row["original_title"] or row["title"],
             "text": row["summary"] or "", "summary": row["summary"] or "", "key_points": [row["summary"] or ""], "news": news,
@@ -156,5 +157,6 @@ async def bot_items(keywords, start_at, end_at, *, collected_after=None):
 
 
 async def validate_bot_items(items):
-    payload = [{"id": i["news"]["engine_id"], "revision": i["news"]["revision"]} for i in items]
+    payload = [{"id": i["news"]["engine_id"], "revision": i["news"]["revision"],
+        "allowBackfill": bool(i["news"].get("allow_backfill"))} for i in items]
     return {"aihot:"+i for i in await request("/internal/anisignal/bot/validate", method="POST", body=payload)}

@@ -23,6 +23,7 @@ const materialSchema = z.object({
   source: sourceSchema, id: z.string().regex(/^as-[0-9]+$/),
   url: z.url().refine(v => /^https?:\/\//.test(v)), title: z.string().max(2000),
   text: z.string().max(200000).default(""), author: z.string().nullable().default(null),
+  bodyComplete: z.boolean().default(true),
   publishedAt: z.iso.datetime().nullable(), discoveredAt: z.iso.datetime(),
   platformCollectedAt: z.iso.datetime().optional(),
   platform: z.string(), externalId: z.string(), hidden: z.boolean().default(false),
@@ -55,11 +56,12 @@ export function registerAdapter(app: FastifyInstance) {
         author: input.author, publishedAt: input.publishedAt ? new Date(input.publishedAt) : null,
         discoveredAt: new Date(input.discoveredAt), via: "anisignal", backfill: input.backfill,
         // B 站视频简介是 excerpt，不能冒充已提取的全文。
-        ...(isX ? { bodyText: input.text, bodyStatus: "ok" as const,
+        ...(isX ? { bodyText: input.text, bodyStatus: input.bodyComplete ? "ok" as const : "unconfirmed" as const,
           xPost: { tweetId: input.externalId, authorName: input.source.name,
             handle: input.author ?? "", text: input.text, media: input.media } }
           : { excerpt: input.text, bodyStatus: "none" as const }),
-        media: input.media, raw: { platform: input.platform, externalId: input.externalId, platformCollectedAt: input.platformCollectedAt },
+        media: input.media, raw: { platform: input.platform, externalId: input.externalId,
+          platformCollectedAt: input.platformCollectedAt, bodyComplete: input.bodyComplete },
       });
       if (input.hidden) await changeVisibility(result.articleId, true);
       if (result.created || result.revised || result.processingNeeded) await queueProcessing(result.articleId);
@@ -90,9 +92,9 @@ export function registerAdapter(app: FastifyInstance) {
         after: z.iso.datetime().optional(), cutover: z.iso.datetime().optional() }).parse(req.query);
       return sql`SELECT p.article_id AS id, p.title, p.original_title, p.summary, p.url,
         p.published_at, p.discovered_at, p.updated_at, p.revision, p.fact_id,
-        p.channel, p.first_party, s.name AS source_name
+        p.channel, p.first_party, p.backfill, s.name AS source_name
         FROM publications p JOIN sources s ON s.id = p.source_id
-        WHERE ${seatedCondition(new Date())} AND NOT p.backfill
+        WHERE ${seatedCondition(new Date())} AND (${!q.after && !q.cutover} OR NOT p.backfill)
           AND p.published_at >= ${new Date(q.start)} AND p.published_at < ${new Date(q.end)}
           AND p.updated_at < ${new Date(q.end)}
           AND (${q.after ?? null}::timestamptz IS NULL OR p.updated_at > ${q.after ?? null}::timestamptz)
@@ -100,11 +102,11 @@ export function registerAdapter(app: FastifyInstance) {
         ORDER BY p.published_at DESC, p.article_id LIMIT 200`;
     });
     internal.post("/bot/validate", async req => {
-      const items = z.array(z.object({ id: z.string(), revision: z.number().int() })).max(200).parse(req.body);
+      const items = z.array(z.object({ id: z.string(), revision: z.number().int(), allowBackfill: z.boolean().default(false) })).max(200).parse(req.body);
       if (!items.length) return [];
-      const rows = await sql`SELECT p.article_id AS id, p.revision FROM publications p
-        WHERE p.article_id IN ${sql(items.map(i => i.id))} AND ${seatedCondition(new Date())} AND NOT p.backfill`;
-      return items.filter(i => rows.some(r => r.id === i.id && r.revision === i.revision)).map(i => i.id);
+      const rows = await sql`SELECT p.article_id AS id, p.revision, p.backfill FROM publications p
+        WHERE p.article_id IN ${sql(items.map(i => i.id))} AND ${seatedCondition(new Date())}`;
+      return items.filter(i => rows.some(r => r.id === i.id && r.revision === i.revision && (!r.backfill || i.allowBackfill))).map(i => i.id);
     });
     internal.post<{ Params: { id: string } }>("/materials/:id/visibility", async req => {
       const { hidden } = z.object({ hidden: z.boolean() }).parse(req.body);

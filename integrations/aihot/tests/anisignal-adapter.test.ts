@@ -64,4 +64,16 @@ test("an imported historical report can never become a bot catch-up push", async
   const [p] = await sql`SELECT revision FROM publications WHERE article_id='as-2'`;
   const result = await app.inject({ method: "POST", url: "/internal/anisignal/bot/validate", headers, payload: [{ id: "as-2", revision: p.revision }] });
   assert.deepEqual(result.json(), []);
+  const daily = await app.inject({ method: "POST", url: "/internal/anisignal/bot/validate", headers,
+    payload: [{ id: "as-2", revision: p.revision, allowBackfill: true }] });
+  assert.deepEqual(daily.json(), ["as-2"]);
+});
+
+test("a truncated X post is never labelled as a confirmed full body", async () => {
+  const partial = { ...material, id: "as-3", url: "https://x.com/fixture/status/123",
+    platform: "x", bodyComplete: false, text: "Only the collected beginning." };
+  assert.equal((await app.inject({ method: "POST", url: "/internal/anisignal/materials", headers, payload: partial })).statusCode, 200);
+  const [article] = await sql`SELECT body_status,body_text FROM articles WHERE id='as-3'`;
+  assert.equal(article.body_status, "unconfirmed");
+  assert.equal(article.body_text, partial.text);
 });
