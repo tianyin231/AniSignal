@@ -81,7 +81,7 @@ async def sources():
     return [{"id": r["id"], "name": r["name"], "platform": "rss" if r["kind"] == "rss" else "bridge",
         "status": "active" if (r.get("last_ok_at") or r["kind"] == "external" and r.get("items_7d")) and not r.get("fail_count") else "delayed" if r.get("fail_count") else "pending",
         "last_success_at": r.get("last_ok_at"), "interval_minutes": r["interval_minutes"]}
-        for r in rows if r["enabled"]]
+        for r in rows if r["enabled"] and r.get("participation_mode") != "isolated"]
 
 
 async def feed(*, q="", topic="", kind="all", hours=168, sort="time", selected=False, limit=20, offset=0):
