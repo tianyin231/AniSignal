@@ -125,7 +125,7 @@ export function useActiveChannel() {
   const mounted = useState('active-channel-mounted', () => false)
   if (import.meta.client) onMounted(() => { mounted.value = true })
   const active = computed<string | null>(() => {
-    if (route.path === '/ai') return 'ai'
+    if (route.path === '/ai' || route.path.startsWith('/ai/')) return 'ai'
     if (route.path.startsWith('/custom')) return 'custom'
     const query = String(route.query.community || '')
     const queryKey = VALID_KEYS.has(query as GameCommunityKey) ? query : null
@@ -151,7 +151,7 @@ export function useGameSection() {
   const hydrated = useState('game-section-hydrated', () => false)
 
   const community = computed<GameCommunityKey>(() => {
-    if (route.path === '/ai') return 'ai'
+    if (route.path === '/ai' || route.path.startsWith('/ai/')) return 'ai'
     const query = String(route.query.community || '')
     if (VALID_KEYS.has(query)) return query as GameCommunityKey
     return hydrated.value ? stored.value : DEFAULT_COMMUNITY

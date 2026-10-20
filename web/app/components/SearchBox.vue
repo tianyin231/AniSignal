@@ -7,6 +7,7 @@ const route = useRoute()
 const pageCommunity = useState<{ path: string, key: string } | null>('page-community', () => null)
 const isAi = computed(() =>
   route.path === '/ai'
+  || route.path.startsWith('/ai/')
   || route.query.community === 'ai'
   || (pageCommunity.value?.path === route.path && pageCommunity.value.key === 'ai'),
 )
