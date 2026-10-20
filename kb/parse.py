@@ -690,7 +690,10 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
 
         for rec in read_shards(source):
             title = rec["title"]
-            wikitext = rec["wikitext"]
+            # 先过 preprocess：修 mwparserfromhell 的括号/标签配对错误
+            #（{{#块内[[链接]] 提前截断模板、标签落模板名），否则整个 infobox
+            # 连参数一起静默消失。
+            wikitext = cleantext.preprocess(rec["wikitext"])
             n_pages += 1
             found = cleantext.top_level_infobox(wikitext, infobox_names,
                                                LEGACY_INFOBOX_TEMPLATE_NAMES)
@@ -827,9 +830,17 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
                 )
 
             # ---- 图片 URL（只记链接不下载）----
+            # 注意：补捞用的三个正则函数（extract_image_files / gallery_lines /
+            # hidden_lines 里的 COMMENT_RE）全部直接扫原始 wikitext，不过
+            # mwparserfromhell，preprocess 对它们只有负作用——`{{#ask:…[[文件:x.jpg]]…}}`
+            # 里的文件引用会被折成纯文本，FILE_REF_RE 就再也匹配不到。
+            # 实测：不传原文会让 16 个图鉴导航页少 552 个图片直链。
+            # 所以图片/图鉴走原文；hidden_lines 留给预处理版（它内部要用
+            # mwparserfromhell 渲染注释正文，预处理能把 `{{#info:}}` 残迹清干净，
+            # 且注释内容已逐页核对无丢失）。
             url = page_url(title)
             images: list[str] = []
-            for sort, fname in enumerate(cleantext.extract_image_files(wikitext)):
+            for sort, fname in enumerate(cleantext.extract_image_files(rec["wikitext"])):
                 u = image_urls.get(fname)
                 conn.execute("INSERT OR REPLACE INTO page_images VALUES(?,?,?,?)",
                              (title, sort, fname, u))
@@ -868,7 +879,10 @@ def run(source: Path, db_path: Path, chunks_path: Path, report: bool = True) -> 
                     n_chunks += 1
 
             # ---- v3 补捞：正文路径丢过/只取了首参的内容，另切一类 chunk ----
-            emit_pack(cleantext.gallery_lines(wikitext), "图库", "gallery", title, url, images)
+            # gallery_lines 同 extract_image_files：纯正则扫原文，preprocess 只会
+            # 让它少匹配（`{{#}}` 块内的 <gallery> 会被 _PF_DROP_BLOCK 整块删掉）。
+            emit_pack(cleantext.gallery_lines(rec["wikitext"]), "图库", "gallery",
+                      title, url, images)
             emit_pack(cleantext.hidden_lines(wikitext), "隐藏正文", "hidden", title, url, images)
             emit_pack(cleantext.template_dump(body_wikitext), "模板数据", "template",
                       title, url, images)
