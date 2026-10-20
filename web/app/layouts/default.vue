@@ -27,7 +27,7 @@ import { channelThemeClass } from '~/composables/useGameSection'
 const route = useRoute()
 // 首页自带侧栏区块；统计 / 日历 / 内容详情 / AI 快讯需要整宽
 const showRail = computed(() =>
-  !['/', '/ai', '/stats', '/calendar'].includes(route.path) && !/^\/contents\/[^/]+$/.test(route.path),
+  !['/', '/ai', '/stats', '/calendar'].includes(route.path) && !route.path.startsWith('/ai/') && !/^\/contents\/[^/]+$/.test(route.path),
 )
 // 频道主题：进入游戏频道后，accent 令牌切换为该游戏的品牌色
 const { active } = useActiveChannel()
