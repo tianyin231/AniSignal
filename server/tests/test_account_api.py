@@ -22,9 +22,15 @@ async def _register_and_login(client, session, email="acc@t.com"):
 async def test_keyword_crud_and_limit(client, session):
     await _register_and_login(client, session)
 
-    # 未登录访问被拒
+    # 登录态可用；摘掉 cookie 必须 401（区间断言会掩护鉴权回归，写死具体码）
     resp = await client.get("/api/account/keywords")
-    assert resp.status_code in (200, 401)  # cookie 已种，先确认当前可用
+    assert resp.status_code == 200
+    saved_cookie = client.cookies.get("anisignal_session")
+    try:
+        client.cookies.delete("anisignal_session")
+        assert (await client.get("/api/account/keywords")).status_code == 401
+    finally:
+        client.cookies.set("anisignal_session", saved_cookie)
 
     resp = await client.post("/api/account/keywords", json={"keyword": "爱弥斯"})
     assert resp.status_code == 201

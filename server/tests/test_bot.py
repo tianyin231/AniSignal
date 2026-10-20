@@ -22,7 +22,10 @@ async def target(session, **overrides):
 
 
 async def test_admin_crud_and_tool_auth(client, session, admin_headers):
-    assert (await client.get('/api/admin/bot')).status_code in (401, 422)
+    unauth = await client.get('/api/admin/bot')
+    assert unauth.status_code == 422
+    # 422 也可能来自别处（比如请求体校验），必须确认缺的是 x-admin-token 这个头
+    assert unauth.json()["detail"][0]["loc"] == ["header", "x-admin-token"]
     saved = await client.put('/api/admin/bot/bridge', headers=admin_headers,
                              json={"endpoint": "http://bot:6185/api/v1/im/messages", "api_key": "secret-never-echo"})
     assert saved.status_code == 200
