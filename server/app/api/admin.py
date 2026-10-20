@@ -1008,9 +1008,9 @@ async def list_email_codes(
 ):
     """最近验证码（SMTP 未配置时的开发/排查通道；仅发信失败的码保留明文）。
 
-    只列注册验证码，密码重置类一律不返回：重置码等于账号接管凭证，把它发给
-    管理端等于给 Token 持有者一条绕过用户邮箱的取号路径。注册码保留是为了让
-    「没配 SMTP 的自托管实例」仍能完成首次注册，这是原本的设计用途。
+    只列注册验证码，密码重置类一律不返回：重置码等于账号接管凭证，发给管理端
+    就是一条绕过用户邮箱的取号路径。注册码的明文仍然保留——「没配 SMTP 的自托管
+    实例」靠它完成首次注册，这是该端点原本的设计用途，砍掉等于把注册流程锁死。
     """
     from app.models import EmailCode, User
 
@@ -1026,6 +1026,8 @@ async def list_email_codes(
             "id": code.id,
             "email": email,
             "purpose": code.purpose,
+            # 明文只在「注册 + 发信失败」时给出；reset 类已在上面被整类过滤
+            "code": code.code_plain,
             "attempts": code.attempts,
             "expires_at": code.expires_at,
             "used": code.used_at is not None,

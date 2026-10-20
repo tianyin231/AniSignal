@@ -393,10 +393,11 @@ async def test_email_codes_endpoint_never_returns_plaintext(session, client, adm
     rows = resp.json()
     blob = resp.text
 
-    assert register_code not in blob
+    # 重置码等于账号接管凭证：整类不列、更不能出现在响应里
     assert reset_code not in blob
-    assert all("code" not in row for row in rows)
     assert {row["purpose"] for row in rows} == {"register"}
+    # 注册码仍可查（没配 SMTP 的自托管实例靠它完成首次注册）
+    assert [row["code"] for row in rows] == [register_code]
 
 
 @pytest.mark.parametrize(

@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 30.0
     http_max_retries: int = 2
 
-    # 邮件发送（通用 SMTP；未配置 host 时验证码只落库，管理端可查）
+    # 邮件发送（通用 SMTP；未配置 host 时验证码只落库，管理端只能查注册码）
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
