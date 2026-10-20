@@ -4,12 +4,17 @@
 失败由重试与来源健康机制兜底。
 """
 
+import logging
+import re
+
 import httpx
 
 from app.collectors.base import USER_AGENT, CollectorError, extract_items, get_json
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+
+logger = logging.getLogger(__name__)
 
 KURO_CONFIG = {
     Platform.KURO_CN: {
@@ -25,6 +30,11 @@ KURO_CONFIG = {
         "lang": "en",
     },
 }
+
+# 公告 ID 的字符白名单：notice_id 来自上游 JSON，会原样拼进 CDN 详情 URL 的路径段。
+# 不加限制时 `../../other/resource`、`x?foo=1`、`x#frag` 这类值能把请求指到 CDN 上的
+# 任意路径（甚至借 `//host` 换主机），所以只放行 ID 形态的字符，其余整条跳过。
+_NOTICE_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 class KuroCollector:
@@ -62,6 +72,12 @@ class KuroCollector:
                     entry.get("noticeId") or entry.get("id") or entry.get("notice_id") or ""
                 )
                 if not notice_id:
+                    continue
+                if not _NOTICE_ID_RE.fullmatch(notice_id):
+                    logger.warning(
+                        "kuro notice_id %r 不符合 ID 形态，跳过（可能是脏数据或注入尝试）",
+                        notice_id,
+                    )
                     continue
                 detail_url = (
                     f"{conf['base']}/gamenotice/content/{conf['game']}/"
