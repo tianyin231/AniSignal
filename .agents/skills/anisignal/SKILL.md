@@ -182,7 +182,7 @@ description: "AniSignal（鸣潮跨平台事件雷达）项目专属指南。在
 - 账号中心（2026-08-29 整理）：不展示订阅（未上线）；关键词 chip 带命中数（`GET /api/account/keywords` 返回 `matches`，union_all 单查询）且**点击 chip 可筛选关注流**（`GET /api/account/feed?keyword_id=`，条目 `matched_keywords` 标注命中的用户关键词，响应含 `new_today` 近 24h 采集数）；改密默认折叠。登录页/账号页按钮在 IAB 自动化里 click 可能因 actionability 超时，可用 `form.requestSubmit()` 兜底。
 - 站点背景可选随机壁纸（2026-08-29）：`GET /api/wallpaper` 返回 JSON `{url}`（解析 api.yppp.net 最终原图地址，每次刷新新图、2s 去重防抖），前端**图床 CDN 直连**显示。**不要把壁纸字节引到本站出口**：实测用户到图床 CDN ~4MB/s、到本站仅 ~180KB/s，服务端压缩转发（试过 Pillow→WebP+LQIP）反而慢数倍，已回退只留解析+下载代理；`/wallpaper/download?url=` 只转发 15min 内签发过的地址（内存签发集，防开放代理），保证下载的就是当前展示那张。前端 `useWallpaper`（localStorage `anisignal-wallpaper`，与主题同级）；顶栏 `WallpaperToggle` 按钮**以 status 为 key 重挂载**（否则 PROPS-only patchFlag 按钮的子节点不更新、图标不渲染）；失败自动回退默认极光背景。覆盖 default/account/auth 布局，管理看板不接壁纸。
 - 路由：`/login /register /forgot /account`（auth 布局：极简品牌头+表单+真实数据预览栏）；登录/注册后进账号中心。
-- 邮件：通用 SMTP 热配置（管理端站点设置页，含测试发信）；未配置时验证码落库，`GET /api/admin/email-codes` 可查。
+- 邮件：通用 SMTP 热配置（管理端站点设置页，含测试发信）；未配置时验证码落库，`GET /api/admin/email-codes` 只列注册码（不含明文，密码重置码不列）。
 
 ## 站点配置（管理端「站点设置」页）
 
