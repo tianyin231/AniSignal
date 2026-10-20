@@ -60,6 +60,55 @@ def parse_wikitext(text: str) -> mwparserfromhell.wikicode.Wikicode | None:
         return None
 
 
+# ---------------------------------------------------------------- kblib 静默漏抽修复
+# mwparserfromhell 的括号/标签配对错误，代价是整个 infobox 连参数一起消失。
+# 两处：① {{#解析器函数: …}} 块内有 [[链接]] 时，]] 被当成模板闭合，模板提前
+# 截断，之后所有参数全丢；② 标签落在模板名里（第一个 | 之前）时名字解析直接崩。
+# preprocess() 提前把块内链接折成文本、名字段标签中性化，输出与 _plain 的渲染
+# 结果逐字节一致。没有这种写法的页面正则一次都不命中。
+# (?:(?!\{\{).)*? 是不跨越下一个 {{ 的非贪婪匹配，和 to_plain 里清解析器函数
+# 残骸用的是同一个形状——万一某块没写全闭合，也不会把后面一整页一起吞掉。
+_PF_BLOCK = re.compile(r"\{\{#(?:(?!\{\{).)*?\}\}", re.S)
+_PF_LINK = re.compile(r"\[\[(?:[^\[\]|]*\|)?([^\[\]]*)\]\]")
+# ref/bstyle/math… 连内容一起没的标签（_DROP_TAGS 的标签名子集，够用就行）
+_PF_DROP_BLOCK = re.compile(
+    r"<\s*(ref|references|nowify|nowiki|gallery|timeline|syntaxhighlight|source|"
+    r"math|code|pre|imagemap|inputbox|quiz|bstyle)\b[^>]*>.*?</\s*\1\s*>",
+    re.I | re.S)
+_PF_BR = re.compile(r"<\s*br\s*/?\s*>", re.I)
+_PF_TAG = re.compile(r"<\s*/?\s*[A-Za-z][^>]*?>")
+
+
+def _pf_neutralize_name(part: str) -> str:
+    """把一个 `{{#…` 块的**名字段**（第一个 | 之前）里的标签治成不碍事的样子。"""
+    part = _PF_DROP_BLOCK.sub("", part)
+    part = _PF_BR.sub("", part)
+    return _PF_TAG.sub("", part)
+
+
+def preprocess(text: str) -> str:
+    """修 mwparserfromhell 的括号/标签配对错误，输出与 _plain 的渲染结果一致。"""
+    if "{{#" not in text:
+        return text
+    if "[[" not in text and "<" not in text:
+        return text
+
+    def fix(m: re.Match) -> str:
+        block = m.group(0)
+        if "[[" in block:
+            block = _PF_LINK.sub(lambda k: k.group(1), block)
+        if "<" in block:
+            # 名字段 = 第一个 | 之前。整块一个 | 都没有时整个内芯都是名字，
+            # 不能因为 partition 不出 sep 就跳过。
+            inner = block[2:-2]
+            head, sep, tail = inner.partition("|")
+            if "<" in head:
+                block = "{{" + _pf_neutralize_name(head) + sep + tail + "}}"
+        return block
+
+    return _PF_BLOCK.sub(fix, text)
+
+
 # ---------------------------------------------------------------- 纯文本化
 def _plain(node: Any, depth: int = 0) -> str:
     """把 mwparserfromhell 节点递归转成纯文本。"""
