@@ -1,5 +1,8 @@
 """账号系统全流程单测：注册→验证→登录→改密→找回，含安全边界。"""
 
+from collections import deque
+
+import pytest
 from sqlalchemy import select
 
 from app.models import EmailCode, User
@@ -178,3 +181,76 @@ async def test_send_rate_limit(client, session):
         "/api/auth/register", json={"email": "rate0@r.com", "password": "password123"}
     )
     assert resp.status_code == 429
+
+
+# ---------- 限频表封顶与淘汰（内存 DoS 与「解锁原语」） ----------
+
+
+def _reset_state():
+    from app.services import auth as auth_module
+
+    auth_module._send_times.clear()
+    auth_module._login_failures.clear()
+    auth_module._state_ops = 0
+
+
+def test_login_failure_table_is_bounded():
+    """未认证刷随机邮箱不能无限涨内存。"""
+    from app.services import auth as auth_module
+
+    _reset_state()
+    try:
+        for i in range(auth_module._MAX_TRACKED_KEYS + 2000):
+            auth_module.record_login_failure(f"flood{i}@example.com")
+        assert len(auth_module._login_failures) <= auth_module._MAX_TRACKED_KEYS + auth_module._STATE_OPS_PER_SWEEP
+    finally:
+        _reset_state()
+
+
+def test_send_limit_table_is_bounded():
+    """注册发码那张表同样按邮箱增长，必须一起封顶。"""
+    from app.services import auth as auth_module
+
+    _reset_state()
+    try:
+        for i in range(auth_module._MAX_TRACKED_KEYS + 2000):
+            auth_module._check_send_limit(f"flood{i}@example.com")
+        assert len(auth_module._send_times) <= auth_module._MAX_TRACKED_KEYS + auth_module._STATE_OPS_PER_SWEEP
+    finally:
+        _reset_state()
+
+
+def test_flood_does_not_unlock_victim():
+    """淘汰策略必须保护「正在锁定」的条目，否则刷随机邮箱就是解锁原语。"""
+    from app.services import auth as auth_module
+
+    _reset_state()
+    try:
+        victim = "victim@example.com"
+        for _ in range(auth_module._LOGIN_FAIL_LIMIT):
+            auth_module.record_login_failure(victim)
+
+        with pytest.raises(auth_module.AuthError):
+            auth_module._check_login_lock(victim)
+
+        for i in range(auth_module._MAX_TRACKED_KEYS * 2):
+            auth_module.record_login_failure(f"flood{i}@example.com")
+
+        # 受害者仍被锁：攻击者拿不到额外 5 次口令尝试
+        with pytest.raises(auth_module.AuthError):
+            auth_module._check_login_lock(victim)
+    finally:
+        _reset_state()
+
+
+def test_expired_entries_are_swept():
+    from app.services import auth as auth_module
+
+    _reset_state()
+    try:
+        stale = "stale@example.com"
+        auth_module._login_failures[stale] = deque([0.0])
+        auth_module._maybe_sweep(force=True)
+        assert stale not in auth_module._login_failures
+    finally:
+        _reset_state()

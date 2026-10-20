@@ -36,6 +36,73 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _send_times: dict[str, deque[float]] = {}
 _login_failures: dict[str, deque[float]] = {}
 
+# 这两张表都按「外部可控的键」增长（任意邮箱都能各插一条），必须封顶：
+# 未认证请求刷 /register 或刷登录失败就能让进程内存无限涨，属慢漏型 DoS。
+_MAX_TRACKED_KEYS = 5000
+_STATE_OPS_PER_SWEEP = 128
+_state_ops = 0
+
+
+def _locked(state: dict[str, deque[float]], key: str, limit: int, window: float, now: float) -> bool:
+    """该键当前是否处于锁定中（窗口内失败次数达上限）。"""
+    fails = state.get(key)
+    if not fails:
+        return False
+    return len(fails) >= limit and now - fails[-1] <= window
+
+
+def _sweep_state(
+    state: dict[str, deque[float]],
+    *,
+    ttl: float,
+    now: float,
+    protect_locked: bool = False,
+    limit: int = 0,
+    window: float = 0.0,
+) -> None:
+    """清过期条目；超过上限时淘汰最久未活动的键。
+
+    淘汰**跳过正在锁定中的键**：分支版本按首先失败时间淘汰，恰好优先踢掉「已经
+    攒满次数、正在锁」的账号，等于给攻击者一个解锁原语（刷一万个随机邮箱即可把
+    受害者的 15 分钟锁定清零）。这里先清空闲键，只有全都在锁定中（攻击者要先把
+    上限数量的账号逐个锁死，代价高得多）才会动锁定键。
+    """
+    for key, times in list(state.items()):
+        if not times or now - times[-1] > ttl:
+            state.pop(key, None)
+    overflow = len(state) - _MAX_TRACKED_KEYS
+    if overflow <= 0:
+        return
+    if protect_locked:
+        candidates = [
+            (key, times)
+            for key, times in state.items()
+            if not _locked(state, key, limit, window, now)
+        ]
+    else:
+        candidates = list(state.items())
+    candidates.sort(key=lambda item: item[1][-1] if item[1] else 0.0)
+    for key, _ in candidates[:overflow]:
+        state.pop(key, None)
+
+
+def _maybe_sweep(*, force: bool = False) -> None:
+    """每 N 次状态写入扫一次，避免每次请求都全表扫（把清理变成 CPU 放大器）。"""
+    global _state_ops
+    _state_ops += 1
+    if not force and _state_ops % _STATE_OPS_PER_SWEEP:
+        return
+    now = time.monotonic()
+    _sweep_state(_send_times, ttl=3600.0, now=now)
+    _sweep_state(
+        _login_failures,
+        ttl=_LOGIN_FAIL_WINDOW,
+        now=now,
+        protect_locked=True,
+        limit=_LOGIN_FAIL_LIMIT,
+        window=_LOGIN_FAIL_WINDOW,
+    )
+
 
 class AuthError(Exception):
     """业务错误（带对用户安全的提示文案）。"""
@@ -90,6 +157,7 @@ def _check_send_limit(email: str) -> None:
     if len(times) >= _SEND_HOURLY_LIMIT:
         raise AuthError("发送次数过多，请 1 小时后再试", 429)
     times.append(now)
+    _maybe_sweep()
 
 
 async def issue_code(session: AsyncSession, user: User, purpose: str) -> bool:
@@ -209,7 +277,11 @@ async def revoke_all_sessions(session: AsyncSession, user_id: int) -> None:
 
 def _check_login_lock(email: str) -> None:
     now = time.monotonic()
-    fails = _login_failures.setdefault(email, deque())
+    # 不要用 setdefault：登录成功也会走这里，给每个邮箱插一个空 deque 等于又开一个
+    # 无界增长面（任意邮箱都能塞一条）
+    fails = _login_failures.get(email)
+    if not fails:
+        return
     while fails and now - fails[0] > _LOGIN_FAIL_WINDOW:
         fails.popleft()
     if len(fails) >= _LOGIN_FAIL_LIMIT:
@@ -218,6 +290,7 @@ def _check_login_lock(email: str) -> None:
 
 def record_login_failure(email: str) -> None:
     _login_failures.setdefault(email, deque()).append(time.monotonic())
+    _maybe_sweep()
 
 
 def clear_login_failures(email: str) -> None:
