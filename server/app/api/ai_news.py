@@ -117,6 +117,14 @@ async def source_status(session):
     return sources
 
 
+@router.get("/sources")
+async def news_sources(session: AsyncSession = Depends(get_session)):
+    from app.services import aihot
+    if aihot.enabled():
+        return {"sources": await aihot.sources(), "engine": "aihot"}
+    return {"sources": await source_status(session), "engine": "legacy"}
+
+
 @router.get("/events")
 async def news_events(
     q: str = Query(default="", max_length=100),
