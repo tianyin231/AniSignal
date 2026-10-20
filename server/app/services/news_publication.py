@@ -231,7 +231,8 @@ async def edition_bot_items(session, *, now=None, keywords=None):
         pool = await aihot.bot_items(keywords, now - timedelta(days=30), now)
         by_id = {item["id"]: item for item in pool}
         return [{**by_id[entry["id"]], "title": entry["headline"], "summary": entry["summary"],
-            "key_points": [entry["summary"]], "edition_day": issue["day"]}
+            "key_points": [entry["summary"]], "edition_day": issue["day"],
+            "news": {**by_id[entry["id"]]["news"], "headline": entry["headline"], "summary": entry["summary"]}}
             for entry in issue["items"] if entry["id"] in by_id]
 
     now = now or utcnow()

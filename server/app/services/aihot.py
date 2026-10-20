@@ -1,6 +1,7 @@
 """AIHOT 原版发布层的网关。这里只转换平台格式，不作第二轮评分或发布判定。"""
 
 from datetime import datetime, timezone
+import re
 
 import httpx
 from fastapi import HTTPException
@@ -28,7 +29,8 @@ def timestamp(value):
 
 def public_media(value):
     if isinstance(value, str):
-        return value.replace("/api/img-proxy?", "/api/ai-news/media?")
+        # 只改本站相对图片地址；外部原文 URL 必须逐字保留。
+        return re.sub(r'(^|[\"\' ,])(/api/img-proxy\?)', r'\1/api/ai-news/media?', value)
     if isinstance(value, list):
         return [public_media(v) for v in value]
     if isinstance(value, dict):
@@ -102,8 +104,8 @@ async def feed(*, q="", topic="", kind="all", hours=168, sort="time", selected=F
         return {"items": items[offset:offset+limit], "total": len(items), "topics": [], "sources": await sources(), "engine": "aihot"}
     data = await request("/internal/anisignal/feed", params={"q": q, "topic": topic, "hours": hours,
         "selected": str(selected).lower(), "limit": limit, "offset": offset})
-    return {"items": [news_item(i) for i in data["items"]] if kind != "rumor" else [],
-        "total": data["total"] if kind != "rumor" else 0, "topics": data.get("topics", []), "sources": await sources(), "engine": "aihot"}
+    return {"items": [news_item(i) for i in data["items"]],
+        "total": data["total"], "topics": data.get("topics", []), "sources": await sources(), "engine": "aihot"}
 
 
 async def edition(day=None):
