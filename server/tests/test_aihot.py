@@ -12,6 +12,13 @@ from app.services.settings import get_setting
 from tests.test_bot import target
 
 
+def test_media_rewrite_preserves_external_original_urls():
+    external = "https://example.org/api/img-proxy?article=1"
+    assert aihot.public_media(external) == external
+    assert aihot.public_media('/api/img-proxy?u=fixture') == '/api/ai-news/media?u=fixture'
+    assert aihot.public_media('<img src="/api/img-proxy?u=fixture">') == '<img src="/api/ai-news/media?u=fixture">'
+
+
 @pytest.fixture
 def engine_config(monkeypatch):
     config = SimpleNamespace(aihot_url="http://engine.invalid", aihot_token="fixture-bridge-token",

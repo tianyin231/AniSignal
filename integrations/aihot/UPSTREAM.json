@@ -8,7 +8,8 @@
   ],
   "customization": [
     "site/site.ts",
-    "package.json (engine validation commands)"
+    "package.json (engine validation commands)",
+    "tests/jina-listing.test.ts (trailing whitespace only)"
   ],
   "integration": "adapter/"
 }
