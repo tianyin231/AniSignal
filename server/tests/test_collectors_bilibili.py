@@ -315,3 +315,39 @@ async def test_search_videos_keeps_search_items_while_circuit_open(monkeypatch):
 
     assert [d["bvid"] for d in details] == ["BV1", "BV2"]
     assert details[0]["view_count"] == 100
+
+
+# ---------- 参数注入：外部值不许长得像 CLI 选项 ----------
+
+
+@pytest.mark.parametrize("bad", ["-o", "--type", "-n", "--videos", "--no-cache", "-", "--out"])
+async def test_search_rejects_option_like_keyword(bad):
+    """外部值恰好等于白名单里的合法 flag 时，也必须被拒（按位置判，不按值判）。"""
+    with pytest.raises(CollectorError):
+        await BilibiliCollector().search_videos(bad, 5)
+
+
+async def test_account_rejects_option_like_mid():
+    with pytest.raises(CollectorError):
+        await BilibiliCollector().user_videos("--videos", 5)
+    with pytest.raises(CollectorError):
+        await BilibiliCollector().user_dynamics("-n", 5)
+
+
+async def test_keyword_with_control_chars_rejected():
+    with pytest.raises(CollectorError):
+        await BilibiliCollector().search_videos("鸣潮\x00", 5)
+
+
+async def test_guard_argv_blocks_unknown_flag(monkeypatch):
+    called = False
+
+    async def fake_exec(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("不应执行")
+
+    monkeypatch.setattr(bili_module.asyncio, "create_subprocess_exec", fake_exec)
+    with pytest.raises(CollectorError):
+        await BilibiliCollector()._run("video", "BV1", "--out", "/tmp/x")
+    assert called is False

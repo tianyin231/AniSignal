@@ -29,6 +29,7 @@ from app.models import (
 )
 from app.models.collect_target import supports_view_threshold
 from app.schemas.api import (
+    validate_target_value,
     CollectTargetCreate,
     CollectTargetOut,
     CollectTargetUpdate,
@@ -166,17 +167,24 @@ async def update_target(
     if body.interval_minutes is not None:
         target.interval_minutes = body.interval_minutes
     if body.target_value is not None and body.target_value != target.target_value:
+        # 目标类型不能改，格式按既有的 (platform, target_type) 组合判
+        try:
+            new_value = validate_target_value(
+                target.platform, target.target_type, body.target_value
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
         duplicate = await session.scalar(
             select(CollectTarget).where(
                 CollectTarget.platform == target.platform,
                 CollectTarget.target_type == target.target_type,
-                CollectTarget.target_value == body.target_value,
+                CollectTarget.target_value == new_value,
                 CollectTarget.id != target.id,
             )
         )
         if duplicate is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "target already exists")
-        target.target_value = body.target_value
+        target.target_value = new_value
         target.last_success_at, target.last_error, target.consecutive_failures = None, None, 0
         if target.enabled:
             target.next_run_at = utcnow()
