@@ -223,20 +223,27 @@ BM25 索引 **120114 docs / 188010 词条**（jieba 分词，232s 建完，84.7 
 | 子表 | 38 张 / 102468 行（角色攻略、角色语音表、任务步骤、讨伐楼层、七圣召唤词条…） |
 | **chunk 数** | **70557**（prose 27329 + 补捞 43228：card 18617 / template 15255 / fields 8685 / hidden 639 / gallery 32） |
 | **向量数** | **70557**（qdrant collection `genshin_kb`，与 chunks.jsonl 行数一致） |
-| BM25 | 70557 docs / 175466 词条（平均 107.9 词，448.5s 建完，55.4 MB，落 `data/genshin/bm25/`） |
+| BM25 | 70557 docs / 175813 词条（平均 112.1 词，57.0 MB，落 `data/genshin/bm25/`） |
 | 页面类型分布 | npc 2811 / furnishing 2418 / costume 2357 / quest 2123 / quest_item 1279 / material 816 / consumable 701 / tutorial 689 / tcg_card 652 / enemy 573 / quest_series 472 / event 526 / food 458 |
 
 **eval 通过率**（51 题：查表 30 + 问答 21，混合检索 top-20 → RRF → rerank → top-3）：
 
-查表 30/30 = 100%；问答 18/21 = 86%；**总计 48/51 = 94.1%**
-（明细见 `data/genshin/eval_report.json`）。高于方舟的 92.0% 和碧蓝 v3 的 88.2%。
+查表 30/30 = 100%；问答 21/21 = 100%；**总计 51/51 = 100%**
+（明细见 `data/genshin/eval_report.json`）。
 
-三条未过题（q07/q18/q19）答案都在库里，根因同一个：**只有 `card` chunk 的文本带页名，
-`prose`/`fields`/`template` 三类 chunk 的文本不带页名也不带章节名**（页名在 payload 的
-`source_title`、章节在 `heading`，都不进被 embed/分词的 `text`），于是问题里点了页名或
-章节名时答案 chunk 只能靠 incidental 词命中——q07 是召回得到但 rerank 输给攻略转述句，
-q18/q19 连 BM25 都没召回。修法（`card_field_keys` 为 `{}`，往 `card_fields` 补长字段
-不改 chunk 条数和 id）记在 burner checkpoint 里，本轮未动数据。
+初版 48/51 = 94.1%，四条未过题分两轮修完，**都没动检索参数、没改题库，全是补数据**：
+
+- q07/q18/q19（→ 50/51 = 98.0%）：根因是只有 `card` chunk 的文本带页名，
+  `prose`/`fields`/`template` 三类 chunk 的文本不带页名也不带章节名（页名在 payload 的
+  `source_title`、章节在 `heading`，都不进被 embed/分词的 `text`），问题里点了页名或
+  章节名时答案 chunk 只能靠 incidental 词命中。修法：数据型 chunk 的文本统一冠上
+  「页名｜章节名」面包屑（commit 2086ea4），chunk 条数与 id 不变。
+- q13（→ 51/51）：问某道料理的配料，答案不在任何 chunk 里——`food` 页型的
+  `card_fields` 漏了 `所需食材`（只在 `attr_fields` 里、能查表不能被检索），
+  405 道有配料的料理全军覆没。修法：往 `card_fields` 补 `[所需食材, 所需食材]`
+  一行（`card_field_keys` 为 `{}`，字段不从 fields chunk 挪走，chunk 条数/id 不变），
+  重 parse 后恰好 405 张 food 卡文本变了，`--append --backend onnx` 原地重嵌，
+  BM25 随之重建（词条 175799 → 175813）。
 
 infobox 模板分布：NPC 2811、摆设图鉴 2418、奇偶装扮 2206、任务 2100、任务道具 1279、
 素材图鉴 816、消耗品图鉴 701、教程 689、卡牌 651、怪物信息栏 573、活动信息 526、
