@@ -19,6 +19,7 @@ def payload(raw, version, source, *, cutover, imported_at=None):
             "tier": tier, "owner": source.owner_key if source else None},
         "platform": raw.platform, "externalId": raw.external_id, "url": raw.url,
         "title": version.title or "", "text": version.text or "", "author": source.external_id if source else None,
+        "bodyComplete": not bool((normalized.get("extra") or {}).get("truncated")),
         "publishedAt": aihot.iso(raw.published_at) if raw.published_at else None,
         "discoveredAt": imported_at if version.id <= cutover and imported_at else aihot.iso(raw.collected_at),
         "platformCollectedAt": aihot.iso(raw.collected_at), "hidden": raw.hidden,

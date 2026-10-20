@@ -48,6 +48,8 @@ async def test_bot_uses_original_selected_revision_and_cutover(monkeypatch, engi
     items = await aihot.bot_items([], now-timedelta(days=1), now, collected_after=now-timedelta(minutes=5))
     assert items[0]["id"] == "aihot:native" and items[0]["news"]["revision"] == 3
     assert calls[0][1]["params"]["cutover"] == engine_config.aihot_bot_after
+    await aihot.bot_items([], now-timedelta(days=1), now)
+    assert "cutover" not in calls[-1][1]["params"]
 
 
 async def test_bridge_failure_keeps_watermark_and_retries_same_version(session, monkeypatch, engine_config):
