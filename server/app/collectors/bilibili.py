@@ -66,6 +66,34 @@ def _circuit_reset(command: str) -> None:
     _CIRCUIT_STATE.pop(command, None)
 
 
+# bili CLI 的选项白名单：_run 只放行这些以 `-` 开头的参数。这是第二层防线——
+# 第一层在 _external_arg：外部数据（target_value / 上游 bvid）根本不许以 `-` 开头。
+# 只靠这份白名单是不够的：外部值恰好等于 `-o`/`--type` 时会被 CLI 当选项重新解析。
+_BILI_FLAGS = frozenset({"--type", "--videos", "--no-cache", "-n", "-o", "--order"})
+
+
+def _external_arg(value: object, label: str) -> str:
+    """校验一个来自外部（DB 里的 target_value、上游 JSON 的 bvid）的 argv 值。
+
+    判据是「位置」而不是「值」：位置参数永远不该长得像选项，所以以 `-` 开头一律拒。
+    """
+    text = str(value if value is not None else "")
+    if not text.strip():
+        raise CollectorError(f"{label} 为空，拒绝执行 bili")
+    if text.startswith("-"):
+        raise CollectorError(f"{label} 以 - 开头（会被 CLI 当作选项解析），已拒绝执行：{text!r}")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text):
+        raise CollectorError(f"{label} 含控制字符，已拒绝执行：{text!r}")
+    return text
+
+
+def _guard_argv(args: tuple[str, ...]) -> None:
+    """拒绝把外部数据当成 CLI 选项传入（第一个参数是命令名，其余按白名单判）。"""
+    for arg in args[1:]:
+        if arg.startswith("-") and arg not in _BILI_FLAGS:
+            raise CollectorError(f"bili 参数含未授权选项 {arg!r}，已拒绝执行")
+
+
 class BilibiliCollector:
     platform = Platform.BILIBILI
 
@@ -83,6 +111,7 @@ class BilibiliCollector:
         连续两次拒绝即熔断该命令一段时间，冷却到期后由下一次调用自然探测。
         """
         command = args[0] if args else ""
+        _guard_argv(args)
         if _circuit_open(command):
             raise CollectorDeferred(
                 f"bili {command} skipped: circuit open after risk-control refusals",
@@ -158,6 +187,7 @@ class BilibiliCollector:
         return extract_items(payload)
 
     async def search_videos(self, keyword: str, limit: int) -> list[dict]:
+        keyword = _external_arg(keyword, "搜索词")
         results = await self._run_nonempty(
             "search", keyword, "--type", "video", "-n", str(limit), "-o", "json", "--no-cache",
             *(["--order", "pubdate"] if self.newest_first else []),
@@ -175,7 +205,9 @@ class BilibiliCollector:
                 details.append(item)
                 continue
             try:
-                detail = await self._run("video", str(bvid), "-o", "json", "--no-cache")
+                # bvid 来自上游 JSON：形状不对就退回列表自带字段，不为一条脏数据丢命
+                safe_bvid = _external_arg(bvid, "bvid")
+                detail = await self._run("video", safe_bvid, "-o", "json", "--no-cache")
             except CollectorError:
                 logger.warning("video detail fetch failed for %s, keeping search item", bvid)
                 details.append(item)
@@ -189,12 +221,14 @@ class BilibiliCollector:
         return details
 
     async def user_videos(self, mid: str, limit: int) -> list[dict]:
+        mid = _external_arg(mid, "账号 MID")
         items = await self._run_nonempty(
             "user", str(mid), "--videos", "-n", str(limit), "-o", "json", "--no-cache"
         )
         return items[:limit]
 
     async def user_dynamics(self, mid: str, limit: int) -> list[dict]:
+        mid = _external_arg(mid, "账号 MID")
         items = await self._run_nonempty(
             "dynamics", str(mid), "-n", str(limit), "-o", "json", "--no-cache"
         )

@@ -18,7 +18,14 @@ from app.models import ContentTranslation, ContentVersion, Event, Evidence, RawC
     ("miyoushe", "keyword_search", 0),
 ])
 async def test_target_view_threshold_matches_collector_capability(client, admin_headers, platform, target_type, expected):
-    payload = {"platform": platform, "target_type": target_type, "target_value": "test"}
+    # 目标值要符合该 (platform, target_type) 的形态：账号类必须是数字 MID / 频道 ID
+    value = {
+        "account_videos": "12345",
+        "account_dynamics": "12345",
+        "channel_rss": "UCabcdefghijklmnopqrstuv",
+        "notices": "default",
+    }.get(target_type, "test")
+    payload = {"platform": platform, "target_type": target_type, "target_value": value}
     response = await client.post("/api/admin/collect-targets", json=payload, headers=admin_headers)
     assert response.status_code == 201
     assert response.json()["min_views"] == expected
@@ -26,7 +33,7 @@ async def test_target_view_threshold_matches_collector_capability(client, admin_
         json={"min_views": 20000}, headers=admin_headers)
     assert response.json()["min_views"] == (20000 if expected else 0)
     response = await client.post("/api/admin/collect-targets",
-        json={**payload, "target_value": "explicit", "min_views": 30000}, headers=admin_headers)
+        json={**payload, "target_value": value + "1", "min_views": 30000}, headers=admin_headers)
     assert response.json()["min_views"] == (30000 if expected else 0)
 
 

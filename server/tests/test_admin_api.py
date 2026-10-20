@@ -397,3 +397,53 @@ async def test_email_codes_endpoint_never_returns_plaintext(session, client, adm
     assert reset_code not in blob
     assert all("code" not in row for row in rows)
     assert {row["purpose"] for row in rows} == {"register"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"platform": "bilibili", "target_type": "keyword_search", "target_value": "-o"},
+        {"platform": "bilibili", "target_type": "keyword_search", "target_value": "  "},
+        {"platform": "bilibili", "target_type": "account_videos", "target_value": "12ab"},
+        {"platform": "kuro_cn", "target_type": "notices", "target_value": "../x"},
+        {"platform": "bilibili", "target_type": "keyword_search", "target_value": "a\tb"},
+    ],
+)
+async def test_create_target_rejects_injectable_value(client, admin_headers, payload):
+    """target_value 会进 bili CLI argv，且历史上被直接入库。"""
+    resp = await client.post("/api/admin/collect-targets", json=payload, headers=admin_headers)
+    assert resp.status_code == 422, resp.text
+
+
+async def test_update_target_rejects_injectable_value(client, admin_headers):
+    created = await client.post(
+        "/api/admin/collect-targets",
+        json={"platform": "bilibili", "target_type": "keyword_search", "target_value": "鸣潮"},
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    target_id = created.json()["id"]
+
+    for bad in ("--type", "-o", "a\nb"):
+        resp = await client.put(
+            f"/api/admin/collect-targets/{target_id}",
+            json={"target_value": bad},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, (bad, resp.text)
+
+
+async def test_update_target_accepts_valid_value(client, admin_headers):
+    created = await client.post(
+        "/api/admin/collect-targets",
+        json={"platform": "bilibili", "target_type": "keyword_search", "target_value": "鸣潮"},
+        headers=admin_headers,
+    )
+    target_id = created.json()["id"]
+    resp = await client.put(
+        f"/api/admin/collect-targets/{target_id}",
+        json={"target_value": "  鸣潮 2.0  "},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["target_value"] == "鸣潮 2.0"
