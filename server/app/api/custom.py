@@ -13,6 +13,18 @@ router = APIRouter(prefix="/api/custom")
 
 SESSION_COOKIE = "anisignal_session"
 
+# 公开端点无鉴权：page 不封顶时深分页就是免费的「全表扫」入口。上界按偏移量算，
+# 这样和 page_size 的取值无关（页大时页数上限自然更小）。
+MAX_PAGE_OFFSET = 10_000
+
+
+def _check_page_depth(page: int, page_size: int) -> None:
+    if (page - 1) * page_size > MAX_PAGE_OFFSET:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "分页过深，请缩小页码或使用筛选条件",
+        )
+
 
 async def _optional_user(request: Request, session: AsyncSession) -> User | None:
     token = request.cookies.get(SESSION_COOKIE)
@@ -46,6 +58,7 @@ async def public_feeds(
     session: AsyncSession = Depends(get_session),
 ):
     """公开监控目录：全站用户公开到定制化频道的监控源。"""
+    _check_page_depth(page, page_size)
     feed_scope = (
         CustomFeed.is_public.is_(True),
         CustomFeed.enabled.is_(True),
@@ -91,6 +104,7 @@ async def feed_detail(
     session: AsyncSession = Depends(get_session),
 ):
     """监控详情与条目：公开监控任何人可看；私有监控仅所有者可见。"""
+    _check_page_depth(page, page_size)
     feed = await session.get(CustomFeed, feed_id)
     if feed is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")

@@ -569,3 +569,27 @@ async def test_public_content_url_is_scheme_sanitized(client, session):
     detail = await client.get(f"/api/contents/{raw_id}")
     assert detail.status_code == 200
     assert detail.json()["url"] is None
+
+
+async def test_public_pagination_offset_is_bounded(client, session):
+    """深分页在 MySQL 里是「先扫再丢」，公开端点必须封住上界。"""
+    import app.api.public as public_module
+
+    await _seed(session)
+    offset = public_module.MAX_PUBLIC_OFFSET
+    for path in ("/api/contents", "/api/events"):
+        assert (await client.get(path, params={"offset": offset})).status_code == 200
+        assert (await client.get(path, params={"offset": offset + 1})).status_code == 422
+        assert (await client.get(path, params={"offset": 2_999_940})).status_code == 422
+
+
+async def test_custom_feed_pagination_is_bounded(client):
+    import app.api.custom as custom_module
+
+    max_page = custom_module.MAX_PAGE_OFFSET // 30 + 1
+    ok = await client.get("/api/custom/feeds", params={"page": max_page, "page_size": 30})
+    assert ok.status_code == 200
+    too_deep = await client.get("/api/custom/feeds", params={"page": max_page + 1, "page_size": 30})
+    assert too_deep.status_code == 422
+    # page_size 越大，页数上限越小（按偏移量判，而不是固定页数）
+    assert (await client.get("/api/custom/feeds", params={"page": 200, "page_size": 100})).status_code == 422

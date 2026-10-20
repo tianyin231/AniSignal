@@ -18,8 +18,12 @@ const tab = computed({
   get: () => String(route.query.tab || 'all'),
   set: (v: string) => router.replace({ query: { ...route.query, tab: v, page: undefined } }),
 })
-const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
+// 后端公开列表的分页上界是 10000（MAX_PUBLIC_OFFSET），折算成页数后前后端一致；
+// 不夹这一层的话，超过该页时请求会 422，页面却还显示「下一页」
+const MAX_PAGE = Math.floor(10_000 / pageSize) + 1
+const page = computed(() => Math.min(MAX_PAGE, Math.max(1, Number(route.query.page) || 1)))
+
 
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐行标注分区
@@ -40,7 +44,7 @@ const { data, status, error, refresh } = await useLazyAsyncData(
 )
 
 const list = computed<AppEvent[]>(() => (data.value?.items ?? []).map(toAppEvent))
-const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
+const totalPages = computed(() => Math.min(MAX_PAGE, Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize))))
 
 function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })

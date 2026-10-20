@@ -45,6 +45,10 @@ router = APIRouter(prefix="/api")
 
 _EXCERPT_LEN = 140
 
+# 公开列表的分页上界：深分页在 MySQL 里是「先扫再丢」，一个无鉴权请求就能触发
+# 数十万行扫描。10000 足够覆盖正常浏览（前端最多到 334 页 × 30），再深请用筛选。
+MAX_PUBLIC_OFFSET = 10_000
+
 # 公开分区参数：默认值与合法值集合来自 communities 注册表
 COMMUNITY_QUERY = Query(
     default=DEFAULT_COMMUNITY,
@@ -187,7 +191,8 @@ async def list_contents(
     sort: str = Query(default="time", pattern="^(time|hot)$", description="hot=按最新播放量排序"),
     q: str | None = Query(default=None, max_length=100, description="标题关键词"),
     limit: int = Query(default=30, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    # 公开端点无鉴权：offset 不封顶时 `?offset=2999940` 就是一次全表扫的免费入口
+    offset: int = Query(default=0, ge=0, le=MAX_PUBLIC_OFFSET),
     session: AsyncSession = Depends(get_session),
 ):
     from app.services.classify import HIDDEN_CATEGORIES
@@ -575,7 +580,7 @@ async def list_events(
     ),
     q: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=30, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    offset: int = Query(default=0, ge=0, le=MAX_PUBLIC_OFFSET),
     session: AsyncSession = Depends(get_session),
 ):
     from app.models import Event as EventModel
