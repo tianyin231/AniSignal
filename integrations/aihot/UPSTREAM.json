@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/KKKKhazix/AIHOT",
+  "commit": "a0d1e75b00ede7e503ca948e71a468db964b2df2",
+  "license": "MIT",
+  "entrypoints": [
+    "apps/api",
+    "apps/worker"
+  ],
+  "customization": [
+    "site/site.ts",
+    "package.json (engine validation commands)"
+  ],
+  "integration": "adapter/"
+}

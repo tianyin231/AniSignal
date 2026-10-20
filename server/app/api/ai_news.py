@@ -3,7 +3,7 @@
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select
@@ -19,7 +19,8 @@ router = APIRouter(prefix="/api/ai-news")
 
 
 class NewsItem(BaseModel):
-    id: int
+    id: int | str
+    path: str | None = None
     headline: str
     summary: str
     original_title: str
@@ -59,6 +60,9 @@ async def list_news(
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.services import aihot
+    if aihot.enabled():
+        return await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, limit=limit, offset=offset)
     news = ContentReview.news
     query = (await approved_news_query(session)).where(RawContent.published_at >= utcnow() - timedelta(hours=hours))
     if kind != "all":
@@ -125,6 +129,9 @@ async def news_events(
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
+    from app.services import aihot
+    if aihot.enabled():
+        return await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected, limit=limit, offset=offset)
     from app.services.news_publication import list_stories
 
     items = await list_stories(session, q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected)
@@ -134,6 +141,9 @@ async def news_events(
 
 @router.get("/edition")
 async def news_edition(day: date | None = None, session: AsyncSession = Depends(get_session)):
+    from app.services import aihot
+    if aihot.enabled():
+        return await aihot.edition(day)
     from app.services.news_publication import read_news_edition
 
     return await read_news_edition(session, day=day)
@@ -141,6 +151,15 @@ async def news_edition(day: date | None = None, session: AsyncSession = Depends(
 
 @router.get("/rss.xml")
 async def news_rss(session: AsyncSession = Depends(get_session)):
+    from app.services import aihot
+    if aihot.enabled():
+        result = await aihot.request("/feed.xml", raw=True)
+        from urllib.parse import urlsplit
+        from xml.etree.ElementTree import fromstring
+        parts = urlsplit(fromstring(result.content).findtext("channel/link") or "")
+        origin = f"{parts.scheme}://{parts.netloc}"
+        text = result.text.replace(origin + "/items/", origin + "/ai/items/").replace(origin + "/stories/", origin + "/ai/stories/")
+        return Response(text, media_type="application/rss+xml", headers={"Cache-Control": "no-store"})
     from email.utils import format_datetime
     from datetime import timezone
     from xml.etree.ElementTree import Element, SubElement, tostring
@@ -163,3 +182,29 @@ async def news_rss(session: AsyncSession = Depends(get_session)):
             f"{source['source_name']}：{source['url'] or ''}" for source in entry["sources"])
     return Response(tostring(root, encoding="utf-8", xml_declaration=True), media_type="application/rss+xml",
         headers={"Cache-Control": "no-store"})
+
+
+@router.get("/engine/{path:path}")
+async def engine_public(path: str, request: Request):
+    """只代理公开读接口；内部接口和上游管理端永不对外开放。"""
+    import re
+    from fastapi import HTTPException
+    from app.services import aihot
+    if not aihot.enabled():
+        raise HTTPException(404)
+    if not re.fullmatch(r"(?:items/[A-Za-z0-9_-]+(?:/original)?|stories/[A-Za-z0-9_-]+(?:/followups)?|groups/[A-Za-z0-9_-]+/reports|reports/(?:daily|weekly|monthly)(?:/[A-Za-z0-9_-]+)?|topics(?:/[A-Za-z0-9_-]+)?|hot)", path):
+        raise HTTPException(404)
+    result = await aihot.request("/api/site/" + path, params=dict(request.query_params))
+    return result
+
+
+@router.get("/media")
+async def engine_media(request: Request):
+    from fastapi import HTTPException
+    from app.services import aihot
+    if not aihot.enabled():
+        raise HTTPException(404)
+    result = await aihot.request("/api/img-proxy", params=dict(request.query_params), raw=True)
+    return Response(result.content, media_type=result.headers.get("content-type", "image/webp"),
+        headers={"Cache-Control": result.headers.get("cache-control", "private, max-age=60"),
+                 "X-Content-Type-Options": "nosniff"})

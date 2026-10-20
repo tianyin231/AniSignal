@@ -103,6 +103,7 @@ def filter_relevant(
     is_news = get_community(target.community).domain == "news"
     if is_news:
         from app.services.ai_news import is_news_candidate
+        from app.services import aihot
 
         kept = []
         for item in items:
@@ -111,7 +112,7 @@ def filter_relevant(
                 body = str(item.get("text") or "").casefold()
                 if co_terms and not any(term.casefold() in body for term in co_terms):
                     continue
-            elif not is_news_candidate(str(item.get("title") or "")):
+            elif not aihot.bridge_enabled() and not is_news_candidate(str(item.get("title") or "")):
                 continue
             item["_matched_keywords"] = [target.target_value]
             kept.append(item)
@@ -318,7 +319,9 @@ async def run_collection(redis, target_id: int) -> dict:
                     postprocess_errors.append(f"dynamic backfill failed: {type(exc).__name__}: {exc}")
                     logger.warning("empty DRAW backfill failed", exc_info=True)
             match_stats = None
-            if stats.touched_content_ids:
+            from app.services import aihot
+            engine_news = is_news and aihot.bridge_enabled()
+            if stats.touched_content_ids and not engine_news:
                 from app.services.similarity import match_official_contents
 
                 try:
@@ -337,7 +340,7 @@ async def run_collection(redis, target_id: int) -> dict:
                 except Exception as exc:  # noqa: BLE001 - AI 匹配不得阻断采集主链路
                     postprocess_errors.append(f"official content matching failed: {type(exc).__name__}: {exc}")
                     logger.exception("official content matching failed")
-            if stats.items_new or stats.items_updated or (match_stats and match_stats.decisions):
+            if not engine_news and (stats.items_new or stats.items_updated or (match_stats and match_stats.decisions)):
                 # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
                 from app.services.events import run_aggregation
 

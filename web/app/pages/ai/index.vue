@@ -6,7 +6,10 @@ import { imageSrcset, imageUrl } from '~/utils/image'
 import { beijingParts } from '~/utils/schedule'
 
 interface NewsItem {
-  id: number
+  id: number | string
+  path?: string
+  image?: string | null
+  engine?: string
   headline: string
   summary: string
   original_title: string
@@ -29,6 +32,7 @@ interface NewsItem {
   developments: (NewsItem & { event_id: number | null })[]
 }
 interface NewsList {
+  engine?: string
   items: NewsItem[]
   total: number
   topics: string[]
@@ -75,7 +79,7 @@ const { data: leadShot } = await useLazyAsyncData(
   () => `ai-lead-media-${page.value === 1 ? (data.value?.items[0]?.id ?? 0) : 0}`,
   async (_app, { signal }) => {
     const id = page.value === 1 ? data.value?.items[0]?.id : 0
-    if (!id) return { id: 0, url: '' }
+    if (!id || typeof id === 'string') return { id: 0, url: '' }
     try {
       const detail = await api<{ media?: string[] }>(`/api/contents/${id}`, { signal })
       return { id, url: detail.media?.[0] || '' }
@@ -116,25 +120,30 @@ const delayedSources = computed(() => sourceCells.value.filter(s => s.status !==
 const leadCover = computed(() => {
   if (!lead.value) return ''
   if (leadShot.value?.id === lead.value.id && leadShot.value.url) return leadShot.value.url
-  return covers.value.get(lead.value.id) || ''
+  return lead.value.image || covers.value.get(Number(lead.value.id)) || ''
 })
 const leadCoverFailed = ref(false)
 watch(leadCover, () => { leadCoverFailed.value = false })
-const failedCovers = ref<number[]>([])
+const failedCovers = ref<(number | string)[]>([])
 const feedTitle = computed(() => (filters.value.selected ? '精选' : filters.value.sort === 'hot' ? '热点' : '最新'))
 
+function newsLink(item: NewsItem) {
+  return item.path || `/contents/${item.id}?community=ai`
+}
 function platformMark(platform: string) {
+  if (platform === 'rss') return { label: '新闻源', short: 'RSS', badge: 'bg-teal-700' }
+
   return platformMeta[platform as Platform] ?? { label: platform, short: platform.slice(0, 1).toUpperCase(), badge: 'bg-slate-500' }
 }
-function rowCover(id: number) {
+function rowCover(id: number | string) {
   if (failedCovers.value.includes(id)) return ''
-  return covers.value.get(id) || ''
+  return data.value?.items.find(i => i.id === id)?.image || covers.value.get(Number(id)) || ''
 }
-function markCoverFailed(id: number) {
+function markCoverFailed(id: number | string) {
   if (!failedCovers.value.includes(id)) failedCovers.value = [...failedCovers.value, id]
 }
 function showOriginal(item: NewsItem) {
-  return item.references.length > 0
+  return (item.references?.length || 0) > 0
 }
 function filterBy(key: string, value: string | number | undefined) {
   return router.replace({ query: { ...route.query, [key]: value || undefined, page: undefined } })
@@ -214,7 +223,7 @@ onBeforeUnmount(() => {
         <p class="mono text-xs tracking-wide text-white/55">{{ dateLine }}</p>
         <p class="num text-xs font-medium uppercase tracking-[0.28em] text-ai-ink">AI News</p>
         <h1 v-if="lead" class="min-w-0 max-w-full text-[26px] font-extrabold leading-[1.18] text-white sm:text-[34px]">
-          <NuxtLink :to="{ path: `/contents/${lead.id}`, query: { community: 'ai' } }" class="line-clamp-3 block max-w-full hover:text-white/85">{{ lead.headline }}</NuxtLink>
+          <NuxtLink :to="newsLink(lead)" class="line-clamp-3 block max-w-full hover:text-white/85">{{ lead.headline }}</NuxtLink>
         </h1>
         <h1 v-else-if="status !== 'pending'" class="text-[40px] font-extrabold leading-none tracking-wide text-white sm:text-[56px]">AI 快讯</h1>
         <p v-if="lead?.summary" class="line-clamp-3 min-w-0 max-w-full text-[15px] leading-relaxed text-white/75">{{ lead.summary }}</p>
@@ -241,6 +250,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <nav class="flex flex-wrap gap-4 text-sm text-ink-2" aria-label="AI 栏目"><NuxtLink to="/ai/reports" class="hover:text-ink">日报 · 周报 · 月报</NuxtLink><a href="/api/ai-news/rss.xml" class="hover:text-ink">精选 RSS</a></nav>
     <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <section class="panel min-w-0 overflow-hidden" aria-labelledby="ai-feed-title" :aria-busy="status === 'pending'">
         <header class="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-5">
@@ -289,7 +299,7 @@ onBeforeUnmount(() => {
 
         <div class="flex gap-1.5 overflow-x-auto border-b border-line px-4 py-2.5 [scrollbar-width:none] sm:px-5">
           <button
-            v-for="kind in kinds"
+            v-for="kind in data?.engine === 'aihot' ? [] : kinds"
             :key="kind.key"
             type="button"
             class="h-8 shrink-0 rounded-full px-3.5 text-[13px] transition-colors"
@@ -340,7 +350,7 @@ onBeforeUnmount(() => {
             <div class="flex gap-3 px-4 py-3.5 transition-colors hover:bg-line-soft sm:gap-4 sm:px-5">
               <NuxtLink
                 v-if="rowCover(item.id)"
-                :to="{ path: `/contents/${item.id}`, query: { community: 'ai' } }"
+                :to="newsLink(item)"
                 class="relative aspect-video w-28 shrink-0 overflow-hidden rounded-[10px] bg-chip sm:w-40"
               >
                 <img
@@ -358,7 +368,7 @@ onBeforeUnmount(() => {
               </NuxtLink>
               <span v-else class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full text-[9px] font-bold text-white" :class="platformMark(item.platform).badge" aria-hidden="true">{{ platformMark(item.platform).short }}</span>
               <div class="min-w-0 flex-1">
-                <NuxtLink :to="{ path: `/contents/${item.id}`, query: { community: 'ai' } }" class="line-clamp-2 block text-[15px] font-semibold leading-normal text-ink hover:text-brand-ink">
+                <NuxtLink :to="newsLink(item)" class="line-clamp-2 block text-[15px] font-semibold leading-normal text-ink hover:text-brand-ink">
                   {{ item.headline }}
                 </NuxtLink>
                 <p class="mt-1 text-[13px] leading-relaxed text-muted" :class="rowCover(item.id) ? 'line-clamp-1' : 'line-clamp-2'">{{ item.summary }}</p>
@@ -382,7 +392,7 @@ onBeforeUnmount(() => {
                     <time :datetime="development.published_at || undefined" class="mono text-faint">{{ development.published_at ? fmtTime(development.published_at) : '时间未知' }}</time>
                     <span v-if="development.kind === 'rumor'" class="text-warn">传闻线索</span>
                   </div>
-                  <NuxtLink :to="`/contents/${development.id}?community=ai`" class="text-sm font-semibold leading-6 text-ink hover:text-brand-ink">{{ development.headline }}</NuxtLink>
+                  <NuxtLink :to="newsLink(development)" class="text-sm font-semibold leading-6 text-ink hover:text-brand-ink">{{ development.headline }}</NuxtLink>
                   <p class="mt-1 line-clamp-2 text-[13px] leading-relaxed text-muted">{{ development.summary }}</p>
                   <div class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
                     <a
@@ -429,7 +439,7 @@ onBeforeUnmount(() => {
           <ol class="mt-3 space-y-2.5">
             <li v-for="(item, index) in edition.items" :key="item.id" class="flex gap-2 text-sm leading-6">
               <span class="num w-4 shrink-0 text-faint">{{ index + 1 }}</span>
-              <NuxtLink :to="`/contents/${item.id}?community=ai`" class="text-ink hover:text-brand-ink">{{ item.headline }}</NuxtLink>
+              <NuxtLink :to="newsLink(item)" class="text-ink hover:text-brand-ink">{{ item.headline }}</NuxtLink>
             </li>
           </ol>
         </section>

@@ -18,6 +18,7 @@ const nav = [
   { to: '/admin/products', label: '商品管理' },
   { to: '/admin/rules', label: '分类词典' },
   { to: '/admin/ai', label: 'AI 层' },
+  { to: '/admin/aihot', label: 'AI 新闻引擎' },
   { to: '/admin/settings', label: '站点设置' },
   { to: '/admin/contents', label: '内容管理' },
 ]

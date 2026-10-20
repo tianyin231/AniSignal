@@ -221,6 +221,18 @@ async def read_news_edition(session, *, day=None):
 async def edition_bot_items(session, *, now=None, keywords=None):
     """邮件和机器人复用同一期已编排内容；没有当期刊物时允许原通道降级。"""
     from app.services.ai_news import load_bot_news
+    from app.services import aihot
+
+    if aihot.enabled():
+        now = now or utcnow()
+        issue = await aihot.edition((now + timedelta(hours=8)).date())
+        if not issue["day"]:
+            return None
+        pool = await aihot.bot_items(keywords, now - timedelta(days=30), now)
+        by_id = {item["id"]: item for item in pool}
+        return [{**by_id[entry["id"]], "title": entry["headline"], "summary": entry["summary"],
+            "key_points": [entry["summary"]], "edition_day": issue["day"]}
+            for entry in issue["items"] if entry["id"] in by_id]
 
     now = now or utcnow()
     issue = await read_news_edition(session, day=(now + timedelta(hours=8)).date())

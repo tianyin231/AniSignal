@@ -352,7 +352,7 @@ async def known_notification_keys(session, target_id: int, now=None) -> set[str]
                         legacy_event_ids.add(source["event_id"])
                     ids = source.get("content_ids") or ([source["id"]] if source.get("id") else [])
                     if recent:
-                        legacy_content_ids.update(ids)
+                        legacy_content_ids.update(cid for cid in ids if isinstance(cid, int))
                     keys.update(hashlib.sha256(f"content:{cid}".encode()).hexdigest()[:32] for cid in ids)
         if row.dedupe_key.startswith((f"updates:{target_id}:", f"critical:{target_id}:")):
             keys.add(row.dedupe_key.rsplit(":", 1)[-1])
@@ -371,6 +371,8 @@ async def identify_item(session, item: dict) -> dict:
     facts = point_key(item.get("source_title") or item.get("title") or "") + "\n" + "\n".join(sorted(point_key(point) for point in news_points(item)))
     # 事件结论常是固定模板；用实际来源事实辨认修订，改写摘要本身不触发续报。
     identity = f"event:{item['event_id']}:{facts}" if item.get("event_id") else f"content:{item['id']}"
+    if item.get("news", {}).get("engine") == "aihot" and item["news"].get("fact_id"):
+        identity = f"aihot-fact:{item['news']['fact_id']}"
     return {**item, "dedupe": hashlib.sha256(identity.encode()).hexdigest()[:32], "topic_key": notification_topic(item)}
 
 
@@ -509,10 +511,23 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     invalid_review = False
     if any(item.get("news") for item in usable):
         from app.services.ai_news import approved_news_query, news_review_identity
+        from app.services import aihot
 
-        query = (await approved_news_query(session)).where(RawContent.id.in_([item["id"] for item in usable]))
+        native = [i for i in usable if i.get("news", {}).get("engine") == "aihot"]
+        if native:
+            try:
+                native_approved = await aihot.validate_bot_items(native) if aihot.enabled() else set()
+            except Exception:
+                return False
+        else:
+            native_approved = set()
+        query = (await approved_news_query(session)).where(RawContent.id.in_([item["id"] for item in usable if isinstance(item["id"], int)]))
         approved = {raw.id: review.news for raw, version, source, review in (await session.execute(query)).all()}
         def same_review(item):
+            if item.get("news", {}).get("engine") == "aihot":
+                return item["id"] in native_approved
+            if aihot.enabled():
+                return False
             return item["id"] in approved and news_review_identity(item["news"]) == news_review_identity(approved[item["id"]])
         invalid_review = any(item.get("news") and not same_review(item) for item in usable)
         usable = [item for item in usable if not item.get("news") or same_review(item)]
