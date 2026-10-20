@@ -14,6 +14,7 @@ const sources = ref<Source[]>([])
 const receipts = ref<Receipt[]>([])
 const busy = ref('')
 const loadError = ref(false)
+const native = ref(false)
 const numericFields = [
   { key: 'first_party_threshold', label: '一手来源精选门槛', max: 100 },
   { key: 'media_threshold', label: '媒体与个人精选门槛', max: 100 },
@@ -25,7 +26,9 @@ const labels: Record<string, string> = { received: '已保存', pending: '执行
 async function load() {
   loadError.value = false
   try {
-    const data = await api<{ policy: Policy; sources: Source[]; receipts: Receipt[] }>('/api/admin/ai/editorial')
+    const data = await api<{ engine?: string; policy: Policy; sources: Source[]; receipts: Receipt[] }>('/api/admin/ai/editorial')
+    native.value = data.engine === 'aihot'
+    if (native.value) return
     policy.value = data.policy; sources.value = data.sources; receipts.value = data.receipts
   } catch { loadError.value = true }
 }
@@ -47,7 +50,8 @@ function retry(receipt: Receipt) {
 </script>
 
 <template>
-  <section class="panel p-5">
+  <section v-if="native" class="panel p-5"><h2 class="font-semibold text-ink">AI 新闻引擎已接管</h2><NuxtLink to="/admin/aihot" class="mt-2 inline-block text-sm text-brand-ink">管理信源、模型、预算与发布 →</NuxtLink></section>
+  <section v-else class="panel p-5">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h2 class="text-sm font-semibold">AI 资讯编辑</h2>
       <button type="button" :disabled="!!busy" class="btn-primary min-h-11 px-4" @click="action('run', '/api/admin/ai/editorial/run', 'POST')">{{ busy === 'run' ? '提交中…' : '处理待归组与待评分资讯' }}</button>

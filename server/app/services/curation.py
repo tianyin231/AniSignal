@@ -96,6 +96,12 @@ async def review_contents(
     ids = list(dict.fromkeys(int(item) for item in content_ids if item))
     if not ids:
         return stats
+    from app.services import aihot
+    if aihot.bridge_enabled():
+        # 已入队的旧任务也不能绕回简化快讯审核；游戏审核照常执行。
+        ids = list(await session.scalars(select(RawContent.id).where(RawContent.id.in_(ids), RawContent.community != "ai")))
+        if not ids:
+            return stats
     config = await get_ai_config(session)
     if not ai_available(config):
         stats.skipped_reason = "ai_not_configured"

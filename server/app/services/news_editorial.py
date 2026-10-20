@@ -220,6 +220,9 @@ async def _apply_grouping(session, record: NewsRecord, choice: dict, candidates:
 
 
 async def group_pending_news(session, *, limit=20, now=None) -> dict:
+    from app.services import aihot
+    if aihot.bridge_enabled():
+        return {"grouped": 0, "deferred": 0, "engine": "aihot"}
     now = now or utcnow()
     stats = {"grouped": 0, "deferred": 0}
     if not (await get_policy(session))["enabled"]:
@@ -251,6 +254,9 @@ async def group_pending_news(session, *, limit=20, now=None) -> dict:
 
 
 async def score_pending_news(session, *, limit=20, now=None) -> dict:
+    from app.services import aihot
+    if aihot.bridge_enabled():
+        return {"scored": 0, "deferred": 0, "engine": "aihot"}
     policy = await get_policy(session)
     stats = {"scored": 0, "deferred": 0}
     if not policy["enabled"] or not policy["score_enabled"]:

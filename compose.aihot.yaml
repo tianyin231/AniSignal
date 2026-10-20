@@ -1,0 +1,47 @@
+# 显式附加此配置启用原版引擎；数据库和引擎仅在容器网络中开放。
+services:
+  aihot-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: [{ path: .env.aihot, format: raw }]
+    environment:
+      POSTGRES_USER: aihot
+      POSTGRES_DB: aihot
+    volumes:
+      - ${DATA_DIR:-./data}/aihot/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aihot -d aihot"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  aihot-api:
+    image: anisignal-aihot:${AIHOT_TAG:-local}
+    build: ./integrations/aihot
+    restart: unless-stopped
+    env_file: [{ path: .env.aihot, format: raw }]
+    command: ["sh", "-c", "node scripts/migrate.ts && node scripts/seed.ts && node adapter/bootstrap.ts && exec node adapter/main.ts"]
+    volumes:
+      - ${DATA_DIR:-./data}/aihot/files:/data
+    depends_on:
+      aihot-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+  aihot-worker:
+    image: anisignal-aihot:${AIHOT_TAG:-local}
+    restart: unless-stopped
+    env_file: [{ path: .env.aihot, format: raw }]
+    command: ["node", "apps/worker/src/main.ts"]
+    stop_grace_period: 515s
+    volumes:
+      - ${DATA_DIR:-./data}/aihot/files:/data
+    depends_on:
+      aihot-api:
+        condition: service_healthy
+  app:
+    env_file: [{ path: .env.aihot, format: raw }]
+  collector:
+    env_file: [{ path: .env.aihot, format: raw }]

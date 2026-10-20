@@ -409,6 +409,9 @@ async def set_content_visibility(
 
     snapshots = await capture_content_fulfillment(session, content_id)
     raw.hidden = bool(body.get("hidden"))
+    if raw.community == "ai":
+        from app.services.aihot_bridge import visibility
+        await visibility(raw.id, raw.hidden)
     await refresh_content_fulfillment(session, snapshots, reaggregate=not raw.hidden)
     await session.commit()
     invalidate_official_links_cache()
@@ -426,6 +429,9 @@ async def delete_content(
     from app.services.fulfillment import capture_content_fulfillment, refresh_content_fulfillment
 
     snapshots = await capture_content_fulfillment(session, content_id)
+    if raw.community == "ai":
+        from app.services.aihot_bridge import visibility
+        await visibility(raw.id, True)
     await session.delete(raw)
     await session.flush()
     await refresh_content_fulfillment(session, snapshots)

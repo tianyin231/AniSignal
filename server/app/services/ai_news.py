@@ -131,6 +131,9 @@ async def approved_news_query(session: AsyncSession):
 
 
 async def load_bot_news(session: AsyncSession, keywords, start_at, end_at, *, collected_after=None, collapse=True) -> list[dict]:
+    from app.services import aihot
+    if aihot.enabled():
+        return await aihot.bot_items(keywords, start_at, end_at, collected_after=collected_after)
     query = (await approved_news_query(session)).where(
         RawContent.published_at >= start_at, RawContent.published_at < end_at,
         ContentReview.updated_at < end_at,
@@ -195,6 +198,9 @@ async def collapse_news_items(session, items: list[dict]) -> list[dict]:
 
 
 async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None = None) -> list[int]:
+    from app.services import aihot
+    if aihot.bridge_enabled():
+        return []
     from app.services.ai import retry_allowed
 
     fingerprint = ContentReview.news["content_hash"].as_string()

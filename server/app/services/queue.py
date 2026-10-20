@@ -234,6 +234,11 @@ class LocalQueue(BaseQueue):
         async def run():
             try:
                 async with SessionLocal() as session:
+                    from app.services import aihot
+                    if aihot.bridge_enabled():
+                        from app.services.aihot_bridge import sync
+                        await sync(session)
+                        return
                     await group_pending_news(session, limit=4)
                     await score_pending_news(session, limit=4)
                     await compose_news_edition(session)

@@ -48,6 +48,9 @@ class EditorialSourceBody(BaseModel):
 
 @router.get("/editorial")
 async def editorial_status(session: AsyncSession = Depends(get_session)):
+    from app.services import aihot
+    if aihot.bridge_enabled():
+        return {"engine": "aihot", "path": "/admin/aihot"}
     from app.models import EditorialReceipt, RawContent, Source
     from app.services.editorial_calls import get_policy
 

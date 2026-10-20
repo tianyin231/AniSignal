@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     # 对外站点基址（生成 RSS 等外部引用链接用；留空则回落到请求基址）
     public_base_url: str = ""
 
+    # bridge 开启只迁移资料；read 开启后网页和 Bot 统一读取原版发布层。
+    aihot_url: str = ""
+    aihot_token: str = ""
+    aihot_read_enabled: bool = False
+    aihot_bot_after: str = ""
+
     # AI 密钥池 env 兜底（逗号分隔；DB site_settings 的 api_keys 优先）
     ai_api_keys: str = ""
 

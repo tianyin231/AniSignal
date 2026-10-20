@@ -108,6 +108,10 @@ async def news_editorial_sweep(ctx) -> dict:
         return {"status": "busy"}
     try:
         async with SessionLocal() as session:
+            from app.services import aihot
+            if aihot.bridge_enabled():
+                from app.services.aihot_bridge import sync
+                return await sync(session)
             grouped = await group_pending_news(session, limit=4)
             scored = await score_pending_news(session, limit=4)
             issue = await compose_news_edition(session)
