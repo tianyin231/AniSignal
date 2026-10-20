@@ -353,3 +353,47 @@ async def test_contents_review_filter_accuracy(client, admin_headers, session):
         "/api/admin/contents", params={"review": "irrelevant", "limit": 200}, headers=admin_headers
     )
     assert resp.json()["total"] == 0
+
+
+async def test_email_codes_endpoint_never_returns_plaintext(session, client, admin_headers):
+    """验证码排障端点：不回传明文，且密码重置类一条都不列。"""
+    from datetime import timedelta
+
+    from app.clock import utcnow
+    from app.models import EmailCode, User
+
+    user = User(email="codes@example.com", password_hash="scrypt$x")
+    session.add(user)
+    await session.commit()
+
+    register_code = "123456"
+    reset_code = "654321"
+    session.add_all(
+        [
+            EmailCode(
+                user_id=user.id,
+                purpose="register",
+                code_hash="h1",
+                code_plain=register_code,
+                expires_at=utcnow() + timedelta(minutes=10),
+            ),
+            EmailCode(
+                user_id=user.id,
+                purpose="reset",
+                code_hash="h2",
+                code_plain=reset_code,
+                expires_at=utcnow() + timedelta(minutes=10),
+            ),
+        ]
+    )
+    await session.commit()
+
+    resp = await client.get("/api/admin/email-codes", headers=admin_headers)
+    assert resp.status_code == 200
+    rows = resp.json()
+    blob = resp.text
+
+    assert register_code not in blob
+    assert reset_code not in blob
+    assert all("code" not in row for row in rows)
+    assert {row["purpose"] for row in rows} == {"register"}

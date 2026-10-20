@@ -998,12 +998,18 @@ async def list_email_codes(
     limit: int = Query(default=20, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
 ):
-    """最近验证码（SMTP 未配置时的开发/排查通道；仅发信失败的码保留明文）。"""
+    """最近验证码（SMTP 未配置时的开发/排查通道；仅发信失败的码保留明文）。
+
+    只列注册验证码，密码重置类一律不返回：重置码等于账号接管凭证，把它发给
+    管理端等于给 Token 持有者一条绕过用户邮箱的取号路径。注册码保留是为了让
+    「没配 SMTP 的自托管实例」仍能完成首次注册，这是原本的设计用途。
+    """
     from app.models import EmailCode, User
 
     rows = await session.execute(
         select(EmailCode, User.email)
         .join(User, EmailCode.user_id == User.id)
+        .where(EmailCode.purpose != "reset")
         .order_by(EmailCode.id.desc())
         .limit(limit)
     )
@@ -1012,7 +1018,7 @@ async def list_email_codes(
             "id": code.id,
             "email": email,
             "purpose": code.purpose,
-            "code": code.code_plain,
+            "attempts": code.attempts,
             "expires_at": code.expires_at,
             "used": code.used_at is not None,
             "sent_via_smtp": code.code_plain is None,
