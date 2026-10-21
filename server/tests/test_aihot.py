@@ -143,6 +143,31 @@ async def test_bridge_never_replaces_live_revision_with_old_history(session, mon
     assert [i["title"] for i in sent] == ["新标题"]
 
 
+@pytest.mark.parametrize("status,hidden,approved", [
+    ("pending", True, None), ("stale", True, None),
+    ("approved", False, True), ("rejected", True, False), ("manual", True, True),
+])
+def test_bridge_distinguishes_pending_from_withdrawal_and_keeps_current_review(status, hidden, approved):
+    now = utcnow()
+    raw = RawContent(id=42, platform="bilibili", external_id="review-fixture", community="ai", content_type="video",
+        url="https://www.bilibili.com/video/BVreview", content_hash="current", hidden=hidden,
+        published_at=now, collected_at=now)
+    version = ContentVersion(id=9, version=2, title="原始标题", text="视频简介")
+    review = None if status == "pending" else SimpleNamespace(
+        relevant=True, promotional=False, violation=False, model="original-model", updated_at=now,
+        news={"content_hash": "current", "content_version": 1 if status == "stale" else 2,
+              "newsworthy": status != "rejected", "headline": "原站已审标题", "summary": "原站已审摘要", "topics": ["Codex"]})
+    body = aihot_bridge.payload(raw, version, None, cutover=10, review=review)
+    assert body["hidden"] is (hidden and approved is not None)
+    if approved is None:
+        assert body["review"] is None
+    else:
+        assert body["review"]["approved"] is approved
+        assert body["review"]["headline"] == "原站已审标题"
+        assert body["review"]["summary"] == "原站已审摘要"
+        assert body["review"]["model"] == "original-model"
+
+
 async def test_bot_native_snapshot_is_revalidated_and_outage_defers(session, monkeypatch, engine_config):
     now = utcnow()
     private = await target(session, community="ai", daily_enabled=False, updates_enabled=True, quiet_start=0, quiet_end=0)
