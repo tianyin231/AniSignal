@@ -433,7 +433,7 @@ async def run_collection(redis, target_id: int) -> dict:
 
 
 def next_run_with_jitter(target: CollectTarget, now: datetime | None = None) -> datetime:
-    """每轮重新抽取间隔；X 抖动 ±25%、至少 30 分钟，失败仍按 2^n 退避。"""
+    """每轮重新抽取间隔；动态风控定期探测恢复，其他失败按 2^n 退避。"""
     settings = get_settings()
     now = now or utcnow()
     backoff = 1.0
@@ -441,6 +441,11 @@ def next_run_with_jitter(target: CollectTarget, now: datetime | None = None) -> 
         backoff = float(
             2 ** min(target.consecutive_failures, settings.scheduler_failure_backoff_max)
         )
+        if (target.platform == "bilibili" and target.target_type == "account_dynamics"
+                and (target.last_error or "").startswith("BiliRiskControlError:")):
+            # 匿名动态可能自行恢复；端点已有 30 分钟熔断，不再叠加 8–16 小时等待。
+            # 保留管理员设置的长采集间隔。
+            backoff = min(backoff, max(1.0, 60 / target.interval_minutes))
     base = target.interval_minutes * 60 * backoff
     if target.platform == "x":
         return now + timedelta(seconds=random.uniform(max(1800, base * 0.75), base * 1.25))
