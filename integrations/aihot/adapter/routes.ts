@@ -13,12 +13,17 @@ import { runsOverview } from "@aihot/backend/admin/runs";
 import { ITEM_COLUMNS, ITEM_FROM, toFeedItemSummary, type ItemRow } from "@aihot/backend/publication/items";
 import { listedCondition, seatedCondition } from "@aihot/backend/publication/scope";
 import { TOPICS, topicMembership } from "@aihot/backend/publication/topics";
+import { publishArticleTx } from "@aihot/backend/publication/publish";
 
 const sourceSchema = z.object({
   id: z.string().regex(/^anisignal-[a-z0-9-]+$/).max(80), name: z.string().min(1).max(200),
   tier: z.enum(["T1", "T1_5", "T2"]).default("T2"),
   owner: z.string().max(120).nullable().default(null),
 });
+const reviewSchema = z.object({
+  approved: z.boolean(), headline: z.string().max(2000), summary: z.string().max(4000),
+  topics: z.array(z.string().max(60)).max(12), model: z.string().max(200), reviewedAt: z.iso.datetime(),
+}).refine(r => !r.approved || !!r.headline.trim() && !!r.summary.trim());
 const materialSchema = z.object({
   source: sourceSchema, id: z.string().regex(/^as-[0-9]+$/),
   url: z.url().refine(v => /^https?:\/\//.test(v)), title: z.string().max(2000),
@@ -29,6 +34,7 @@ const materialSchema = z.object({
   platform: z.string(), externalId: z.string(), hidden: z.boolean().default(false),
   media: z.array(z.object({ kind: z.enum(["image", "video"]), url: z.url() })).max(30).default([]),
   backfill: z.string().nullable().default(null),
+  review: reviewSchema.nullable().default(null),
 });
 
 export function registerAdapter(app: FastifyInstance) {
@@ -64,7 +70,9 @@ export function registerAdapter(app: FastifyInstance) {
           platformCollectedAt: input.platformCollectedAt, bodyComplete: input.bodyComplete },
       });
       if (input.hidden) await changeVisibility(result.articleId, true);
-      if (result.created || result.revised || result.processingNeeded) await queueProcessing(result.articleId);
+      // 原站已完成、且与当前正文版本绑定的审核直接迁移，不能让历史重审挤占实时处理预算。
+      if (input.review) await importReview(result.articleId, input.review);
+      else if (result.created || result.revised || result.processingNeeded) await queueProcessing(result.articleId);
       return result;
     });
     internal.get("/feed", async req => {
@@ -138,6 +146,23 @@ export function registerAdapter(app: FastifyInstance) {
       return switchModel(req.params.capability, body.model, body.reason, "anisignal-admin");
     });
   }, { prefix: "/internal/anisignal" });
+}
+
+async function importReview(id: string, review: z.infer<typeof reviewSchema>) {
+  await sql.begin(async tx => {
+    const [article] = await tx`SELECT revision FROM articles WHERE id=${id} FOR UPDATE`;
+    if (!article) return;
+    const [judged] = await tx`SELECT 1 FROM analyses WHERE article_id=${id} AND input_revision=${article.revision}
+      AND relevance IN ('pass','block') LIMIT 1`;
+    if (judged) return;
+    await tx`INSERT INTO analyses (article_id,input_revision,origin,model,prompt_version,relevance,title_zh,summary_zh,
+      tags,selected,output) VALUES (${id},${article.revision},'replay',${review.model},'anisignal-review-v1',
+      ${review.approved ? 'pass' : 'block'},${review.headline},${review.summary},${review.topics},false,
+      ${tx.json({ scope: 'unknown', importedReview: review })})`;
+    await tx`UPDATE articles SET processing_state=${review.approved ? 'analyzed' : 'blocked'},processing_error=NULL,
+      processing_retry_at=NULL,processing_queued_at=NULL,processing_attempts=0 WHERE id=${id}`;
+    await publishArticleTx(tx, id, { releasedAt: new Date(review.reviewedAt) });
+  });
 }
 
 async function changeVisibility(id: string, hidden: boolean) {

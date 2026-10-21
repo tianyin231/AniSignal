@@ -4,6 +4,7 @@ import { after, test } from "node:test";
 import { sql, closeDb } from "@aihot/backend/db";
 import { publishArticle } from "@aihot/backend/publication/publish";
 import { stopBoss } from "@aihot/backend/jobs/queue";
+import { processArticle } from "@aihot/backend/jobs/content";
 import { buildApp } from "../apps/api/src/app.ts";
 import { registerAdapter } from "../adapter/routes.ts";
 
@@ -77,4 +78,38 @@ test("a truncated X post is never labelled as a confirmed full body", async () =
   const [article] = await sql`SELECT body_status,body_text FROM articles WHERE id='as-3'`;
   assert.equal(article.body_status, "unconfirmed");
   assert.equal(article.body_text, partial.text);
+});
+
+test("a version-bound original review is imported once without buying another analysis", async () => {
+  const archived = { ...material, id: "as-4", url: "https://www.bilibili.com/video/BVapproved", backfill: "anisignal-initial-import",
+    review: { approved: true, headline: "原站已审发布", summary: "来源报道模型开放测试。", topics: ["OpenAI"], model: "original-model", reviewedAt: at } };
+  const send = () => app.inject({ method: "POST", url: "/internal/anisignal/materials", headers, payload: archived });
+  assert.equal((await send()).statusCode, 200);
+  assert.equal((await send()).statusCode, 200);
+  const [analysis] = await sql`SELECT count(*)::int AS count,max(origin) AS origin,max(summary_zh) AS summary FROM analyses WHERE article_id='as-4'`;
+  assert.equal(analysis.count, 1);
+  assert.equal(analysis.origin, "replay");
+  assert.equal(analysis.summary, archived.review.summary);
+  const feed = (await app.inject({ url: "/internal/anisignal/feed", headers })).json();
+  assert.equal(feed.items.find((i: { id: string }) => i.id === "as-4")?.title, archived.review.headline);
+  assert.deepEqual(await processArticle("as-4"), { state: "analyzed" });
+  const [receipts] = await sql`SELECT count(*)::int AS count FROM receipts WHERE subject LIKE 'article:as-4@%'`;
+  assert.equal(receipts.count, 0);
+  const [pub] = await sql`SELECT revision FROM publications WHERE article_id='as-4'`;
+  const bot = await app.inject({ method: "POST", url: "/internal/anisignal/bot/validate", headers,
+    payload: [{ id: "as-4", revision: pub.revision }] });
+  assert.deepEqual(bot.json(), []);
+});
+
+test("rejected reviews and explicit withdrawal stay out of the public feed", async () => {
+  for (const [id, approved] of [["as-5", false], ["as-6", true]] as const) {
+    const input = { ...material, id, url: `https://www.bilibili.com/video/BV${id}`, hidden: true,
+      review: { approved, headline: "已审标题", summary: "已审摘要", topics: [], model: "original-model", reviewedAt: at } };
+    assert.equal((await app.inject({ method: "POST", url: "/internal/anisignal/materials", headers, payload: input })).statusCode, 200);
+    const [pub] = await sql`SELECT visibility FROM publications WHERE article_id=${id}`;
+    assert.equal(pub.visibility, "withdrawn");
+  }
+  const feed = (await app.inject({ url: "/internal/anisignal/feed", headers })).json();
+  assert.equal(feed.items.some((i: { id: string }) => ["as-5", "as-6"].includes(i.id)), false);
+  assert.deepEqual(await processArticle("as-5"), { state: "blocked" });
 });

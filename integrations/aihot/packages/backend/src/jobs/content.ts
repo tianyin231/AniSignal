@@ -113,8 +113,8 @@ export async function settleNonEditorial(articleId: string): Promise<{ group: bo
 }
 
 async function processingInput(articleId: string) {
-  const [row] = await sql<{ participation_mode: string; revision: number; backfill: boolean; published_at: Date | null; discovered_at: Date }[]>`
-    SELECT s.participation_mode, a.revision, a.backfill, a.published_at, a.discovered_at FROM articles a JOIN sources s ON s.id = a.source_id WHERE a.id = ${articleId}`;
+  const [row] = await sql<{ participation_mode: string; processing_state: string; revision: number; backfill: boolean; published_at: Date | null; discovered_at: Date }[]>`
+    SELECT s.participation_mode, a.processing_state, a.revision, a.backfill, a.published_at, a.discovered_at FROM articles a JOIN sources s ON s.id = a.source_id WHERE a.id = ${articleId}`;
   return row ? { ...row, historical: isHistorical(row) } : null;
 }
 
@@ -126,6 +126,8 @@ async function processingInput(articleId: string) {
 export async function processArticle(articleId: string, opts: { attemptTag?: string } = {}): Promise<{ state: string; retryAt?: Date }> {
   const row = await processingInput(articleId);
   if (!row) return { state: "missing" };
+  // 重复入队或迁移前遗留的任务不重做已落库的审核；显式重评仍有自己的 attemptTag。
+  if (!opts.attemptTag && ["analyzed", "blocked"].includes(row.processing_state)) return { state: row.processing_state };
   try {
     return await processRevision(articleId, row, opts);
   } catch (error) {
