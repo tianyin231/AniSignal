@@ -12,6 +12,7 @@ import {
   type ReceiptRequest,
 } from "./receipts.ts";
 import { enterModelCircuit, recordModelHealth, type CircuitPermit } from "./circuit.ts";
+import { fetchWithKeyPool, poolKeys } from "./key-pool.ts";
 
 export interface ModelSpec extends ModelPreset {
   key: string;
@@ -165,8 +166,8 @@ async function chatOnce<S extends z.ZodType>(opts: ChatJsonOptions<S>, circuit =
   if (!spec) throw new Error(`Unknown model ${opts.model}`);
   if (!config.modelCallsEnabled) throw new ModelUnavailableError("Model calls are disabled (MODEL_CALLS_ENABLED=false)");
   const baseUrl = credential("models", spec.baseUrlEnv);
-  const apiKey = credential("models", spec.apiKeyEnv);
-  if (!baseUrl || !apiKey || !spec.model) throw new ModelUnavailableError(`Model ${opts.model} is not configured (${spec.baseUrlEnv}, ${spec.apiKeyEnv}${spec.key === "default" ? ", LLM_MODEL" : ""})`);
+  const apiKeys = poolKeys(credential("models", spec.apiKeyEnv), credential("models", `${spec.apiKeyEnv}S`));
+  if (!baseUrl || !apiKeys.length || !spec.model) throw new ModelUnavailableError(`Model ${opts.model} is not configured (${spec.baseUrlEnv}, ${spec.apiKeyEnv}${spec.key === "default" ? ", LLM_MODEL" : ""})`);
 
   const { request, temperature, maxTokens, userText } = requestFor(opts, spec);
   const timeoutMs = opts.timeoutMs ?? (circuit ? FAILOVER_TIMEOUT_MS : TIMEOUT_MS);
@@ -189,16 +190,11 @@ async function chatOnce<S extends z.ZodType>(opts: ChatJsonOptions<S>, circuit =
     { ...request, fallbackFor },
     async () => {
       const started = performance.now();
-      let res: Response;
+      let res: Awaited<ReturnType<typeof fetchWithKeyPool>>;
       let text: string;
       try {
-        res = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
-          method: "POST",
-          headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        text = await res.text();
+        res = await fetchWithKeyPool(`${baseUrl.replace(/\/$/, "")}/chat/completions`, body, apiKeys, timeoutMs);
+        text = res.text;
         assertAccepted(spec.service, res.status, text);
       } catch (error) {
         const failure = isConnectFailure(error) ? new ProviderRejectedError(`connect failed: ${String(error)}`, null, true) : error;
@@ -217,7 +213,7 @@ async function chatOnce<S extends z.ZodType>(opts: ChatJsonOptions<S>, circuit =
       const usage = (json.usage as Record<string, unknown> | undefined) ?? null;
       return {
         response: { ...json, _latencyMs: Math.round(performance.now() - started) },
-        requestId: (json.id as string | undefined) ?? res.headers.get("x-request-id"),
+        requestId: (json.id as string | undefined) ?? res.requestId,
         usage,
         cost: null,
       };
