@@ -1,13 +1,18 @@
-// 只初始化一次；后续启动保留管理员在原版后台保存的预算和信源配置。
+// 信源只初始化一次；模型调用默认不加平台配额，保留供应商自身的限流重试。
 import { sql, closeDb } from "@aihot/backend/db";
-import { updateBudget } from "@aihot/backend/admin/settings";
+import { audit } from "@aihot/backend/audit";
 import { updateSource } from "@aihot/backend/admin/sources";
+
+const [unlimited] = await sql`SELECT 1 FROM settings WHERE key='anisignal:unlimited-llm'`;
+if (!unlimited) await sql.begin(async tx => {
+  // budgets 无记录即不限额；0 的语义是停用，不能用 0 代替不限额。
+  const before = await tx`DELETE FROM budgets WHERE service='llm' RETURNING *`;
+  await audit("anisignal-deploy", "budget.remove", "budget:llm", "按用户要求取消模型调用配额", before, null, { db: tx });
+  await tx`INSERT INTO settings (key,value,updated_by) VALUES ('anisignal:unlimited-llm','true'::jsonb,'anisignal-deploy') ON CONFLICT DO NOTHING`;
+});
 
 const [done] = await sql`SELECT 1 FROM settings WHERE key='anisignal:initialized'`;
 if (!done) {
-  // 新装原版的默认预算很高，平台默认延续当前的调用上限。
-  if (!(await sql`SELECT 1 FROM receipt_attempts LIMIT 1`).length)
-    await updateBudget("llm", { perMinute: 12, perHour: 100, perDay: 300, reason: "平台初始调用上限" }, "anisignal-deploy");
   const sources = await sql`SELECT id,config,updated_at FROM sources WHERE kind='rss' AND cursor IS NULL`;
   for (const source of sources) await updateSource(source.id, {
     version: source.updated_at.toISOString(),
