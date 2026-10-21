@@ -133,6 +133,8 @@ async function toggle(target: CollectTarget) {
     })
     toast.ok(target.enabled ? '已停用' : '已启用')
     await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '操作失败，请重试')
   } finally {
     busyId.value = null
   }
@@ -176,6 +178,8 @@ async function remove(target: CollectTarget) {
     toast.ok('目标已删除')
     await refresh()
     await refreshRuns()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '删除失败，请重试')
   } finally {
     busyId.value = null
   }

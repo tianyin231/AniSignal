@@ -64,8 +64,7 @@ def _sweep_state(
 
     淘汰**跳过正在锁定中的键**：分支版本按首先失败时间淘汰，恰好优先踢掉「已经
     攒满次数、正在锁」的账号，等于给攻击者一个解锁原语（刷一万个随机邮箱即可把
-    受害者的 15 分钟锁定清零）。这里先清空闲键，只有全都在锁定中（攻击者要先把
-    上限数量的账号逐个锁死，代价高得多）才会动锁定键。
+    受害者的 15 分钟锁定清零）。只淘汰未锁定的键；全部锁定时由写入侧拒绝新增键。
     """
     for key, times in list(state.items()):
         if not times or now - times[-1] > ttl:
@@ -289,8 +288,11 @@ def _check_login_lock(email: str) -> None:
 
 
 def record_login_failure(email: str) -> None:
-    _login_failures.setdefault(email, deque()).append(time.monotonic())
     _maybe_sweep()
+    # 两轮清理之间最多多容纳一批新键；全是锁定条目时拒绝新增，不能无限增长或解锁旧账号。
+    if email not in _login_failures and len(_login_failures) >= _MAX_TRACKED_KEYS + _STATE_OPS_PER_SWEEP:
+        raise AuthError("登录请求过多，请稍后再试", 429)
+    _login_failures.setdefault(email, deque()).append(time.monotonic())
 
 
 def clear_login_failures(email: str) -> None:

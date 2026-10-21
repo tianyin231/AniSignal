@@ -49,8 +49,15 @@ async def put_ai(body: dict, session: AsyncSession = Depends(get_session)):
         if isinstance(raw_keys, str):
             raw_keys = raw_keys.replace("，", ",").replace(",", "\n").split("\n")
         api_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
+    raw_base = str(body.get("base_url") or "").strip().rstrip("/")
+    base_url = safe_endpoint(raw_base) or ""
+    if raw_base and not base_url:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "base_url 必须是 http(s) 地址（自托管内网地址允许）",
+        )
     value = {
-        "base_url": str(body.get("base_url") or "").strip().rstrip("/"),
+        "base_url": base_url,
         "api_key": api_key,
         "api_keys": api_keys,
         "model": str(body.get("model") or "").strip(),

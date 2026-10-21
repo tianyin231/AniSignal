@@ -254,3 +254,42 @@ def test_expired_entries_are_swept():
         assert stale not in auth_module._login_failures
     finally:
         _reset_state()
+
+
+async def test_full_locked_table_rejects_new_keys_and_recovers(client, monkeypatch):
+    """全部条目都已锁定时，新增邮箱不能继续占内存，也不能挤掉已有锁定。"""
+    from app.services import auth as auth_module
+
+    _reset_state()
+    monkeypatch.setattr(auth_module, "_MAX_TRACKED_KEYS", 8)
+    monkeypatch.setattr(auth_module, "_STATE_OPS_PER_SWEEP", 32)
+    capacity = auth_module._MAX_TRACKED_KEYS + auth_module._STATE_OPS_PER_SWEEP
+    now = auth_module.time.monotonic()
+    try:
+        for i in range(capacity):
+            auth_module._login_failures[f"locked{i}@example.com"] = deque(
+                [now] * auth_module._LOGIN_FAIL_LIMIT
+            )
+
+        for i in range(5):
+            response = await client.post(
+                "/api/auth/login",
+                json={"email": f"overflow{i}@example.com", "password": "wrong-password"},
+            )
+            assert response.status_code == 429
+        assert len(auth_module._login_failures) == capacity
+        with pytest.raises(auth_module.AuthError):
+            auth_module._check_login_lock("locked0@example.com")
+
+        for times in auth_module._login_failures.values():
+            times.clear()
+            times.append(now - auth_module._LOGIN_FAIL_WINDOW - 1)
+        auth_module._maybe_sweep(force=True)
+        response = await client.post(
+            "/api/auth/login",
+            json={"email": "recovered@example.com", "password": "wrong-password"},
+        )
+        assert response.status_code == 401
+        assert len(auth_module._login_failures) == 1
+    finally:
+        _reset_state()
