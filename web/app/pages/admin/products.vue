@@ -14,7 +14,21 @@ const fulfillmentKindLabels: Record<string, string> = {
   forward: '转发剪辑',
   none: '普通资讯',
 }
+interface ProductCandidateItem {
+  id: number
+  community: string
+  name: string
+  watch_terms: string[]
+  search_keyword: string
+  price_note: string | null
+  presale_note: string | null
+  ship_note: string | null
+  source_url: string | null
+  status: string
+}
+
 const products = ref<ApiProduct[]>([])
+const candidates = ref<ProductCandidateItem[]>([])
 const communityFilter = ref<string>('')
 const filteredProducts = computed(() =>
   communityFilter.value ? products.value.filter(p => p.community === communityFilter.value) : products.value,
@@ -56,10 +70,12 @@ const signalForm = reactive({
   note: '',
 })
 
+const goodsNoun = /机械键盘|鼠标垫|亚克力|键盘|键帽|手办|立牌|徽章|色纸|耳机|挂件|海报|卫衣|吧唧/
+
 function suggestedTerms(name: string) {
   const full = name.replace(/\s+/g, '').trim()
   const compact = full.replace(/联名|机械|限定|周边/g, '')
-  return [...new Set([full, compact])].filter((term) => term.length >= 2)
+  return [...new Set([full, compact])].filter(term => term.length >= 4 && goodsNoun.test(term))
 }
 
 watch(
@@ -72,8 +88,12 @@ watch(
 
 async function refresh() {
   try {
-    const data = await api<ApiProductList>('/api/admin/products')
+    const [data, found] = await Promise.all([
+      api<ApiProductList>('/api/admin/products'),
+      api<{ items: ProductCandidateItem[] }>('/api/admin/product-candidates'),
+    ])
     products.value = data.items
+    candidates.value = found.items
     if (signalProduct.value)
       signalProduct.value = data.items.find((item) => item.id === signalProduct.value?.id) ?? null
   } catch (exc: any) {
@@ -164,6 +184,46 @@ async function submit() {
   }
 }
 
+async function acceptCandidate(item: ProductCandidateItem) {
+  busy.value = true
+  try {
+    await api(`/api/admin/product-candidates/${item.id}/accept`, { method: 'POST' })
+    toast.ok(`已开始跟踪「${item.name}」`)
+    await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '接受失败，请重试')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function ignoreCandidate(item: ProductCandidateItem) {
+  busy.value = true
+  try {
+    await api(`/api/admin/product-candidates/${item.id}/ignore`, { method: 'POST' })
+    toast.ok(`已忽略「${item.name}」`)
+    await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '忽略失败，请重试')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function archiveProduct(product: ApiProduct) {
+  if (!confirm(`结束「${product.name}」的跟踪窗口？页面会保留已有证据，专属搜索会停下。`)) return
+  busy.value = true
+  try {
+    await api(`/api/admin/products/${product.id}/archive`, { method: 'POST' })
+    toast.ok(`「${product.name}」已归档`)
+    await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '归档失败，请重试')
+  } finally {
+    busy.value = false
+  }
+}
+
 async function remove(product: ApiProduct) {
   if (!confirm(`删除商品「${product.name}」？关联事件会保留但失去商品关联。`)) return
   busy.value = true
@@ -245,9 +305,33 @@ async function saveSignal() {
     <div>
       <h1 class="text-lg font-semibold">商品管理</h1>
       <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
-        新增时可按商品名称创建采集。履约信号持续自动分析，证据充分时自动采纳；此处保留人工纠错和确认。
+        官方内容里出现的新周边会列在下面。接受后准备一路搜索和匹配词。信号仍由全站审核自动判断，这里只处理候选、矛盾和归档。
       </p>
     </div>
+
+    <section v-if="candidates.length" class="panel p-5">
+      <h2 class="text-sm font-semibold">新周边候选</h2>
+      <ul class="mt-3 divide-y divide-slate-900/5 dark:divide-white/10">
+        <li v-for="item in candidates" :key="item.id" class="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div class="min-w-0">
+            <p class="font-medium">{{ item.name }}</p>
+            <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">
+              {{ ADMIN_COMMUNITY_LABELS[item.community] ?? item.community }}
+              · 搜索「{{ item.search_keyword }}」
+              · 匹配 {{ item.watch_terms.join(' / ') }}
+            </p>
+            <p v-if="item.presale_note || item.ship_note || item.price_note" class="mt-1 text-xs text-slate-500 dark:text-zinc-400">
+              {{ [item.price_note, item.presale_note, item.ship_note].filter(Boolean).join(' · ') }}
+            </p>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <a v-if="item.source_url" :href="item.source_url" target="_blank" rel="noopener noreferrer" class="min-h-11 px-2 text-xs text-blue-600 hover:underline dark:text-blue-300">来源</a>
+            <button type="button" class="btn-primary min-h-11 px-3 text-xs" :disabled="busy" @click="acceptCandidate(item)">{{ busy ? '处理中…' : '接受并跟踪' }}</button>
+            <button type="button" class="min-h-11 px-3 text-xs text-slate-500 hover:underline" :disabled="busy" @click="ignoreCandidate(item)">忽略</button>
+          </div>
+        </li>
+      </ul>
+    </section>
 
     <form class="panel p-5" @submit.prevent="submit">
       <div class="flex items-center justify-between gap-3">
@@ -410,6 +494,7 @@ async function saveSignal() {
               <span class="font-medium">{{ p.name }}</span>
               <span class="mono ml-2 text-xs text-slate-400">{{ p.slug }}</span>
               <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[p.community ?? ''] ?? 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'">{{ ADMIN_COMMUNITY_LABELS[p.community ?? ''] ?? '鸣潮' }}</span>
+              <span v-if="p.monitor_status === 'archived'" class="chip ml-1">窗口已结束</span>
             </td>
             <td class="max-w-48 truncate px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.watch_terms.join(' / ') || '—' }}</td>
             <td class="max-w-48 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.fulfillment.official.state_label }}</td>
@@ -417,6 +502,7 @@ async function saveSignal() {
             <td class="max-w-48 px-3 py-3 text-xs text-slate-500 dark:text-zinc-400">{{ p.fulfillment.quality.state_label }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right">
               <button class="min-h-11 rounded px-2 text-xs text-emerald-700 hover:underline dark:text-emerald-300" @click="openSignals(p)">查看 / 纠正信号<span v-if="p.fulfillment.candidate_total">（{{ p.fulfillment.candidate_total }}）</span></button>
+              <button v-if="p.monitor_status !== 'archived'" class="min-h-11 rounded px-2 text-xs text-slate-600 hover:underline dark:text-zinc-300" :disabled="busy" @click="archiveProduct(p)">归档</button>
               <button class="min-h-11 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="startEdit(p)">编辑</button>
               <button class="min-h-11 rounded px-2 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busy" @click="remove(p)">删除</button>
             </td>

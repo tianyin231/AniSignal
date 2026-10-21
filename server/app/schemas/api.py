@@ -467,6 +467,18 @@ class ProductSignalUpdate(BaseModel):
     note: str = Field(default="", max_length=1000)
 
 
+class ProductBriefOut(BaseModel):
+    archived: bool = False
+    unboxing_accounts: int = 0
+    unboxing_from: datetime | None = None
+    unboxing_to: datetime | None = None
+    unboxing_note: str = ""
+    quality_accounts: int = 0
+    quality_latest: datetime | None = None
+    official_text: str = ""
+    official_registered: bool = False
+
+
 class ProductMonitorOut(BaseModel):
     target_id: int
     keyword: str
@@ -489,6 +501,9 @@ class ProductOut(BaseModel):
     original_ship_at: str | None
     ship_note: str | None
     watch_terms: list[str] = []
+    monitor_status: str = "watching"
+    source_url: SafeLink = None
+    brief: ProductBriefOut = Field(default_factory=ProductBriefOut)
     monitor: ProductMonitorOut | None = None
     stage_hint: int = -1
     current_stage: int
@@ -510,6 +525,24 @@ class ProductOut(BaseModel):
 
 class ProductListOut(BaseModel):
     items: list[ProductOut]
+
+
+class ProductCandidateOut(BaseModel):
+    id: int
+    community: str
+    name: str
+    watch_terms: list[str] = []
+    search_keyword: str
+    price_note: str | None = None
+    presale_note: str | None = None
+    ship_note: str | None = None
+    source_url: SafeLink = None
+    status: str
+    created_at: datetime | None = None
+
+
+class ProductCandidateListOut(BaseModel):
+    items: list[ProductCandidateOut]
 
 
 class ProductCreate(BaseModel):

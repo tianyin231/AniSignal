@@ -3,7 +3,8 @@ import type { ApiProduct, ApiProductSignal } from '~/composables/usePublicApi'
 /** 履约信号的新变化优先；没有信号的商品放在后面。 */
 export function sortProductsBySignal(items: ApiProduct[]) {
   const time = (product: ApiProduct) => Date.parse(product.fulfillment.updated_at || '') || 0
-  return [...items].sort((left, right) => time(right) - time(left) || right.id - left.id)
+  const rank = (product: ApiProduct) => product.monitor_status === 'archived' ? 1 : 0
+  return [...items].sort((left, right) => rank(left) - rank(right) || time(right) - time(left) || right.id - left.id)
 }
 
 /** 采纳方式与证据状态分开，自动结论不能标成人工确认。 */

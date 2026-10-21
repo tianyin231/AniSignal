@@ -22,6 +22,7 @@ _local_morning_date = None
 _local_custom_sweep_at = None
 _local_fulfillment_sweep_at = None
 _local_editorial_sweep_at = None
+_local_product_monitor_at = None
 _CUSTOM_SWEEP_INTERVAL = timedelta(minutes=5)
 
 
@@ -73,6 +74,13 @@ async def local_loop(queue) -> None:
                     result = await enqueue_pending_fulfillment_reviews(session, queue.redis, queue.enqueue_review)
                     _local_fulfillment_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
                     logger.info("local fulfillment review sweep -> %s", result)
+                global _local_product_monitor_at
+                if _local_product_monitor_at is None or now >= _local_product_monitor_at:
+                    from app.services.product_discovery import run_product_monitor_loop
+
+                    result = await run_product_monitor_loop(session, now=now)
+                    _local_product_monitor_at = now + _CUSTOM_SWEEP_INTERVAL
+                    logger.info("local product monitor -> %s", result)
         except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
             logger.exception("local scheduler tick failed")
         await asyncio.sleep(settings.scheduler_poll_seconds)
@@ -180,6 +188,13 @@ async def main() -> None:
                             f"anisignal:extract-sweep-enqueued:{bucket}", "1",
                             nx=True, px=6 * 60 * 60 * 1000)
                         logger.info("enqueued extract sweep job=%s", getattr(job, "job_id", None))
+                    if not await redis.get(f"anisignal:product-monitor-enqueued:{bucket}"):
+                        job = await redis.enqueue_job(
+                            "product_monitor_sweep", _job_id=f"product-monitor:{bucket}")
+                        await redis.set(
+                            f"anisignal:product-monitor-enqueued:{bucket}", "1",
+                            nx=True, px=6 * 60 * 60 * 1000)
+                        logger.info("enqueued product monitor job=%s", getattr(job, "job_id", None))
             except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
                 logger.exception("scheduler tick failed")
             await asyncio.sleep(settings.scheduler_poll_seconds)
