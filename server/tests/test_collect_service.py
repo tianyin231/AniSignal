@@ -206,6 +206,41 @@ async def test_failure_backoff_doubles_interval(session, patched_collect):
     assert timedelta(minutes=100) < (nxt - now) < timedelta(minutes=140)
 
 
+@pytest.mark.parametrize("interval,failures,error,expected", [
+    (15, 1, "BiliRiskControlError: refused", 30),
+    (15, 7, "BiliRiskControlError: refused", 60),
+    (30, 9, "BiliRiskControlError: refused", 60),
+    (120, 9, "BiliRiskControlError: refused", 120),
+    (30, 9, "CollectorError: timeout", 960),
+])
+def test_dynamic_risk_control_does_not_miss_recovery_for_hours(monkeypatch, interval, failures, error, expected):
+    monkeypatch.setattr(collect_module.random, "uniform", lambda *_: 1.0)
+    target = CollectTarget(platform="bilibili", target_type="account_dynamics", target_value="1955897084",
+        interval_minutes=interval, consecutive_failures=failures, last_error=error)
+    now = utcnow()
+    assert collect_module.next_run_with_jitter(target, now) - now == timedelta(minutes=expected)
+
+
+async def test_dynamic_refusal_keeps_failure_visible_but_probes_recovery_within_an_hour(session, patched_collect, monkeypatch):
+    from app.collectors.bilibili import BiliRiskControlError
+
+    target = await _make_target(session)
+    target.target_type = "account_dynamics"
+    target.target_value = "1955897084"
+    target.consecutive_failures = 9
+    await session.commit()
+
+    async def refused(*args):
+        raise BiliRiskControlError("the first page of this feed carried nothing")
+
+    monkeypatch.setattr(_StubCollector, "fetch", refused)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    await session.refresh(target)
+    assert result["status"] == "failed"
+    assert target.consecutive_failures == 10 and target.last_success_at is None
+    assert timedelta(minutes=54) <= target.next_run_at - target.last_run_at <= timedelta(minutes=66)
+
+
 async def test_success_restores_interval_after_failure_backoff(session, patched_collect):
     target = await _make_target(session)
     target.consecutive_failures = 5
