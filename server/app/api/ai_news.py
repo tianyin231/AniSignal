@@ -62,7 +62,9 @@ async def list_news(
 ):
     from app.services import aihot
     if aihot.enabled():
-        return await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, limit=limit, offset=offset)
+        result = await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, limit=limit, offset=offset)
+        result["sources"] = await _monitoring_sources(session, result["sources"])
+        return result
     news = ContentReview.news
     query = (await approved_news_query(session)).where(RawContent.published_at >= utcnow() - timedelta(hours=hours))
     if kind != "all":
@@ -117,11 +119,17 @@ async def source_status(session):
     return sources
 
 
+async def _monitoring_sources(session, engine_sources):
+    # bridge 条目是文章作者；健康点阵应显示本系统的采集目标和原引擎的 RSS 入口。
+    sources = await source_status(session)
+    return sources + [NewsSource.model_validate(source) for source in engine_sources if source["platform"] == "rss"]
+
+
 @router.get("/sources")
 async def news_sources(session: AsyncSession = Depends(get_session)):
     from app.services import aihot
     if aihot.enabled():
-        return {"sources": await aihot.sources(), "engine": "aihot"}
+        return {"sources": await _monitoring_sources(session, await aihot.sources()), "engine": "aihot"}
     return {"sources": await source_status(session), "engine": "legacy"}
 
 
@@ -139,7 +147,9 @@ async def news_events(
 ):
     from app.services import aihot
     if aihot.enabled():
-        return await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected, limit=limit, offset=offset)
+        result = await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected, limit=limit, offset=offset)
+        result["sources"] = await _monitoring_sources(session, result["sources"])
+        return result
     from app.services.news_publication import list_stories
 
     items = await list_stories(session, q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected)
