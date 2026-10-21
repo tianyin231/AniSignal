@@ -355,8 +355,8 @@ async def test_contents_review_filter_accuracy(client, admin_headers, session):
     assert resp.json()["total"] == 0
 
 
-async def test_email_codes_endpoint_never_returns_plaintext(session, client, admin_headers):
-    """验证码排障端点：不回传明文，且密码重置类一条都不列。"""
+async def test_email_codes_endpoint_only_returns_register_codes(session, client, admin_headers):
+    """验证码排障端点保留注册码明文，密码重置码不返回。"""
     from datetime import timedelta
 
     from app.clock import utcnow

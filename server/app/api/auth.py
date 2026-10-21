@@ -109,7 +109,10 @@ async def login(body: dict, response: Response, session: AsyncSession = Depends(
         raise _auth_error(exc)
     user = await session.scalar(select(User).where(User.email == email))
     if user is None or not verify_password(password, user.password_hash):
-        record_login_failure(email)
+        try:
+            record_login_failure(email)
+        except AuthError as exc:
+            raise _auth_error(exc)
         # 统一文案：不区分"账号不存在"与"密码错误"
         raise HTTPException(status_code=401, detail="邮箱或密码不正确")
     if user.status != "active":

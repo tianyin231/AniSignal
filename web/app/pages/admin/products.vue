@@ -171,6 +171,8 @@ async function remove(product: ApiProduct) {
     await api(`/api/admin/products/${product.id}`, { method: 'DELETE' })
     toast.ok(`商品「${product.name}」已删除`)
     await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '删除失败，请重试')
   } finally {
     busy.value = false
   }

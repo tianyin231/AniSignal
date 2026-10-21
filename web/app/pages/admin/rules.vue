@@ -64,6 +64,8 @@ async function toggle(rule: Rule) {
     })
     toast.ok(rule.enabled ? '已停用' : '已启用')
     await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '操作失败，请重试')
   } finally {
     busy.value = false
   }
@@ -75,6 +77,8 @@ async function remove(rule: Rule) {
     await api(`/api/admin/classification-rules/${rule.id}`, { method: 'DELETE' })
     toast.ok('规则已删除')
     await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '删除失败，请重试')
   } finally {
     busy.value = false
   }

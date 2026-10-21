@@ -106,7 +106,8 @@ const texts = ref<Record<string, string>>({})
 async function refresh() {
   loadFailed.value = false
   loaded.value = false
-  let data: { smtp: SmtpView; onepush: OnePushView; announcement: typeof announcement; texts: Record<string, string>; media_visibility?: any }
+  error.value = ''
+  let data: { smtp: SmtpView; onepush: OnePushView; ai: AiView; announcement: typeof announcement; texts: Record<string, string>; media_visibility?: any }
   try {
     data = await api('/api/admin/settings')
   } catch (exc: any) {
@@ -126,6 +127,9 @@ async function refresh() {
   onepushInfo.value = data.onepush
   onepush.enabled = data.onepush.enabled
   onepush.config_yaml = ''
+  ai.base_url = data.ai.base_url || ''
+  ai.model = data.ai.model || ''
+  ai.api_key = ''
   Object.assign(announcement, data.announcement)
   texts.value = { ...data.texts }
   const mv = data.media_visibility ?? { default: { image: 'show', video: 'show' }, platforms: {} }
