@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from app.clock import utcnow
-from app.models import RawContent, ContentVersion
+from app.models import CollectTarget, RawContent, ContentVersion
 from app.services import aihot, aihot_bridge, bot
 from app.services.settings import get_setting
 from tests.test_bot import target
@@ -35,6 +35,42 @@ def engine_config(monkeypatch):
         aihot_read_enabled=True, aihot_bot_after="2026-10-20T12:00:00Z")
     monkeypatch.setattr(aihot, "get_settings", lambda: config)
     return config
+
+
+@pytest.mark.parametrize("path", ["/api/ai-news", "/api/ai-news/events", "/api/ai-news/sources"])
+async def test_source_health_uses_collection_targets_and_native_rss(client, session, monkeypatch, engine_config, path):
+    now = utcnow()
+    session.add_all([
+        CollectTarget(platform="bilibili", target_type="keyword_search", target_value="Codex", display_name="B站 · Codex",
+                      community="ai", enabled=True, last_success_at=now),
+        CollectTarget(platform="x", target_type="account_dynamics", target_value="OpenAI", display_name="X · OpenAI",
+                      community="ai", enabled=True, last_success_at=now, consecutive_failures=1),
+        CollectTarget(platform="x", target_type="account_dynamics", target_value="paused", community="ai", enabled=False),
+        CollectTarget(platform="bilibili", target_type="keyword_search", target_value="鸣潮", community="wuwa", enabled=True),
+    ])
+    await session.commit()
+    common = {"status": "active", "last_success_at": None, "interval_minutes": 30}
+    authors = [{**common, "id": f"anisignal-bilibili-{i}", "name": f"历史作者{i}", "platform": "bridge"} for i in range(1529)]
+    rss = [{**common, "id": f"rss-{i}", "name": f"RSS {i}", "platform": "rss",
+            "status": "delayed" if i == 0 else "pending" if i == 1 else "active"} for i in range(18)]
+
+    async def sources():
+        return authors + rss
+
+    async def feed(**kwargs):
+        return {"items": [], "total": 0, "topics": [], "sources": await sources(), "engine": "aihot"}
+
+    monkeypatch.setattr(aihot, "sources", sources)
+    monkeypatch.setattr(aihot, "feed", feed)
+    response = await client.get(path)
+    assert response.status_code == 200
+    rows = response.json()["sources"]
+    assert len(rows) == 20  # 两个启用的监控目标 + 18 个原生 RSS，不为历史作者逐个生成健康点。
+    assert {row["platform"] for row in rows} == {"bilibili", "x", "rss"}
+    assert [row["name"] for row in rows[:2]] == ["B站 · Codex", "X · OpenAI"]
+    assert rows[1]["status"] == "delayed"  # 使用真实采集状态，不继承桥接作者的 active。
+    assert [row["status"] for row in rows[2:4]] == ["delayed", "pending"]
+    assert {row["name"] for row in rows[2:]} == {f"RSS {i}" for i in range(18)}
 
 
 async def test_publication_failure_never_falls_back_to_legacy(client, monkeypatch, engine_config):
