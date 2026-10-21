@@ -37,6 +37,7 @@ async def enqueue_pending_fulfillment_reviews(
         RawContent.hidden.is_(False), latest_version.is_not(None),
         ProductSignalEvidence.role != "excluded",
         ProductSignal.active.is_(True), ProductSignal.locked.is_(False),
+        Product.monitor_status == "watching",
         ProductSignal.community == RawContent.community, Product.community == RawContent.community,
         last_attempt.is_(None) | (last_attempt <= now - timedelta(minutes=10)),
     ).order_by(RawContent.id))).all()
