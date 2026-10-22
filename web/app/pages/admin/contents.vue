@@ -182,10 +182,10 @@ async function rereview(item: ContentItem) {
 
 <template>
   <div class="space-y-6">
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="wall-heading flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 class="text-lg font-semibold">内容管理</h1>
-        <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
+        <h1 class="text-2xl font-bold">内容管理</h1>
+        <p class="mt-0.5 text-sm text-muted">
           审核状态一目了然；支持下架/恢复、修订（产生新版本）、删除与重审。
         </p>
       </div>
@@ -228,7 +228,7 @@ async function rereview(item: ContentItem) {
           <option value="">全部平台</option>
           <option v-for="(label, value) in platformLabels" :key="value" :value="value">{{ label }}</option>
         </select>
-        <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
+        <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-ink-2">
           <input v-model="hiddenOnly" type="checkbox" class="checkbox">
           仅看已下架
         </label>
@@ -252,7 +252,7 @@ async function rereview(item: ContentItem) {
     <div class="panel overflow-x-auto">
       <table class="w-full min-w-3xl text-sm">
         <thead>
-          <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+          <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
             <th class="px-4 py-2.5 font-medium">标题</th>
             <th class="px-4 py-2.5 font-medium">平台</th>
             <th class="px-4 py-2.5 font-medium">来源分级</th>
@@ -264,21 +264,21 @@ async function rereview(item: ContentItem) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in items" :key="item.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5" :class="item.hidden ? 'opacity-60' : ''">
+          <tr v-for="item in items" :key="item.id" class="border-b border-line-soft last:border-0" :class="item.hidden ? 'opacity-60' : ''">
             <td class="max-w-72 px-4 py-2.5">
               <a v-if="item.url" :href="item.url" target="_blank" rel="noopener" class="link block truncate font-medium">{{ item.title || item.external_id }}</a>
               <span v-else class="block truncate">{{ item.title || item.external_id }}</span>
-              <span class="mono text-xs text-slate-400">v{{ item.version ?? '?' }} · {{ item.external_id }}</span>
-              <p v-if="item.review?.reason" class="mt-0.5 truncate text-xs text-slate-400 dark:text-zinc-500" :title="item.review.reason">AI：{{ item.review.reason }}</p>
+              <span class="mono text-xs text-faint">v{{ item.version ?? '?' }} · {{ item.external_id }}</span>
+              <p v-if="item.review?.reason" class="mt-0.5 truncate text-xs text-faint" :title="item.review.reason">AI：{{ item.review.reason }}</p>
             </td>
-            <td class="whitespace-nowrap px-4 py-2.5 text-slate-600 dark:text-zinc-300">
+            <td class="whitespace-nowrap px-4 py-2.5 text-ink-2">
               {{ platformLabels[item.platform] ?? item.platform }}
-              <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[item.community] ?? 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'">{{ ADMIN_COMMUNITY_SHORT[item.community] ?? '鸣潮' }}</span>
+              <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[item.community] ?? 'bg-chip text-muted'">{{ ADMIN_COMMUNITY_SHORT[item.community] ?? '鸣潮' }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <span
                 class="chip"
-                :class="item.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300' : item.tier === 'general' ? 'bg-slate-500/10 text-slate-500 dark:text-zinc-400' : 'bg-zinc-500/10 text-zinc-500 dark:text-zinc-400'"
+                :class="item.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300' : item.tier === 'general' ? 'bg-chip text-muted' : 'bg-chip text-faint dark:text-muted'"
                 :title="(item.matched_keywords || []).join('、')"
               >{{ item.tier === 'core' ? '核心来源' : item.tier === 'general' ? '泛关键词' : '无匹配' }}</span>
             </td>
@@ -289,25 +289,25 @@ async function rereview(item: ContentItem) {
                 :class="reviewBadge(item)!.class"
                 :title="item.review?.reason"
               >{{ reviewBadge(item)!.label }}</span>
-              <span v-else class="text-xs text-slate-400">未审核</span>
+              <span v-else class="text-xs text-faint">未审核</span>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <span
                 class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
-                :class="item.hidden ? 'bg-slate-500/15 text-slate-600 dark:text-zinc-300' : 'bg-blue-500/10 text-blue-700 dark:text-blue-300'"
+                :class="item.hidden ? 'bg-chip text-ink-2' : 'bg-blue-500/10 text-blue-700 dark:text-blue-300'"
               >{{ item.hidden ? '已下架' : '展示中' }}</span>
             </td>
-            <td class="mono whitespace-nowrap px-4 py-2.5 text-slate-500 dark:text-zinc-400">{{ fmtTime(item.collected_at) }}</td>
-            <td class="mono whitespace-nowrap px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ metricText(item.latest_metrics) }}</td>
+            <td class="mono whitespace-nowrap px-4 py-2.5 text-muted">{{ fmtTime(item.collected_at) }}</td>
+            <td class="mono whitespace-nowrap px-4 py-2.5 text-ink-2">{{ metricText(item.latest_metrics) }}</td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <div class="flex items-center gap-1">
                 <button
-                  class="rounded-md border border-slate-900/10 px-2 py-1 text-xs text-slate-600 transition-colors hover:bg-slate-900/5 disabled:opacity-40 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+                  class="rounded-md border border-line px-2 py-1 text-xs text-ink-2 transition-colors hover:bg-chip disabled:opacity-40"
                   :disabled="busyId === item.id"
                   @click="toggleHidden(item)"
                 >{{ item.hidden ? '恢复' : '下架' }}</button>
                 <button
-                  class="grid size-7 place-items-center rounded-md border border-slate-900/10 text-slate-600 transition-colors hover:bg-slate-900/5 disabled:opacity-40 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+                  class="grid size-7 place-items-center rounded-md border border-line text-ink-2 transition-colors hover:bg-chip disabled:opacity-40"
                   title="修订标题/正文（产生新版本）"
                   :disabled="busyId === item.id"
                   @click="openEdit(item)"
@@ -315,7 +315,7 @@ async function rereview(item: ContentItem) {
                   <Pencil :size="13" />
                 </button>
                 <button
-                  class="grid size-7 place-items-center rounded-md border border-slate-900/10 text-slate-600 transition-colors hover:bg-slate-900/5 disabled:opacity-40 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+                  class="grid size-7 place-items-center rounded-md border border-line text-ink-2 transition-colors hover:bg-chip disabled:opacity-40"
                   title="重新走 AI 审核"
                   :disabled="busyId === item.id"
                   @click="rereview(item)"
@@ -334,7 +334,7 @@ async function rereview(item: ContentItem) {
             </td>
           </tr>
           <tr v-if="items.length === 0 && !loading">
-            <td colspan="8" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">
+            <td colspan="8" class="px-4 py-10 text-center text-sm text-faint">
               暂无内容；创建目标并触发采集后，这里会出现数据。
             </td>
           </tr>
@@ -344,7 +344,7 @@ async function rereview(item: ContentItem) {
 
     <div v-if="totalPages > 1" class="flex items-center justify-center gap-4 text-sm">
       <button
-        class="rounded-md border border-slate-900/10 px-3 py-1.5 disabled:opacity-40 dark:border-white/15"
+        class="rounded-md border border-line px-3 py-1.5 disabled:opacity-40"
         :disabled="page <= 1"
         @click="page--"
       >
@@ -352,7 +352,7 @@ async function rereview(item: ContentItem) {
       </button>
       <span class="mono">{{ page }} / {{ totalPages }}</span>
       <button
-        class="rounded-md border border-slate-900/10 px-3 py-1.5 disabled:opacity-40 dark:border-white/15"
+        class="rounded-md border border-line px-3 py-1.5 disabled:opacity-40"
         :disabled="page >= totalPages"
         @click="page++"
       >
@@ -364,19 +364,19 @@ async function rereview(item: ContentItem) {
     <div v-if="editing" class="fixed inset-0 z-50 grid place-items-center bg-slate-900/40 p-4" @click.self="editing = null">
       <div class="panel w-full max-w-2xl p-5">
         <h2 class="text-sm font-semibold">修订内容 #{{ editing.id }}（保存后产生新版本，历史保留）</h2>
-        <label class="mt-3 block text-xs font-medium text-slate-500 dark:text-zinc-400">标题</label>
+        <label class="mt-3 block text-xs font-medium text-muted">标题</label>
         <input
           v-model="editTitle"
           class="input mt-1 w-full px-3 py-2 text-sm"
         >
-        <label class="mt-3 block text-xs font-medium text-slate-500 dark:text-zinc-400">正文</label>
+        <label class="mt-3 block text-xs font-medium text-muted">正文</label>
         <textarea
           v-model="editText"
           rows="8"
           class="textarea mt-1 w-full px-3 py-2 text-sm"
         />
         <div class="mt-4 flex justify-end gap-2">
-          <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" @click="editing = null">取消</button>
+          <button class="rounded-md border border-line px-4 py-2 text-sm" @click="editing = null">取消</button>
           <button class="btn-primary px-4 py-2 text-sm" :disabled="editSaving" @click="saveEdit">
             {{ editSaving ? '保存中…' : '保存新版本' }}
           </button>

@@ -25,9 +25,8 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
 </script>
 
 <template>
-  <div class="aurora-bg flex min-h-dvh flex-col">
-    <WallpaperBackdrop />
-  <header class="glass sticky top-0 z-20">
+  <div class="flex min-h-dvh flex-col">
+    <header class="glass sticky top-0 z-40">
       <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
         <NuxtLink to="/" class="flex items-center gap-2">
           <img src="/icon.png" alt="" class="size-8 shrink-0 rounded-[9px]">

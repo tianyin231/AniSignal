@@ -41,15 +41,15 @@ const stats = computed(() => {
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
+    <div class="wall-heading flex items-center justify-between">
       <div>
-        <h1 class="text-lg font-semibold">总览</h1>
-        <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
+        <h1 class="text-2xl font-bold">总览</h1>
+        <p class="mt-0.5 text-sm text-muted">
           来源健康与队列状态；"没抓到"必须可见，不代表没有消息。
         </p>
       </div>
       <button
-        class="rounded-md border border-slate-900/10 px-3 py-1.5 text-sm transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:hover:bg-white/10"
+        class="rounded-md border border-line px-3 py-1.5 text-sm transition-colors hover:bg-chip"
         :disabled="loading"
         @click="refresh"
       >
@@ -61,7 +61,7 @@ const stats = computed(() => {
 
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
       <div v-for="stat in stats" :key="stat.label" class="panel px-4 py-3">
-        <p class="text-xs text-slate-500 dark:text-zinc-400">{{ stat.label }}</p>
+        <p class="text-xs text-muted">{{ stat.label }}</p>
         <p class="mono mt-1 text-xl font-semibold" :class="stat.warn && stat.value > 0 ? 'text-red-600 dark:text-red-400' : ''">
           {{ stat.value }}
         </p>
@@ -71,7 +71,7 @@ const stats = computed(() => {
     <div class="panel overflow-hidden">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+          <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
             <th class="px-4 py-2.5 font-medium">目标</th>
             <th class="px-4 py-2.5 font-medium">平台</th>
             <th class="px-4 py-2.5 font-medium">频率</th>
@@ -84,18 +84,18 @@ const stats = computed(() => {
           <tr
             v-for="target in data?.targets ?? []"
             :key="target.id"
-            class="border-b border-slate-900/5 last:border-0 dark:border-white/5"
+            class="border-b border-line-soft last:border-0"
           >
             <td class="max-w-56 truncate px-4 py-2.5">
               <span class="font-medium">{{ target.display_name || target.target_value }}</span>
-              <span class="mono ml-2 text-xs text-slate-400">{{ targetTypeLabels[target.target_type] ?? target.target_type }}</span>
+              <span class="mono ml-2 text-xs text-faint">{{ targetTypeLabels[target.target_type] ?? target.target_type }}</span>
             </td>
-            <td class="px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabels[target.platform] ?? target.platform }}</td>
+            <td class="px-4 py-2.5 text-ink-2">{{ platformLabels[target.platform] ?? target.platform }}</td>
             <td class="mono px-4 py-2.5">{{ target.interval_minutes }}min</td>
-            <td class="mono px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ fmtTime(target.next_run_at) }}</td>
-            <td class="mono px-4 py-2.5 text-slate-600 dark:text-zinc-300">{{ fmtTime(target.last_success_at) }}</td>
+            <td class="mono px-4 py-2.5 text-ink-2">{{ fmtTime(target.next_run_at) }}</td>
+            <td class="mono px-4 py-2.5 text-ink-2">{{ fmtTime(target.last_success_at) }}</td>
             <td class="px-4 py-2.5">
-              <span v-if="!target.enabled" class="chip bg-slate-500/10 text-slate-500 dark:text-zinc-400">已停用</span>
+              <span v-if="!target.enabled" class="chip bg-chip text-muted">已停用</span>
               <span v-else-if="target.consecutive_failures > 0" class="chip bg-red-500/10 text-red-600 dark:text-red-400" :title="target.last_error ?? ''">
                 连续失败 ×{{ target.consecutive_failures }}
               </span>
@@ -103,7 +103,7 @@ const stats = computed(() => {
             </td>
           </tr>
           <tr v-if="(data?.targets ?? []).length === 0">
-            <td colspan="6" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">
+            <td colspan="6" class="px-4 py-10 text-center text-sm text-faint">
               还没有采集目标，去「采集目标」页创建一个。
             </td>
           </tr>

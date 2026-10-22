@@ -22,7 +22,7 @@ async function submit() {
   <div class="flex min-h-[60vh] items-center justify-center">
     <form class="panel w-full max-w-sm p-8" @submit.prevent="submit">
       <h1 class="text-lg font-semibold">管理员登录</h1>
-      <p class="mt-1 text-sm text-slate-500 dark:text-zinc-400">
+      <p class="mt-1 text-sm text-muted">
         输入后端配置的管理员 Token（<span class="mono">ANISIGNAL_ADMIN_TOKEN</span>）。
       </p>
       <label class="mt-6 block text-sm font-medium" for="token">Token</label>

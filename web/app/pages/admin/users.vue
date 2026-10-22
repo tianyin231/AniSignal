@@ -232,14 +232,14 @@ const deliveryStatusLabel: Record<string, string> = {
 
 <template>
   <div class="space-y-4">
-    <div>
-      <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">用户管理</h1>
-      <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">快查、封禁、订阅管理与邮件触达。</p>
+    <div class="wall-heading">
+      <h1 class="text-2xl font-bold text-ink">用户管理</h1>
+      <p class="mt-0.5 text-sm text-muted">快查、封禁、订阅管理与邮件触达。</p>
     </div>
 
     <!-- 广播邮件 -->
     <section class="panel p-4">
-      <h2 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-zinc-100">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-ink">
         <Send :size="14" /> 广播邮件
       </h2>
       <div class="mt-3 grid gap-3">
@@ -255,11 +255,11 @@ const deliveryStatusLabel: Record<string, string> = {
           class="textarea px-3 py-2 text-sm"
         ></textarea>
         <div class="flex flex-wrap items-center gap-4">
-          <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-600 dark:text-zinc-300">
+          <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-ink-2">
             <input v-model="broadcast.verified_only" type="checkbox" class="checkbox" />
             仅发给已验证用户
           </label>
-          <span class="text-xs text-slate-400 dark:text-zinc-500">封禁用户始终排除；按 50 人/批后台分批投递</span>
+          <span class="text-xs text-faint">封禁用户始终排除；按 50 人/批后台分批投递</span>
           <button
             class="btn-primary ml-auto px-4 py-2 text-sm"
             :disabled="broadcastBusy"
@@ -300,7 +300,7 @@ const deliveryStatusLabel: Record<string, string> = {
           <option value="yes">已验证</option>
           <option value="no">未验证</option>
         </select>
-        <span class="ml-auto text-xs text-slate-400 dark:text-zinc-500">共 {{ total }} 位用户</span>
+        <span class="ml-auto text-xs text-faint">共 {{ total }} 位用户</span>
       </div>
 
       <p v-if="error" class="mt-3 rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
@@ -308,7 +308,7 @@ const deliveryStatusLabel: Record<string, string> = {
       <div class="mt-3 overflow-x-auto">
         <table class="w-full min-w-3xl text-sm">
           <thead>
-            <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+            <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
               <th class="px-3 py-2.5 font-medium">用户</th>
               <th class="px-3 py-2.5 font-medium">状态</th>
               <th class="px-3 py-2.5 font-medium">验证</th>
@@ -323,12 +323,12 @@ const deliveryStatusLabel: Record<string, string> = {
             <tr
               v-for="u in items"
               :key="u.id"
-              class="border-b border-slate-900/5 last:border-0 dark:border-white/5"
+              class="border-b border-line-soft last:border-0"
               :class="u.status === 'banned' ? 'opacity-60' : ''"
             >
               <td class="px-3 py-2.5">
                 <span class="font-medium">{{ u.email }}</span>
-                <span v-if="u.display_name" class="ml-1.5 text-xs text-slate-400">{{ u.display_name }}</span>
+                <span v-if="u.display_name" class="ml-1.5 text-xs text-faint">{{ u.display_name }}</span>
               </td>
               <td class="px-3 py-2.5">
                 <span
@@ -338,23 +338,23 @@ const deliveryStatusLabel: Record<string, string> = {
                     : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'"
                 >{{ u.status === 'banned' ? '已封禁' : '正常' }}</span>
               </td>
-              <td class="px-3 py-2.5 text-slate-500 dark:text-zinc-400">{{ u.is_verified ? '已验证' : '未验证' }}</td>
+              <td class="px-3 py-2.5 text-muted">{{ u.is_verified ? '已验证' : '未验证' }}</td>
               <td class="px-3 py-2.5">
                 <button
                   class="min-h-9 cursor-pointer rounded px-2 text-xs underline-offset-2 hover:underline disabled:cursor-wait"
-                  :class="u.notification_enabled ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-400'"
+                  :class="u.notification_enabled ? 'text-emerald-700 dark:text-emerald-300' : 'text-faint'"
                   :disabled="busyId === u.id"
                   @click="toggleNotification(u)"
                 >
                   {{ u.notification_enabled ? '已订阅' : '未订阅' }}
                 </button>
               </td>
-              <td class="mono px-3 py-2.5 text-slate-500 dark:text-zinc-400">{{ u.keyword_count ?? 0 }}</td>
-              <td class="mono px-3 py-2.5 text-xs text-slate-400">{{ fmtTime(u.created_at) }}</td>
-              <td class="mono px-3 py-2.5 text-xs text-slate-400">{{ u.last_login_at ? fmtTime(u.last_login_at) : '—' }}</td>
+              <td class="mono px-3 py-2.5 text-muted">{{ u.keyword_count ?? 0 }}</td>
+              <td class="mono px-3 py-2.5 text-xs text-faint">{{ fmtTime(u.created_at) }}</td>
+              <td class="mono px-3 py-2.5 text-xs text-faint">{{ u.last_login_at ? fmtTime(u.last_login_at) : '—' }}</td>
               <td class="whitespace-nowrap px-3 py-2.5 text-right">
                 <button class="min-h-9 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="openDetail(u)">详情</button>
-                <button class="min-h-9 rounded px-2 text-xs text-slate-600 hover:underline dark:text-zinc-300" @click="openMail(u)">
+                <button class="min-h-9 rounded px-2 text-xs text-ink-2 hover:underline" @click="openMail(u)">
                   <Mail :size="12" class="mr-0.5 inline" />邮件
                 </button>
                 <button
@@ -368,36 +368,36 @@ const deliveryStatusLabel: Record<string, string> = {
               </td>
             </tr>
             <tr v-if="!items.length && !loading">
-              <td colspan="8" class="px-3 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">没有匹配的用户</td>
+              <td colspan="8" class="px-3 py-10 text-center text-sm text-faint">没有匹配的用户</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-900/5 px-3 py-2.5 text-xs text-slate-400 dark:border-white/10 dark:text-zinc-500">
+      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-line-soft px-3 py-2.5 text-xs text-faint dark:border-line">
         <span>共 {{ total }} 位用户</span>
         <div class="flex items-center gap-3">
-          <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="page--">« 上一页</button>
+          <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-ink-2" @click="page--">« 上一页</button>
           <span class="mono">{{ page }} / {{ totalPages }}</span>
-          <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="page++">下一页 »</button>
+          <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-ink-2" @click="page++">下一页 »</button>
         </div>
       </div>
     </section>
 
     <!-- 触达记录 -->
     <section class="panel p-4">
-      <h2 class="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-zinc-100">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-ink">
         <RotateCw v-if="deliveriesLoading" :size="14" class="animate-spin" /> 触达记录（单发 / 广播）
       </h2>
       <ul class="mt-3 space-y-1 text-xs">
         <li v-for="d in deliveries" :key="d.id" class="flex flex-wrap items-center gap-2">
-          <span class="mono text-slate-400">{{ fmtTime(d.created_at) }}</span>
-          <span class="rounded bg-slate-500/10 px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-zinc-400">{{ kindLabels[d.kind] ?? d.kind }}</span>
-          <span class="text-slate-600 dark:text-zinc-300">{{ d.email }}</span>
+          <span class="mono text-faint">{{ fmtTime(d.created_at) }}</span>
+          <span class="rounded bg-chip px-1.5 py-0.5 text-[10px] text-muted">{{ kindLabels[d.kind] ?? d.kind }}</span>
+          <span class="text-ink-2">{{ d.email }}</span>
           <span class="min-w-0 flex-1 truncate">{{ d.subject || '—' }}</span>
-          <span :class="d.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : d.status === 'failed' ? 'text-red-500' : 'text-slate-400'">{{ deliveryStatusLabel[d.status] ?? d.status }}</span>
+          <span :class="d.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : d.status === 'failed' ? 'text-red-500' : 'text-faint'">{{ deliveryStatusLabel[d.status] ?? d.status }}</span>
         </li>
-        <li v-if="!deliveries.length && !deliveriesLoading" class="text-slate-400 dark:text-zinc-500">暂无管理端邮件记录</li>
+        <li v-if="!deliveries.length && !deliveriesLoading" class="text-faint">暂无管理端邮件记录</li>
       </ul>
     </section>
 
@@ -408,16 +408,16 @@ const deliveryStatusLabel: Record<string, string> = {
         <div class="popover relative w-full max-w-xl p-5">
           <div class="flex flex-wrap items-start justify-between gap-2">
             <div class="min-w-0">
-              <h2 class="truncate text-sm font-semibold text-slate-900 dark:text-zinc-100">{{ detail?.email }}</h2>
-              <p v-if="detail?.display_name" class="mt-0.5 text-xs text-slate-400 dark:text-zinc-500">{{ detail?.display_name }}</p>
+              <h2 class="truncate text-sm font-semibold text-ink">{{ detail?.email }}</h2>
+              <p v-if="detail?.display_name" class="mt-0.5 text-xs text-faint">{{ detail?.display_name }}</p>
             </div>
             <div class="flex shrink-0 items-center gap-2">
               <button
                 v-if="detail && detail.status === 'active'"
-                class="rounded-md border border-slate-900/10 px-2.5 py-1.5 text-xs text-slate-600 transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+                class="rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-2 transition-colors hover:bg-chip"
                 @click="openMail(detail)"
               >发邮件</button>
-              <button class="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300" @click="closeDetail">关闭</button>
+              <button class="text-xs text-faint hover:text-ink-2" @click="closeDetail">关闭</button>
             </div>
           </div>
           <p v-if="detail?.status === 'banned'" class="mt-3 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
@@ -425,7 +425,7 @@ const deliveryStatusLabel: Record<string, string> = {
           </p>
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
-              <h3 class="text-xs font-medium text-slate-400 dark:text-zinc-500">关键词订阅（{{ detail?.keywords.length ?? 0 }}）</h3>
+              <h3 class="text-xs font-medium text-faint">关键词订阅（{{ detail?.keywords.length ?? 0 }}）</h3>
               <div class="mt-2 flex flex-wrap gap-1.5">
                 <span
                   v-for="k in detail?.keywords ?? []"
@@ -433,22 +433,22 @@ const deliveryStatusLabel: Record<string, string> = {
                   class="rounded px-2 py-0.5 text-[11px]"
                   :class="k.enabled
                     ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300'
-                    : 'bg-slate-500/10 text-slate-400 line-through dark:text-zinc-500'"
+                    : 'bg-chip text-faint line-through'"
                 >{{ k.keyword }}</span>
-                <span v-if="!detail?.keywords.length" class="text-xs text-slate-400">未设置关键词</span>
+                <span v-if="!detail?.keywords.length" class="text-xs text-faint">未设置关键词</span>
               </div>
-              <p class="mt-3 text-xs text-slate-400 dark:text-zinc-500">累计送达邮件 {{ detail?.sent_total ?? 0 }} 封</p>
+              <p class="mt-3 text-xs text-faint">累计送达邮件 {{ detail?.sent_total ?? 0 }} 封</p>
             </div>
             <div>
-              <h3 class="text-xs font-medium text-slate-400 dark:text-zinc-500">最近投递记录</h3>
+              <h3 class="text-xs font-medium text-faint">最近投递记录</h3>
               <ul class="mt-2 space-y-1 text-xs">
                 <li v-for="d in detail?.recent_deliveries ?? []" :key="d.id" class="flex items-center gap-2">
-                  <span class="mono shrink-0 text-slate-400">{{ fmtTime(d.created_at) }}</span>
-                  <span class="rounded bg-slate-500/10 px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-zinc-400">{{ kindLabels[d.kind] ?? d.kind }}</span>
+                  <span class="mono shrink-0 text-faint">{{ fmtTime(d.created_at) }}</span>
+                  <span class="rounded bg-chip px-1.5 py-0.5 text-[10px] text-muted">{{ kindLabels[d.kind] ?? d.kind }}</span>
                   <span class="min-w-0 flex-1 truncate">{{ d.subject || '—' }}</span>
-                  <span :class="d.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : d.status === 'failed' ? 'text-red-500' : 'text-slate-400'">{{ deliveryStatusLabel[d.status] ?? d.status }}</span>
+                  <span :class="d.status === 'sent' ? 'text-emerald-600 dark:text-emerald-400' : d.status === 'failed' ? 'text-red-500' : 'text-faint'">{{ deliveryStatusLabel[d.status] ?? d.status }}</span>
                 </li>
-                <li v-if="!detail?.recent_deliveries.length" class="text-slate-400">暂无投递记录</li>
+                <li v-if="!detail?.recent_deliveries.length" class="text-faint">暂无投递记录</li>
               </ul>
             </div>
           </div>
@@ -461,12 +461,12 @@ const deliveryStatusLabel: Record<string, string> = {
       <div v-if="showMail && mailTarget" class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[14vh]">
         <div class="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" @click="closeMail" />
         <div class="popover relative w-full max-w-lg p-5">
-          <h2 class="text-sm font-semibold text-slate-900 dark:text-zinc-100">发送邮件 → {{ mailTarget.email }}</h2>
+          <h2 class="text-sm font-semibold text-ink">发送邮件 → {{ mailTarget.email }}</h2>
           <div class="mt-3 grid gap-3">
             <input v-model="mailSubject" placeholder="邮件主题（如：违规提醒 / 专属优惠）" class="input" />
             <textarea v-model="mailBody" rows="5" placeholder="邮件正文（纯文本，将自动套用邮件模板）" class="textarea"></textarea>
             <div class="flex items-center justify-end gap-2">
-              <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10" @click="closeMail">取消</button>
+              <button class="rounded-md border border-line px-4 py-2 text-sm text-ink-2 transition-colors hover:bg-chip" @click="closeMail">取消</button>
               <button class="btn-primary px-4 py-2 text-sm" :disabled="mailBusy" @click="sendMail">
                 <Send :size="13" class="mr-1 inline" />{{ mailBusy ? '入队中…' : '发送' }}
               </button>
