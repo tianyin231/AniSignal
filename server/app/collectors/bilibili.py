@@ -8,6 +8,7 @@
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 
 import httpx
@@ -17,6 +18,7 @@ from app.collectors.base import CollectorDeferred, CollectorError, extract_items
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+from app.services.collector_proxy import http_proxy_kwargs, redact_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -135,11 +137,18 @@ class BilibiliCollector:
         raise CollectorError(f"bili command failed after retries: {last_error}")
 
     async def _run_once(self, *args: str) -> object:
+        env = os.environ.copy()
+        # 通过子进程环境传递，代理密码不出现在 argv / 命令日志中。
+        for name in ("BILI_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+            env.pop(name, None)
+        if getattr(self, "proxy_url", None):
+            env["BILI_PROXY"] = self.proxy_url
         proc = await asyncio.create_subprocess_exec(
             self._bin,
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self._timeout)
@@ -153,7 +162,7 @@ class BilibiliCollector:
             await proc.communicate()
             raise
         if proc.returncode != 0:
-            stderr_text = stderr.decode(errors="replace")
+            stderr_text = redact_proxy(stderr.decode(errors="replace"), getattr(self, "proxy_url", None))
             # bili 0.3: 4=匿名首屏静默拒绝，6=限频；不再只靠英文 risk control。
             if proc.returncode in (4, 6) or "risk control" in stderr_text.casefold():
                 raise BiliRiskControlError(
@@ -275,7 +284,7 @@ class BilibiliCollector:
             "User-Agent": "Mozilla/5.0",
             "Referer": f"https://t.bilibili.com/{dynamic_id}",
         }
-        async with httpx.AsyncClient(timeout=self._timeout, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=headers, **http_proxy_kwargs(self)) as client:
             response = await client.get(
                 _DYNAMIC_DETAIL_URL,
                 params={"id": dynamic_id, **_DYNAMIC_DETAIL_PARAMS},

@@ -15,6 +15,7 @@ from app.config import get_settings
 from app.models.enums import Platform
 from app.parsers.x import normalize_account, parse_page
 from app.schemas.content import FetchResult
+from app.services.collector_proxy import http_proxy_kwargs
 
 logger = logging.getLogger(__name__)
 _COOLDOWN_KEY = "anisignal:x:cooldown"
@@ -75,7 +76,7 @@ class XCollector:
         account = normalize_account(target_value)
         try:
             async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, follow_redirects=True,
-                                         timeout=get_settings().http_timeout_seconds) as client:
+                                         timeout=get_settings().http_timeout_seconds, **http_proxy_kwargs(self)) as client:
                 source = await self._read(client, f"https://x.com/{account}")
                 items = [item for item in parse_page(source) if item["author"].lower() == account][:limit]
                 if not items:
