@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -99,6 +100,11 @@ def _guard_argv(args: tuple[str, ...]) -> None:
 class BilibiliCollector:
     platform = Platform.BILIBILI
 
+    def _circuit_key(self, command: str) -> str:
+        # 各出口分别冷却，冷却中的直连不再请求；日志只带摘要，不含代理认证。
+        url = getattr(self, "proxy_url", None)
+        return f"{command}:{hashlib.sha256(url.encode()).hexdigest()[:12]}" if url else command
+
     def __init__(self) -> None:
         settings = get_settings()
         self._bin = settings.bili_bin
@@ -112,7 +118,7 @@ class BilibiliCollector:
         风控门禁拒绝不重试：门禁按 IP 持续生效，秒级重试无意义；
         连续两次拒绝即熔断该命令一段时间，冷却到期后由下一次调用自然探测。
         """
-        command = args[0] if args else ""
+        command = self._circuit_key(args[0] if args else "")
         _guard_argv(args)
         if _circuit_open(command):
             raise CollectorDeferred(
@@ -209,7 +215,7 @@ class BilibiliCollector:
             bvid = item.get("bvid")
             if not bvid:
                 continue
-            if _circuit_open("video"):
+            if _circuit_open(self._circuit_key("video")):
                 # 熔断期间不触碰详情端点；搜索结果自带 view/reply 等核心指标，直接兜底
                 details.append(item)
                 continue
@@ -278,7 +284,7 @@ class BilibiliCollector:
         if dynamic_id in _DRAW_DETAIL_CACHE:
             return _DRAW_DETAIL_CACHE[dynamic_id]
         retry_at = _DRAW_DETAIL_RETRY_AT.get(dynamic_id)
-        if (retry_at and retry_at > utcnow()) or _circuit_open("dynamic-detail"):
+        if (retry_at and retry_at > utcnow()) or _circuit_open(self._circuit_key("dynamic-detail")):
             return {}
         headers = {
             "User-Agent": "Mozilla/5.0",
@@ -290,7 +296,7 @@ class BilibiliCollector:
                 params={"id": dynamic_id, **_DYNAMIC_DETAIL_PARAMS},
             )
             if response.status_code in (412, 429):
-                _circuit_record_failure("dynamic-detail")
+                _circuit_record_failure(self._circuit_key("dynamic-detail"))
                 _defer_dynamic_detail(dynamic_id)
                 logger.warning("anonymous dynamic detail refused: HTTP %s", response.status_code)
                 return {}
@@ -298,7 +304,7 @@ class BilibiliCollector:
         payload = response.json()
         if payload.get("code") != 0:
             if payload.get("code") in (-352, -412, -509):
-                _circuit_record_failure("dynamic-detail")
+                _circuit_record_failure(self._circuit_key("dynamic-detail"))
             _defer_dynamic_detail(
                 dynamic_id,
                 timedelta(hours=6) if payload.get("code") == 4101152 else _CIRCUIT_COOLDOWN,
@@ -310,7 +316,7 @@ class BilibiliCollector:
                 payload.get("message"),
             )
             return {}
-        _circuit_reset("dynamic-detail")
+        _circuit_reset(self._circuit_key("dynamic-detail"))
         rich = _extract_dynamic_detail(payload)
         if (rich.get("text") or "").strip() or rich.get("pics"):
             _DRAW_DETAIL_RETRY_AT.pop(dynamic_id, None)

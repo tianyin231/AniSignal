@@ -1,6 +1,7 @@
 """低频读取 X 公开账号页；登录、空壳和访问拒绝均计入来源健康。"""
 
 import asyncio
+import hashlib
 import logging
 import random
 from datetime import timedelta
@@ -30,9 +31,13 @@ class XCollector:
         self.redis = None
         self._requested = False
 
+    def _cooldown_key(self):
+        url = getattr(self, "proxy_url", None)
+        return f"{_COOLDOWN_KEY}:{hashlib.sha256(url.encode()).hexdigest()[:12]}" if url else _COOLDOWN_KEY
+
     async def _check_cooldown(self):
         if self.redis is not None:
-            ttl = await self.redis.pttl(_COOLDOWN_KEY)
+            ttl = await self.redis.pttl(self._cooldown_key())
             if ttl and ttl > 0:
                 raise CollectorDeferred("X 平台处于访问限制冷却期", retry_at=utcnow() + timedelta(milliseconds=ttl))
 
@@ -47,8 +52,8 @@ class XCollector:
                 seconds = max(seconds, int((to_naive_utc(parsedate_to_datetime(retry_after)) - utcnow()).total_seconds()))
             except (TypeError, ValueError):
                 pass
-        ttl = max(seconds * 1000, await self.redis.pttl(_COOLDOWN_KEY) or 0)
-        await self.redis.set(_COOLDOWN_KEY, "1", px=ttl)
+        ttl = max(seconds * 1000, await self.redis.pttl(self._cooldown_key()) or 0)
+        await self.redis.set(self._cooldown_key(), "1", px=ttl)
 
     async def _read(self, client, url):
         await self._check_cooldown()

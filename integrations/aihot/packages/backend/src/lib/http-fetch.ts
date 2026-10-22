@@ -6,7 +6,7 @@ import { config } from "../config.ts";
 import { assertPublicUrl, guardedLookup } from "./url.ts";
 import { createEgressProxy, createEgressResolver, OUTBOUND_HTTP_OPTIONS } from "./egress-proxy.ts";
 import { DEPLOYMENT, SITE } from "@aihot/site";
-import { leaseCollectionProxy } from "./collector-proxy.ts";
+import { collectionRoutes } from "./collector-proxy.ts";
 
 /**
  * Where a request leaves the host. "egress" (collection, bodies, images and other public data) goes
@@ -120,14 +120,31 @@ export const DEFAULT_UA = `Mozilla/5.0 (compatible; ${SITE.crawlerName}; +${conf
 export const languageHeaders = (language: string | undefined): Record<string, string> => language ? { "accept-language": language } : {};
 
 export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}): Promise<GuardedResponse> {
-  // One budget includes DNS, every redirect and the body. Restarting it at each hop allowed a
-  // nominal 20 s image request to occupy the API for minutes.
+  const host = hostOf(new URL(input));
+  const fixedDirect = (opts.privateFeedHost && config.privateFeedHosts.includes(host)) ||
+    host.endsWith(".local") || DEPLOYMENT.directFetchHosts.includes(host) || host === new URL(config.siteUrl).hostname;
+  const routes = fixedDirect ? [null] : await collectionRoutes();
+  // 仅重复无副作用的读取；POST 等只用最高优先级出口，避免重复付费或写入。
+  const retryable = ["GET", "HEAD"].includes((opts.method ?? "GET").toUpperCase()) && opts.body === undefined;
+  for (let index = 0; index < routes.length; index++) {
+    const hasNext = retryable && index + 1 < routes.length;
+    try {
+      const response = await fetchRoute(input, opts, routes[index]!);
+      if (hasNext && response.status >= 400) continue;
+      return response;
+    } catch (error) {
+      if (!hasNext || /Blocked|Too many redirects|Response too large/.test(String(error))) throw error;
+    }
+  }
+  throw new Error("没有可用的采集出口");
+}
+
+async function fetchRoute(input: string, opts: GuardedFetchOptions, leased: string | null): Promise<GuardedResponse> {
+  // 每个出口一个预算，包含 DNS、整条重定向和正文。直连超时后仍留给下一个出口一次机会。
   const signal = AbortSignal.timeout(opts.timeoutMs ?? 20_000);
   const route = opts.route ?? "egress";
   const configuredHost = hostOf(new URL(input));
   const privateHosts = opts.privateFeedHost && config.privateFeedHosts.includes(configuredHost) ? [configuredHost] : [];
-  const ownHost = configuredHost === new URL(config.siteUrl).hostname || DEPLOYMENT.directFetchHosts.includes(configuredHost);
-  const leased = privateHosts.length || ownHost ? null : await withinDeadline(leaseCollectionProxy(), signal);
   const proxy = (target: URL) => proxyFor(target, route, privateHosts, leased);
   const check = (target: string) => withinDeadline(assertPublicUrl(target, config.allowPrivateNetworkFetch,
     proxy(new URL(target)) ? egressResolver(proxy(new URL(target))!) : undefined, privateHosts), signal);

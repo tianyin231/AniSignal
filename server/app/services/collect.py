@@ -29,7 +29,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import CollectRun, CollectTarget, Platform, Product, RawContent, RunStatus
 from app.services.ingest import IngestStats, ingest_items
-from app.services.collector_proxy import choose_proxy, configure_collector, redact_proxy
+from app.services.collector_proxy import fetch_with_fallback, configure_collector, redact_proxy
 from app.services.queue import enqueue_review_jobs
 from app.services.product_matching import matches_product_text
 
@@ -260,22 +260,19 @@ async def run_collection(redis, target_id: int) -> dict:
             if collector_factory is None:
                 raise CollectError(f"no collector for platform {target.platform}")
             collector = collector_factory()
-            proxy_url = await choose_proxy(session, target.platform, redis)
-            configure_collector(collector, proxy_url)
             product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))
             is_news = get_community(target.community).domain == "news"
             if is_news and isinstance(collector, BilibiliCollector):
                 collector.newest_first = True
             if isinstance(collector, XCollector):
                 collector.redis = redis
-                fetch_result = await collector.fetch(
-                    target.target_type, target.target_value, settings.collect_limit
-                )
-            else:
+            async def fetch():
+                if isinstance(collector, XCollector):
+                    return await collector.fetch(target.target_type, target.target_value, settings.collect_limit)
                 async with platform_slot(redis, target.platform, settings.platform_min_interval_seconds):
-                    fetch_result = await collector.fetch(
-                        target.target_type, target.target_value, settings.collect_limit
-                    )
+                    return await collector.fetch(target.target_type, target.target_value, settings.collect_limit)
+            fetch_result = await fetch_with_fallback(collector, session, target.platform, fetch)
+            proxy_url = collector.proxy_url
             items_fetched = len(fetch_result.items)
             fetch_result.items, filtered_out = filter_relevant(
                 fetch_result.items, target,

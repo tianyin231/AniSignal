@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.admin import get_queue
 from app.api.deps import require_admin
 from app.clock import utcnow
 from app.config import get_settings
@@ -24,6 +23,7 @@ internal_router = APIRouter(prefix="/api/internal/collector-proxy")
 class PoolOptions(BaseModel):
     enabled: bool
     platforms: dict[str, bool] = Field(default_factory=dict)
+    order: list[str] | None = None
 
 
 class ProxyImport(BaseModel):
@@ -62,6 +62,11 @@ async def save_options(body: PoolOptions, session: AsyncSession = Depends(get_se
         raise HTTPException(422, "未知的采集平台")
     if body.enabled and not any(entry.get("enabled") for entry in config["entries"]):
         raise HTTPException(400, "请先添加并启用至少一个代理")
+    if body.order is not None:
+        expected = {"direct", *(entry["id"] for entry in config["entries"])}
+        if len(body.order) != len(expected) or set(body.order) != expected:
+            raise HTTPException(422, "优先级须包含直连和每个代理各一次，请刷新后重试")
+        config["order"] = body.order
     config.update(enabled=body.enabled, platforms={**config["platforms"], **body.platforms})
     await set_setting(session, pool.SETTING_KEY, config)
     return pool.public_config(config)
@@ -86,6 +91,7 @@ async def import_proxies(body: ProxyImport, session: AsyncSession = Depends(get_
             duplicates += 1
             continue
         config["entries"].append(entry)
+        config["order"].append(entry["id"])
         known.add(url)
         added += 1
     await set_setting(session, pool.SETTING_KEY, config)
@@ -115,6 +121,7 @@ async def delete_proxy(entry_id: str, session: AsyncSession = Depends(get_sessio
     config = await pool.get_config(session)
     find_entry(config, entry_id)
     config["entries"] = [entry for entry in config["entries"] if entry["id"] != entry_id]
+    config["order"] = [key for key in config["order"] if key != entry_id]
     if not any(entry.get("enabled") for entry in config["entries"]):
         config["enabled"] = False
     await set_setting(session, pool.SETTING_KEY, config)
@@ -147,7 +154,6 @@ async def require_bridge(x_anisignal_key: str = Header(default="")):
 
 
 @internal_router.post("/lease", dependencies=[Depends(require_bridge)])
-async def lease_proxy(response: Response, session: AsyncSession = Depends(get_session), queue=Depends(get_queue)):
+async def lease_proxy(response: Response, session: AsyncSession = Depends(get_session)):
     response.headers["Cache-Control"] = "no-store"
-    redis = getattr(queue, "_pool", None) or getattr(queue, "redis", None)
-    return {"url": await pool.choose_proxy(session, "aihot", redis)}
+    return {"routes": await pool.collection_routes(session, "aihot")}

@@ -9,14 +9,15 @@ interface ProxyEntry {
   id: string; label: string; scheme: string; host: string; port: number; username: string
   enabled: boolean; password_set: boolean; last_test?: TestResult
 }
-interface ProxyPool { enabled: boolean; platforms: Record<string, boolean>; entries: ProxyEntry[] }
+interface ProxyPool { enabled: boolean; platforms: Record<string, boolean>; entries: ProxyEntry[]; order: string[] }
 interface ImportResult { added: number; duplicates: number; errors: { line: number; message: string }[]; pool: ProxyPool }
 
 const { api } = useAdminApi()
 const toast = useAdminToast()
-const pool = ref<ProxyPool>({ enabled: false, platforms: {}, entries: [] })
+const pool = ref<ProxyPool>({ enabled: false, platforms: {}, entries: [], order: ['direct'] })
 const enabled = ref(false)
 const platforms = ref<Record<string, boolean>>({})
+const order = ref<string[]>(['direct'])
 const loaded = ref(false)
 const busy = ref('')
 const error = ref('')
@@ -32,11 +33,23 @@ const names: Record<string, string> = {
   kuro_cn: '库洛国服官网', kuro_global: '库洛国际官网', aihot: 'AIHOT（RSS / 网页 / 正文）',
 }
 const activeCount = computed(() => pool.value.entries.filter(entry => entry.enabled).length)
+const routeRows = computed(() => order.value.map(id => {
+  const entry = pool.value.entries.find(item => item.id === id)
+  return { id, name: id === 'direct' ? '直连' : entry?.label || `${entry?.host}:${entry?.port}`,
+    enabled: id === 'direct' || !!entry?.enabled }
+}))
+
+function moveRoute(index: number, step: number) {
+  const next = [...order.value]
+  ;[next[index], next[index + step]] = [next[index + step]!, next[index]!]
+  order.value = next
+}
 
 function apply(value: ProxyPool) {
   pool.value = value
   enabled.value = value.enabled
   platforms.value = { ...value.platforms }
+  order.value = [...value.order]
   loaded.value = true
 }
 
@@ -60,7 +73,7 @@ onMounted(refresh)
 
 async function saveOptions() {
   await perform('options', async () => {
-    apply(await api<ProxyPool>('/api/admin/proxies', { method: 'PUT', body: { enabled: enabled.value, platforms: platforms.value } }))
+    apply(await api<ProxyPool>('/api/admin/proxies', { method: 'PUT', body: { enabled: enabled.value, platforms: platforms.value, order: order.value } }))
     toast.ok('采集代理配置已保存，下一次采集生效')
   })
 }
@@ -143,6 +156,18 @@ async function remove(entry: ProxyEntry) {
     <form class="panel p-5" @submit.prevent="saveOptions">
       <fieldset :disabled="!!busy || !loaded" class="space-y-4 disabled:opacity-60">
         <label class="flex items-center gap-2 font-semibold"><input v-model="enabled" type="checkbox">启用采集代理池</label>
+        <p class="text-sm text-muted">关闭时仅直连。启用后按下方优先级尝试，成功即停止；没有新内容不会切换代理。</p>
+        <div class="space-y-2">
+          <h2 class="text-sm font-semibold">出口优先级（从上到下）</h2>
+          <ol class="divide-y divide-line rounded-lg border border-line">
+            <li v-for="(route, index) in routeRows" :key="route.id" class="flex items-center gap-3 px-3 py-2 text-sm" :class="!route.enabled && 'text-muted'">
+              <span class="w-5 shrink-0 font-mono text-muted">{{ index + 1 }}</span>
+              <span class="min-w-0 flex-1 break-all">{{ route.name }}<span v-if="!route.enabled" class="ml-2 text-xs">已停用，跳过</span></span>
+              <button type="button" class="shrink-0 rounded border border-line px-2 py-1 disabled:opacity-30" :disabled="index === 0 || !!busy" :aria-label="`提高${route.name}优先级`" @click="moveRoute(index, -1)">上移</button>
+              <button type="button" class="shrink-0 rounded border border-line px-2 py-1 disabled:opacity-30" :disabled="index === routeRows.length - 1 || !!busy" :aria-label="`降低${route.name}优先级`" @click="moveRoute(index, 1)">下移</button>
+            </li>
+          </ol>
+        </div>
         <div class="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <label v-for="(name, key) in names" :key="key" class="flex items-center gap-2"><input v-model="platforms[key]" type="checkbox">{{ name }}</label>
         </div>
