@@ -9,6 +9,7 @@ from app.collectors.base import USER_AGENT, CollectorError, extract_items, get_j
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+from app.services.collector_proxy import http_proxy_kwargs
 
 SEARCH_URL = "https://bbs-api.miyoushe.com/post/wapi/searchPosts"
 DETAIL_URL = "https://bbs-api.miyoushe.com/post/wapi/getPostFull"
@@ -30,7 +31,7 @@ class MiyousheCollector:
         return FetchResult(platform=self.platform, fetch_kind="miyoushe_posts", items=items)
 
     async def search_posts(self, keyword: str, limit: int) -> list[dict]:
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, **http_proxy_kwargs(self)) as client:
             payload = await get_json(
                 client,
                 SEARCH_URL,

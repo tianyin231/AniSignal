@@ -16,6 +16,7 @@ from app.collectors.bilibili import BilibiliCollector
 from app.models import CustomFeed, CustomFeedItem, NotificationDelivery, User
 from app.parsers.bilibili import parse_dynamic, parse_video
 from app.services.notifications import beijing_today
+from app.services.collector_proxy import choose_proxy, configure_collector
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,11 @@ def _collector(platform: str):
     raise ValueError(f"unsupported custom platform: {platform}")
 
 
-async def fetch_custom_items(feed: CustomFeed, redis) -> list:
+async def fetch_custom_items(feed: CustomFeed, redis, session=None) -> list:
     """抓取并解析定制源；平台礼貌间隔与主采集共享同一个 Redis 槽。"""
     collector = _collector(feed.platform)
+    if session is not None:
+        configure_collector(collector, await choose_proxy(session, feed.platform, redis))
     if feed.kind == "uid":
         async with platform_slot(redis, feed.platform, 5.0):
             raw_items = await collector.user_dynamics(feed.target_value, 20)
@@ -48,7 +51,7 @@ async def fetch_custom_items(feed: CustomFeed, redis) -> list:
 
 async def collect_custom_feed(session: AsyncSession, feed: CustomFeed, redis) -> int:
     """抓取单个定制源并把新条目落库，返回新增条数。"""
-    normalized_list = await fetch_custom_items(feed, redis)
+    normalized_list = await fetch_custom_items(feed, redis, session)
     existing = set(
         (
             await session.execute(
