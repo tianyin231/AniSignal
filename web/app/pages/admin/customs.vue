@@ -118,9 +118,9 @@ async function removeFeed(feed: CustomFeedAdminRow) {
 
 <template>
   <div class="space-y-4">
-    <div>
-      <h1 class="text-lg font-semibold text-slate-900 dark:text-zinc-50">定制监控</h1>
-      <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">全站用户自建的 UID / 关键词监控源巡查与处置。</p>
+    <div class="wall-heading">
+      <h1 class="text-2xl font-bold text-ink">定制监控</h1>
+      <p class="mt-0.5 text-sm text-muted">全站用户自建的 UID / 关键词监控源巡查与处置。</p>
     </div>
 
     <section class="panel p-4">
@@ -151,7 +151,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <option value="active">正常</option>
           <option value="disabled">已停用</option>
         </select>
-        <span class="ml-auto text-xs text-slate-400 dark:text-zinc-500">共 {{ total }} 个监控</span>
+        <span class="ml-auto text-xs text-faint">共 {{ total }} 个监控</span>
       </div>
 
       <p v-if="error" class="mt-3 rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
@@ -159,7 +159,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
       <div class="mt-3 overflow-x-auto">
         <table class="w-full min-w-3xl text-sm">
           <thead>
-            <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+            <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
               <th class="px-3 py-2.5 font-medium">监控</th>
               <th class="px-3 py-2.5 font-medium">类型</th>
               <th class="px-3 py-2.5 font-medium">所有者</th>
@@ -174,29 +174,29 @@ async function removeFeed(feed: CustomFeedAdminRow) {
             <tr
               v-for="f in items"
               :key="f.id"
-              class="border-b border-slate-900/5 last:border-0 dark:border-white/5"
+              class="border-b border-line-soft last:border-0"
               :class="f.status === 'disabled' || !f.enabled ? 'opacity-60' : ''"
             >
               <td class="px-3 py-2.5">
                 <span class="font-medium">{{ f.name }}</span>
-                <span class="mono ml-1.5 text-xs text-slate-400">{{ f.target_value }}</span>
-                <span v-if="f.min_views > 0" class="mono ml-1 text-[11px] text-slate-400">≥{{ f.min_views }} 播放</span>
+                <span class="mono ml-1.5 text-xs text-faint">{{ f.target_value }}</span>
+                <span v-if="f.min_views > 0" class="mono ml-1 text-[11px] text-faint">≥{{ f.min_views }} 播放</span>
               </td>
-              <td class="px-3 py-2.5 text-slate-500 dark:text-zinc-400">{{ f.kind === 'uid' ? 'UID' : '关键词' }}</td>
+              <td class="px-3 py-2.5 text-muted">{{ f.kind === 'uid' ? 'UID' : '关键词' }}</td>
               <td class="px-3 py-2.5">
-                <span class="text-slate-600 dark:text-zinc-300">{{ f.owner_email }}</span>
-                <span v-if="f.owner_name" class="ml-1 text-xs text-slate-400">{{ f.owner_name }}</span>
+                <span class="text-ink-2">{{ f.owner_email }}</span>
+                <span v-if="f.owner_name" class="ml-1 text-xs text-faint">{{ f.owner_name }}</span>
               </td>
-              <td class="mono px-3 py-2.5 text-slate-500 dark:text-zinc-400">{{ f.item_count }}</td>
+              <td class="mono px-3 py-2.5 text-muted">{{ f.item_count }}</td>
               <td class="px-3 py-2.5">
                 <button
                   class="min-h-9 cursor-pointer rounded px-2 text-xs underline-offset-2 hover:underline disabled:cursor-wait"
-                  :class="f.is_public ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-400'"
+                  :class="f.is_public ? 'text-emerald-700 dark:text-emerald-300' : 'text-faint'"
                   :disabled="busyId === f.id"
                   @click="patchFeed(f, { is_public: !f.is_public }, `已${f.is_public ? '取消' : '设为'}公开`)"
                 >{{ f.is_public ? '公开' : '私有' }}</button>
               </td>
-              <td class="px-3 py-2.5 text-slate-500 dark:text-zinc-400">{{ f.push_enabled ? '开' : '关' }}</td>
+              <td class="px-3 py-2.5 text-muted">{{ f.push_enabled ? '开' : '关' }}</td>
               <td class="px-3 py-2.5">
                 <button
                   class="min-h-9 cursor-pointer rounded px-2 text-xs underline-offset-2 hover:underline disabled:cursor-wait"
@@ -207,23 +207,23 @@ async function removeFeed(feed: CustomFeedAdminRow) {
               </td>
               <td class="whitespace-nowrap px-3 py-2.5 text-right">
                 <button class="min-h-9 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === f.id" @click="collectNow(f)">抓取</button>
-                <NuxtLink v-if="f.is_public" :to="`/custom/${f.id}`" target="_blank" class="min-h-9 inline-block rounded px-2 text-xs text-slate-500 hover:underline dark:text-zinc-400">查看</NuxtLink>
+                <NuxtLink v-if="f.is_public" :to="`/custom/${f.id}`" target="_blank" class="min-h-9 inline-block rounded px-2 text-xs text-muted hover:underline">查看</NuxtLink>
                 <button class="min-h-9 rounded px-2 text-xs text-red-500 hover:underline disabled:cursor-wait" :disabled="busyId === f.id" @click="removeFeed(f)">删除</button>
               </td>
             </tr>
             <tr v-if="!items.length && !loading">
-              <td colspan="8" class="px-3 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">没有匹配的定制监控</td>
+              <td colspan="8" class="px-3 py-10 text-center text-sm text-faint">没有匹配的定制监控</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-slate-900/5 px-3 py-2.5 text-xs text-slate-400 dark:border-white/10 dark:text-zinc-500">
+      <div v-if="totalPages > 1" class="flex items-center justify-between border-t border-line-soft px-3 py-2.5 text-xs text-faint dark:border-line">
         <span>共 {{ total }} 个监控</span>
         <div class="flex items-center gap-3">
-          <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="page--">« 上一页</button>
+          <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-ink-2" @click="page--">« 上一页</button>
           <span class="mono">{{ page }} / {{ totalPages }}</span>
-          <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="page++">下一页 »</button>
+          <button :disabled="page >= totalPages" class="disabled:opacity-40 hover:text-ink-2" @click="page++">下一页 »</button>
         </div>
       </div>
     </section>

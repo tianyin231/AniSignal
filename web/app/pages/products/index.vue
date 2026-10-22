@@ -53,13 +53,10 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
               {{ p.publisher || '—' }}{{ p.skus.length ? ` · ${p.skus.join(' / ')}` : '' }}
             </p>
           </div>
-          <span class="chip shrink-0 bg-blue-500/10 text-blue-700 dark:text-blue-300">{{ p.fulfillment.consumer.state_label }}</span>
+          <span v-if="p.monitor_status === 'archived'" class="chip shrink-0">窗口已结束</span>
         </div>
-        <p v-if="p.price_note" class="mono mt-3 text-sm text-slate-600 dark:text-zinc-300">{{ p.price_note }}</p>
-        <div class="mt-3 grid gap-2 text-xs text-slate-600 dark:text-zinc-300">
-          <p>官方：{{ p.fulfillment.official.state_label }}</p>
-          <p>消费者：{{ p.fulfillment.consumer.state_label }}</p>
-          <p>质量：{{ p.fulfillment.quality.state_label }}</p>
+        <div v-if="p.brief" class="mt-3">
+          <ProductBrief :brief="p.brief" />
         </div>
         <p v-if="p.latest_candidate" class="mt-3 truncate text-[11px] text-slate-500 dark:text-zinc-400" :title="p.latest_candidate.summary">
           跟踪中：{{ p.latest_candidate.summary }}

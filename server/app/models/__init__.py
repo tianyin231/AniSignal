@@ -31,6 +31,7 @@ from app.models.editorial import EditorialReceipt, NewsGrouping, NewsEdition
 from app.models.fulfillment import ProductSignal, ProductSignalEvidence, ProductSignalRevision
 from app.models.fulfillment_revision import ProductFulfillmentRevision
 from app.models.product import FULFILLMENT_STAGES, Product
+from app.models.product_candidate import MerchScan, ProductCandidate
 from app.models.run import CollectRun
 from app.models.setting import SiteSetting
 from app.models.source import Source
@@ -73,6 +74,8 @@ __all__ = [
     "ProductSignalRevision",
     "ProductFulfillmentRevision",
     "Product",
+    "ProductCandidate",
+    "MerchScan",
     "FULFILLMENT_STAGES",
     "Platform",
     "TargetType",

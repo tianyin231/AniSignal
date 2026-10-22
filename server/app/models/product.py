@@ -43,6 +43,11 @@ class Product(Base):
         unique=True,
     )
     fulfillment_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # watching = 窗口内，专属搜索和履约审核上下文都包括它；archived = 留档，停搜索。
+    monitor_status: Mapped[str] = mapped_column(String(16), default="watching")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # 接受候选时带来的公告链接。档案里的预售/发货文字仍是登记信息，不是官方信号。
+    source_url: Mapped[str | None] = mapped_column(String(512))
     # 管理端或 AI 指定的当前阶段（-1 = 跟随引擎计算）
     stage_hint: Mapped[int] = mapped_column(Integer, default=-1)
     stage_hint_source: Mapped[str | None] = mapped_column(String(16))  # manual / ai

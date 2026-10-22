@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// 随机壁纸背景层：图床 CDN 直连图固定在页面最底层，承托玻璃面板；
+// 应用唯一的随机壁纸背景层，不随页面和布局切换卸载。
+// 图床 CDN 直连图固定在页面最底层，承托玻璃面板；
 // 未开启或加载失败时不渲染（自然回退默认底色）。
 // 开启时给 <html> 挂 data-wallpaper：main.css 据此把实底卡片切成毛玻璃，让壁纸透出来。
 const { status, src } = useWallpaper()

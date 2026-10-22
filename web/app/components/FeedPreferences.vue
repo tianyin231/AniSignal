@@ -46,19 +46,19 @@ async function save() {
 <template>
   <section class="panel p-5" aria-labelledby="preferences-title">
     <h2 id="preferences-title" class="text-sm font-semibold">个人降噪</h2>
-    <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">用于关键词关注流、每日早报和 AI 精炼邮件。定制监控仍按各自规则收集。</p>
+    <p class="mt-1 text-xs leading-relaxed text-muted">用于关键词关注流、每日早报和 AI 精炼邮件。定制监控仍按各自规则收集。</p>
     <form class="mt-3 space-y-3" @submit.prevent="save">
       <fieldset :disabled="!ready || busy">
-        <legend class="mb-2 text-xs text-slate-500 dark:text-zinc-400">关注的游戏（未选时包含全部游戏）</legend>
+        <legend class="mb-2 text-xs text-muted">关注的游戏（未选时包含全部游戏）</legend>
         <div class="flex flex-wrap items-center gap-x-4 gap-y-3">
-          <button type="button" :aria-pressed="!selectedGames.length" class="rounded border px-2.5 py-1 text-xs" :class="!selectedGames.length ? 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300' : 'border-slate-900/10 dark:border-white/15'" @click="selectedGames = []">全部游戏</button>
+          <button type="button" :aria-pressed="!selectedGames.length" class="rounded border px-2.5 py-1 text-xs" :class="!selectedGames.length ? 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300' : 'border-line'" @click="selectedGames = []">全部游戏</button>
           <label v-for="game in GAME_COMMUNITIES" :key="game.key" class="inline-flex cursor-pointer items-center gap-1.5 text-sm">
             <input v-model="selectedGames" type="checkbox" :value="game.key" class="checkbox">{{ game.label }}
           </label>
         </div>
       </fieldset>
       <div>
-        <label for="exclude-keywords" class="mb-1.5 block text-xs text-slate-500 dark:text-zinc-400">排除标题中的词（逗号或换行分隔，最多 20 个）</label>
+        <label for="exclude-keywords" class="mb-1.5 block text-xs text-muted">排除标题中的词（逗号或换行分隔，最多 20 个）</label>
         <textarea id="exclude-keywords" v-model="excludedText" :disabled="!ready || busy" rows="2" maxlength="1320" placeholder="例如：二创，配队，抽卡记录" class="input w-full px-3 py-2 text-sm" />
       </div>
       <div class="flex flex-wrap items-center gap-3">

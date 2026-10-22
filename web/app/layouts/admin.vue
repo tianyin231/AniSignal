@@ -1,5 +1,7 @@
 <script setup lang="ts">
-// 管理看板布局：与公开站点共用材质约定（panel / aurora / 暗色），但结构独立
+import AppShell from '~/components/AppShell.vue'
+
+// 管理功能使用独立导航，站点外壳、主题和壁纸与公开页面共用。
 const route = useRoute()
 const { token, logout } = useAdminApi()
 
@@ -28,32 +30,28 @@ const showingLogin = computed(() => route.path === '/admin/login')
 </script>
 
 <template>
-  <div class="aurora-bg min-h-screen">
-    <header class="glass sticky top-0 z-20">
-      <div class="mx-auto max-w-5xl px-4 sm:px-6">
-        <div class="flex h-14 items-center gap-4">
-          <NuxtLink to="/admin" class="flex shrink-0 items-center gap-2">
-            <img src="/icon.png" alt="" class="size-7 shrink-0 rounded-lg">
-            <span class="num text-[17px] font-bold tracking-tight text-ink">AniSignal</span>
-            <span class="rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-ink">管理看板</span>
-          </NuxtLink>
-          <div class="ml-auto flex shrink-0 items-center gap-3 text-sm">
-            <NuxtLink to="/" class="hidden text-slate-500 hover:text-slate-900 sm:block dark:text-zinc-400 dark:hover:text-zinc-100">返回站点</NuxtLink>
+  <AppShell>
+    <main class="min-w-0 py-6 lg:py-8">
+      <div class="wall-surface mb-5 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <NuxtLink to="/admin" class="text-sm font-bold text-ink">管理看板</NuxtLink>
+          <div class="flex items-center gap-3 text-sm">
+            <NuxtLink to="/" class="text-muted transition-colors hover:text-ink">返回站点</NuxtLink>
             <button
               v-if="token"
-              class="rounded-md border border-slate-900/10 px-3 py-1.5 text-slate-600 transition-colors hover:bg-slate-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10"
+              class="h-9 rounded-[10px] border border-line px-3.5 text-ink-2 transition-colors hover:bg-chip"
               @click="handleLogout"
             >
-              退出
+              退出管理
             </button>
           </div>
         </div>
-        <nav v-if="!showingLogin" aria-label="管理功能" class="flex flex-wrap gap-1 border-t border-slate-900/5 py-2 text-sm dark:border-white/10">
+        <nav v-if="!showingLogin" aria-label="管理功能" class="flex flex-wrap gap-1 border-t border-line pt-3 text-sm">
           <NuxtLink
             v-for="item in nav"
             :key="item.to"
             :to="item.to"
-            class="shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 transition-colors"
+            class="inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-full px-3.5 transition-colors"
             :aria-current="route.path === item.to ? 'page' : undefined"
             :class="route.path === item.to
               ? 'bg-ink font-semibold text-card'
@@ -63,10 +61,8 @@ const showingLogin = computed(() => route.path === '/admin/login')
           </NuxtLink>
         </nav>
       </div>
-    </header>
-    <main class="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
       <slot />
     </main>
     <AdminToasts />
-  </div>
+  </AppShell>
 </template>

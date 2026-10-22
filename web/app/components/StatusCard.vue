@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ApiProductList, FulfillmentAxis } from '~/composables/usePublicApi'
+import type { ApiProductList } from '~/composables/usePublicApi'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { fmtTime } from '~/utils/admin-types'
 import { sortProductsBySignal } from '~/utils/product-utils'
@@ -46,42 +46,6 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () =>
   status.value !== 'pending' && (props.embedded || window.matchMedia('(min-width: 1280px)').matches !== Boolean(props.mobile)),
 )
 
-// 三轴速览：每轴一段色条（灰=暂无 / 蓝=有官方动态 / 绿=正向样本 / 橙=需关注 / 红=多源问题），细节在商品详情页
-type Tone = 'neutral' | 'brand' | 'ok' | 'warn' | 'hot'
-const TONE_BAR: Record<Tone, string> = {
-  neutral: 'bg-line',
-  brand: 'bg-brand',
-  ok: 'bg-ok',
-  warn: 'bg-warn',
-  hot: 'bg-hot',
-}
-function axisTone(axis: FulfillmentAxis): Tone {
-  switch (axis.state) {
-    case 'no_verified_signal':
-    case 'no_verified_receipt':
-      return 'neutral'
-    case 'no_verified_issue':
-      return 'ok'
-    case 'seeded_samples':
-      return 'brand'
-    case 'isolated_issue':
-    case 'candidate_attention':
-      return 'warn'
-    case 'repeated_issue':
-      return 'hot'
-    default:
-      if (axis.key === 'consumer') return 'ok'
-      return /delay/.test(axis.state) ? 'warn' : 'brand'
-  }
-}
-const axes = computed(() =>
-  product.value
-    ? (['official', 'consumer', 'quality'] as const).map((key) => {
-        const axis = product.value!.fulfillment[key]
-        return { key, label: axis.label, state: axis.state_label, bar: TONE_BAR[axisTone(axis)] }
-      })
-    : [],
-)
 const footLine = computed(() => {
   const f = product.value?.fulfillment
   if (!f) return ''
@@ -125,13 +89,10 @@ const footLine = computed(() => {
         {{ product.name }}
         <span v-if="productCommunity" class="rounded-md px-1.5 py-0.5 text-[11px] font-semibold" :class="communityClasses(productCommunity.color).chip">{{ productCommunity.label }}</span>
       </NuxtLink>
-      <div class="mt-4 grid grid-cols-3 gap-3">
-        <div v-for="axis in axes" :key="axis.key" class="min-w-0">
-          <div class="h-1 rounded-full" :class="axis.bar" />
-          <p class="mt-2 text-xs text-muted">{{ axis.label }}</p>
-          <p class="mt-0.5 line-clamp-2 text-[13px] font-semibold leading-snug text-ink-2">{{ axis.state }}</p>
-        </div>
+      <div v-if="product.brief" class="mt-4">
+        <ProductBrief :brief="product.brief" />
       </div>
+      <p v-if="product.brief?.archived" class="mt-3 text-xs text-muted">窗口已结束</p>
       <p v-if="footLine" class="mono mt-4 text-[11px] text-faint">{{ footLine }}</p>
     </template>
     <p v-else-if="status === 'pending'" class="mt-2 text-xs text-muted">正在加载商品…</p>

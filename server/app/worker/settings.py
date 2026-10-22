@@ -144,6 +144,30 @@ async def collect_custom_feeds(ctx) -> dict:
         return await sweep_custom_feeds(session, ctx["redis"])
 
 
+async def product_monitor_sweep(ctx) -> dict:
+    """官方内容里发现周边候选，并把安静期满的商品归档。"""
+    import secrets
+
+    from app.db import SessionLocal
+    from app.services.product_discovery import run_product_monitor_loop
+
+    token = secrets.token_hex(16)
+    key = "anisignal:product-monitor-lock"
+    if not await ctx["redis"].set(key, token, nx=True, ex=1900):
+        return {"status": "busy"}
+    try:
+        async with SessionLocal() as session:
+            result = await run_product_monitor_loop(session)
+            if result["discover"]["created"] or result["archive"]["archived"]:
+                logger.info("product_monitor_sweep -> %s", result)
+            return result
+    finally:
+        await ctx["redis"].eval(
+            "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0",
+            1, key, token,
+        )
+
+
 async def extract_entities_sweep(ctx) -> dict:
     """官方内容实体抽取轮询：日程与兑换码（每轮限量）。"""
     from app.db import SessionLocal
@@ -237,6 +261,7 @@ class WorkerSettings:
         send_admin_emails,
         collect_custom_feeds,
         extract_entities_sweep,
+        product_monitor_sweep,
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4

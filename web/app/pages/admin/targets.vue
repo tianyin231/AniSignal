@@ -210,9 +210,9 @@ onMounted(refreshRuns)
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h1 class="text-lg font-semibold">采集目标</h1>
-      <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
+    <div class="wall-heading">
+      <h1 class="text-2xl font-bold">采集目标</h1>
+      <p class="mt-0.5 text-sm text-muted">
         关键词、账号与频率配置；调度器按频率自动投递采集任务。
       </p>
     </div>
@@ -241,11 +241,11 @@ onMounted(refreshRuns)
       </select>
       <input v-model="form.display_name" aria-label="显示名称" placeholder="显示名称（可选）" class="input px-3 py-2 text-sm sm:col-span-2">
       <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="input px-3 py-2 text-sm sm:col-span-2">
-      <label class="text-xs text-slate-500 dark:text-zinc-400">{{ supportsViews ? '最低播放量（0 不过滤）' : '此目标没有播放量门槛' }}<input v-model.number="form.min_views" type="number" min="0" :disabled="!supportsViews" class="input mono mt-1 w-full px-3 py-2 text-sm disabled:opacity-50"></label>
+      <label class="text-xs text-muted">{{ supportsViews ? '最低播放量（0 不过滤）' : '此目标没有播放量门槛' }}<input v-model.number="form.min_views" type="number" min="0" :disabled="!supportsViews" class="input mono mt-1 w-full px-3 py-2 text-sm disabled:opacity-50"></label>
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
         {{ creating ? '保存中…' : editingId ? '保存修改' : '新增目标' }}
       </button>
-      <button v-if="editingId" type="button" class="px-3 py-2 text-sm text-slate-500" :disabled="creating" @click="cancelEdit">取消编辑</button>
+      <button v-if="editingId" type="button" class="px-3 py-2 text-sm text-muted" :disabled="creating" @click="cancelEdit">取消编辑</button>
       <p v-if="formError" class="col-span-full text-sm text-red-600 dark:text-red-400">{{ formError }}</p>
     </form>
 
@@ -258,7 +258,7 @@ onMounted(refreshRuns)
           v-for="option in [['', '全部分区'], ...ADMIN_COMMUNITIES.map(c => [c.key, c.label] as const)] as const"
           :key="option[0]"
           class="rounded-full px-2.5 py-1 text-xs transition-colors"
-          :class="communityFilter === option[0] ? 'bg-blue-600 text-white' : 'bg-slate-500/10 text-slate-500 hover:text-slate-700 dark:text-zinc-400'"
+          :class="communityFilter === option[0] ? 'bg-blue-600 text-white' : 'bg-chip text-muted hover:text-ink-2'"
           @click="communityFilter = option[0]"
         >
           {{ option[1] }}
@@ -269,7 +269,7 @@ onMounted(refreshRuns)
     <div class="panel overflow-x-auto">
       <table class="w-full min-w-[850px] text-sm">
         <thead>
-          <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+          <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
             <th class="px-3 py-2.5 font-medium">目标</th>
             <th class="px-2.5 py-2.5 font-medium">平台 · 类型</th>
             <th class="px-2.5 py-2.5 font-medium">分区</th>
@@ -281,20 +281,20 @@ onMounted(refreshRuns)
           </tr>
         </thead>
         <tbody>
-          <tr v-for="target in filteredTargets" :key="target.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5">
+          <tr v-for="target in filteredTargets" :key="target.id" class="border-b border-line-soft last:border-0">
             <td class="px-3 py-2.5">
               <span class="font-medium">{{ target.display_name && target.display_name !== target.target_value ? target.display_name : target.target_value }}</span>
-              <span v-if="target.display_name && target.display_name !== target.target_value" class="mono ml-1.5 text-xs text-slate-400">{{ target.target_value }}</span>
+              <span v-if="target.display_name && target.display_name !== target.target_value" class="mono ml-1.5 text-xs text-faint">{{ target.target_value }}</span>
             </td>
-            <td class="whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-zinc-300">
+            <td class="whitespace-nowrap px-2.5 py-2.5 text-ink-2">
               {{ platformLabels[target.platform] ?? target.platform }}
-              <span class="text-slate-400">·</span>
+              <span class="text-faint">·</span>
               {{ targetTypeLabels[target.target_type] ?? target.target_type }}
             </td>
             <td class="whitespace-nowrap px-2.5 py-2.5">
               <span
                 class="chip whitespace-nowrap"
-                :class="target.community === 'blhx' ? 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+                :class="target.community === 'blhx' ? 'bg-cyan-500/10 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300' : 'bg-chip text-muted'"
               >
                 {{ communityLabels[target.community] ?? target.community }}
               </span>
@@ -302,7 +302,7 @@ onMounted(refreshRuns)
             <td class="whitespace-nowrap px-2.5 py-2.5">
               <button
                 class="chip cursor-pointer whitespace-nowrap transition-colors"
-                :class="target.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+                :class="target.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300' : 'bg-chip text-muted'"
                 :title="target.tier === 'core' ? '核心关键词：全量入库，强及时。点击切换为泛关键词' : '泛关键词：走共现词与热度门槛。点击切换为核心关键词'"
                 :disabled="busyId === target.id"
                 @click="toggleTier(target)"
@@ -310,22 +310,22 @@ onMounted(refreshRuns)
                 {{ target.tier === 'core' ? '核心' : '泛关键词' }}
               </button>
             </td>
-            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-slate-500 dark:text-zinc-400">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
-            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-slate-600 dark:text-zinc-300">{{ target.platform === 'x' ? '约 ' : '' }}{{ target.interval_minutes }}min{{ target.platform === 'x' ? ' · 随机' : '' }}</td>
-            <td class="max-w-40 truncate px-3 py-2.5 text-xs text-slate-400" :title="target.last_error ?? ''">
+            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
+            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-ink-2">{{ target.platform === 'x' ? '约 ' : '' }}{{ target.interval_minutes }}min{{ target.platform === 'x' ? ' · 随机' : '' }}</td>
+            <td class="max-w-40 truncate px-3 py-2.5 text-xs text-faint" :title="target.last_error ?? ''">
               {{ target.last_error ?? '—' }}
             </td>
             <td class="whitespace-nowrap px-3 py-2.5 text-right">
               <button class="rounded px-1.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id || creating" @click="edit(target)">编辑</button>
               <button class="rounded px-1.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id" @click="runNow(target)">立即采集</button>
-              <button class="rounded px-1.5 py-1 text-xs text-slate-500 hover:underline dark:text-zinc-400" :disabled="busyId === target.id" @click="toggle(target)">
+              <button class="rounded px-1.5 py-1 text-xs text-muted hover:underline" :disabled="busyId === target.id" @click="toggle(target)">
                 {{ target.enabled ? '停用' : '启用' }}
               </button>
               <button class="rounded px-1.5 py-1 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busyId === target.id" @click="remove(target)">删除</button>
             </td>
           </tr>
           <tr v-if="targets.length === 0">
-            <td colspan="8" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">暂无目标</td>
+            <td colspan="8" class="px-4 py-10 text-center text-sm text-faint">暂无目标</td>
           </tr>
         </tbody>
       </table>
@@ -334,22 +334,22 @@ onMounted(refreshRuns)
     <section class="panel overflow-hidden">
       <div class="flex items-center justify-between px-4 py-3">
         <h2 class="text-sm font-semibold">最近采集运行</h2>
-        <p class="text-xs text-slate-400">抓取 → 过滤（分级/门槛） → 入库</p>
+        <p class="text-xs text-faint">抓取 → 过滤（分级/门槛） → 入库</p>
       </div>
       <table class="w-full text-sm">
         <tbody>
-          <tr v-for="run in runs" :key="run.id" class="border-t border-slate-900/5 text-xs dark:border-white/5">
-            <td class="px-4 py-2 text-slate-600 dark:text-zinc-300">{{ targetName(run.target_id) }}</td>
-            <td class="mono px-4 py-2 text-slate-400">{{ fmtTime(run.started_at) }}</td>
+          <tr v-for="run in runs" :key="run.id" class="border-t border-line-soft text-xs">
+            <td class="px-4 py-2 text-ink-2">{{ targetName(run.target_id) }}</td>
+            <td class="mono px-4 py-2 text-faint">{{ fmtTime(run.started_at) }}</td>
             <td class="px-4 py-2">
-              <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-slate-500/10 text-slate-500'">{{ run.status === 'skipped' ? '冷却跳过' : run.status }}</span>
+              <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-chip text-muted'">{{ run.status === 'skipped' ? '冷却跳过' : run.status }}</span>
             </td>
-            <td class="mono px-4 py-2 text-slate-500 dark:text-zinc-400">
+            <td class="mono px-4 py-2 text-muted">
               抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 入库 {{ run.items_new ?? 0 }}
             </td>
           </tr>
           <tr v-if="!runs.length">
-            <td colspan="4" class="px-4 py-6 text-center text-sm text-slate-400">暂无运行记录。</td>
+            <td colspan="4" class="px-4 py-6 text-center text-sm text-faint">暂无运行记录。</td>
           </tr>
         </tbody>
       </table>

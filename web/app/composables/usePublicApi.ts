@@ -258,6 +258,18 @@ export interface ApiProductSignalList {
   total: number
 }
 
+export interface ProductBrief {
+  archived: boolean
+  unboxing_accounts: number
+  unboxing_from: string | null
+  unboxing_to: string | null
+  unboxing_note: string
+  quality_accounts: number
+  quality_latest: string | null
+  official_text: string
+  official_registered: boolean
+}
+
 export interface ApiProduct {
   id: number
   slug: string
@@ -271,6 +283,9 @@ export interface ApiProduct {
   original_ship_at: string | null
   ship_note: string | null
   watch_terms: string[]
+  monitor_status?: 'watching' | 'archived'
+  source_url?: string | null
+  brief?: ProductBrief
   monitor?: {
     target_id: number
     keyword: string
