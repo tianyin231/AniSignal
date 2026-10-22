@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
     env_file: [{ path: .env.aihot, format: raw }]
     environment:
-      ANISIGNAL_PROXY_POOL_URL: http://app:8000/api/internal/collector-proxy/lease
+      ANISIGNAL_PROXY_POOL_URL: http://app:3000/api/internal/collector-proxy/lease
     command: ["sh", "-c", "node scripts/migrate.ts && node scripts/seed.ts && node adapter/bootstrap.ts && exec node adapter/main.ts"]
     volumes:
       - ${DATA_DIR:-./data}/aihot/files:/data
@@ -37,7 +37,7 @@ services:
     restart: unless-stopped
     env_file: [{ path: .env.aihot, format: raw }]
     environment:
-      ANISIGNAL_PROXY_POOL_URL: http://app:8000/api/internal/collector-proxy/lease
+      ANISIGNAL_PROXY_POOL_URL: http://app:3000/api/internal/collector-proxy/lease
     command: ["node", "apps/worker/src/main.ts"]
     stop_grace_period: 515s
     volumes:

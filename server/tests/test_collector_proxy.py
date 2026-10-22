@@ -59,19 +59,74 @@ async def test_proxy_admin_import_edit_delete_and_password_retention(client, adm
     assert len((await client.get('/api/admin/proxies', headers=admin_headers)).json()['entries']) == 2
 
 
-async def test_rotation_and_platform_opt_out(session):
+async def test_route_priority_and_platform_opt_out(session):
     entries = [pool.parse_proxy(f'proxy-{n}.example:8080') for n in range(3)]
     entries[1]['enabled'] = False
     await set_setting(session, pool.SETTING_KEY, {'enabled': True, 'entries': entries, 'platforms': {'x': False}})
-    class Redis:
-        value = 0
-        async def incr(self, key):
-            self.value += 1
-            return self.value
-    redis = Redis()
-    assert [await pool.choose_proxy(session, 'bilibili', redis) for _ in range(3)] == [pool.proxy_url(entries[n]) for n in (0, 2, 0)]
-    assert await pool.choose_proxy(session, 'x', redis) is None
-    assert await pool.choose_proxy(session, 'aihot', redis) == pool.proxy_url(entries[2])
+    assert await pool.collection_routes(session, 'bilibili') == [None, pool.proxy_url(entries[0]), pool.proxy_url(entries[2])]
+    assert await pool.collection_routes(session, 'x') == [None]
+    config = await pool.get_config(session)
+    config['order'] = [entries[2]['id'], 'direct', entries[1]['id'], entries[0]['id']]
+    await set_setting(session, pool.SETTING_KEY, config)
+    assert await pool.collection_routes(session, 'aihot') == [pool.proxy_url(entries[2]), None, pool.proxy_url(entries[0])]
+
+
+async def test_priority_api_persists_and_rejects_missing_routes(client, admin_headers):
+    response = await client.post('/api/admin/proxies', headers=admin_headers, json={'text': 'one.example:80\ntwo.example:80'})
+    ids = [entry['id'] for entry in response.json()['pool']['entries']]
+    assert response.json()['pool']['order'] == ['direct', *ids]
+    order = [ids[1], 'direct', ids[0]]
+    response = await client.put('/api/admin/proxies', headers=admin_headers, json={'enabled': True, 'order': order})
+    assert response.json()['order'] == order
+    assert (await client.get('/api/admin/proxies', headers=admin_headers)).json()['order'] == order
+    assert (await client.put('/api/admin/proxies', headers=admin_headers, json={'enabled': True, 'order': ids})).status_code == 422
+    await client.delete(f'/api/admin/proxies/{ids[1]}', headers=admin_headers)
+    assert (await client.get('/api/admin/proxies', headers=admin_headers)).json()['order'] == ['direct', ids[0]]
+
+
+@pytest.mark.parametrize('direct_ok', [True, False])
+async def test_fallback_only_after_failed_read_and_empty_is_success(session, direct_ok):
+    entries = [pool.parse_proxy(f'proxy-{n}.example:80') for n in range(2)]
+    await set_setting(session, pool.SETTING_KEY, {'enabled': True, 'entries': entries})
+    collector = type('Collector', (), {})()
+    calls = []
+    async def fetch():
+        calls.append(collector.proxy_url)
+        if not direct_ok and collector.proxy_url != pool.proxy_url(entries[1]):
+            raise httpx.ConnectError('connection failed')
+        return []
+    assert await pool.fetch_with_fallback(collector, session, 'bilibili', fetch) == []
+    assert calls == ([None] if direct_ok else [None, *(pool.proxy_url(e) for e in entries)])
+
+
+async def test_bili_direct_cooldown_keeps_proxy_available(session, monkeypatch):
+    from app.collectors import bilibili
+    entry = pool.parse_proxy('proxy.example:80')
+    await set_setting(session, pool.SETTING_KEY, {'enabled': True, 'entries': [entry]})
+    collector = bilibili.BilibiliCollector()
+    calls = []
+    async def run(*args):
+        calls.append(collector.proxy_url)
+        if not collector.proxy_url:
+            raise bilibili.BiliRiskControlError('refused')
+        return []
+    monkeypatch.setattr(collector, '_run_once', run)
+    monkeypatch.setattr(bilibili, '_CIRCUIT_STATE', {})
+    for _ in range(3):
+        assert await pool.fetch_with_fallback(collector, session, 'bilibili', lambda: collector._run('dynamics', '123')) == []
+    assert calls == [None, pool.proxy_url(entry), None, pool.proxy_url(entry), pool.proxy_url(entry)]
+
+
+async def test_fallback_final_error_does_not_leak_password(session):
+    from app.collectors.base import CollectorError
+    entry = pool.parse_proxy('proxy.example:80:alice:private-password')
+    await set_setting(session, pool.SETTING_KEY, {'enabled': True, 'entries': [entry]})
+    collector = type('Collector', (), {})()
+    async def fetch():
+        raise CollectorError(f'failed {collector.proxy_url}')
+    with pytest.raises(CollectorError) as caught:
+        await pool.fetch_with_fallback(collector, session, 'bilibili', fetch)
+    assert 'private-password' not in str(caught.value)
 
 
 async def test_admin_auth_and_internal_lease(client, admin_headers, monkeypatch):
@@ -83,7 +138,7 @@ async def test_admin_auth_and_internal_lease(client, admin_headers, monkeypatch)
     await client.put('/api/admin/proxies', headers=admin_headers, json={'enabled': True, 'platforms': {'aihot': True}})
     monkeypatch.setattr(get_settings(), 'aihot_token', 'a' * 40)
     response = await client.post('/api/internal/collector-proxy/lease', headers={'X-Anisignal-Key': 'a' * 40})
-    assert response.status_code == 200 and response.json()['url'] == 'http://alice:secret@proxy.example:8080'
+    assert response.status_code == 200 and response.json()['routes'] == [None, 'http://alice:secret@proxy.example:8080']
     assert response.headers['cache-control'] == 'no-store'
 
 

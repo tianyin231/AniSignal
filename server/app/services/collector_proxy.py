@@ -1,19 +1,21 @@
-"""采集代理池：配置存 KV，每次采集选一个出口，任务内保持不变。"""
+"""采集出口按管理端顺序尝试；默认直连，成功即停止，不因没有新内容换出口。"""
 
-import itertools
 import copy
+import logging
 import re
 import uuid
 from urllib.parse import quote, unquote, urlsplit
 
-from app.collectors.base import CollectorError
+import httpx
+
+from app.collectors.base import CollectorDeferred, CollectorError
 from app.models.enums import Platform
 from app.services.settings import get_setting
 
 SETTING_KEY = "collector_proxies"
 PLATFORMS = [p.value for p in Platform] + ["aihot"]
 SCHEMES = {"http", "https", "socks5"}
-_cursor = itertools.count()
+logger = logging.getLogger(__name__)
 
 
 def parse_proxy(line: str, default_scheme: str = "http") -> dict:
@@ -71,7 +73,11 @@ def public_entry(entry: dict) -> dict:
 async def get_config(session) -> dict:
     # 不原地修改 ORM 原值的嵌套列表，否则 JSON 变更可能不会持久化。
     stored = copy.deepcopy(await get_setting(session, SETTING_KEY) or {})
-    return {"enabled": bool(stored.get("enabled")), "entries": stored.get("entries") or [],
+    entries = stored.get("entries") or []
+    ids = ["direct", *(entry["id"] for entry in entries)]
+    order = list(dict.fromkeys(item for item in stored.get("order", []) if item in ids))
+    order.extend(item for item in ids if item not in order)
+    return {"enabled": bool(stored.get("enabled")), "entries": entries, "order": order,
             "platforms": {p: bool(stored.get("platforms", {}).get(p, True)) for p in PLATFORMS}}
 
 
@@ -79,17 +85,33 @@ def public_config(config: dict) -> dict:
     return {**config, "entries": [public_entry(entry) for entry in config["entries"]]}
 
 
-async def choose_proxy(session, platform: str, redis=None) -> str | None:
+async def collection_routes(session, platform: str) -> list[str | None]:
+    if session is None:
+        return [None]
     config = await get_config(session)
     if not config["enabled"] or not config["platforms"].get(str(platform), True):
-        return None
-    entries = [entry for entry in config["entries"] if entry.get("enabled")]
-    if not entries:
-        raise CollectorError("代理池已启用，但没有可用的代理，请在管理端添加或启用代理")
-    index = next(_cursor)
-    if redis is not None and hasattr(redis, "incr"):
-        index = int(await redis.incr("anisignal:collector-proxy:cursor")) - 1
-    return proxy_url(entries[index % len(entries)])
+        return [None]
+    entries = {entry["id"]: entry for entry in config["entries"] if entry.get("enabled")}
+    return [None if key == "direct" else proxy_url(entries[key])
+            for key in config["order"] if key == "direct" or key in entries]
+
+
+async def fetch_with_fallback(collector, session, platform: str, fetch):
+    """只重试读取，不重复入库或后处理。每个出口至多尝试一轮。"""
+    last_error = None
+    routes = await collection_routes(session, platform)
+    for index, url in enumerate(routes):
+        configure_collector(collector, url)
+        try:
+            return await fetch()
+        except CollectorDeferred as exc:
+            # 冷却中的出口不发请求；保留真实失败，避免它被后续冷却覆盖。
+            last_error = last_error or exc
+        except (CollectorError, httpx.HTTPError, TimeoutError) as exc:
+            exc.args = (redact_proxy(str(exc), url),)
+            last_error = exc
+            logger.warning("%s collection exit %d/%d failed: %s", platform, index + 1, len(routes), type(exc).__name__)
+    raise last_error
 
 
 def configure_collector(collector, url: str | None) -> None:
