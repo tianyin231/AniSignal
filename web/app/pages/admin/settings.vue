@@ -304,9 +304,9 @@ async function saveTexts() {
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h1 class="text-lg font-semibold">站点设置</h1>
-      <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
+    <div class="wall-heading">
+      <h1 class="text-2xl font-bold">站点设置</h1>
+      <p class="mt-0.5 text-sm text-muted">
         OnePush、SMTP 发信、全服公告与各页面文案区域；保存即生效，无需重启。
       </p>
     </div>
@@ -321,7 +321,7 @@ async function saveTexts() {
     <!-- SMTP -->
     <section class="panel p-5">
       <h2 class="flex items-center gap-2 text-sm font-semibold"><Mail :size="15" /> 邮件发送（SMTP）</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+      <p class="mt-1 text-xs leading-relaxed text-muted">
         未配置时验证码只落库：管理端「验证码」列表可查注册码，密码重置码不再回传（等于账号接管凭证），所以找回密码需要配置 SMTP。
         <template v-if="smtpInfo?.password_set">
           当前密码：已设置（来源 {{ smtpInfo.password_source === 'db' ? '本页' : '环境变量' }}），留空保存则保留。
@@ -329,27 +329,27 @@ async function saveTexts() {
       </p>
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div>
-          <label for="smtp-host" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">SMTP 服务器</label>
+          <label for="smtp-host" class="block text-xs font-medium text-muted">SMTP 服务器</label>
           <input id="smtp-host" v-model="smtp.host" placeholder="如 smtp.qq.com" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
-          <label for="smtp-port" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">端口</label>
+          <label for="smtp-port" class="block text-xs font-medium text-muted">端口</label>
           <input id="smtp-port" v-model.number="smtp.port" type="number" class="input mono mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
-          <label for="smtp-user" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">账号</label>
+          <label for="smtp-user" class="block text-xs font-medium text-muted">账号</label>
           <input id="smtp-user" v-model="smtp.user" autocomplete="username" placeholder="xxx@qq.com" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
-          <label for="smtp-password" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">密码 / 授权码</label>
+          <label for="smtp-password" class="block text-xs font-medium text-muted">密码 / 授权码</label>
           <input id="smtp-password" v-model="smtp.password" type="password" autocomplete="new-password" placeholder="留空 = 保留已存密码" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div class="sm:col-span-2">
-          <label for="smtp-from" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">发件人（From）</label>
-          <input id="smtp-from" v-model="smtp.from" placeholder="AniSignal <noreply@example.com>" class="mt-1 w-full rounded-md border border-slate-900/10 bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15 dark:bg-white/5">
+          <label for="smtp-from" class="block text-xs font-medium text-muted">发件人（From）</label>
+          <input id="smtp-from" v-model="smtp.from" placeholder="AniSignal <noreply@example.com>" class="mt-1 w-full rounded-md border border-line bg-white/70 px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-chip/60">
         </div>
         <div class="sm:col-span-2">
-          <label for="smtp-tls-mode" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">连接加密</label>
+          <label for="smtp-tls-mode" class="block text-xs font-medium text-muted">连接加密</label>
           <select id="smtp-tls-mode" v-model="smtp.tls_mode" class="select mt-1 w-full px-3 py-2 text-sm sm:w-72">
             <option value="starttls">STARTTLS（通常使用 587）</option>
             <option value="tls">SSL/TLS（通常使用 465）</option>
@@ -363,7 +363,7 @@ async function saveTexts() {
         </button>
         <label for="smtp-test-to" class="sr-only">测试收件邮箱</label>
         <input id="smtp-test-to" v-model="testTo" type="email" placeholder="测试收件邮箱" class="input min-h-11 w-52 px-3 py-2 text-sm">
-        <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-slate-900/10 px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15" :disabled="busy || !loaded || loadFailed || !testTo.trim()" @click="sendTest">
+        <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-line px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy || !loaded || loadFailed || !testTo.trim()" @click="sendTest">
           <Send :size="14" /> {{ busyWhat === 'sendTest' ? '发送中…' : '发送测试邮件' }}
         </button>
         <span v-if="testResult" class="text-xs" :class="testResult.includes('失败') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ testResult }}</span>
@@ -373,7 +373,7 @@ async function saveTexts() {
       <div class="flex items-center justify-between gap-3">
         <div>
           <h2 class="text-sm font-semibold">媒体可见性</h2>
-          <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">
+          <p class="mt-0.5 text-xs text-muted">
             按平台控制封面图片与来源链接的展示；全站默认对未单独设置的平台生效，保存即生效。
           </p>
         </div>
@@ -383,15 +383,15 @@ async function saveTexts() {
       </div>
       <table class="mt-4 w-full text-sm">
         <thead>
-          <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+          <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
             <th class="px-3 py-2 font-medium">范围</th>
             <th class="px-3 py-2 font-medium">图片</th>
             <th class="px-3 py-2 font-medium">视频/来源链接</th>
           </tr>
         </thead>
         <tbody>
-          <tr class="border-b border-slate-900/5 dark:border-white/10">
-            <td class="px-3 py-2 font-medium text-slate-700 dark:text-zinc-200">全站默认</td>
+          <tr class="border-b border-line-soft dark:border-line">
+            <td class="px-3 py-2 font-medium text-ink-2">全站默认</td>
             <td class="px-3 py-2">
               <select v-model="mediaVisibility.default.image" class="select px-2 py-1.5 text-xs">
                 <option value="show">显示图片</option>
@@ -407,8 +407,8 @@ async function saveTexts() {
               </select>
             </td>
           </tr>
-          <tr v-for="p in PLATFORM_MEDIA" :key="p.key" class="border-b border-slate-900/5 last:border-0 dark:border-white/10">
-            <td class="px-3 py-2 text-slate-700 dark:text-zinc-200">{{ p.label }}</td>
+          <tr v-for="p in PLATFORM_MEDIA" :key="p.key" class="border-b border-line-soft last:border-0 dark:border-line">
+            <td class="px-3 py-2 text-ink-2">{{ p.label }}</td>
             <td class="px-3 py-2">
               <select
                 :value="platformMode(p.key, 'image')"
@@ -442,12 +442,12 @@ async function saveTexts() {
     <!-- OnePush -->
     <section class="panel p-5">
       <h2 class="flex items-center gap-2 text-sm font-semibold"><BellRing :size="15" /> OnePush 全站推送</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+      <p class="mt-1 text-xs leading-relaxed text-muted">
         全站共用一个管理员推送通道，适合 Bark、PushPlus、Server 酱、企业微信等。
         参数按 OnePush YAML 格式填写；保存后不会回显 token、key 等敏感值。
         <a href="https://github.com/LmeSzinc/AzurLaneAutoScript/wiki/Onepush-configuration-%5BCN%5D" target="_blank" rel="noopener noreferrer" class="link rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">查看配置说明</a>
       </p>
-      <div v-if="onepushInfo?.configured" class="mt-3 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-slate-600 dark:text-zinc-300">
+      <div v-if="onepushInfo?.configured" class="mt-3 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-ink-2">
         当前 provider：<span class="mono font-medium text-blue-700 dark:text-blue-300">{{ onepushInfo.provider }}</span>
         <template v-if="onepushInfo.fields.length"> · 已保存字段：{{ onepushInfo.fields.join('、') }}</template>
       </div>
@@ -456,7 +456,7 @@ async function saveTexts() {
         启用 OnePush 自动发送
       </label>
       <div class="mt-3">
-        <label for="onepush-config" class="block text-xs font-medium text-slate-500 dark:text-zinc-400">OnePush YAML 配置</label>
+        <label for="onepush-config" class="block text-xs font-medium text-muted">OnePush YAML 配置</label>
         <textarea
           id="onepush-config"
           v-model="onepush.config_yaml"
@@ -465,13 +465,13 @@ async function saveTexts() {
           placeholder="provider: bark&#10;key: YOUR_BARK_KEY"
           class="textarea mono mt-1 w-full px-3 py-2 text-sm leading-relaxed"
         />
-        <p class="mt-1.5 text-xs text-slate-500 dark:text-zinc-400">已配置时留空保存会保留原参数；关闭开关只停止自动发送，仍可执行测试。</p>
+        <p class="mt-1.5 text-xs text-muted">已配置时留空保存会保留原参数；关闭开关只停止自动发送，仍可执行测试。</p>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <button class="btn-primary inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy || !loaded || loadFailed" @click="saveOnepush">
           <Save :size="14" /> {{ busyWhat === 'saveOnepush' ? '保存中…' : '保存 OnePush' }}
         </button>
-        <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-slate-900/10 px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-white/15" :disabled="busy || !loaded || loadFailed || !onepushInfo?.configured" @click="testOnepush">
+        <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-line px-4 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" :disabled="busy || !loaded || loadFailed || !onepushInfo?.configured" @click="testOnepush">
           <Send :size="14" /> {{ busyWhat === 'testOnepush' ? '发送中…' : '发送测试推送' }}
         </button>
         <span v-if="onepushTestResult" class="text-xs" :class="onepushTestResult.includes('失败') || onepushTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ onepushTestResult }}</span>
@@ -481,28 +481,28 @@ async function saveTexts() {
     <!-- AI / LLM -->
     <section class="panel p-5">
       <h2 class="text-sm font-semibold">AI 层（LLM）</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+      <p class="mt-1 text-xs leading-relaxed text-muted">
         OpenAI 兼容接口。配置后自动为事件生成中文摘要与关键事实、翻译国际服公告；
         未配置时这些任务安全跳过，不影响采集。
       </p>
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">Base URL（如 https://api.deepseek.com/v1）</label>
+          <label class="block text-xs font-medium text-muted">Base URL（如 https://api.deepseek.com/v1）</label>
           <input v-model="ai.base_url" placeholder="https://api.example.com/v1" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">模型名（如 deepseek-chat）</label>
+          <label class="block text-xs font-medium text-muted">模型名（如 deepseek-chat）</label>
           <input v-model="ai.model" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">API Key（留空 = 保留已存）</label>
+          <label class="block text-xs font-medium text-muted">API Key（留空 = 保留已存）</label>
           <input v-model="ai.api_key" type="password" placeholder="sk-…" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <button class="btn-primary px-4 py-2" :disabled="busy || !loaded || loadFailed" @click="saveAi">{{ busyWhat === 'saveAi' ? '保存中…' : '保存 LLM 配置' }}</button>
-        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy || !loaded || loadFailed" @click="testAi">{{ busyWhat === 'testAi' ? '测试中…' : '连通测试' }}</button>
-        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy || !loaded || loadFailed" @click="summarizeAll">{{ busyWhat === 'summarizeAll' ? '执行中…' : '批量补事件摘要' }}</button>
+        <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy || !loaded || loadFailed" @click="testAi">{{ busyWhat === 'testAi' ? '测试中…' : '连通测试' }}</button>
+        <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy || !loaded || loadFailed" @click="summarizeAll">{{ busyWhat === 'summarizeAll' ? '执行中…' : '批量补事件摘要' }}</button>
         <span v-if="aiTestResult" class="text-xs" :class="aiTestResult.includes('失败') || aiTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ aiTestResult }}</span>
       </div>
     </section>
@@ -510,7 +510,7 @@ async function saveTexts() {
     <!-- 全服公告 -->
     <section class="panel p-5">
       <h2 class="flex items-center gap-2 text-sm font-semibold"><Megaphone :size="14" /> 全服公告</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+      <p class="mt-1 text-xs leading-relaxed text-muted">
         启用后全站顶部显示横幅（访客可关闭）；文本为空时自动不显示。
       </p>
       <div class="mt-4 space-y-3">
@@ -519,7 +519,7 @@ async function saveTexts() {
             <input v-model="announcement.enabled" type="checkbox" class="checkbox"> 启用公告
           </label>
           <div class="flex items-center gap-2 text-sm">
-            <span class="text-xs text-slate-500 dark:text-zinc-400">级别</span>
+            <span class="text-xs text-muted">级别</span>
             <select v-model="announcement.level" class="select px-2 py-1.5 text-sm">
               <option value="info">通知（蓝）</option>
               <option value="warning">警示（琥珀）</option>
@@ -538,7 +538,7 @@ async function saveTexts() {
       <h2 class="text-sm font-semibold">页面文案区域</h2>
       <div class="mt-4 space-y-3">
         <div v-for="(label, key) in TEXT_LABELS" :key="key">
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">{{ label }}（{{ key }}）</label>
+          <label class="block text-xs font-medium text-muted">{{ label }}（{{ key }}）</label>
           <textarea v-model="texts[key]" rows="2" class="textarea mt-1 w-full px-3 py-2 text-sm" />
         </div>
       </div>

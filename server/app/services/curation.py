@@ -679,7 +679,12 @@ def _match_product_context(
 
 
 async def _load_tracked_products(session: AsyncSession) -> list[dict]:
-    rows = await session.execute(select(Product.id, Product.name, Product.watch_terms, Product.community))
+    """只有窗口开着的商品进入每条内容的履约审核。归档商品仍可由泛搜索命中后按规则挂回。"""
+    rows = await session.execute(
+        select(Product.id, Product.name, Product.watch_terms, Product.community).where(
+            Product.monitor_status == "watching",
+        )
+    )
     products = []
     for pid, name, terms, community in rows:
         term_list = [t for t in (terms or []) if isinstance(t, str) and len(t.strip()) >= 2]

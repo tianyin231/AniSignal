@@ -54,7 +54,7 @@ onMounted(load)
 
 <template>
   <div class="space-y-6">
-    <header class="flex items-center justify-between"><div><h1 class="text-2xl font-bold text-ink">AI 新闻引擎</h1><p class="mt-2 text-sm text-muted">{{ data?.read_enabled ? '网页与 Bot 正在读取原版发布层' : '对照运行，尚未切换公开数据' }} · {{ data?.upstream }}</p></div><button class="rounded-lg border border-line px-4 py-2 text-sm text-ink" @click="load">刷新</button></header>
+    <header class="wall-heading flex items-center justify-between"><div><h1 class="text-2xl font-bold text-ink">AI 新闻引擎</h1><p class="mt-2 text-sm text-muted">{{ data?.read_enabled ? '网页与 Bot 正在读取原版发布层' : '对照运行，尚未切换公开数据' }} · {{ data?.upstream }}</p></div><button class="rounded-lg border border-line px-4 py-2 text-sm text-ink" @click="load">刷新</button></header>
     <p v-if="error" class="panel p-5 text-warn">{{ error }}</p>
     <p v-if="data && !data.enabled" class="panel p-5 text-muted">引擎尚未配置。</p>
     <template v-if="data?.enabled">

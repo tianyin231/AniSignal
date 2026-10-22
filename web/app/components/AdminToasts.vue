@@ -11,7 +11,7 @@ const tone = (type: string) =>
 </script>
 
 <template>
-  <div class="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2">
+  <div class="pointer-events-none fixed bottom-20 right-4 z-50 flex w-80 flex-col gap-2 lg:bottom-4">
     <TransitionGroup name="toast">
       <div
         v-for="t in toasts"

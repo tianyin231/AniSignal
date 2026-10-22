@@ -102,10 +102,10 @@ async function reparseAll() {
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
+    <div class="wall-heading flex items-center justify-between">
       <div>
-        <h1 class="text-lg font-semibold">分类词典</h1>
-        <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
+        <h1 class="text-2xl font-bold">分类词典</h1>
+        <p class="mt-0.5 text-sm text-muted">
           标题/正文命中的关键词 → 类目；数字越小优先级越高。修改后需「全量重算」生效。
         </p>
       </div>
@@ -130,7 +130,7 @@ async function reparseAll() {
     <div class="panel overflow-x-auto">
       <table class="w-full min-w-xl text-sm">
         <thead>
-          <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+          <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
             <th class="px-4 py-2.5 font-medium">优先级</th>
             <th class="px-3 py-2.5 font-medium">关键词</th>
             <th class="px-3 py-2.5 font-medium">类目</th>
@@ -140,18 +140,18 @@ async function reparseAll() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="rule in rules" :key="rule.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5" :class="{ 'opacity-40': !rule.enabled }">
+          <tr v-for="rule in rules" :key="rule.id" class="border-b border-line-soft last:border-0" :class="{ 'opacity-40': !rule.enabled }">
             <td class="mono px-4 py-2.5">{{ rule.priority }}</td>
             <td class="px-3 py-2.5 font-medium">{{ rule.pattern }}</td>
             <td class="px-3 py-2.5">{{ categoryLabels[rule.category] ?? rule.category }}</td>
-            <td class="px-3 py-2.5 text-slate-500 dark:text-zinc-400">{{ rule.platform ?? '全部' }}</td>
+            <td class="px-3 py-2.5 text-muted">{{ rule.platform ?? '全部' }}</td>
             <td class="px-3 py-2.5">
-              <span class="chip" :class="rule.enabled ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-slate-500/10 text-slate-400'">
+              <span class="chip" :class="rule.enabled ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-chip text-faint'">
                 {{ rule.enabled ? '启用' : '停用' }}
               </span>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-right">
-              <button class="rounded px-2 py-1 text-xs text-slate-500 hover:underline dark:text-zinc-400" :disabled="busy" @click="toggle(rule)">{{ rule.enabled ? '停用' : '启用' }}</button>
+              <button class="rounded px-2 py-1 text-xs text-muted hover:underline" :disabled="busy" @click="toggle(rule)">{{ rule.enabled ? '停用' : '启用' }}</button>
               <button class="rounded px-2 py-1 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busy" @click="remove(rule)">删除</button>
             </td>
           </tr>

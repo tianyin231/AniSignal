@@ -204,10 +204,10 @@ async function splitSelectedEvidence() {
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center justify-between">
+    <div class="wall-heading flex items-center justify-between">
       <div>
-        <h1 class="text-lg font-semibold">事件审核</h1>
-        <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
+        <h1 class="text-2xl font-bold">事件审核</h1>
+        <p class="mt-0.5 text-sm text-muted">
           引擎自动聚合，人工复核后编辑会自动锁定（引擎不再覆盖）。共 {{ total }} 条。
         </p>
       </div>
@@ -226,24 +226,24 @@ async function splitSelectedEvidence() {
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
     <div class="grid gap-6 xl:grid-cols-[1fr_360px]">
-      <div class="panel divide-y divide-slate-900/5 dark:divide-white/10">
+      <div class="panel divide-y divide-line-soft dark:divide-line">
         <div
           v-for="event in events"
           :key="event.id"
           class="cursor-pointer px-4 py-3 transition-colors"
-          :class="selected?.id === event.id ? 'bg-blue-500/5' : 'hover:bg-slate-900/[0.04] dark:hover:bg-white/5'"
+          :class="selected?.id === event.id ? 'bg-blue-500/5' : 'hover:bg-chip/60'"
           @click="pick(event)"
         >
           <div class="flex items-start justify-between gap-3">
-            <p class="min-w-0 truncate text-sm font-medium text-slate-800 dark:text-zinc-200">
+            <p class="min-w-0 truncate text-sm font-medium text-ink dark:text-ink-2">
               {{ event.title }}
               <span v-if="event.importance" class="chip ml-1 bg-red-500/10 text-red-600 dark:text-red-400">重要</span>
-              <span class="mono ml-1 text-xs font-normal text-slate-400">#{{ event.id }}</span>
+              <span class="mono ml-1 text-xs font-normal text-faint">#{{ event.id }}</span>
             </p>
-            <span class="mono shrink-0 text-xs text-slate-400">{{ fmtTime(event.updated_at) }}</span>
+            <span class="mono shrink-0 text-xs text-faint">{{ fmtTime(event.updated_at) }}</span>
           </div>
-          <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-400 dark:text-zinc-500">
-            <span class="text-slate-600 dark:text-zinc-300">{{ categoryMeta[event.category]?.label ?? event.category }}</span>
+          <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-faint">
+            <span class="text-ink-2">{{ categoryMeta[event.category]?.label ?? event.category }}</span>
             <span aria-hidden="true">·</span>
             <span>证据 {{ event.evidence_count }}</span>
             <span aria-hidden="true">·</span>
@@ -254,19 +254,19 @@ async function splitSelectedEvidence() {
             <span aria-hidden="true">·</span>
             <span
               class="rounded px-1.5 py-0.5"
-              :class="event.summary_status === 'fallback' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : event.summary_status === 'ai' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+              :class="event.summary_status === 'fallback' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : event.summary_status === 'ai' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300' : 'bg-chip text-muted'"
             >{{ summaryLabels[event.summary_status ?? ''] ?? '未生成' }}</span>
             <span aria-hidden="true">·</span>
-            <button class="hover:underline" :class="event.importance ? 'text-red-500 dark:text-red-400' : 'text-slate-400'" :disabled="busy" :title="event.importance ? '点击取消置顶' : '置顶到要闻最前'" @click.stop="togglePin(event)">
+            <button class="hover:underline" :class="event.importance ? 'text-red-500 dark:text-red-400' : 'text-faint'" :disabled="busy" :title="event.importance ? '点击取消置顶' : '置顶到要闻最前'" @click.stop="togglePin(event)">
               {{ event.importance ? '★ 已置顶' : '☆ 置顶' }}
             </button>
             <span aria-hidden="true">·</span>
-            <button class="hover:underline" :class="event.manual_locked ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'" :disabled="busy" @click.stop="toggleLock(event)">
+            <button class="hover:underline" :class="event.manual_locked ? 'text-amber-600 dark:text-amber-400' : 'text-faint'" :disabled="busy" @click.stop="toggleLock(event)">
               {{ event.manual_locked ? '已锁定 解锁' : '未锁定' }}
             </button>
           </div>
         </div>
-        <div v-if="!events.length" class="px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">
+        <div v-if="!events.length" class="px-4 py-10 text-center text-sm text-faint">
           暂无事件。
         </div>
       </div>
@@ -276,13 +276,13 @@ async function splitSelectedEvidence() {
           <h2 class="text-sm font-semibold">编辑事件 #{{ selected.id }}</h2>
           <NuxtLink :to="`/events/${selected.id}`" target="_blank" class="link text-xs">公开页 ↗</NuxtLink>
         </div>
-        <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">标题</label>
+        <label class="block text-xs font-medium text-muted">标题</label>
         <input v-model="edit.title" class="input w-full px-3 py-2 text-sm">
-        <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">结论</label>
+        <label class="block text-xs font-medium text-muted">结论</label>
         <textarea v-model="edit.conclusion" rows="3" class="textarea w-full px-3 py-2 text-sm" />
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">可信度</label>
+            <label class="block text-xs font-medium text-muted">可信度</label>
             <select v-model="edit.confidence" class="select mt-1 w-full px-3 py-2 text-sm">
               <option value="high">high</option>
               <option value="medium">medium</option>
@@ -290,7 +290,7 @@ async function splitSelectedEvidence() {
             </select>
           </div>
           <div>
-            <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">状态标签</label>
+            <label class="block text-xs font-medium text-muted">状态标签</label>
             <input v-model="edit.status_label" class="input mt-1 w-full px-3 py-2 text-sm">
           </div>
         </div>
@@ -299,38 +299,38 @@ async function splitSelectedEvidence() {
         </label>
         <button class="btn-primary w-full px-4 py-2" :disabled="busy" @click="save">保存（自动锁定）</button>
 
-        <div class="space-y-2 border-t border-slate-900/10 pt-3 dark:border-white/10">
+        <div class="space-y-2 border-t border-line pt-3">
           <div class="flex items-center justify-between">
-            <label class="text-xs font-medium text-slate-500 dark:text-zinc-400">摘要质量</label>
+            <label class="text-xs font-medium text-muted">摘要质量</label>
             <span
               class="chip"
-              :class="selected.summary_status === 'fallback' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : selected.summary_status === 'ai' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300' : 'bg-slate-500/10 text-slate-500 dark:text-zinc-400'"
+              :class="selected.summary_status === 'fallback' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : selected.summary_status === 'ai' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-300' : 'bg-chip text-muted'"
             >{{ summaryLabels[selected.summary_status ?? ''] ?? '未生成' }}</span>
           </div>
-          <p class="rounded-md bg-slate-900/[0.03] px-3 py-2 text-sm leading-6 dark:bg-white/5">
+          <p class="rounded-md bg-chip/60 px-3 py-2 text-sm leading-6">
             {{ selected.summary || '当前没有摘要。' }}
           </p>
-          <p class="text-xs text-slate-500 dark:text-zinc-400">
+          <p class="text-xs text-muted">
             {{ selected.evidence_count }} 条证据 · 生成于 {{ fmtTime(selected.summary_updated_at) }}
           </p>
-          <button class="min-h-11 w-full rounded-md border border-slate-900/10 px-3 py-2 text-sm dark:border-white/15" :disabled="busy" @click="regenerateSummary">
+          <button class="min-h-11 w-full rounded-md border border-line px-3 py-2 text-sm" :disabled="busy" @click="regenerateSummary">
             {{ busyAction === 'summary' ? '生成中…' : '重新生成摘要' }}
           </button>
         </div>
 
-        <div class="space-y-2 border-t border-slate-900/10 pt-3 dark:border-white/10">
+        <div class="space-y-2 border-t border-line pt-3">
           <div class="flex items-center justify-between">
-            <label class="text-xs font-medium text-slate-500 dark:text-zinc-400">证据处理</label>
-            <span class="mono text-xs text-slate-400">已选 {{ splitEvidenceIds.length }}</span>
+            <label class="text-xs font-medium text-muted">证据处理</label>
+            <span class="mono text-xs text-faint">已选 {{ splitEvidenceIds.length }}</span>
           </div>
-          <p class="text-xs leading-5 text-slate-500 dark:text-zinc-400">应独立成事件的证据请选择“拆分”；无关内容请选择“移除”。</p>
+          <p class="text-xs leading-5 text-muted">应独立成事件的证据请选择“拆分”；无关内容请选择“移除”。</p>
           <div class="max-h-72 space-y-2 overflow-y-auto pr-1">
-            <div v-for="source in evidences" :key="`${source.role}-${source.content_id}`" class="rounded-md border border-slate-900/10 p-2.5 dark:border-white/10">
+            <div v-for="source in evidences" :key="`${source.role}-${source.content_id}`" class="rounded-md border border-line p-2.5">
               <div class="flex items-start gap-2">
                 <input v-if="source.content_id" v-model="splitEvidenceIds" type="checkbox" :value="source.content_id" class="checkbox mt-1" :disabled="busy" :aria-label="`选择证据内容 #${source.content_id}`">
                 <div class="min-w-0 flex-1">
                   <p class="truncate text-sm font-medium">{{ source.title || `内容 #${source.content_id}` }}</p>
-                  <p class="mt-0.5 text-xs text-slate-500 dark:text-zinc-400">
+                  <p class="mt-0.5 text-xs text-muted">
                     {{ source.platform }} · {{ source.account || '未知来源' }} · {{ fmtTime(source.published_at) }}
                     <span v-if="source.role === 'conflict'" class="ml-1 text-red-500">冲突证据</span>
                   </p>
@@ -351,21 +351,21 @@ async function splitSelectedEvidence() {
           >{{ busyAction === 'split' ? '拆分中…' : `拆分所选证据（${splitEvidenceIds.length}）` }}</button>
         </div>
 
-        <div class="border-t border-slate-900/10 pt-3 dark:border-white/10">
-          <p class="text-xs text-slate-500 dark:text-zinc-400">
+        <div class="border-t border-line pt-3">
+          <p class="text-xs text-muted">
             修正历史：{{ selected.corrections.length }} 条（最近：{{ selected.corrections.at(-1)?.note?.slice(0, 40) ?? '—' }}）
           </p>
         </div>
 
-        <div class="border-t border-slate-900/10 pt-3 dark:border-white/10">
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">合并其他事件进来</label>
+        <div class="border-t border-line pt-3">
+          <label class="block text-xs font-medium text-muted">合并其他事件进来</label>
           <div class="mt-1 flex gap-2">
             <input v-model="mergeSource" type="number" placeholder="源事件 ID" class="input mono w-full px-3 py-2 text-sm">
-            <button class="shrink-0 rounded-md border border-slate-900/10 px-3 py-2 text-sm dark:border-white/15" :disabled="busy || !mergeSource" @click="merge">合并</button>
+            <button class="shrink-0 rounded-md border border-line px-3 py-2 text-sm" :disabled="busy || !mergeSource" @click="merge">合并</button>
           </div>
         </div>
       </div>
-      <div v-else class="panel px-4 py-10 text-center text-sm text-slate-400 dark:text-zinc-500">
+      <div v-else class="panel px-4 py-10 text-center text-sm text-faint">
         从左侧选择一个事件进行复核或修正。
       </div>
     </div>

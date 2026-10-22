@@ -164,6 +164,7 @@ async def events_to_out(
 async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
     """商品公开视图：结论只来自已核验履约信号，旧事件仅作证据目录。"""
     from app.services.fulfillment import build_fulfillment_snapshot, list_product_signals, load_product_signal_data
+    from app.services.product_discovery import public_brief
 
     signal_data = await load_product_signal_data(session, product.id)
     fulfillment = await build_fulfillment_snapshot(session, product.id, signal_data=signal_data)
@@ -267,6 +268,9 @@ async def product_to_out(session: AsyncSession, product: Product) -> ProductOut:
         original_ship_at=product.original_ship_at,
         ship_note=product.ship_note,
         watch_terms=(product.watch_terms or []),
+        monitor_status=product.monitor_status or "watching",
+        source_url=product.source_url,
+        brief=public_brief(product, fulfillment, signals),
         monitor=monitor,
         stage_hint=-1,
         current_stage=effective,

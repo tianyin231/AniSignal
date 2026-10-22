@@ -42,6 +42,8 @@ from app.schemas.api import (
     EventUpdate,
     OverviewOut,
     ProductCreate,
+    ProductCandidateListOut,
+    ProductCandidateOut,
     ProductListOut,
     ProductOut,
     ProductSignalListOut,
@@ -876,6 +878,64 @@ async def update_product(
         )
         await session.flush()
         await run_aggregation(session, product_snapshots={product_id: before})
+    await session.commit()
+    await session.refresh(product)
+    return await product_to_out(session, product)
+
+
+@router.get("/product-candidates", response_model=ProductCandidateListOut)
+async def list_product_candidates(
+    status_filter: str = Query(default="pending", alias="status", pattern="^(pending|accepted|ignored)$"),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.models import ProductCandidate
+
+    rows = list(await session.scalars(
+        select(ProductCandidate).where(ProductCandidate.status == status_filter).order_by(ProductCandidate.id.desc()).limit(100)
+    ))
+    return ProductCandidateListOut(items=[ProductCandidateOut.model_validate(row, from_attributes=True) for row in rows])
+
+
+@router.post("/product-candidates/{candidate_id}/accept", response_model=ProductOut)
+async def accept_product_candidate_route(
+    candidate_id: int, session: AsyncSession = Depends(get_session),
+):
+    from app.services.product_discovery import accept_product_candidate
+
+    try:
+        product = await accept_product_candidate(session, candidate_id)
+    except ValueError as exc:
+        code = status.HTTP_404_NOT_FOUND if str(exc) == "candidate_not_found" else status.HTTP_409_CONFLICT
+        raise HTTPException(code, str(exc)) from exc
+    return await product_to_out(session, product)
+
+
+@router.post("/product-candidates/{candidate_id}/ignore", response_model=ProductCandidateOut)
+async def ignore_product_candidate_route(
+    candidate_id: int, session: AsyncSession = Depends(get_session),
+):
+    from app.models import ProductCandidate
+    from app.services.product_discovery import ignore_product_candidate
+
+    try:
+        await ignore_product_candidate(session, candidate_id)
+    except ValueError as exc:
+        code = status.HTTP_404_NOT_FOUND if str(exc) == "candidate_not_found" else status.HTTP_409_CONFLICT
+        raise HTTPException(code, str(exc)) from exc
+    row = await session.get(ProductCandidate, candidate_id)
+    return ProductCandidateOut.model_validate(row, from_attributes=True)
+
+
+@router.post("/products/{product_id}/archive", response_model=ProductOut)
+async def archive_product_route(
+    product_id: int, session: AsyncSession = Depends(get_session),
+):
+    from app.services.product_discovery import archive_product
+
+    product = await session.get(Product, product_id, with_for_update=True)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "product not found")
+    await archive_product(session, product)
     await session.commit()
     await session.refresh(product)
     return await product_to_out(session, product)

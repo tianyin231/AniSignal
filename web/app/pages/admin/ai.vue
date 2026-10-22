@@ -123,9 +123,9 @@ async function translateMissing() {
 
 <template>
   <div class="space-y-6">
-    <div>
-      <h1 class="text-lg font-semibold">AI 层（LLM）</h1>
-      <p class="mt-0.5 text-sm text-slate-500 dark:text-zinc-400">
+    <div class="wall-heading">
+      <h1 class="text-2xl font-bold">AI 层（LLM）</h1>
+      <p class="mt-0.5 text-sm text-muted">
         配置 OpenAI 兼容接口，管理事件摘要与内容翻译任务，跟踪 token 消耗与费用。
       </p>
     </div>
@@ -133,20 +133,20 @@ async function translateMissing() {
     <!-- 状态卡 -->
     <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <div class="panel px-4 py-3">
-        <p class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400"><Bot :size="13" /> 模型</p>
+        <p class="flex items-center gap-1.5 text-xs text-muted"><Bot :size="13" /> 模型</p>
         <p class="mt-1 truncate text-sm font-semibold">{{ configView?.model || '未配置' }}</p>
-        <p class="mono mt-0.5 truncate text-[11px] text-slate-400">{{ configView?.base_url || '—' }}</p>
+        <p class="mono mt-0.5 truncate text-[11px] text-faint">{{ configView?.base_url || '—' }}</p>
       </div>
       <div class="panel px-4 py-3">
-        <p class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400"><Zap :size="13" /> {{ days }} 天调用</p>
+        <p class="flex items-center gap-1.5 text-xs text-muted"><Zap :size="13" /> {{ days }} 天调用</p>
         <p class="mono mt-1 text-xl font-semibold">{{ usage?.window.calls ?? '—' }}</p>
       </div>
       <div class="panel px-4 py-3">
-        <p class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400"><Cpu :size="13" /> {{ days }} 天 tokens</p>
+        <p class="flex items-center gap-1.5 text-xs text-muted"><Cpu :size="13" /> {{ days }} 天 tokens</p>
         <p class="mono mt-1 text-xl font-semibold">{{ usage?.window.total_tokens?.toLocaleString() ?? '—' }}</p>
       </div>
       <div class="panel px-4 py-3">
-        <p class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400"><Coins :size="13" /> {{ days }} 天费用</p>
+        <p class="flex items-center gap-1.5 text-xs text-muted"><Coins :size="13" /> {{ days }} 天费用</p>
         <p class="mono mt-1 text-xl font-semibold">{{ usage?.window.cost?.toFixed(4) ?? '—' }}</p>
       </div>
     </div>
@@ -154,42 +154,42 @@ async function translateMissing() {
     <!-- 配置 -->
     <section class="panel p-5">
       <h2 class="text-sm font-semibold">接口配置</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+      <p class="mt-1 text-xs leading-relaxed text-muted">
         API Key <template v-if="configView?.api_key_set">已设置（留空保存 = 保留）</template><template v-else>未设置</template>；
         定价用于费用估算（每百万 token 单价，输入/输出分开），填 0 则费用记 0。
       </p>
       <div class="mt-4 grid gap-3 sm:grid-cols-2">
         <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">Base URL</label>
+          <label class="block text-xs font-medium text-muted">Base URL</label>
           <input v-model="config.base_url" placeholder="https://api.deepseek.com/v1" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">模型名</label>
+          <label class="block text-xs font-medium text-muted">模型名</label>
           <input v-model="config.model" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">API Key（留空保留）</label>
+          <label class="block text-xs font-medium text-muted">API Key（留空保留）</label>
           <input v-model="config.api_key" type="password" placeholder="sk-…" class="input mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">
+          <label class="block text-xs font-medium text-muted">
             密钥池（每行一个，留空保存 = 保留现有池）
             <template v-if="configView?.api_keys_count"> · 当前 {{ configView.api_keys_count }} 把（尾号 {{ configView.api_keys_tail.join(' / ') }}）</template>
           </label>
           <textarea v-model="config.api_keys" rows="3" placeholder="sk-…（每行一个，请求时自动轮询分摊，命中限流自动换下一把）" class="input mono mt-1 w-full px-3 py-2 text-sm"></textarea>
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">输入单价（/百万 tokens）</label>
+          <label class="block text-xs font-medium text-muted">输入单价（/百万 tokens）</label>
           <input v-model.number="config.price_in" type="number" step="0.1" min="0" class="input mono mt-1 w-full px-3 py-2 text-sm">
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 dark:text-zinc-400">输出单价（/百万 tokens）</label>
+          <label class="block text-xs font-medium text-muted">输出单价（/百万 tokens）</label>
           <input v-model.number="config.price_out" type="number" step="0.1" min="0" class="input mono mt-1 w-full px-3 py-2 text-sm">
         </div>
       </div>
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveConfig">{{ busyWhat === 'save' ? '保存中…' : '保存配置' }}</button>
-        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="runTest">{{ busyWhat === 'test' ? '测试中…' : '连通测试' }}</button>
+        <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy" @click="runTest">{{ busyWhat === 'test' ? '测试中…' : '连通测试' }}</button>
         <span v-if="testResult" class="text-xs" :class="testResult.includes('失败') || testResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ testResult }}</span>
       </div>
     </section>
@@ -199,12 +199,12 @@ async function translateMissing() {
     <!-- 批量任务 -->
     <section class="panel p-5">
       <h2 class="text-sm font-semibold">批量任务</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+      <p class="mt-1 text-xs leading-relaxed text-muted">
         平时事件摘要随采集自动触发；这里可后台补齐缺失与降级摘要，保留人工编辑和锁定内容。每批最多 200 条摘要或 50 条翻译，可稍后查看调用记录并继续补齐。翻译针对国际服公告与 YouTube 内容。
       </p>
       <div class="mt-3 flex flex-wrap gap-2">
         <button class="btn-primary px-4 py-2" :disabled="busy" @click="summarizeAll">{{ busyWhat === 'summarize' ? '执行中…' : '补事件摘要' }}</button>
-        <button class="rounded-md border border-slate-900/10 px-4 py-2 text-sm dark:border-white/15" :disabled="busy" @click="translateMissing">{{ busyWhat === 'translate' ? '执行中…' : '补内容翻译' }}</button>
+        <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy" @click="translateMissing">{{ busyWhat === 'translate' ? '执行中…' : '补内容翻译' }}</button>
       </div>
     </section>
 
@@ -220,18 +220,18 @@ async function translateMissing() {
         </select>
       </div>
       <div class="mt-3 grid grid-cols-2 gap-3">
-        <div class="rounded-xl bg-slate-500/5 px-4 py-3 dark:bg-white/5">
-          <p class="text-xs text-slate-500 dark:text-zinc-400">累计 tokens</p>
+        <div class="rounded-xl bg-chip/60 px-4 py-3">
+          <p class="text-xs text-muted">累计 tokens</p>
           <p class="mono mt-1 text-lg font-semibold">{{ usage?.all_time.total_tokens?.toLocaleString() ?? '—' }}</p>
         </div>
-        <div class="rounded-xl bg-slate-500/5 px-4 py-3 dark:bg-white/5">
-          <p class="text-xs text-slate-500 dark:text-zinc-400">累计费用</p>
+        <div class="rounded-xl bg-chip/60 px-4 py-3">
+          <p class="text-xs text-muted">累计费用</p>
           <p class="mono mt-1 text-lg font-semibold">{{ usage?.all_time.cost?.toFixed(4) ?? '—' }}</p>
         </div>
       </div>
       <table v-if="usage?.by_task?.length" class="mt-4 w-full text-sm">
         <thead>
-          <tr class="border-b border-slate-200 text-left text-xs text-slate-400 dark:border-zinc-800">
+          <tr class="border-b border-line text-left text-xs text-faint">
             <th class="py-2 pr-3 font-medium">任务</th>
             <th class="py-2 pr-3 font-medium">调用</th>
             <th class="py-2 pr-3 font-medium">输入</th>
@@ -242,7 +242,7 @@ async function translateMissing() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="t in usage.by_task" :key="t.task" class="border-b border-slate-100 last:border-0 dark:border-zinc-800/60">
+          <tr v-for="t in usage.by_task" :key="t.task" class="border-b border-line-soft last:border-0">
             <td class="py-2 pr-3">{{ TASK_LABELS[t.task] ?? t.task }}</td>
             <td class="mono py-2 pr-3">{{ t.calls }}</td>
             <td class="mono py-2 pr-3">{{ t.prompt_tokens.toLocaleString() }}</td>
@@ -253,7 +253,7 @@ async function translateMissing() {
           </tr>
         </tbody>
       </table>
-      <p v-else class="mt-3 text-sm text-slate-400">暂无 AI 调用记录。</p>
+      <p v-else class="mt-3 text-sm text-faint">暂无 AI 调用记录。</p>
     </section>
 
     <!-- 最近调用 -->
@@ -261,7 +261,7 @@ async function translateMissing() {
       <div class="px-5 py-3.5"><h2 class="text-sm font-semibold">最近调用</h2></div>
       <table v-if="calls.length" class="w-full min-w-2xl text-sm">
         <thead>
-          <tr class="border-b border-slate-900/5 text-left text-xs text-slate-500 dark:border-white/10 dark:text-zinc-400">
+          <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
             <th class="px-4 py-2.5 font-medium">时间</th>
             <th class="px-3 py-2.5 font-medium">任务</th>
             <th class="px-3 py-2.5 font-medium">tokens</th>
@@ -271,10 +271,10 @@ async function translateMissing() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="c in calls" :key="c.id" class="border-b border-slate-900/5 last:border-0 dark:border-white/5">
+          <tr v-for="c in calls" :key="c.id" class="border-b border-line-soft last:border-0">
             <td class="mono whitespace-nowrap px-4 py-2.5 text-xs">{{ new Date(c.created_at.endsWith('Z') ? c.created_at : c.created_at + 'Z').toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) }}</td>
-            <td class="px-3 py-2.5">{{ TASK_LABELS[c.task] ?? c.task }}<span v-if="c.ref_id" class="mono ml-1 text-xs text-slate-400">#{{ c.ref_id }}</span></td>
-            <td class="mono px-3 py-2.5">{{ c.total_tokens.toLocaleString() }}<span class="ml-1 text-xs text-slate-400">({{ c.prompt_tokens }}+{{ c.completion_tokens }})</span></td>
+            <td class="px-3 py-2.5">{{ TASK_LABELS[c.task] ?? c.task }}<span v-if="c.ref_id" class="mono ml-1 text-xs text-faint">#{{ c.ref_id }}</span></td>
+            <td class="mono px-3 py-2.5">{{ c.total_tokens.toLocaleString() }}<span class="ml-1 text-xs text-faint">({{ c.prompt_tokens }}+{{ c.completion_tokens }})</span></td>
             <td class="mono px-3 py-2.5">{{ c.cost.toFixed(6) }}</td>
             <td class="mono px-3 py-2.5">{{ (c.duration_ms / 1000).toFixed(1) }}s</td>
             <td class="px-4 py-2.5">
@@ -283,7 +283,7 @@ async function translateMissing() {
           </tr>
         </tbody>
       </table>
-      <p v-else class="px-5 py-8 text-center text-sm text-slate-400">暂无记录。</p>
+      <p v-else class="px-5 py-8 text-center text-sm text-faint">暂无记录。</p>
     </section>
   </div>
 </template>
