@@ -67,11 +67,11 @@ async def _official(session, *, title, text="", identity="official", community="
 async def test_official_notice_automatically_opens_one_search(session, client, admin_headers, monkeypatch):
     monkeypatch.setattr(product_discovery, "get_ai_config", AsyncMock(return_value={
         "base_url": "https://example.com", "api_key": "test", "model": "test"}))
-    monkeypatch.setattr(product_discovery, "chat", AsyncMock(side_effect=[(json.dumps({"products": [{
+    monkeypatch.setattr(product_discovery, "chat", AsyncMock(side_effect=[('{"products":[]}', None), (json.dumps({"products": [{
         "name": "菲比手办", "product_type": "手办", "confidence": 96, "quote": "菲比手办开启预售",
         "price_note": "¥399", "presale_note": "预售将于下月开启", "ship_note": "预计八月发货",
         "facts": [{"signal_type": "presale_open", "confidence": 96, "quote": "菲比手办开启预售"}],
-    }]}, ensure_ascii=False), None), ('{"products":[]}', None)]))
+    }]}, ensure_ascii=False), None)]))
     await _official(
         session,
         title="菲比手办开启预售",

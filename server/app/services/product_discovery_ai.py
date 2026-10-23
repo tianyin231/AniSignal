@@ -20,7 +20,7 @@ MERCH_SYSTEM = """你是游戏周边商品编辑，负责自动建档与持续�
 输出 JSON {"products":[{"name":"菲比主题手办","product_type":"手办","aliases":["菲比手办"],
 "existing_product_id":null,"confidence":95,"quote":"包含具体商品名称的连续原文",
 "price_note":null,"presale_note":null,"balance_note":null,"ship_note":null,
-"expected_ship_at":null,"date_quote":null,"facts":[{"signal_type":"presale_open","confidence":95,"quote":"该商品预售的连续原文"}]}]}。
+"expected_ship_at":null,"date_quote":null,"search_keyword":"菲比 手办","image_ids":[],"facts":[{"signal_type":"presale_open","confidence":95,"quote":"该商品预售的连续原文"}]}]}。
 没有具体商品时 products=[]。name 使用原文商品名，aliases 给出原文叫法和一两个明确指向同款的常用简称，均须包含品类，禁止只填角色名。
 existing_products 是本分区已有档案。同款跨平台、翻译名和简称合并到 existing_product_id；不同型号、代际、联名对象、再版或发售批次不可误合并。无法确认同款时不填写已有 id。
 quote 必须逐字连续摘自 title 或 text 并包含商品标识；不能拼接字段。confidence 是商品识别的置信度，明确发布就直接确认，不泛化为待查证。
@@ -29,6 +29,9 @@ expected_ship_at 是明确发货时间窗口的末端，带时区 ISO 日期时�
 相对日期和未写年份的日期以 published_at 为基准，不以今天为基准；缺乏明确日期就 null。
 facts 逐商品判断，只记录原文直接支持的官方事实：presale_open（开放预售/公布预售安排）、balance_open（尾款安排）、delayed（延期）、shipping_started（已经发货）、aftersales_notice（售后说明）。
 未来预计发货不等于已经发货；发售公告不推断所有前置流程。每条事实独立摘录本商品的原文，其他商品的进展不可串用；没提及的事实不输出。
+images 是此官方内容的原站配图。image_ids 只选择能明确对应本商品的图片编号，最多六张；不同商品各选各的图，不把游戏版本封面、账号标志、抽奖奖品混作商品图。没有合适图片就 []，禁止编造 URL。
+图片用于识别商品配图；名称、价格、日期和 facts 的原文引文仍须来自输入 title/text，不能将图片 OCR 冒充正文。
+search_keyword 是用于寻找社区开箱/反馈的一路 B站搜索词，选角色或系列名加商品品类，词间用空格；不照抄冗长全称，不混入价格、日期和多余品牌词。
 只要求输出 JSON，不输出解释。"""
 
 
@@ -51,6 +54,8 @@ class MerchItem(BaseModel):
     ship_note: str | None = Field(default=None, max_length=2000)
     expected_ship_at: datetime | None = None
     date_quote: str | None = None
+    image_ids: list[int] = Field(default_factory=list, max_length=6)
+    search_keyword: str | None = Field(default=None, min_length=2, max_length=64, pattern=r"^[^-\x00-\x1f\x7f][^\x00-\x1f\x7f]*$")
     facts: list[MerchFact] = Field(default_factory=list, max_length=5)
 
 
@@ -63,10 +68,12 @@ def compact_name(value: str) -> str:
                    if not c.isspace() and not unicodedata.category(c).startswith(("P", "S")))
 
 
-def parse_merch_response(response: str, *, title: str, text: str, published_at: datetime) -> list[MerchItem]:
+def parse_merch_response(response: str, *, title: str, text: str, published_at: datetime, image_ids: set[int] | None = None) -> list[MerchItem]:
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", response.strip(), flags=re.I)
     result = MerchResult.model_validate(json.loads(cleaned))
     for item in result.products:
+        if any(type(image_id) is not int or image_id not in (image_ids or set()) for image_id in item.image_ids):
+            raise ValueError("商品图必须来自这条官方内容")
         if not is_grounded_quote(item.quote, title=title, text=text):
             raise ValueError("商品名称缺少原文依据")
         # 官方常把角色与品类分开写；允许 AI 组合名称，但主体与品类都必须在同段原文中。

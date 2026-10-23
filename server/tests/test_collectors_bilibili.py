@@ -157,6 +157,20 @@ async def test_enriches_empty_articles_but_skips_live_and_image_only(monkeypatch
     assert result[0]["text"] == "专栏补全"
 
 
+async def test_forwarded_merch_gets_original_images_and_preserves_the_official_caption(monkeypatch):
+    collector = BilibiliCollector()
+    calls = []
+    async def detail(dynamic_id):
+        calls.append(dynamic_id)
+        return {"text": "茶歇时光手办今汐款，169元", "pics": ["https://example.com/figure.jpg"]}
+    monkeypatch.setattr(collector, "_fetch_draw_detail", detail)
+    items = [{"id": "forward", "orig_id": "original", "type": "DYNAMIC_TYPE_FORWARD", "text": "官方新品预售"}]
+    result = await collector._enrich_draw_dynamics(items)
+    assert calls == ["original"]
+    assert result[0]["text"] == "官方新品预售\n\n茶歇时光手办今汐款，169元"
+    assert result[0]["pics"] == ["https://example.com/figure.jpg"]
+
+
 async def test_risk_control_refusal_fails_fast_without_retries(monkeypatch):
     collector = BilibiliCollector()
     calls = []

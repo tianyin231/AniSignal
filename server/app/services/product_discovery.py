@@ -1,7 +1,6 @@
 """AI 从官方正文自动建档、关联同款与启动搜索；交付后的安静期才归档。"""
 
 from datetime import datetime, timedelta
-import json
 import logging
 import re
 import time
@@ -11,7 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import get_community
+from app.communities import COMMUNITIES, get_community
 from app.models import (
     ContentVersion,
     MerchScan,
@@ -23,6 +22,7 @@ from app.models import (
 from app.services.urls import safe_link
 from app.services.ai import ai_available, chat, get_ai_config, record_usage
 from app.services.product_discovery_ai import MERCH_SYSTEM, MerchItem, compact_name, parse_merch_response
+from app.services.product_media import merch_message, official_image_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,8 @@ def build_search_keyword(name: str, product_type: str | None = None) -> str:
     return keyword
 
 
-async def _store_discovered_product(session: AsyncSession, item: MerchItem, raw: RawContent, version: ContentVersion) -> tuple[Product, bool]:
+async def _store_discovered_product(session: AsyncSession, item: MerchItem, raw: RawContent, version: ContentVersion,
+                                    images: list[str] | None = None) -> tuple[Product, bool]:
     from app.services.product_monitoring import configure_product_monitor
 
     catalog = list(await session.scalars(select(Product).where(Product.community == raw.community).with_for_update()))
@@ -111,7 +112,7 @@ async def _store_discovered_product(session: AsyncSession, item: MerchItem, raw:
         session.add(candidate)
     candidate.aliases = item.aliases
     candidate.watch_terms = terms
-    candidate.search_keyword = build_search_keyword(item.name, item.product_type)
+    candidate.search_keyword = item.search_keyword or build_search_keyword(item.name, item.product_type)
     candidate.price_note = item.price_note
     candidate.presale_note = item.presale_note
     candidate.ship_note = item.ship_note
@@ -144,7 +145,11 @@ async def _store_discovered_product(session: AsyncSession, item: MerchItem, raw:
             if value is not None:
                 setattr(product, field, value)
         product.source_url = safe_link(raw.url)
-        product.discovery = {"raw_content_id": raw.id, "content_version": version.version,
+        previous = product.discovery or {}
+        product.discovery = {**previous, "raw_content_id": raw.id, "content_version": version.version,
+                             "product_type": item.product_type,
+                             "images": images or previous.get("images") or [],
+                             "images_source_url": safe_link(raw.url) if images else previous.get("images_source_url"),
                              "quote": item.quote, "published_at": published.isoformat()}
     candidate.status = "accepted"
     candidate.product_id = product.id
@@ -153,6 +158,7 @@ async def _store_discovered_product(session: AsyncSession, item: MerchItem, raw:
 
 async def discover_merch_candidates(
     session: AsyncSession, *, limit: int = SCAN_LIMIT, now: datetime | None = None,
+    content_ids: list[int] | None = None,
 ) -> dict:
     """逐版本 AI 识别并直接启动追踪。模型/协议失败十分钟后自动重试。"""
     now = now or utcnow()
@@ -180,6 +186,8 @@ async def discover_merch_candidates(
         .outerjoin(MerchScan, MerchScan.raw_content_id == RawContent.id)
         .where(
             Source.identity == "official",
+            RawContent.community.in_([key for key, meta in COMMUNITIES.items() if meta.domain == "game"]),
+            *([RawContent.id.in_(content_ids)] if content_ids is not None else []),
             RawContent.hidden.is_(False),
             or_(RawContent.collected_at >= cutoff, MerchScan.raw_content_id.is_not(None)),
             or_(MerchScan.raw_content_id.is_(None),
@@ -187,7 +195,7 @@ async def discover_merch_candidates(
                     (MerchScan.scanned_at <= now - timedelta(minutes=10))
                     | (ContentVersion.parsed_at > MerchScan.scanned_at))),
         )
-        .order_by(MerchScan.scanned_at, RawContent.id)
+        .order_by(MerchScan.scanned_at, RawContent.id.desc())
         .limit(limit)
     ))
     created = 0
@@ -214,16 +222,19 @@ async def discover_merch_candidates(
         catalog = list(await session.scalars(select(Product).where(Product.community == community)))
         from app.services.ai import _plain_evidence
         title, text = version.title or "", _plain_evidence(version.text or "")[:12000]
-        payload = json.dumps({
+        images = official_image_candidates(version, raw.url)
+        payload = {
             "game": get_community(community).game_name, "title": title, "text": text,
             "published_at": (raw.published_at or raw.collected_at).isoformat() + "Z",
             "existing_products": [{"id": p.id, "name": p.name, "aliases": p.watch_terms or []} for p in catalog],
-        }, ensure_ascii=False)
+        }
         await session.commit()
         started, usage = time.monotonic(), None
         try:
-            response, usage = await chat(config, MERCH_SYSTEM, payload, json_mode=True)
-            items = parse_merch_response(response, title=title, text=text, published_at=raw.published_at or raw.collected_at)
+            message = await merch_message(payload, images)
+            response, usage = await chat(config, MERCH_SYSTEM, message, json_mode=True)
+            items = parse_merch_response(response, title=title, text=text, published_at=raw.published_at or raw.collected_at,
+                                         image_ids={image["id"] for image in images})
             confirmed = [item for item in items if item.confidence >= 85]
             # 模型运行期间可能有内容修订/下架，旧版本不能落地建档。
             current = await session.scalar(select(ContentVersion.version).where(
@@ -244,7 +255,8 @@ async def discover_merch_candidates(
                 for item in confirmed:
                     if item.name in ignored:
                         continue
-                    product, is_new = await _store_discovered_product(session, item, raw, version)
+                    selected_images = [image["url"] for image in images if image["id"] in item.image_ids]
+                    product, is_new = await _store_discovered_product(session, item, raw, version, selected_images)
                     new_count += int(is_new)
                     matched_ids.add(product.id)
                     for fact in item.facts:

@@ -33,7 +33,7 @@ _DYNAMIC_DETAIL_PARAMS = {
 _DRAW_DETAIL_CACHE: dict[str, dict] = {}
 _DRAW_DETAIL_CACHE_LIMIT = 256
 _DRAW_DETAIL_RETRY_AT: dict[str, datetime] = {}
-_RICH_DYNAMIC_TYPES = {"DYNAMIC_TYPE_DRAW", "DYNAMIC_TYPE_ARTICLE"}
+_RICH_DYNAMIC_TYPES = {"DYNAMIC_TYPE_DRAW", "DYNAMIC_TYPE_ARTICLE", "DYNAMIC_TYPE_FORWARD"}
 
 # 进程级熔断：同一 bili 命令连续被风控拒绝时暂停一段时间，避免对已门禁端点
 # 持续硬打（collector 每个采集任务新建实例，状态必须放模块级才能跨任务生效）。
@@ -250,15 +250,16 @@ class BilibiliCollector:
         return (await self._enrich_draw_dynamics(items))[:limit]
 
     async def _enrich_draw_dynamics(self, items: list[dict], cap: int = 20) -> list[dict]:
-        """补全 CLI 未展开的 DRAW/ARTICLE（OPUS）；共用详情缓存与冷却。"""
+        """补全图文，以及官方转发未展开的原动态商品图；共用详情缓存与冷却。"""
         enriched = 0
         attempted = 0
         for item in items:
             if item.get("type") not in _RICH_DYNAMIC_TYPES:
                 continue
-            if (item.get("text") or "").strip() or item.get("pics"):
+            forwarded = item.get("type") == "DYNAMIC_TYPE_FORWARD" and item.get("orig_id")
+            if item.get("pics") or ((item.get("text") or "").strip() and not forwarded):
                 continue
-            dynamic_id = str(item.get("id") or "")
+            dynamic_id = str((item.get("orig_id") if forwarded else item.get("id")) or "")
             if not dynamic_id:
                 continue
             rich = _DRAW_DETAIL_CACHE.get(dynamic_id)
@@ -272,7 +273,10 @@ class BilibiliCollector:
                     logger.warning("anonymous DRAW detail failed for %s: %s", dynamic_id, exc)
                     continue
             if (rich.get("text") or "").strip() or rich.get("pics"):
-                item["text"] = rich.get("text") or item.get("text")
+                original_text = (item.get("text") or "").strip()
+                detail_text = (rich.get("text") or "").strip()
+                item["text"] = (original_text + "\n\n" + detail_text if forwarded and original_text
+                                and detail_text and detail_text not in original_text else detail_text or original_text)
                 item["pics"] = list(rich.get("pics") or item.get("pics") or [])
                 enriched += 1
         if enriched:

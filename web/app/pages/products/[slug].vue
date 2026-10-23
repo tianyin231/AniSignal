@@ -48,23 +48,27 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
     </div>
     <p v-if="error" role="alert" class="text-sm text-amber-700 dark:text-amber-300">商品状态暂时更新失败，当前显示上次结果。<button type="button" class="ml-1 underline" @click="productRequest.refresh()">重试</button></p>
 
-    <section class="panel p-4 sm:p-5">
+    <section class="panel grid items-start gap-6 p-4 sm:p-6 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-10">
+      <ProductGallery :images="product.images || []" :name="product.name" :kind="product.product_type" :source-url="product.images_source_url" />
+      <div class="min-w-0 py-1 md:py-3">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
-          <h1 class="flex flex-wrap items-center gap-2 text-2xl font-bold text-ink">{{ product.name }}<span v-if="communityMeta" class="chip text-xs" :class="communityClasses(communityMeta.color).chip">{{ communityMeta.label }}</span></h1>
+          <div class="mb-3 flex flex-wrap items-center gap-2"><span v-if="communityMeta" class="chip text-xs" :class="communityClasses(communityMeta.color).chip">{{ communityMeta.label }}</span><span v-if="product.product_type" class="text-xs text-muted">{{ product.product_type }}</span></div>
+          <h1 class="text-2xl font-bold leading-tight tracking-tight text-ink sm:text-3xl lg:text-4xl">{{ product.name }}</h1>
           <p v-if="product.publisher || product.skus.length" class="mt-0.5 text-xs text-slate-600 dark:text-zinc-400">
             {{ [product.publisher, product.skus.join(' / ')].filter(Boolean).join(' · ') }}
           </p>
         </div>
-        <span v-if="product.monitor_status === 'archived'" class="chip">窗口已结束</span>
+        <span class="chip shrink-0">{{ product.monitor_status === 'archived' ? '已归档' : '追踪中' }}</span>
       </div>
-      <p v-if="product.price_note" class="mono mt-3 text-sm text-slate-600 dark:text-zinc-300">{{ product.price_note }}</p>
-      <div v-if="product.brief" class="mt-4">
-        <ProductBrief :brief="product.brief" />
+      <p v-if="product.price_note" class="num mt-5 text-2xl font-semibold text-ink">{{ product.price_note }}</p>
+      <div v-if="product.brief" class="mt-6 rounded-xl border border-line-soft p-4 sm:p-5">
+        <ProductBrief :brief="product.brief" compact />
       </div>
       <p v-if="product.source_url" class="mt-3 text-xs">
         <a :href="product.source_url" class="link" target="_blank" rel="noopener noreferrer">公告来源</a>
       </p>
+      </div>
     </section>
 
     <section class="panel p-4 sm:p-5">
