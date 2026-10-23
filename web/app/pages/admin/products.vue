@@ -90,7 +90,7 @@ async function refresh() {
   try {
     const [data, found] = await Promise.all([
       api<ApiProductList>('/api/admin/products'),
-      api<{ items: ProductCandidateItem[] }>('/api/admin/product-candidates'),
+      api<{ items: ProductCandidateItem[] }>('/api/admin/product-candidates', { query: { status: 'accepted' } }),
     ])
     products.value = data.items
     candidates.value = found.items
@@ -179,32 +179,6 @@ async function submit() {
   } catch (exc: any) {
     error.value = `保存失败：${exc?.data?.detail ?? exc?.message ?? '请稍后重试'}`
     toast.err(error.value)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function acceptCandidate(item: ProductCandidateItem) {
-  busy.value = true
-  try {
-    await api(`/api/admin/product-candidates/${item.id}/accept`, { method: 'POST' })
-    toast.ok(`已开始跟踪「${item.name}」`)
-    await refresh()
-  } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? exc?.message ?? '接受失败，请重试')
-  } finally {
-    busy.value = false
-  }
-}
-
-async function ignoreCandidate(item: ProductCandidateItem) {
-  busy.value = true
-  try {
-    await api(`/api/admin/product-candidates/${item.id}/ignore`, { method: 'POST' })
-    toast.ok(`已忽略「${item.name}」`)
-    await refresh()
-  } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? exc?.message ?? '忽略失败，请重试')
   } finally {
     busy.value = false
   }
@@ -305,12 +279,12 @@ async function saveSignal() {
     <div class="wall-heading">
       <h1 class="text-2xl font-bold">商品管理</h1>
       <p class="mt-0.5 text-sm text-muted">
-        官方内容里出现的新周边会列在下面。接受后准备一路搜索和匹配词。信号仍由全站审核自动判断，这里只处理候选、矛盾和归档。
+        AI 自动识别官方新周边、建档并持续追踪。这里保留档案维护和纠错入口。
       </p>
     </div>
 
     <section v-if="candidates.length" class="panel p-5">
-      <h2 class="text-sm font-semibold">新周边候选</h2>
+      <h2 class="text-sm font-semibold">自动发现记录</h2>
       <ul class="mt-3 divide-y divide-line-soft dark:divide-line">
         <li v-for="item in candidates" :key="item.id" class="flex flex-wrap items-center justify-between gap-3 py-3">
           <div class="min-w-0">
@@ -326,8 +300,7 @@ async function saveSignal() {
           </div>
           <div class="flex shrink-0 items-center gap-2">
             <a v-if="item.source_url" :href="item.source_url" target="_blank" rel="noopener noreferrer" class="min-h-11 px-2 text-xs text-blue-600 hover:underline dark:text-blue-300">来源</a>
-            <button type="button" class="btn-primary min-h-11 px-3 text-xs" :disabled="busy" @click="acceptCandidate(item)">{{ busy ? '处理中…' : '接受并跟踪' }}</button>
-            <button type="button" class="min-h-11 px-3 text-xs text-muted hover:underline" :disabled="busy" @click="ignoreCandidate(item)">忽略</button>
+            <span class="chip">已自动跟踪</span>
           </div>
         </li>
       </ul>

@@ -58,14 +58,10 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
         <div v-if="p.brief" class="mt-3">
           <ProductBrief :brief="p.brief" />
         </div>
-        <p v-if="p.latest_candidate" class="mt-3 truncate text-[11px] text-slate-500 dark:text-zinc-400" :title="p.latest_candidate.summary">
-          跟踪中：{{ p.latest_candidate.summary }}
-        </p>
-        <p v-if="p.fulfillment.candidate_total" class="mt-3 text-xs text-amber-800 dark:text-amber-300">{{ p.fulfillment.candidate_total }} 条信号正在自动跟踪</p>
       </NuxtLink>
     </div>
     <section v-else class="panel px-4 py-10 text-center text-sm text-slate-600 dark:text-zinc-400">
-      暂无追踪中的商品。商品与监控词由管理员在后台维护。
+      暂无商品动态。
     </section>
 
   </div>

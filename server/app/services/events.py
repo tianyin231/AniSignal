@@ -34,6 +34,7 @@ from app.models import (
     Evidence,
     FULFILLMENT_CATEGORIES,
     Product,
+    MerchScan,
     RawContent,
     Source,
 )
@@ -584,15 +585,19 @@ async def _aggregate_product(
     session: AsyncSession, product: Product, contents: list[ContentRow], stats: AggStats,
     *, before: dict | None = None,
 ) -> None:
-    from app.services.fulfillment import build_fulfillment_snapshot, product_signal_types, sync_product_signals
+    from app.services.fulfillment import build_fulfillment_snapshot, load_fulfillment_reviews, product_signal_types, sync_product_signals
 
     if before is None:
         before = await build_fulfillment_snapshot(session, product.id)
+    scans = list(await session.scalars(select(MerchScan).where(
+        MerchScan.raw_content_id.in_([row.raw_id for row in contents])))) if contents else []
+    ai_links = {scan.raw_content_id: ((scan.result or {}).get("fulfillment") or {}).get("content_version") for scan in scans
+                if any(item.get("product_id") == product.id for item in ((scan.result or {}).get("fulfillment") or {}).get("signals", []))}
     matched = [
         row
         for row in contents
         if row.community == (product.community or DEFAULT_COMMUNITY)
-        and _matches_product(row, product)
+        and (_matches_product(row, product) or ai_links.get(row.raw_id) == row.content_version)
     ]
     signal_categories = {
         "presale_open": "presale", "balance_open": "balance", "delayed": "delay",
@@ -600,15 +605,13 @@ async def _aggregate_product(
         "quality_issue": "quality", "aftersales_notice": "quality",
     }
     by_category: dict[str, list[ContentRow]] = {}
-    reviews = {review.raw_content_id: review for review in await session.scalars(select(ContentReview).where(
-        ContentReview.raw_content_id.in_([row.raw_id for row in matched]),
-    ))} if matched else {}
+    reviews = await load_fulfillment_reviews(session, {row.raw_id for row in matched})
     for row in matched:
         review = reviews.get(row.raw_id)
         kinds = product_signal_types(
             title=row.title, text=row.text, category=row.category, product_id=product.id,
             actor_type=row.identity, content_version=row.content_version,
-            review_fulfillment=review.fulfillment if review and review.relevant and not review.violation and not review.promotional else None,
+            review_fulfillment=review,
         )
         categories = {signal_categories[kind] for kind in kinds}
         if row.category == "unboxing" and "arrived" in categories:

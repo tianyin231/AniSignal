@@ -140,7 +140,8 @@ async def test_multiaxis_content_gets_receipt_and_quality_candidates(client, ses
     await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, bvid="BV-mixed", title="爱弥斯 键盘开箱，品控拉完了", description="按键故障", owner_mid=778)])
     await run_aggregation(session)
     await session.commit()
-    data = (await client.get("/api/products/mixed")).json()
+    product = await session.scalar(select(Product).where(Product.slug == "mixed"))
+    data = next(item for item in (await client.get("/api/admin/products", headers=admin_headers)).json()["items"] if item["id"] == product.id)
     assert data["fulfillment"]["consumer"]["candidate_count"] == 1
     assert data["fulfillment"]["quality"]["candidate_count"] == 1
     assert data["fulfillment"]["consumer"]["verified_count"] == 0

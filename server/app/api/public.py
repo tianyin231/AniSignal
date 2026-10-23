@@ -712,7 +712,7 @@ async def get_product_signals(
     product = await session.scalar(select(ProductModel).where(ProductModel.slug == slug))
     if product is None:
         raise HTTPException(status_code=404, detail="product not found")
-    items = await list_product_signals(session, product.id)
+    items = await list_product_signals(session, product.id, verified_only=True, include_notes=False)
     return ProductSignalListOut(items=items, total=len(items))
 
 

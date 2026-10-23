@@ -135,7 +135,7 @@ async def test_public_products_with_stages(client, session):
     assert product["consumer_evidence_count"] == 0
     assert product["stage_source"] == "signals"
     assert product["fulfillment"]["consumer"]["state"] == "no_verified_receipt"
-    assert product["fulfillment"]["consumer"]["candidate_count"] == 1
+    assert product["fulfillment"]["consumer"]["candidate_count"] == 0
     assert product["fulfillment"]["official"]["verified_count"] >= 1
 
     resp = await client.get("/api/products/kb")

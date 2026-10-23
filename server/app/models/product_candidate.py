@@ -26,6 +26,7 @@ class ProductCandidate(Base):
     price_note: Mapped[str | None] = mapped_column(String(64))
     presale_note: Mapped[str | None] = mapped_column(String(64))
     ship_note: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
     source_url: Mapped[str | None] = mapped_column(String(512))
     raw_content_id: Mapped[int | None] = mapped_column(
         ForeignKey("raw_contents.id", name="fk_product_candidates_raw_content", ondelete="SET NULL"),
@@ -48,3 +49,6 @@ class MerchScan(Base):
         primary_key=True,
     )
     scanned_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # 只在 AI 成功后推进版本。失败保留旧版本，scanned_at 控制重试间隔。
+    content_version: Mapped[int] = mapped_column(default=0)
+    result: Mapped[dict] = mapped_column(JSON, default=dict)

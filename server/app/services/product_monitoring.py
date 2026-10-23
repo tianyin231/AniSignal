@@ -50,6 +50,10 @@ async def configure_product_monitor(
     target.tier = "core"
     if enabled is not None:
         target.enabled = enabled
+        if enabled and product.monitor_status == "archived":
+            product.monitor_status = "watching"
+            product.archived_at = None
+            product.monitor_started_at = utcnow()
     if interval_minutes is not None:
         target.interval_minutes = interval_minutes
     if min_views is not None:

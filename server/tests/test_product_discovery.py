@@ -1,27 +1,25 @@
 """周边发现、接受跟踪、安静归档，以及公开页的三件事。"""
 
 from datetime import timedelta
+import json
+from unittest.mock import AsyncMock
 
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import CollectTarget, ContentVersion, MerchScan, Product, ProductCandidate, RawContent, Source
+from app.models import CollectTarget, ContentVersion, MerchScan, Product, ProductCandidate, ProductSignal, ProductSignalEvidence, RawContent, Source
+from app.services import product_discovery
 from app.services.curation import _load_tracked_products
 from app.services.product_discovery import (
     archive_quiet_products,
     build_search_keyword,
     build_watch_terms,
     discover_merch_candidates,
-    extract_merch_name,
     public_brief,
 )
 
 
-def test_merch_name_needs_a_goods_noun_and_a_specific_name():
-    assert extract_merch_name("《鸣潮》爱弥斯联名机械键盘开启预售") == "爱弥斯联名机械键盘"
-    assert extract_merch_name("菲比手办预约") == "菲比手办"
-    assert extract_merch_name("键盘推荐合集") is None
-    assert extract_merch_name("爱弥斯新衣装") is None
+def test_watch_terms_keep_the_product_category_and_use_one_search():
     assert build_watch_terms("爱弥斯联名机械键盘") == ["爱弥斯联名机械键盘", "爱弥斯键盘"]
     assert build_search_keyword("爱弥斯联名机械键盘") == "爱弥斯 键盘"
     assert build_watch_terms("爱弥斯") == []
@@ -44,7 +42,7 @@ def test_public_brief_does_not_call_unspecified_unboxing_a_purchase():
     ])
     assert brief["archived"] is True
     assert brief["unboxing_accounts"] == 8
-    assert brief["unboxing_note"] == "购买方式未注明"
+    assert brief["unboxing_note"] == ""
     assert brief["quality_accounts"] == 3
     assert brief["official_registered"] is True
     assert "分批发货" in brief["official_text"]
@@ -66,7 +64,14 @@ async def _official(session, *, title, text="", identity="official", community="
     return raw
 
 
-async def test_official_notice_becomes_a_candidate_and_accept_opens_one_search(session, client, admin_headers):
+async def test_official_notice_automatically_opens_one_search(session, client, admin_headers, monkeypatch):
+    monkeypatch.setattr(product_discovery, "get_ai_config", AsyncMock(return_value={
+        "base_url": "https://example.com", "api_key": "test", "model": "test"}))
+    monkeypatch.setattr(product_discovery, "chat", AsyncMock(side_effect=[(json.dumps({"products": [{
+        "name": "菲比手办", "product_type": "手办", "confidence": 96, "quote": "菲比手办开启预售",
+        "price_note": "¥399", "presale_note": "预售将于下月开启", "ship_note": "预计八月发货",
+        "facts": [{"signal_type": "presale_open", "confidence": 96, "quote": "菲比手办开启预售"}],
+    }]}, ensure_ascii=False), None), ('{"products":[]}', None)]))
     await _official(
         session,
         title="菲比手办开启预售",
@@ -78,16 +83,12 @@ async def test_official_notice_becomes_a_candidate_and_accept_opens_one_search(s
     again = await discover_merch_candidates(session)
     assert again["scanned"] == 0
 
-    listed = (await client.get("/api/admin/product-candidates", headers=admin_headers)).json()
+    listed = (await client.get("/api/admin/product-candidates?status=accepted", headers=admin_headers)).json()
     assert listed["items"][0]["name"] == "菲比手办"
     assert listed["items"][0]["search_keyword"] == "菲比 手办"
     assert "¥399" in (listed["items"][0]["price_note"] or "")
 
-    accepted = await client.post(
-        f"/api/admin/product-candidates/{listed['items'][0]['id']}/accept", headers=admin_headers,
-    )
-    assert accepted.status_code == 200, accepted.text
-    body = accepted.json()
+    body = (await client.get("/api/products")).json()["items"][0]
     assert body["monitor_status"] == "watching"
     assert body["watch_terms"] == ["菲比手办"]
     assert body["monitor"]["keyword"] == "菲比 手办"
@@ -104,8 +105,10 @@ async def test_official_notice_becomes_a_candidate_and_accept_opens_one_search(s
 
 async def test_ignore_and_archive_leave_the_page_but_stop_the_search(session, client, admin_headers):
     raw = await _official(session, title="秧秧立牌开启预订", text="预售本周开启。", external="n3")
-    await discover_merch_candidates(session)
-    candidate = await session.scalar(select(ProductCandidate).where(ProductCandidate.raw_content_id == raw.id))
+    candidate = ProductCandidate(community="wuwa", name="秧秧立牌", watch_terms=["秧秧立牌"],
+                                 search_keyword="秧秧 立牌", raw_content_id=raw.id)
+    session.add(candidate)
+    await session.commit()
     ignored = await client.post(f"/api/admin/product-candidates/{candidate.id}/ignore", headers=admin_headers)
     assert ignored.status_code == 200
     assert ignored.json()["status"] == "ignored"
@@ -125,6 +128,11 @@ async def test_ignore_and_archive_leave_the_page_but_stop_the_search(session, cl
     session.add(target)
     await session.flush()
     product.monitor_target_id = target.id
+    signal = ProductSignal(product_id=product.id, signal_type="shipping_started", actor_type="official",
+                           review_status="verified", summary="旧徽章已发货", occurred_at=utcnow() - timedelta(days=40))
+    session.add(signal)
+    await session.flush()
+    session.add(ProductSignalEvidence(signal_id=signal.id, raw_content_id=raw.id, independent_source_key="official"))
     await session.commit()
 
     result = await archive_quiet_products(session)
@@ -134,8 +142,7 @@ async def test_ignore_and_archive_leave_the_page_but_stop_the_search(session, cl
     assert product.monitor_status == "archived"
     assert target.enabled is False
     tracked = await _load_tracked_products(session)
-    assert all(item["name"] != "旧徽章" for item in tracked)
+    assert any(item["name"] == "旧徽章" for item in tracked)  # 归档仅停专属搜索，匹配后的新反馈仍能审核。
     visible = (await client.get("/api/products/old-badge")).json()
     assert visible["monitor_status"] == "archived"
     assert visible["brief"]["archived"] is True
-    assert await session.get(MerchScan, raw.id) is not None

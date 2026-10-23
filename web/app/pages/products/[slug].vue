@@ -52,8 +52,8 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <h1 class="flex flex-wrap items-center gap-2 text-2xl font-bold text-ink">{{ product.name }}<span v-if="communityMeta" class="chip text-xs" :class="communityClasses(communityMeta.color).chip">{{ communityMeta.label }}</span></h1>
-          <p class="mt-0.5 text-xs text-slate-600 dark:text-zinc-400">
-            {{ product.publisher || '—' }}<template v-if="product.skus.length"> · {{ product.skus.join(' / ') }}</template>
+          <p v-if="product.publisher || product.skus.length" class="mt-0.5 text-xs text-slate-600 dark:text-zinc-400">
+            {{ [product.publisher, product.skus.join(' / ')].filter(Boolean).join(' · ') }}
           </p>
         </div>
         <span v-if="product.monitor_status === 'archived'" class="chip">窗口已结束</span>
@@ -65,14 +65,10 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
       <p v-if="product.source_url" class="mt-3 text-xs">
         <a :href="product.source_url" class="link" target="_blank" rel="noopener noreferrer">公告来源</a>
       </p>
-      <p v-if="product.fulfillment.candidate_total" class="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-        正在自动跟踪 {{ product.fulfillment.candidate_total }} 条信号。证据不足的不计入上面的数字。
-      </p>
     </section>
 
     <section class="panel p-4 sm:p-5">
-      <h2 class="text-base font-bold text-ink">证据（{{ signals.length }}）</h2>
-      <p class="mt-1 text-xs leading-relaxed text-slate-600 dark:text-zinc-400">按时间排列。自动采纳、官方来源和人工确认分开标。实物开箱不等于已确认自购。</p>
+      <h2 class="text-base font-bold text-ink">追踪动态（{{ signals.length }}）</h2>
       <div class="mt-4">
         <p v-if="signalsError" role="alert" class="text-sm text-amber-700 dark:text-amber-300">信号暂时加载失败。<button type="button" class="ml-1 underline" @click="refreshSignals()">重试</button></p>
         <ProductSignalList v-else :items="signals" :community="productCommunity" />
