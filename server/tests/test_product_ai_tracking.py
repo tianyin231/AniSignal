@@ -109,6 +109,18 @@ async def test_current_shipping_wins_over_historical_presale_in_the_same_announc
     assert (await build_fulfillment_snapshot(session, product.id))["official"]["state"] == "shipping_started"
 
 
+async def test_official_presale_time_quote_becomes_a_public_timeline_signal(session, client, ai):
+    await _official(session, title="浮金波纹异形交通卡预售即将开启", text="开售时间：10月22日12:00")
+    ai.return_value = (response(merch("浮金波纹异形交通卡", product_type="交通卡", facts=[
+        {"signal_type": "presale_open", "confidence": 95, "quote": "开售时间：10月22日12:00"},
+    ])), None)
+    assert (await discovery.discover_merch_candidates(session))["created"] == 1
+    product = await session.scalar(select(Product))
+    assert (await build_fulfillment_snapshot(session, product.id))["official"]["state"] == "presale_open"
+    signals = (await client.get(f"/api/products/{product.slug}/signals")).json()["items"]
+    assert len(signals) == 1 and signals[0]["signal_type"] == "presale_open"
+
+
 async def test_one_uncertain_item_does_not_hold_back_other_clear_products(session, ai):
     now = utcnow()
     await _official(session, title="菲比手办与安可耳机发布")

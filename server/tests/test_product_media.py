@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.models import ContentVersion, Product
 from app.services import product_discovery as discovery, curation
-from app.services.product_media import official_image_candidates
+from app.services.product_media import merch_message, official_image_candidates
 from tests.test_product_ai_tracking import ai, merch, response
 from tests.test_product_discovery import _official
 
@@ -36,3 +36,14 @@ async def test_unknown_picture_id_does_not_publish_a_fabricated_picture(session,
     ai.return_value = (response(merch(image_ids=[99])), None)
     assert (await discovery.discover_merch_candidates(session))["created"] == 0
     assert not list(await session.scalars(select(Product)))
+
+
+async def test_ai_uses_official_cdn_thumbnail_and_keeps_the_original_url(monkeypatch):
+    original = "https://i0.hdslb.com/bfs/new_dyn/figure.jpg"
+    fetch = AsyncMock(return_value="data:image/webp;base64,test")
+    monkeypatch.setattr(curation, "_cover_data_url", fetch)
+    images = [{"id": 1, "url": original, "caption": "官方主图"}]
+    message = await merch_message({"title": "手办预售", "text": ""}, images)
+    fetch.assert_awaited_once_with(original + "@960w.webp")
+    assert original in message[0]["text"]
+    assert images[0]["url"] == original

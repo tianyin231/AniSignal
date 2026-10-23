@@ -77,6 +77,13 @@ def test_physical_receipt_can_be_verified_without_guessing_purchase():
     assert result["confidence"] == .92 and result["method"] == "ai"
 
 
+def test_regular_sale_time_does_not_establish_a_presale_without_presale_context():
+    quote = "开售时间：10月22日12:00"
+    result = decide(supported(quote, signal_type="presale_open"), signal_type="presale_open",
+                    title="交通卡现货发售", text=quote, actor_type="official")
+    assert result["review_status"] == "candidate"
+
+
 @pytest.mark.parametrize("actor,expected_actor,expected_acquisition", [
     ("unknown", "user", "self_purchase"), ("user", "user", "self_purchase"),
     ("seeded", "seeded", "seeded"), ("official", "official", "unknown"),

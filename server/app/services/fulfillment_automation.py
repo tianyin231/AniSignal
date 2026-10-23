@@ -29,7 +29,10 @@ _AXIS_BASIS = {
 }
 
 
-def _has_axis_basis(signal_type: str, quote: str) -> bool:
+def _has_axis_basis(signal_type: str, quote: str, *, context: str = "") -> bool:
+    # 官方预售公告常把具体安排写成“开售时间”，引文仍须在原文中逐字可追溯。
+    if signal_type == "presale_open" and re.search(r"开售|开订", quote) and re.search(_AXIS_BASIS[signal_type], context, re.I):
+        return True
     if not re.search(_AXIS_BASIS.get(signal_type, r"(?!)"), quote, re.I):
         return False
     if signal_type == "consumer_received" and re.search(r"期待|准备|等待|希望|将要|即将|计划|预计|早日|什么时候|waiting|expect|will unbox", quote, re.I):
@@ -199,7 +202,7 @@ def decide_signal_automation(
                     conflict = quality_claim_conflicts(quote)
                 if conflict:
                     result.update(review_status="conflict", reason="原文与支持判定存在冲突，继续自动跟踪")
-                elif not _has_axis_basis(signal_type, quote):
+                elif not _has_axis_basis(signal_type, quote, context=f"{title}\n{text}"):
                     result.update(reason="原文缺少该信号的直接依据，继续自动跟踪")
                 else:
                     acquisition = _explicit_acquisition(quote, item["acquisition_type"])

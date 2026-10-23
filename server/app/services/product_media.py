@@ -4,7 +4,7 @@ import asyncio
 from html.parser import HTMLParser
 import json
 import re
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from app.services.urls import is_public_http_url
 
@@ -57,7 +57,14 @@ async def merch_message(payload: dict, images: list[dict]):
         return text
     from app.services.curation import _cover_data_url
 
-    data_urls = await asyncio.gather(*[_cover_data_url(item["url"]) for item in images[:4]])
+    # AI 只需辨认商品，B站原图常达数 MB；使用官方 CDN 缩放且保留入库原图 URL。
+    def inference_url(url: str) -> str:
+        parsed = urlsplit(url)
+        if re.fullmatch(r"i\d\.hdslb\.com", parsed.hostname or "") and parsed.path.startswith("/bfs/"):
+            return parsed._replace(path=f"{parsed.path.split('@')[0]}@960w.webp").geturl()
+        return url
+
+    data_urls = await asyncio.gather(*[_cover_data_url(inference_url(item["url"])) for item in images[:4]])
     content = [{"type": "text", "text": text}]
     for item, data_url in zip(images, data_urls):
         if data_url:
