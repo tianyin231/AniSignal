@@ -29,6 +29,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.models import CollectRun, CollectTarget, Platform, Product, RawContent, RunStatus
 from app.services.ingest import IngestStats, ingest_items
+from app.services.collector_proxy import fetch_with_fallback, configure_collector, redact_proxy
 from app.services.queue import enqueue_review_jobs
 from app.services.product_matching import matches_product_text
 
@@ -253,6 +254,7 @@ async def run_collection(redis, target_id: int) -> dict:
         retry_at: datetime | None = None
         items_fetched = 0
         items_filtered = 0
+        proxy_url = None
         try:
             collector_factory = _COLLECTORS.get(target.platform)
             if collector_factory is None:
@@ -264,14 +266,13 @@ async def run_collection(redis, target_id: int) -> dict:
                 collector.newest_first = True
             if isinstance(collector, XCollector):
                 collector.redis = redis
-                fetch_result = await collector.fetch(
-                    target.target_type, target.target_value, settings.collect_limit
-                )
-            else:
+            async def fetch():
+                if isinstance(collector, XCollector):
+                    return await collector.fetch(target.target_type, target.target_value, settings.collect_limit)
                 async with platform_slot(redis, target.platform, settings.platform_min_interval_seconds):
-                    fetch_result = await collector.fetch(
-                        target.target_type, target.target_value, settings.collect_limit
-                    )
+                    return await collector.fetch(target.target_type, target.target_value, settings.collect_limit)
+            fetch_result = await fetch_with_fallback(collector, session, target.platform, fetch)
+            proxy_url = collector.proxy_url
             items_fetched = len(fetch_result.items)
             fetch_result.items, filtered_out = filter_relevant(
                 fetch_result.items, target,
@@ -314,7 +315,9 @@ async def run_collection(redis, target_id: int) -> dict:
                     await enqueue_review_jobs(redis, pending_ids)
             if fetch_result.fetch_kind == "bilibili_dynamics":
                 try:
-                    await _backfill_empty_draw_dynamics(session, collector_factory())
+                    repair_collector = collector_factory()
+                    configure_collector(repair_collector, proxy_url)
+                    await _backfill_empty_draw_dynamics(session, repair_collector)
                 except Exception as exc:  # noqa: BLE001 - 回填失败不影响本轮采集
                     postprocess_errors.append(f"dynamic backfill failed: {type(exc).__name__}: {exc}")
                     logger.warning("empty DRAW backfill failed", exc_info=True)
@@ -363,7 +366,7 @@ async def run_collection(redis, target_id: int) -> dict:
             error_text = str(exc)
             logger.info("collect target %s deferred until %s: %s", target_id, retry_at, exc)
         except Exception as exc:  # noqa: BLE001 - 任何失败都落到健康状态里
-            error_text = f"{type(exc).__name__}: {exc}"
+            error_text = f"{type(exc).__name__}: {redact_proxy(str(exc), proxy_url)}"
             logger.error("collect target %s failed: %s", target_id, error_text)
             # 入库已单独提交；后处理事务失败时先回滚，确保健康记录仍能落库。
             await session.rollback()

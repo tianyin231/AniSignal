@@ -13,6 +13,7 @@ from app.collectors.base import USER_AGENT, CollectorError, extract_items, get_j
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+from app.services.collector_proxy import http_proxy_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ class KuroCollector:
 
     async def fetch_notices(self, limit: int) -> list[dict]:
         conf = KURO_CONFIG[self.platform]
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, **http_proxy_kwargs(self)) as client:
             list_url = (
                 f"{conf['base']}/gamenotice/{conf['game']}/{conf['channel']}/notice.json"
             )

@@ -2,7 +2,9 @@
 // can spend 20 s on a blocked name and occupy the lookup pool for unrelated images. Letting the proxy
 // resolve an unchecked name instead would allow DNS rebinding into this host or its private network.
 import net from "node:net";
-import { Client, ProxyAgent, request, type Agent, type Dispatcher } from "undici";
+import tls from "node:tls";
+import { SocksClient } from "socks";
+import { Agent, Client, ProxyAgent, request, type Dispatcher } from "undici";
 import { isBlockedAddress } from "./url.ts";
 
 // HTTP/2 idle-socket cleanup can emit an unhandled stream error after a request has finished.
@@ -41,14 +43,51 @@ class PinnedProxyClient extends Client {
   }
 }
 
-export function createEgressProxy(proxyUrl: string, resolve: Resolve, factory?: Agent.Options["factory"]): ProxyAgent {
+function socksAgent(proxyUrl: string, resolve?: Resolve, factory?: Agent.Options["factory"]): Agent {
+  const proxy = new URL(proxyUrl);
+  return new Agent({ ...OUTBOUND_HTTP_OPTIONS, factory, connect: async (options, callback) => {
+    try {
+      const host = options.hostname.replace(/^\[|\]$/g, "");
+      let destination = host;
+      if (resolve) {
+        const addresses = net.isIP(host) ? [host] : await resolve(host);
+        if (!addresses.length || addresses.some(isBlockedAddress)) throw new Error("Blocked proxy destination");
+        destination = addresses.find(address => net.isIP(address) === 4) ?? addresses[0]!;
+      }
+      const { socket } = await SocksClient.createConnection({
+        command: "connect", timeout: 5000,
+        proxy: { host: proxy.hostname.replace(/^\[|\]$/g, ""), port: Number(proxy.port || 1080), type: 5,
+          userId: decodeURIComponent(proxy.username), password: decodeURIComponent(proxy.password) },
+        destination: { host: destination, port: Number(options.port || (options.protocol === "https:" ? 443 : 80)) },
+      });
+      if (options.protocol !== "https:") { callback(null, socket); return; }
+      const secure = tls.connect({ socket, servername: options.servername || (net.isIP(host) ? undefined : host), ALPNProtocols: ["http/1.1"] });
+      const failed = (error: Error) => { callback(error, null); };
+      secure.once("error", failed);
+      secure.setTimeout(5000, () => secure.destroy(new Error("SOCKS5 TLS handshake timeout")));
+      secure.once("secureConnect", () => {
+        secure.setTimeout(0);
+        secure.removeListener("error", failed);
+        callback(null, secure);
+      });
+    } catch {
+      // SocksClientError 带完整代理 options，不能把原异常交给日志系统。
+      callback(new Error("SOCKS5 proxy connection failed"), null);
+    }
+  } });
+}
+
+export function createEgressProxy(proxyUrl: string, resolve: Resolve, factory?: Agent.Options["factory"]): ProxyAgent | Agent {
+  if (new URL(proxyUrl).protocol === "socks5:") return socksAgent(proxyUrl, resolve, factory);
   return new ProxyAgent({ uri: proxyUrl, ...OUTBOUND_HTTP_OPTIONS, proxyTls: OUTBOUND_HTTP_OPTIONS,
     proxyTunnel: true, factory, clientFactory: (origin, options) => new PinnedProxyClient(origin, options, resolve) });
 }
 
 /** The fixed DNS service is reached through the same outbound proxy, never the system resolver. */
 export function createEgressResolver(proxyUrl: string): Resolve {
-  const dns = new ProxyAgent({ uri: proxyUrl, ...OUTBOUND_HTTP_OPTIONS, proxyTls: OUTBOUND_HTTP_OPTIONS, maxResponseSize: 64 * 1024 });
+  // SOCKS 的无 resolver 分支仅用于下方固定的 Cloudflare DNS 地址。
+  const dns = new URL(proxyUrl).protocol === "socks5:" ? socksAgent(proxyUrl)
+    : new ProxyAgent({ uri: proxyUrl, ...OUTBOUND_HTTP_OPTIONS, proxyTls: OUTBOUND_HTTP_OPTIONS, maxResponseSize: 64 * 1024 });
   const cache = new Map<string, { addresses: string[]; until: number }>();
   const pending = new Map<string, Promise<string[]>>();
   return (host) => {

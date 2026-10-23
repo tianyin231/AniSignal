@@ -19,6 +19,8 @@ services:
     build: ./integrations/aihot
     restart: unless-stopped
     env_file: [{ path: .env.aihot, format: raw }]
+    environment:
+      ANISIGNAL_PROXY_POOL_URL: http://app:3000/api/internal/collector-proxy/lease
     command: ["sh", "-c", "node scripts/migrate.ts && node scripts/seed.ts && node adapter/bootstrap.ts && exec node adapter/main.ts"]
     volumes:
       - ${DATA_DIR:-./data}/aihot/files:/data
@@ -34,12 +36,16 @@ services:
     image: anisignal-aihot:${AIHOT_TAG:-local}
     restart: unless-stopped
     env_file: [{ path: .env.aihot, format: raw }]
+    environment:
+      ANISIGNAL_PROXY_POOL_URL: http://app:3000/api/internal/collector-proxy/lease
     command: ["node", "apps/worker/src/main.ts"]
     stop_grace_period: 515s
     volumes:
       - ${DATA_DIR:-./data}/aihot/files:/data
     depends_on:
       aihot-api:
+        condition: service_healthy
+      app:
         condition: service_healthy
   app:
     env_file: [{ path: .env.aihot, format: raw }]

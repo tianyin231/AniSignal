@@ -16,6 +16,7 @@ from app.collectors.bilibili import BilibiliCollector
 from app.models import CustomFeed, CustomFeedItem, NotificationDelivery, User
 from app.parsers.bilibili import parse_dynamic, parse_video
 from app.services.notifications import beijing_today
+from app.services.collector_proxy import fetch_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +33,24 @@ def _collector(platform: str):
     raise ValueError(f"unsupported custom platform: {platform}")
 
 
-async def fetch_custom_items(feed: CustomFeed, redis) -> list:
+async def fetch_custom_items(feed: CustomFeed, redis, session=None) -> list:
     """抓取并解析定制源；平台礼貌间隔与主采集共享同一个 Redis 槽。"""
     collector = _collector(feed.platform)
-    if feed.kind == "uid":
+    if feed.kind not in CUSTOM_KINDS:
+        raise ValueError(f"unsupported custom kind: {feed.kind}")
+    async def fetch():
         async with platform_slot(redis, feed.platform, 5.0):
-            raw_items = await collector.user_dynamics(feed.target_value, 20)
-        return [n for n in (parse_dynamic(i) if i else None for i in raw_items) if n is not None]
-    if feed.kind == "keyword":
-        async with platform_slot(redis, feed.platform, 5.0):
-            raw_items = await collector.search_videos(feed.target_value, 30)
-        return [n for n in (parse_video(i) if i else None for i in raw_items) if n is not None]
-    raise ValueError(f"unsupported custom kind: {feed.kind}")
+            if feed.kind == "uid":
+                return await collector.user_dynamics(feed.target_value, 20)
+            return await collector.search_videos(feed.target_value, 30)
+    raw_items = await fetch_with_fallback(collector, session, feed.platform, fetch)
+    parse = parse_dynamic if feed.kind == "uid" else parse_video
+    return [n for n in (parse(i) if i else None for i in raw_items) if n is not None]
 
 
 async def collect_custom_feed(session: AsyncSession, feed: CustomFeed, redis) -> int:
     """抓取单个定制源并把新条目落库，返回新增条数。"""
-    normalized_list = await fetch_custom_items(feed, redis)
+    normalized_list = await fetch_custom_items(feed, redis, session)
     existing = set(
         (
             await session.execute(

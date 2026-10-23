@@ -1,11 +1,12 @@
 // Outbound HTTP for collectors, the image proxy and the paid APIs: SSRF guard, routing, limits.
 import net from "node:net";
 import { addAbortListener } from "node:events";
-import { Agent, Pool, ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
+import { Agent, Pool, fetch as undiciFetch, type Dispatcher } from "undici";
 import { config } from "../config.ts";
 import { assertPublicUrl, guardedLookup } from "./url.ts";
 import { createEgressProxy, createEgressResolver, OUTBOUND_HTTP_OPTIONS } from "./egress-proxy.ts";
 import { DEPLOYMENT, SITE } from "@aihot/site";
+import { collectionRoutes } from "./collector-proxy.ts";
 
 /**
  * Where a request leaves the host. "egress" (collection, bodies, images and other public data) goes
@@ -20,23 +21,26 @@ import { DEPLOYMENT, SITE } from "@aihot/site";
  */
 export type EgressRoute = "egress" | "direct";
 
-let proxyAgent: ProxyAgent | null = null;
+const proxyAgents = new Map<string, Dispatcher>();
 let directAgent: Agent | null = null;
 let privateFeedAgent: Agent | null = null;
-let resolveEgress: ReturnType<typeof createEgressResolver> | null = null;
+const egressResolvers = new Map<string, ReturnType<typeof createEgressResolver>>();
 
-function egressResolver() {
-  return resolveEgress ??= createEgressResolver(config.egressProxyUrl!);
+function egressResolver(proxyUrl: string) {
+  if (!egressResolvers.has(proxyUrl)) egressResolvers.set(proxyUrl, createEgressResolver(proxyUrl));
+  return egressResolvers.get(proxyUrl)!;
 }
 
 function hostOf(url: URL): string {
   return url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
 }
 
-function proxied(url: URL, route: EgressRoute, privateHosts: readonly string[]): boolean {
-  if (route !== "egress" || !config.egressProxyUrl) return false;
+function proxyFor(url: URL, route: EgressRoute, privateHosts: readonly string[], leased: string | null): string | null {
   const host = hostOf(url);
-  return net.isIP(host) === 0 && !privateHosts.includes(host) && !host.endsWith(".cn") && !host.endsWith(".local") && !DEPLOYMENT.directFetchHosts.includes(host);
+  if (privateHosts.includes(host) || host.endsWith(".local") || DEPLOYMENT.directFetchHosts.includes(host) || host === new URL(config.siteUrl).hostname) return null;
+  if (config.collectorProxyUrl) return leased;
+  if (route !== "egress" || !config.egressProxyUrl || net.isIP(host) || host.endsWith(".cn")) return null;
+  return config.egressProxyUrl;
 }
 
 // Per-edition limits are optional; missing hosts keep the runtime default (normally 16 KiB).
@@ -45,10 +49,10 @@ function destinationPool(origin: string | URL, options: object): Pool {
   return new Pool(origin, { ...options, maxHeaderSize: limits?.[new URL(origin).hostname] });
 }
 
-function dispatcherFor(viaProxy: boolean, privateHost: boolean): Dispatcher | undefined {
-  if (viaProxy) {
-    proxyAgent ??= createEgressProxy(config.egressProxyUrl!, egressResolver(), destinationPool);
-    return proxyAgent;
+function dispatcherFor(proxyUrl: string | null, privateHost: boolean): Dispatcher | undefined {
+  if (proxyUrl) {
+    if (!proxyAgents.has(proxyUrl)) proxyAgents.set(proxyUrl, createEgressProxy(proxyUrl, egressResolver(proxyUrl), destinationPool));
+    return proxyAgents.get(proxyUrl)!;
   }
   if (config.allowPrivateNetworkFetch) return undefined;
   if (privateHost) {
@@ -116,14 +120,34 @@ export const DEFAULT_UA = `Mozilla/5.0 (compatible; ${SITE.crawlerName}; +${conf
 export const languageHeaders = (language: string | undefined): Record<string, string> => language ? { "accept-language": language } : {};
 
 export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}): Promise<GuardedResponse> {
-  // One budget includes DNS, every redirect and the body. Restarting it at each hop allowed a
-  // nominal 20 s image request to occupy the API for minutes.
+  const host = hostOf(new URL(input));
+  const fixedDirect = (opts.privateFeedHost && config.privateFeedHosts.includes(host)) ||
+    host.endsWith(".local") || DEPLOYMENT.directFetchHosts.includes(host) || host === new URL(config.siteUrl).hostname;
+  const routes = fixedDirect ? [null] : await collectionRoutes();
+  // 仅重复无副作用的读取；POST 等只用最高优先级出口，避免重复付费或写入。
+  const retryable = ["GET", "HEAD"].includes((opts.method ?? "GET").toUpperCase()) && opts.body === undefined;
+  for (let index = 0; index < routes.length; index++) {
+    const hasNext = retryable && index + 1 < routes.length;
+    try {
+      const response = await fetchRoute(input, opts, routes[index]!);
+      if (hasNext && response.status >= 400) continue;
+      return response;
+    } catch (error) {
+      if (!hasNext || /Blocked|Too many redirects|Response too large/.test(String(error))) throw error;
+    }
+  }
+  throw new Error("没有可用的采集出口");
+}
+
+async function fetchRoute(input: string, opts: GuardedFetchOptions, leased: string | null): Promise<GuardedResponse> {
+  // 每个出口一个预算，包含 DNS、整条重定向和正文。直连超时后仍留给下一个出口一次机会。
   const signal = AbortSignal.timeout(opts.timeoutMs ?? 20_000);
   const route = opts.route ?? "egress";
   const configuredHost = hostOf(new URL(input));
   const privateHosts = opts.privateFeedHost && config.privateFeedHosts.includes(configuredHost) ? [configuredHost] : [];
+  const proxy = (target: URL) => proxyFor(target, route, privateHosts, leased);
   const check = (target: string) => withinDeadline(assertPublicUrl(target, config.allowPrivateNetworkFetch,
-    proxied(new URL(target), route, privateHosts) ? egressResolver() : undefined, privateHosts), signal);
+    proxy(new URL(target)) ? egressResolver(proxy(new URL(target))!) : undefined, privateHosts), signal);
   let url = await check(input);
   const maxRedirects = opts.maxRedirects ?? 5;
   const maxBytes = opts.maxBytes ?? 8 * 1024 * 1024;
@@ -142,7 +166,7 @@ export async function guardedFetch(input: string, opts: GuardedFetchOptions = {}
       headers: Object.fromEntries(headers),
       body: requestBody,
       redirect: "manual",
-      dispatcher: dispatcherFor(proxied(url, route, privateHosts), privateHosts.includes(hostOf(url))),
+      dispatcher: dispatcherFor(proxy(url), privateHosts.includes(hostOf(url))),
       signal,
     });
     if ([301, 302, 303, 307, 308].includes(res.status) && res.headers.get("location")) {

@@ -17,6 +17,7 @@ from app.collectors.youtube_rss import YoutubeRssCollector
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+from app.services.collector_proxy import http_proxy_kwargs
 
 API_BASE = "https://www.googleapis.com/youtube/v3"
 
@@ -70,7 +71,7 @@ class YoutubeApiCollector:
             "maxResults": str(max(1, min(limit, 50))),
             "key": self._api_key,
         }
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, **http_proxy_kwargs(self)) as client:
             last_error: Exception | None = None
             for attempt in range(self._max_retries + 1):
                 if attempt:
