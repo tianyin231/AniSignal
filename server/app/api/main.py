@@ -14,6 +14,7 @@ from app.api.admin_ai import router as admin_ai_router
 from app.api.admin_users import router as admin_users_router
 from app.api.admin_custom import router as admin_custom_router
 from app.api.admin_settings import router as admin_settings_router
+from app.api.admin_proxies import router as admin_proxies_router, internal_router as proxy_internal_router
 from app.api.auth import router as auth_router
 from app.api.public import router as public_router
 from app.api.ai_news import router as ai_news_router
@@ -68,6 +69,8 @@ app.include_router(admin_aihot_router)
 app.include_router(auth_router)
 app.include_router(account_router)
 app.include_router(admin_settings_router)
+app.include_router(admin_proxies_router)
+app.include_router(proxy_internal_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_users_router)
 app.include_router(admin_custom_router)

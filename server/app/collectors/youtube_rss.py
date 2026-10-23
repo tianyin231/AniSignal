@@ -13,6 +13,7 @@ from app.collectors.base import USER_AGENT, CollectorError
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+from app.services.collector_proxy import http_proxy_kwargs
 
 FEED_URL = "https://www.youtube.com/feeds/videos.xml"
 
@@ -41,7 +42,7 @@ class YoutubeRssCollector:
         return FetchResult(platform=self.platform, fetch_kind="youtube_rss", items=items)
 
     async def fetch_feed(self, channel_id: str, limit: int) -> list[dict]:
-        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as client:
+        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, **http_proxy_kwargs(self)) as client:
             for attempt in range(self._max_retries + 1):
                 if attempt:
                     await asyncio.sleep(min(2**attempt, 8))

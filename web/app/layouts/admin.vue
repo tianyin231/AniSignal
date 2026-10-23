@@ -16,6 +16,7 @@ const nav = [
   { to: '/admin/bot', label: '机器人通知' },
   { to: '/admin/customs', label: '定制监控' },
   { to: '/admin/targets', label: '采集目标' },
+  { to: '/admin/proxies', label: '采集代理' },
   { to: '/admin/events', label: '事件审核' },
   { to: '/admin/products', label: '商品管理' },
   { to: '/admin/rules', label: '分类词典' },
