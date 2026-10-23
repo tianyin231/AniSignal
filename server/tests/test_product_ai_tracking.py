@@ -134,7 +134,7 @@ async def test_failure_cools_down_then_recovers_without_blocking_other_notices(s
     now = utcnow()
     first = await _official(session, title="菲比手办发布", external="first")
     await _official(session, title="安可耳机发布", external="second")
-    ai.side_effect = [("bad json", None), (response(merch("安可耳机", product_type="耳机")), None)]
+    ai.side_effect = [(response(merch("安可耳机", product_type="耳机")), None), ("bad json", None)]
     assert (await discovery.discover_merch_candidates(session, now=now))["created"] == 1
     assert (await session.get(MerchScan, first.id)).content_version == 0
     assert (await discovery.discover_merch_candidates(session, now=now + timedelta(minutes=1)))["scanned"] == 0

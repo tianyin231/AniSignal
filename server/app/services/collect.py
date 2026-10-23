@@ -177,7 +177,7 @@ def filter_relevant(
 async def _backfill_empty_draw_dynamics(
     session: AsyncSession, collector, limit: int = 5
 ) -> int:
-    """回填缺失正文和图片的 DRAW/ARTICLE，跳过直播推荐和纯图片动态。
+    """回填空图文、转发缺失的原图；保留原始作者和统计，以新版本补齐。
 
     成功的动态以新版本入库（保留原 author/统计），空卡片的琥珀提示随之消失。
     """
@@ -189,8 +189,8 @@ async def _backfill_empty_draw_dynamics(
         "FROM raw_contents rc JOIN content_versions cv ON cv.raw_content_id=rc.id "
         "AND cv.version=(SELECT MAX(version) FROM content_versions WHERE raw_content_id=rc.id) "
         "WHERE rc.content_type='dynamic' AND rc.platform='bilibili' "
-        "AND JSON_EXTRACT(rc.raw_json, '$.type') IN ('DYNAMIC_TYPE_DRAW','DYNAMIC_TYPE_ARTICLE') "
-        "AND COALESCE(LENGTH(cv.text),0)=0 "
+        "AND JSON_EXTRACT(rc.raw_json, '$.type') IN ('DYNAMIC_TYPE_DRAW','DYNAMIC_TYPE_ARTICLE','DYNAMIC_TYPE_FORWARD') "
+        "AND (COALESCE(LENGTH(cv.text),0)=0 OR JSON_EXTRACT(rc.raw_json, '$.type')='DYNAMIC_TYPE_FORWARD') "
         "AND COALESCE(JSON_EXTRACT(cv.normalized_json, '$.media'),'[]') IN ('[]','null') "
         "AND rc.collected_at > :cutoff "
         "ORDER BY rc.id DESC LIMIT :lim"
@@ -203,12 +203,6 @@ async def _backfill_empty_draw_dynamics(
     for rid, external_id, raw_json, community in rows:
         if not external_id:
             continue
-        try:
-            rich = await collector._fetch_draw_detail(external_id)
-        except Exception:  # noqa: BLE001 - 单条失败跳过
-            continue
-        if not ((rich.get("text") or "").strip() or rich.get("pics")):
-            continue
         raw = raw_json or {}
         if isinstance(raw, str):
             import json as _json
@@ -219,8 +213,18 @@ async def _backfill_empty_draw_dynamics(
                 raw = {}
         if not isinstance(raw, dict):
             raw = {}
+        forwarded = raw.get("type") == "DYNAMIC_TYPE_FORWARD" and raw.get("orig_id")
+        try:
+            rich = await collector._fetch_draw_detail(str(raw["orig_id"]) if forwarded else external_id)
+        except Exception:  # noqa: BLE001 - 单条失败跳过
+            continue
+        if not ((rich.get("text") or "").strip() or rich.get("pics")):
+            continue
         item = dict(raw)
-        item.update({"id": external_id, "text": rich.get("text") or "", "pics": rich.get("pics") or []})
+        original_text, detail_text = (raw.get("text") or "").strip(), (rich.get("text") or "").strip()
+        body = (original_text + "\n\n" + detail_text if forwarded and original_text and detail_text
+                and detail_text not in original_text else detail_text or original_text)
+        item.update({"id": external_id, "text": body, "pics": rich.get("pics") or []})
         enriched_by_community.setdefault(community or DEFAULT_COMMUNITY, []).append(item)
         touched.append(rid)
     total = 0

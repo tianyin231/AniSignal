@@ -492,6 +492,9 @@ class ProductOut(BaseModel):
     id: int
     slug: str
     name: str
+    product_type: str | None = None
+    images: SafeMediaList = []
+    images_source_url: SafeLink = None
     publisher: str | None
     community: str = _DEFAULT_COMMUNITY
     skus: list[str]

@@ -274,6 +274,9 @@ export interface ApiProduct {
   id: number
   slug: string
   name: string
+  product_type?: string | null
+  images?: string[]
+  images_source_url?: string | null
   community?: string
   publisher: string | null
   skus: string[]

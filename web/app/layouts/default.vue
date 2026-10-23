@@ -19,6 +19,6 @@ import AppShell from '~/components/AppShell.vue'
 const route = useRoute()
 // 首页自带侧栏区块；统计 / 日历 / 内容详情 / AI 快讯需要整宽
 const showRail = computed(() =>
-  !['/', '/ai', '/stats', '/calendar'].includes(route.path) && !route.path.startsWith('/ai/') && !/^\/contents\/[^/]+$/.test(route.path),
+  !['/', '/ai', '/stats', '/calendar'].includes(route.path) && !route.path.startsWith('/ai/') && !route.path.startsWith('/products') && !/^\/contents\/[^/]+$/.test(route.path),
 )
 </script>
