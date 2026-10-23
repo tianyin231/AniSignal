@@ -646,7 +646,7 @@ async def _review_candidates(
                 "content_version": version.version,
                 "identity": source.identity if source else "unknown",
                 "title": (version.title or raw.external_id)[:240],
-                "text": text_plain[:3000] if get_community(community).domain == "news" else text_plain[:1200],
+                "text": text_plain[:3000] if get_community(community).domain == "news" else text_plain[:6000],
                 "text_truncated": bool((normalized.get("extra") or {}).get("truncated")) or (
                     raw.platform == "x" and len(text_plain) > 3000),
                 "source_name": source.name if source else None,
@@ -679,11 +679,9 @@ def _match_product_context(
 
 
 async def _load_tracked_products(session: AsyncSession) -> list[dict]:
-    """只有窗口开着的商品进入每条内容的履约审核。归档商品仍可由泛搜索命中后按规则挂回。"""
+    """先本地匹配商品，只有命中的商品送入 AI；归档后的新反馈也能按需分析。"""
     rows = await session.execute(
-        select(Product.id, Product.name, Product.watch_terms, Product.community).where(
-            Product.monitor_status == "watching",
-        )
+        select(Product.id, Product.name, Product.watch_terms, Product.community)
     )
     products = []
     for pid, name, terms, community in rows:

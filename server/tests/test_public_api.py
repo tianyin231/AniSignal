@@ -442,8 +442,8 @@ async def test_official_links_prefers_ai_labels(client, session, admin_headers):
     assert "https://aki-gm-resources.aki-game.net/reward" not in by_url
 
 
-async def test_product_list_includes_latest_candidate(client, session):
-    """商品列表带最新候选信号摘要（未核验），与三轴"暂无"并存。"""
+async def test_product_list_keeps_unresolved_candidates_in_the_backend(client, session, admin_headers):
+    """分析尚未完成的记录保留后台，公开页只呈现已采纳的事实。"""
     from app.models import Product, ProductSignal, ProductSignalEvidence
     from app.services.ingest import ingest_items
     from tests.test_parsers_bilibili import VIDEO_RAW
@@ -478,8 +478,11 @@ async def test_product_list_includes_latest_candidate(client, session):
 
     resp = await client.get("/api/products")
     item = next(i for i in resp.json()["items"] if i["slug"] == "latest-cand")
-    assert item["latest_candidate"]["summary"] == "最新候选测试键盘到货"
-    assert item["latest_candidate"]["content_id"] == raw.id
+    assert item["latest_candidate"] is None
+    assert item["fulfillment"]["candidate_total"] == 0
+    assert (await client.get("/api/products/latest-cand/signals")).json()["items"] == []
+    admin = (await client.get("/api/admin/products", headers=admin_headers)).json()["items"][0]
+    assert admin["latest_candidate"]["content_id"] == raw.id
 
 
 async def test_official_links_ai_path_requires_official_identity(client, session):

@@ -1,14 +1,13 @@
-"""从官方内容发现周边，接受后准备一路搜索，安静期满后归档。
-
-关键词搜索本身没有做降频。每个窗口中的商品一路搜索词，匹配词两到四个，
-并且必须带商品品类。归档后退出履约审核上下文，专属搜索停下。
-"""
+"""AI 从官方正文自动建档、关联同款与启动搜索；交付后的安静期才归档。"""
 
 from datetime import datetime, timedelta
+import json
+import logging
 import re
+import time
 import unicodedata
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
@@ -18,25 +17,24 @@ from app.models import (
     MerchScan,
     Product,
     ProductCandidate,
-    ProductSignal,
     RawContent,
     Source,
 )
 from app.services.urls import safe_link
+from app.services.ai import ai_available, chat, get_ai_config, record_usage
+from app.services.product_discovery_ai import MERCH_SYSTEM, MerchItem, compact_name, parse_merch_response
+
+logger = logging.getLogger(__name__)
 
 GOODS_NOUNS = (
     "机械键盘", "鼠标垫", "亚克力", "键盘", "键帽", "手办", "立牌", "徽章",
     "色纸", "耳机", "挂件", "海报", "卫衣", "吧唧",
 )
 _GOODS_SORTED = tuple(sorted(GOODS_NOUNS, key=len, reverse=True))
-_QUIET_TYPES = frozenset({"consumer_received", "shipping_started", "delayed"})
 QUIET_DAYS = 30
 LOOKBACK_DAYS = 45
 SCAN_LIMIT = 20
-_PREFIX_NOISE = re.compile(r"^(?:鸣潮|库洛游戏|库洛|官方|关于|现已|正式|开启|公布)")
 _TERM_FILLER = re.compile(r"联名|机械|限定|周边")
-_PRICE = re.compile(r"[¥￥]\s*(\d{2,5}(?:\.\d{1,2})?)")
-_SENTENCE = re.compile(r"[。！？!?；;\n]+")
 
 
 def _plain(value: str | None) -> str:
@@ -52,44 +50,32 @@ def goods_noun(text: str) -> str | None:
     return None
 
 
-def extract_merch_name(title: str | None) -> str | None:
-    """标题里要有品类，而且品类前后还得有具体名字。单独的「键盘」不算。"""
-    plain = _plain(title)
-    noun = goods_noun(plain)
-    if noun is None:
-        return None
-    left = re.split(r"[，,。！？!?；;：:《》「」\"'（）()【】\[\]|｜/\\\-]+", plain[:plain.find(noun)])[-1]
-    left = _PREFIX_NOISE.sub("", left)
-    name = f"{left}{noun}"
-    if name == noun or len(name) < 4 or len(name) > 32:
-        return None
-    return name
-
-
-def _valid_term(term: str) -> bool:
+def _valid_term(term: str, product_type: str | None = None) -> bool:
     compact = _plain(term)
-    return len(compact) >= 4 and goods_noun(compact) is not None
+    return len(compact) >= (3 if product_type else 4) and (goods_noun(compact) is not None or bool(
+        product_type and _plain(product_type).casefold() in compact.casefold()
+    ))
 
 
-def build_watch_terms(name: str, aliases: list[str] | None = None) -> list[str]:
+def build_watch_terms(name: str, aliases: list[str] | None = None, product_type: str | None = None) -> list[str]:
     """两到四个匹配词。过短或没有品类的叫法丢掉，避免角色名把审核上下文撑大。"""
     terms: list[str] = []
     for raw in (name, *(aliases or [])):
         compact = _plain(raw)
-        if _valid_term(compact) and compact not in terms:
+        if _valid_term(compact, product_type) and compact not in terms:
             terms.append(compact)
         shorter = _TERM_FILLER.sub("", compact)
-        if _valid_term(shorter) and shorter not in terms:
+        if _valid_term(shorter, product_type) and shorter not in terms:
             terms.append(shorter)
         if len(terms) >= 4:
             break
     return terms[:4]
 
 
-def build_search_keyword(name: str) -> str:
+def build_search_keyword(name: str, product_type: str | None = None) -> str:
     """一路稍宽的搜索词：名字里的具体部分加品类，别名不再各开一路。"""
     compact = _plain(name)
-    noun = goods_noun(compact) or ""
+    noun = goods_noun(compact) or product_type or ""
     search_noun = "键盘" if noun == "机械键盘" else noun
     prefix = _TERM_FILLER.sub("", compact.replace(noun, "", 1)).strip()
     if len(prefix) >= 2 and search_noun:
@@ -102,60 +88,77 @@ def build_search_keyword(name: str) -> str:
     return keyword
 
 
-def _sentence_with(text: str, pattern: str, limit: int = 64) -> str | None:
-    for part in _SENTENCE.split(text or ""):
-        piece = re.sub(r"\s+", " ", part).strip()
-        if piece and re.search(pattern, piece):
-            return piece[:limit]
-    return None
+async def _store_discovered_product(session: AsyncSession, item: MerchItem, raw: RawContent, version: ContentVersion) -> tuple[Product, bool]:
+    from app.services.product_monitoring import configure_product_monitor
 
-
-def notes_from_text(text: str | None) -> dict[str, str | None]:
-    raw = text or ""
-    price = _PRICE.search(raw)
-    return {
-        "price_note": f"¥{price.group(1)}" if price else None,
-        "presale_note": _sentence_with(raw, r"预售|预订|预约"),
-        "ship_note": _sentence_with(raw, r"发货|出货|尾款"),
-    }
-
-
-def _compact_key(value: str) -> str:
-    return _plain(value).casefold()
-
-
-async def _tracked_names(session: AsyncSession, community: str) -> set[str]:
-    rows = await session.execute(
-        select(Product.name, Product.watch_terms).where(Product.community == community)
-    )
-    names: set[str] = set()
-    for name, terms in rows:
-        names.add(_compact_key(name))
-        for term in terms or []:
-            if isinstance(term, str):
-                names.add(_compact_key(term))
-    pending = await session.scalars(
-        select(ProductCandidate.name).where(
-            ProductCandidate.community == community,
-            ProductCandidate.status == "pending",
-        )
-    )
-    names.update(_compact_key(item) for item in pending)
-    return {item for item in names if item}
-
-
-def _already_known(name: str, known: set[str]) -> bool:
-    key = _compact_key(name)
-    if key in known:
-        return True
-    return any(key in item or item in key for item in known if len(item) >= 4)
+    catalog = list(await session.scalars(select(Product).where(Product.community == raw.community).with_for_update()))
+    product = next((p for p in catalog if p.id == item.existing_product_id), None)
+    if item.existing_product_id and product is None:
+        raise ValueError("AI 关联了本分区不存在的商品")
+    if product is None:
+        # 精确名称去重；有歧义的简称由 AI 对照已有型号判断，不能按包含关系吞并新款。
+        product = next((p for p in catalog if compact_name(p.name) == compact_name(item.name)), None)
+    candidate = await session.scalar(select(ProductCandidate).where(
+        ProductCandidate.community == raw.community, ProductCandidate.name == item.name,
+    ).order_by(ProductCandidate.id.desc()).limit(1))
+    if candidate and candidate.status == "ignored":
+        raise ValueError("该商品已被管理员忽略")
+    terms = build_watch_terms(item.name, item.aliases, item.product_type)
+    if not terms:
+        raise ValueError("商品缺少包含品类的完整匹配词")
+    if candidate is None:
+        candidate = ProductCandidate(community=raw.community, name=item.name)
+        session.add(candidate)
+    candidate.aliases = item.aliases
+    candidate.watch_terms = terms
+    candidate.search_keyword = build_search_keyword(item.name, item.product_type)
+    candidate.price_note = item.price_note
+    candidate.presale_note = item.presale_note
+    candidate.ship_note = item.ship_note
+    candidate.source_url = safe_link(raw.url)
+    candidate.raw_content_id = raw.id
+    candidate.details = item.model_dump(mode="json")
+    await session.flush()
+    created = product is None
+    if product is None:
+        product = Product(slug=f"merch-{candidate.id}", name=item.name, community=raw.community,
+                          watch_terms=terms, monitor_status="watching", monitor_started_at=utcnow())
+        session.add(product)
+        await session.flush()
+    else:
+        product.watch_terms = list(dict.fromkeys([*(product.watch_terms or []), *terms]))[:8]
+    if product.monitor_target_id is None and product.monitor_status == "watching":
+        try:
+            async with session.begin_nested():
+                await configure_product_monitor(session, product, enabled=True, keyword=candidate.search_keyword)
+        except ValueError:
+            keyword = f"{get_community(raw.community).bare_name} {item.name}"[:64]
+            await configure_product_monitor(session, product, enabled=True, keyword=keyword)
+    # 新公告只更新其实际给出的资料，旧公告回填不能覆盖较新的登记。
+    published = raw.published_at or raw.collected_at
+    previous_at = (product.discovery or {}).get("published_at")
+    if not previous_at or published.isoformat() >= previous_at:
+        for field, value in (("price_note", item.price_note), ("presale_at", item.presale_note),
+                             ("balance_window", item.balance_note), ("ship_note", item.ship_note),
+                             ("expected_ship_at", item.expected_ship_at)):
+            if value is not None:
+                setattr(product, field, value)
+        product.source_url = safe_link(raw.url)
+        product.discovery = {"raw_content_id": raw.id, "content_version": version.version,
+                             "quote": item.quote, "published_at": published.isoformat()}
+    candidate.status = "accepted"
+    candidate.product_id = product.id
+    return product, created
 
 
 async def discover_merch_candidates(
     session: AsyncSession, *, limit: int = SCAN_LIMIT, now: datetime | None = None,
 ) -> dict:
-    """扫尚未看过的官方内容。没有候选也会记下，下一轮不重复扫。"""
+    """逐版本 AI 识别并直接启动追踪。模型/协议失败十分钟后自动重试。"""
     now = now or utcnow()
+    config = await get_ai_config(session)
+    if not ai_available(config):
+        return {"scanned": 0, "created": 0, "skipped_reason": "ai_not_configured"}
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
     latest = (
         select(
@@ -174,52 +177,107 @@ async def discover_merch_candidates(
             (ContentVersion.raw_content_id == latest.c.rid)
             & (ContentVersion.version == latest.c.version),
         )
+        .outerjoin(MerchScan, MerchScan.raw_content_id == RawContent.id)
         .where(
             Source.identity == "official",
             RawContent.hidden.is_(False),
-            RawContent.collected_at >= cutoff,
-            ~select(MerchScan.raw_content_id).where(MerchScan.raw_content_id == RawContent.id).exists(),
+            or_(RawContent.collected_at >= cutoff, MerchScan.raw_content_id.is_not(None)),
+            or_(MerchScan.raw_content_id.is_(None),
+                (MerchScan.content_version != ContentVersion.version) & (
+                    (MerchScan.scanned_at <= now - timedelta(minutes=10))
+                    | (ContentVersion.parsed_at > MerchScan.scanned_at))),
         )
-        .order_by(RawContent.id.desc())
+        .order_by(MerchScan.scanned_at, RawContent.id)
         .limit(limit)
     ))
     created = 0
-    known_by_community: dict[str, set[str]] = {}
-    for raw, version, _source in rows:
-        session.add(MerchScan(raw_content_id=raw.id, scanned_at=now))
+    scanned = 0
+    content_versions = [(raw.id, version.version) for raw, version, _source in rows]
+    for raw_id, version_number in content_versions:
+        raw = await session.get(RawContent, raw_id, populate_existing=True)
+        version = await session.scalar(select(ContentVersion).where(
+            ContentVersion.raw_content_id == raw_id, ContentVersion.version == version_number))
+        if raw is None or version is None:
+            continue
+        scan = await session.get(MerchScan, raw_id)
+        if scan is None:
+            scan = MerchScan(raw_content_id=raw_id)
+            session.add(scan)
+        scan.scanned_at = max(now, utcnow())
+        await session.commit()
         community = raw.community or ""
         if get_community(community).domain != "game":
+            scan.content_version = version_number
+            scan.result = {}
+            await session.commit()
             continue
-        name = extract_merch_name(version.title)
-        if name is None:
-            continue
-        if community not in known_by_community:
-            known_by_community[community] = await _tracked_names(session, community)
-        known = known_by_community[community]
-        if _already_known(name, known):
-            continue
-        terms = build_watch_terms(name)
-        if not terms:
-            continue
-        notes = notes_from_text(version.text or version.title)
-        session.add(ProductCandidate(
-            community=community,
-            name=name,
-            aliases=terms[1:],
-            watch_terms=terms,
-            search_keyword=build_search_keyword(name),
-            price_note=notes["price_note"],
-            presale_note=notes["presale_note"],
-            ship_note=notes["ship_note"],
-            source_url=safe_link(raw.url),
-            raw_content_id=raw.id,
-            status="pending",
-        ))
-        known.add(_compact_key(name))
-        known.update(_compact_key(term) for term in terms)
-        created += 1
-    await session.commit()
-    return {"scanned": len(rows), "created": created}
+        catalog = list(await session.scalars(select(Product).where(Product.community == community)))
+        from app.services.ai import _plain_evidence
+        title, text = version.title or "", _plain_evidence(version.text or "")[:12000]
+        payload = json.dumps({
+            "game": get_community(community).game_name, "title": title, "text": text,
+            "published_at": (raw.published_at or raw.collected_at).isoformat() + "Z",
+            "existing_products": [{"id": p.id, "name": p.name, "aliases": p.watch_terms or []} for p in catalog],
+        }, ensure_ascii=False)
+        await session.commit()
+        started, usage = time.monotonic(), None
+        try:
+            response, usage = await chat(config, MERCH_SYSTEM, payload, json_mode=True)
+            items = parse_merch_response(response, title=title, text=text, published_at=raw.published_at or raw.collected_at)
+            confirmed = [item for item in items if item.confidence >= 85]
+            # 模型运行期间可能有内容修订/下架，旧版本不能落地建档。
+            current = await session.scalar(select(ContentVersion.version).where(
+                ContentVersion.raw_content_id == raw_id).order_by(ContentVersion.version.desc()).limit(1))
+            await session.refresh(raw)
+            if raw.hidden or current != version_number:
+                await record_usage(session, task="discover_products", config=config, usage=usage,
+                                   duration_ms=int((time.monotonic() - started) * 1000), ref_id=raw_id)
+                continue
+            from app.services.fulfillment_automation import SIGNAL_TYPES
+            from app.services.product_matching import matches_product_text
+            signals = {}
+            matched_ids = {p.id for p in catalog if matches_product_text(title, text, p.watch_terms or [])}
+            new_count = 0
+            async with session.begin_nested():
+                ignored = set(await session.scalars(select(ProductCandidate.name).where(
+                    ProductCandidate.community == community, ProductCandidate.status == "ignored")))
+                for item in confirmed:
+                    if item.name in ignored:
+                        continue
+                    product, is_new = await _store_discovered_product(session, item, raw, version)
+                    new_count += int(is_new)
+                    matched_ids.add(product.id)
+                    for fact in item.facts:
+                        signals[(product.id, fact.signal_type)] = {
+                            "product_id": product.id, "signal_type": fact.signal_type, "verdict": "supported",
+                            "confidence": fact.confidence, "quote": fact.quote,
+                            "reason": "官方正文明确说明", "acquisition_type": "unknown",
+                        }
+                for product_id in matched_ids:
+                    for kind in SIGNAL_TYPES:
+                        signals.setdefault((product_id, kind), {
+                            "product_id": product_id, "signal_type": kind, "verdict": "uncertain",
+                            "confidence": 0, "quote": "", "reason": "原文未涉及", "acquisition_type": "unknown",
+                        })
+                scan.content_version = version_number if len(confirmed) == len(items) else 0
+                scan.result = {"products": [item.model_dump(mode="json") for item in items], "fulfillment": {
+                    "schema_version": 2, "content_version": version_number, "kind": "none", "confidence": 95,
+                    "reason": "官方周边正文分析", "signals": list(signals.values()),
+                }}
+                await session.flush()
+                if matched_ids:
+                    from app.services.events import run_aggregation
+                    await run_aggregation(session)
+            await record_usage(session, task="discover_products", config=config, usage=usage,
+                               duration_ms=int((time.monotonic() - started) * 1000), ref_id=raw_id)
+            created += new_count
+            scanned += 1
+        except Exception:
+            await session.rollback()
+            logger.exception("商品 AI 发现失败，稍后重试 content_id=%s", raw_id)
+            await record_usage(session, task="discover_products", config=config, usage=usage,
+                               duration_ms=int((time.monotonic() - started) * 1000), ref_id=raw_id, status="failed")
+    return {"scanned": scanned, "created": created}
 
 
 async def accept_product_candidate(session: AsyncSession, candidate_id: int) -> Product:
@@ -285,7 +343,7 @@ async def archive_product(session: AsyncSession, product: Product, *, now: datet
 
 
 async def archive_quiet_products(session: AsyncSession, *, now: datetime | None = None) -> dict:
-    """连续约 30 天没有新开箱，也没有新的官方延期或发货，就归档并停掉专属搜索。"""
+    """已有交付证据，且最近一次进展与本轮跟踪都安静 30 天，才结束专属搜索。"""
     now = now or utcnow()
     products = list(await session.scalars(
         select(Product).where(Product.monitor_status == "watching").with_for_update()
@@ -293,16 +351,23 @@ async def archive_quiet_products(session: AsyncSession, *, now: datetime | None 
     archived = 0
     deadline = now - timedelta(days=QUIET_DAYS)
     for product in products:
-        latest = await session.scalar(
-            select(func.max(ProductSignal.occurred_at)).where(
-                ProductSignal.product_id == product.id,
-                ProductSignal.active.is_(True),
-                ProductSignal.review_status == "verified",
-                ProductSignal.signal_type.in_(_QUIET_TYPES),
-                ProductSignal.community == product.community,
-            )
-        )
-        baseline = latest or product.created_at
+        from app.services.fulfillment import _active_signal_rows
+
+        rows = [(signal, evidence.acquisition_type) for signal, evidence, _, _ in await _active_signal_rows(session, product.id)
+                if signal.review_status == "verified"]
+        delivery_times = [signal.occurred_at for signal, acquisition in rows if signal.occurred_at and (
+            (signal.signal_type == "shipping_started" and signal.actor_type == "official")
+            or (signal.signal_type == "consumer_received" and acquisition != "seeded" and signal.actor_type != "seeded")
+        )]
+        if not delivery_times or (product.expected_ship_at and product.expected_ship_at > now):
+            continue
+        delivery_at = max(delivery_times)
+        # 新一轮预售、补款或延期意味着仍在等交付，不能把早期样品/旧批次当作完成。
+        if any(signal.actor_type == "official" and signal.signal_type in {"presale_open", "balance_open", "delayed"}
+               and signal.occurred_at and signal.occurred_at > delivery_at for signal, _ in rows):
+            continue
+        times = [signal.occurred_at for signal, _ in rows if signal.occurred_at]
+        baseline = max([*times, product.monitor_started_at or product.created_at])
         if baseline is not None and baseline <= deadline:
             await archive_product(session, product, now=now)
             archived += 1
@@ -331,16 +396,24 @@ def public_brief(product: Product, fulfillment: dict, signals: list[dict]) -> di
         + int(consumer.get("verified_count") or 0)
     )
     if accounts == 0:
-        unboxing_note = "还没有采纳的实物开箱"
+        unboxing_note = "尚无开箱分享"
     elif int(consumer.get("verified_count") or 0) == 0 and int(fulfillment.get("sample_count") or 0) == 0:
-        unboxing_note = "购买方式未注明"
+        unboxing_note = ""
     elif int(consumer.get("verified_count") or 0) == 0:
         unboxing_note = "含送测样品，未计入自购"
     else:
         unboxing_note = f"其中 {int(consumer['verified_count'])} 个独立账号写明自购"
     official = fulfillment["official"]
     if int(official.get("verified_count") or 0):
-        official_text = official.get("state_label") or ""
+        latest = next((signal for signal in signals if signal.get("actor_type") == "official"
+                       and signal.get("review_status") == "verified"
+                       and signal.get("signal_type") == official.get("state")), None)
+        official_text = ((latest or {}).get("claim_quote") or official.get("summary")
+                         or official.get("state_label") or "")
+        if official.get("state") in {"presale_open", "balance_open", "delayed"}:
+            for note in (product.price_note, product.presale_at, product.balance_window, product.ship_note):
+                if note and note not in official_text:
+                    official_text += f"；{note}"
         official_registered = False
     else:
         parts = []
@@ -355,9 +428,9 @@ def public_brief(product: Product, fulfillment: dict, signals: list[dict]) -> di
         if product.ship_note:
             parts.append(product.ship_note)
         official_text = "；".join(parts)
-        official_registered = bool(parts)
+        official_registered = bool(parts) and not bool(product.discovery)
         if not official_text:
-            official_text = "官方来源里还没有这件商品的发货或延期原文"
+            official_text = (product.discovery or {}).get("quote") or "暂无新公告"
     return {
         "archived": product.monitor_status == "archived",
         "unboxing_accounts": accounts,

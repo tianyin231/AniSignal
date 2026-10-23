@@ -50,8 +50,7 @@ const footLine = computed(() => {
   const f = product.value?.fulfillment
   if (!f) return ''
   return [
-    f.automated_count ? `${f.automated_count} 条已采纳` : '',
-    f.candidate_total ? `${f.candidate_total} 条跟踪中` : '',
+    f.automated_count ? `${f.automated_count} 条动态` : '',
     f.updated_at ? fmtTime(f.updated_at) : '',
   ].filter(Boolean).join(' · ')
 })

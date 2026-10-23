@@ -48,6 +48,10 @@ class Product(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime)
     # 接受候选时带来的公告链接。档案里的预售/发货文字仍是登记信息，不是官方信号。
     source_url: Mapped[str | None] = mapped_column(String(512))
+    # AI 抽取的发货窗口末端用于调度；原始日期表述保留在档案和发现记录中。
+    expected_ship_at: Mapped[datetime | None] = mapped_column(DateTime)
+    monitor_started_at: Mapped[datetime | None] = mapped_column(DateTime)
+    discovery: Mapped[dict] = mapped_column(JSON, default=dict)
     # 管理端或 AI 指定的当前阶段（-1 = 跟随引擎计算）
     stage_hint: Mapped[int] = mapped_column(Integer, default=-1)
     stage_hint_source: Mapped[str | None] = mapped_column(String(16))  # manual / ai

@@ -205,6 +205,10 @@ async def update_target(
         target.enabled = body.enabled
         if body.enabled and (was_disabled or target.next_run_at is None):
             target.next_run_at = utcnow()
+        if body.enabled and bound_product and bound_product.monitor_status == "archived":
+            bound_product.monitor_status = "watching"
+            bound_product.archived_at = None
+            bound_product.monitor_started_at = utcnow()
     await session.commit()
     await session.refresh(target)
     return target
@@ -796,7 +800,7 @@ async def list_products_admin(
     if community:
         query = query.where(Product.community == community)
     products = list((await session.execute(query)).scalars())
-    return ProductListOut(items=[await product_to_out(session, p) for p in products])
+    return ProductListOut(items=[await product_to_out(session, p, include_pending=True) for p in products])
 
 
 @router.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
@@ -836,7 +840,7 @@ async def create_product(body: ProductCreate, session: AsyncSession = Depends(ge
     await run_aggregation(session)
     await session.commit()
     await session.refresh(product)
-    return await product_to_out(session, product)
+    return await product_to_out(session, product, include_pending=True)
 
 
 @router.put("/products/{product_id}", response_model=ProductOut)
@@ -880,7 +884,7 @@ async def update_product(
         await run_aggregation(session, product_snapshots={product_id: before})
     await session.commit()
     await session.refresh(product)
-    return await product_to_out(session, product)
+    return await product_to_out(session, product, include_pending=True)
 
 
 @router.get("/product-candidates", response_model=ProductCandidateListOut)
@@ -907,7 +911,7 @@ async def accept_product_candidate_route(
     except ValueError as exc:
         code = status.HTTP_404_NOT_FOUND if str(exc) == "candidate_not_found" else status.HTTP_409_CONFLICT
         raise HTTPException(code, str(exc)) from exc
-    return await product_to_out(session, product)
+    return await product_to_out(session, product, include_pending=True)
 
 
 @router.post("/product-candidates/{candidate_id}/ignore", response_model=ProductCandidateOut)
@@ -938,7 +942,7 @@ async def archive_product_route(
     await archive_product(session, product)
     await session.commit()
     await session.refresh(product)
-    return await product_to_out(session, product)
+    return await product_to_out(session, product, include_pending=True)
 
 
 @router.post("/products/{product_id}/assess", response_model=ProductOut)

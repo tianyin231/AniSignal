@@ -14,6 +14,7 @@ from app.models import (
     ContentVersion,
     Event,
     Evidence,
+    MerchScan,
     Product,
     ProductSignal,
     ProductSignalEvidence,
@@ -73,6 +74,37 @@ def _review_method(signal: ProductSignal) -> str:
     if automation.get("method") == "ai":
         return "ai"
     return "rule" if signal.review_status == "verified" else "pending"
+
+
+async def load_fulfillment_reviews(session: AsyncSession, raw_ids: set[int]) -> dict[int, dict]:
+    """全站审核和官方商品发现共用信号协议；同版本明确判断优先于未涉及的轴。"""
+    if not raw_ids:
+        return {}
+    reviews = {row.raw_content_id: row for row in await session.scalars(select(ContentReview).where(
+        ContentReview.raw_content_id.in_(raw_ids)))}
+    result = {rid: row.fulfillment for rid, row in reviews.items()
+              if row.relevant and not row.violation and not row.promotional and row.fulfillment}
+    scans = await session.scalars(select(MerchScan).join(RawContent).join(Source).where(
+        MerchScan.raw_content_id.in_(raw_ids), Source.identity == "official", RawContent.hidden.is_(False)))
+    for scan in scans:
+        found = (scan.result or {}).get("fulfillment")
+        if not found:
+            continue
+        review = reviews.get(scan.raw_content_id)
+        if review and review.violation:
+            continue
+        base = result.get(scan.raw_content_id)
+        if base and base.get("schema_version") == 2 and base.get("content_version") == found.get("content_version"):
+            signals = {(item["product_id"], item["signal_type"]): item for item in found["signals"]}
+            for item in base["signals"]:
+                key = (item["product_id"], item["signal_type"])
+                if item["verdict"] != "uncertain" or key not in signals:
+                    signals[key] = item
+            found = {**base, "signals": list(signals.values())}
+        elif base and (base.get("content_version") or 0) > (found.get("content_version") or 0):
+            continue
+        result[scan.raw_content_id] = found
+    return result
 
 
 def product_signal_types(*, title, text, category, product_id, actor_type, content_version, review_fulfillment) -> set[str]:
@@ -150,23 +182,23 @@ async def sync_product_signals(
         for signal, evidence in existing_rows
     }
     raw_ids = {raw.id for _, raw, _, _ in rows}
-    reviews = {review.raw_content_id: review for review in await session.scalars(
-        select(ContentReview).where(ContentReview.raw_content_id.in_(raw_ids))
-    )} if raw_ids else {}
+    reviews = await load_fulfillment_reviews(session, raw_ids)
     expected = {}
     event_signal_types = {
         category: {kind} for category, kind in CATEGORY_TO_SIGNAL.items()
     }
     event_signal_types["quality"].add("aftersales_notice")
     for event, raw, source, version in rows:
-        if not matches_product_text(version.title, version.text, product.watch_terms or []):
-            continue
         review = reviews.get(raw.id)
+        ai_linked = bool(review and review.get("content_version") == version.version
+                         and any(item.get("product_id") == product_id for item in review.get("signals", [])))
+        if not matches_product_text(version.title, version.text, product.watch_terms or []) and not ai_linked:
+            continue
         kinds = product_signal_types(
             title=version.title, text=version.text, category=version.category,
             product_id=product_id, actor_type=source.identity if source else "unknown",
             content_version=version.version,
-            review_fulfillment=review.fulfillment if review and review.relevant and not review.violation and not review.promotional else None,
+            review_fulfillment=review,
         )
         for kind in kinds & event_signal_types.get(event.category, set()):
             expected[(raw.id, kind)] = (event, raw, source, version)
@@ -216,10 +248,10 @@ async def sync_product_signals(
             decision = decide_signal_automation(
                 signal_type=signal_type, product_id=product_id, actor_type=actor,
                 title=version.title, text=version.text, content_version=version.version,
-                review_fulfillment=review.fulfillment if review and review.relevant and not review.violation and not review.promotional else None,
+                review_fulfillment=review,
             )
             # 已确认官方身份的明确公告仍可由规则采纳；AI 明确反证时可自动纠正。
-            if is_official and decision["review_status"] == "candidate":
+            if is_official and decision["review_status"] == "candidate" and decision["method"] == "rule":
                 decision = {"review_status": "verified", "actor_type": actor,
                             "acquisition_type": "unknown", "confidence": 1.0,
                             "reason": "已确认的官方账号发布履约公告", "method": "rule",
@@ -235,6 +267,12 @@ async def sync_product_signals(
             evidence.claim_quote = decision.get("quote") or quote
             evidence.independent_source_key = _source_key(raw, source)
             evidence.acquisition_type = decision["acquisition_type"]
+            # 只由归档后新发布、已采纳的事实恢复搜索；旧公告回填不重新点亮商品。
+            if (signal.review_status == "verified" and product.monitor_status == "archived"
+                and product.archived_at and signal.occurred_at > product.archived_at):
+                from app.services.product_monitoring import configure_product_monitor
+
+                await configure_product_monitor(session, product, enabled=True)
             if (previous_decision != decision or previous != signal.review_status) and (decision["method"] == "ai" or previous != signal.review_status):
                 session.add(ProductSignalRevision(
                     signal_id=signal.id, actor="automation", previous_status=previous,
@@ -361,7 +399,9 @@ async def build_fulfillment_snapshot(
     official = [(s, e) for s, e in verified if s.actor_type == "official" and s.signal_type in OFFICIAL_TYPES]
     official_candidates = {s.id for s, _ in candidates if s.signal_type in OFFICIAL_TYPES}
     if official:
-        latest_official, _ = max(official, key=lambda item: item[0].occurred_at or item[0].updated_at)
+        priority = {"presale_open": 0, "balance_open": 1, "shipping_started": 2, "delayed": 3, "aftersales_notice": 4}
+        latest_official, _ = max(official, key=lambda item: (
+            item[0].occurred_at or item[0].updated_at, priority[item[0].signal_type], item[0].id))
         official_state = latest_official.signal_type
         official_label = SIGNAL_LABELS[latest_official.signal_type]
         official_summary = latest_official.summary
@@ -405,7 +445,7 @@ async def build_fulfillment_snapshot(
         evidence.independent_source_key
         for signal, evidence in verified
         if signal.signal_type == "consumer_received" and evidence.acquisition_type == "seeded"
-    }
+    } - receipt_sources
     observation_by_source = {
         evidence.independent_source_key: signal
         for signal, evidence in verified
@@ -515,7 +555,7 @@ async def build_fulfillment_snapshot(
 
 async def list_product_signals(
     session: AsyncSession, product_id: int, *, include_rejected: bool = False,
-    signal_data: tuple[list, dict] | None = None, include_notes: bool = True,
+    signal_data: tuple[list, dict] | None = None, include_notes: bool = True, verified_only: bool = False,
 ) -> list[dict]:
     rows, ai_hints = signal_data if signal_data is not None else await load_product_signal_data(session, product_id)
     last_notes: dict[int, str] = {}
@@ -532,6 +572,8 @@ async def list_product_signals(
     result = []
     seen: set[int] = set()
     for signal, evidence, raw, source in rows:
+        if verified_only and signal.review_status != "verified":
+            continue
         if signal.id in seen or (signal.review_status == "rejected" and not include_rejected):
             continue
         seen.add(signal.id)

@@ -11,17 +11,17 @@ function day(value: string | null) {
 const unboxing = computed(() => {
   const brief = props.brief
   if (!brief.unboxing_accounts) return brief.unboxing_note
-  const span = brief.unboxing_from && brief.unboxing_to
-    ? `${day(brief.unboxing_from)} – ${day(brief.unboxing_to)}`
-    : ''
+  const first = day(brief.unboxing_from)
+  const last = day(brief.unboxing_to)
+  const span = first === last ? first : [first, last].filter(Boolean).join(' – ')
   return [`${brief.unboxing_accounts} 个账号`, span, brief.unboxing_note].filter(Boolean).join(' · ')
 })
 
 const quality = computed(() => {
   const brief = props.brief
-  if (!brief.quality_accounts) return '还没有采纳的质量反馈'
+  if (!brief.quality_accounts) return '暂无质量反馈'
   const latest = brief.quality_latest ? `最新 ${day(brief.quality_latest)}` : ''
-  return [`${brief.quality_accounts} 个账号`, latest, '不能当成故障率'].filter(Boolean).join(' · ')
+  return [`${brief.quality_accounts} 个账号反馈`, latest].filter(Boolean).join(' · ')
 })
 </script>
 
