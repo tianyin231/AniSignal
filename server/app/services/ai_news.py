@@ -223,7 +223,9 @@ async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None
             RawContent.community == "ai",
             or_(Source.raw_json["participation_mode"].as_string().is_(None),
                 Source.raw_json["participation_mode"].as_string() == "editorial"),
-            func.coalesce(RawContent.published_at, RawContent.collected_at) >= utcnow() - timedelta(days=7),
+            or_(func.coalesce(RawContent.published_at, RawContent.collected_at) >= utcnow() - timedelta(days=7),
+                and_(RawContent.platform == "rss", latest_version > 1,
+                    latest_parsed >= utcnow() - timedelta(days=7))),
             retry_allowed("review_content", latest_parsed),
             (fingerprint.is_(None)) | (fingerprint != RawContent.content_hash)
             | (ContentReview.news["content_version"].as_integer().is_(None))
