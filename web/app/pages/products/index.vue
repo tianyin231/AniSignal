@@ -9,6 +9,18 @@ function communityChip(community?: string) {
   return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
 }
 
+/** 列表卡只留一行履约摘要；三块明细进详情页看。 */
+function briefLine(product: ApiProductList['items'][number]) {
+  const brief = product.brief
+  if (!brief) return ''
+  const parts: string[] = []
+  if (brief.unboxing_accounts) parts.push(`${brief.unboxing_accounts} 个账号开箱`)
+  else if (brief.unboxing_note) parts.push(brief.unboxing_note)
+  if (brief.quality_accounts) parts.push(`${brief.quality_accounts} 条质量反馈`)
+  if (!parts.length && product.monitor_status !== 'archived') parts.push(product.fulfillment.official.state_label || '持续追踪官方动态')
+  return parts.join(' · ')
+}
+
 useSeoMeta({ title: '商品总览' })
 
 const { api } = usePublicApi()
@@ -70,9 +82,7 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
             </p>
           </div>
         </div>
-        <div v-if="p.brief" class="my-3">
-          <ProductBrief :brief="p.brief" compact clamp-official />
-        </div>
+        <p v-if="briefLine(p)" class="mt-2 truncate text-xs text-muted">{{ briefLine(p) }}</p>
         <div class="mt-auto flex items-center justify-between gap-2 border-t border-line-soft pt-2.5 text-xs"><span class="mono text-faint">{{ p.fulfillment.updated_at ? fmtTime(p.fulfillment.updated_at) : '' }}</span><span class="font-medium text-brand-ink">查看进展 →</span></div>
         </div>
       </NuxtLink>
