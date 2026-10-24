@@ -31,6 +31,7 @@ if (route.query.community !== 'all' && route.query.community !== productCommunit
   await navigateTo({ path: route.path, query: { ...route.query, community: productCommunity.value } }, { replace: true })
 }
 const listFallback = computed(() => `/products?community=${route.query.community === 'all' ? 'all' : productCommunity.value}`)
+const hasImages = computed(() => (product.value.images?.length ?? 0) > 0)
 const signals = computed(() => signalData.value?.items ?? [])
 useVisibleRefresh(() => Promise.all([
   productRequest.refresh({ dedupe: 'defer' }),
@@ -48,9 +49,10 @@ useSeoMeta({ title: () => `${product.value.name} · 商品` })
     </div>
     <p v-if="error" role="alert" class="text-sm text-amber-700 dark:text-amber-300">商品状态暂时更新失败，当前显示上次结果。<button type="button" class="ml-1 underline" @click="productRequest.refresh()">重试</button></p>
 
-    <section class="panel grid items-start gap-6 p-4 sm:p-6 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:gap-10">
-      <ProductGallery :images="product.images || []" :name="product.name" :kind="product.product_type" :source-url="product.images_source_url" />
-      <div class="min-w-0 py-1 md:py-3">
+    <!-- 无官方图时收起画廊单列排版，标题与履约信息直接占满首屏 -->
+    <section class="panel grid items-start gap-6 p-4 sm:p-6 lg:gap-10" :class="hasImages ? 'md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]' : ''">
+      <ProductGallery v-if="hasImages" :images="product.images || []" :name="product.name" :kind="product.product_type" :source-url="product.images_source_url" />
+      <div class="min-w-0 py-1 md:py-3" :class="hasImages ? '' : 'sm:py-2'">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0 flex-1">
           <div class="mb-3 flex flex-wrap items-center gap-2"><span v-if="communityMeta" class="chip text-xs" :class="communityClasses(communityMeta.color).chip">{{ communityMeta.label }}</span><span v-if="product.product_type" class="text-xs text-muted">{{ product.product_type }}</span></div>

@@ -47,8 +47,9 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
         :to="{ path: `/products/${p.slug}`, query: { community: scope } }"
         class="panel group flex min-w-0 flex-col overflow-hidden transition-shadow hover:shadow-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand [overflow-wrap:anywhere]"
       >
-        <ProductArtwork :src="p.images?.[0]" :name="p.name" :kind="p.product_type" class="aspect-[4/3] border-b border-line-soft" />
-        <div class="flex flex-1 flex-col p-4 sm:p-5">
+        <!-- 无官方图时直接省掉图区：文字信息前置，不留大占位框 -->
+        <ProductArtwork v-if="p.images?.length" :src="p.images[0]" :name="p.name" :kind="p.product_type" class="aspect-[4/3] border-b border-line-soft" />
+        <div class="flex flex-1 flex-col p-4 sm:p-5" :class="p.images?.length ? '' : 'pt-5'">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
             <div class="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">

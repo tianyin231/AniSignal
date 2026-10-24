@@ -23,6 +23,11 @@ const quality = computed(() => {
   const latest = brief.quality_latest ? `最新 ${day(brief.quality_latest)}` : ''
   return [`${brief.quality_accounts} 个账号反馈`, latest].filter(Boolean).join(' · ')
 })
+
+// 官方说明由登记字段拼接，日期可能是裸 ISO（2026-06-20）；全站统一 YYYY/MM/DD。
+const officialText = computed(() =>
+  (props.brief.official_text || '').replace(/(\d{4})-(\d{2})-(\d{2})/g, '$1/$2/$3'),
+)
 </script>
 
 <template>
@@ -45,7 +50,7 @@ const quality = computed(() => {
     </div>
     <div class="min-w-0" :class="{ 'col-span-2 border-t border-line-soft pt-3': compact }">
       <p class="text-xs text-muted">官方说明<span v-if="brief.official_registered"> · 登记信息</span></p>
-      <p class="mt-1 text-[13px] font-medium leading-relaxed text-ink-2" :class="{ 'line-clamp-3': clampOfficial }">{{ brief.official_text }}</p>
+      <p class="mt-1 text-[13px] font-medium leading-relaxed text-ink-2" :class="{ 'line-clamp-3': clampOfficial }">{{ officialText }}</p>
     </div>
   </div>
 </template>
