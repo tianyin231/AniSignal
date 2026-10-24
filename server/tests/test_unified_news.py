@@ -137,3 +137,16 @@ async def test_admin_uses_main_database_and_keeps_shared_auth(client, session, s
         json={"visibility": "withdrawn", "version": version, "reason": "Correction"})
     assert response.status_code == 200
     assert (await client.get("/api/ai-news/engine/items/as-42")).status_code == 404
+
+
+async def test_old_rss_body_revision_is_reviewed_without_republishing_old_date(session, snapshot):
+    from app.services.ai_news import pending_news_ids
+    await import_news(session, snapshot)
+    alias = await session.get(NewsArchive, ("article", "rss-native"))
+    raw = await session.get(RawContent, alias.raw_content_id)
+    raw.published_at = utcnow() - timedelta(days=90)
+    raw.content_hash, raw.hidden = "updated-body", True
+    session.add(ContentVersion(raw_content_id=raw.id, version=2, title="Research revision", text="New evidence", normalized_json={}))
+    await session.commit()
+    assert raw.id in await pending_news_ids(session)
+    assert raw.published_at < utcnow() - timedelta(days=80)
