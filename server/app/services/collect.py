@@ -281,6 +281,9 @@ async def run_collection(redis, target_id: int) -> dict:
                     return await collector.fetch(target.target_type, target.target_value, settings.collect_limit)
             fetch_result = await fetch_with_fallback(collector, session, target.platform, fetch)
             proxy_url = collector.proxy_url
+            if isinstance(collector, RssCollector):
+                from app.services.rss_body import enrich_items
+                await enrich_items(session, collector, fetch_result.items)
             items_fetched = len(fetch_result.items)
             fetch_result.items, filtered_out = filter_relevant(
                 fetch_result.items, target,

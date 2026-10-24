@@ -31,7 +31,7 @@ const groups = computed<SignalGroup[]>(() => {
   }
   return [...buckets.values()].map((bucket) => {
     const first = bucket[0]
-    const summary = decodeEntities(first.summary || '')
+    const summary = [...new Set(bucket.map(item => decodeEntities(item.summary || '').trim()).filter(Boolean))].join('；')
     const quote = decodeEntities(
       bucket.map(item => item.claim_quote || '').find(Boolean) || '',
     )

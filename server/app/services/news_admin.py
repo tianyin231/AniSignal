@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 import re
+from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -121,8 +122,10 @@ async def content_search(session, q):
         ContentReview, ContentReview.raw_content_id == RawContent.id).outerjoin(Source, Source.id == RawContent.source_id).where(RawContent.community == "ai")
     if q:
         alias = await session.get(NewsArchive, ("article", q))
+        match = re.fullmatch(r"(?:as|content)-(\d+)", q)
+        rid = alias.raw_content_id if alias else int(match[1]) if match else -1
         query = query.where(or_(ContentVersion.title.icontains(q, autoescape=True), RawContent.url.icontains(q, autoescape=True),
-            RawContent.id == alias.raw_content_id if alias else RawContent.id == -1))
+            RawContent.id == rid))
     rows = (await session.execute(query.order_by(RawContent.collected_at.desc()).limit(50))).all()
     aliases = await native_news.article_aliases(session, [row.id for row, _, _, _ in rows])
     return {"rows": [{"id": aliases[raw.id].key if raw.id in aliases else f"content-{raw.id}", "title": version.title,
@@ -160,6 +163,8 @@ async def request(session, path, *, method, params, body, queue=None):
             if not body.get("reason") or body.get("version") != version.version:
                 raise HTTPException(409, "请刷新内容版本并填写原因")
             raw.hidden = body.get("visibility") != "public"
+            session.add(NewsArchive(kind="visibility", key=uuid4().hex, raw_content_id=raw.id,
+                payload={"hidden": raw.hidden, "reason": body["reason"], "content_version": version.version}, created_at=utcnow()))
             if not raw.hidden and review and review.news:
                 review.relevant, review.promotional, review.violation = True, False, False
                 review.news = {**review.news, "newsworthy": True}

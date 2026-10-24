@@ -70,8 +70,8 @@ class NewsRecord:
             "published_at": self.raw.published_at, "version": self.input_version, "content_hash": self.input_hash}
 
 
-async def load_news_records(session, *, since=None, until=None, content_ids=None) -> list[NewsRecord]:
-    query = (await approved_news_query(session)).add_columns(NewsGrouping, Event).outerjoin(
+async def load_news_records(session, *, since=None, until=None, content_ids=None, include_archived=False) -> list[NewsRecord]:
+    query = (await approved_news_query(session, include_archived=include_archived)).add_columns(NewsGrouping, Event).outerjoin(
         NewsGrouping, NewsGrouping.raw_content_id == RawContent.id).outerjoin(Event, Event.id == NewsGrouping.event_id)
     if since:
         query = query.where(func.coalesce(RawContent.published_at, RawContent.collected_at) >= since)

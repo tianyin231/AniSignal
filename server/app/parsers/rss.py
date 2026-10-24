@@ -16,5 +16,6 @@ def parse_item(raw: dict) -> NormalizedContent:
         author=NormalizedAuthor(external_id=rss_id(raw["feed_url"]), name=raw.get("source_name"),
             identity=Identity.OFFICIAL if official else Identity.MEDIA),
         media=raw.get("media") or [], extra={"author": raw.get("author"), "owner_key": raw.get("owner_key"),
-            "feed_url": raw["feed_url"], "participation_mode": raw.get("participation_mode", "editorial"), "tier": raw.get("tier", "T2")},
+            "feed_url": raw["feed_url"], "participation_mode": raw.get("participation_mode", "editorial"), "tier": raw.get("tier", "T2"),
+            "rss_feed_hash": raw.get("rss_feed_hash"), "body_extracted": bool(raw.get("body_extracted"))},
     )

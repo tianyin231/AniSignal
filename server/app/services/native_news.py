@@ -18,12 +18,14 @@ def publication_time(row):
     return row.raw.published_at or row.raw.collected_at
 
 
-def available(row, now=None):
+def available(row, now=None, *, listed=True):
     now = now or utcnow()
     imported = row.news.get("imported_publication") or {}
     release = date(imported.get("visible_after"))
-    isolated = (row.source.raw_json or {}).get("participation_mode") == "isolated" if row.source else False
-    return not isolated and (not imported.get("selected") or bool(release and release <= now))
+    mode = (row.source.raw_json or {}).get("participation_mode", "editorial") if row.source else "editorial"
+    return (mode == "editorial" and (not listed or imported.get("eligible", True))
+        and not (row.current and row.event and not row.event.is_active)
+        and (not imported.get("selected") or bool(release and release <= now)))
 
 
 async def article_aliases(session, ids):

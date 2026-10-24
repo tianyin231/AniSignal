@@ -5,12 +5,12 @@ from datetime import timedelta
 from html import unescape
 from urllib.parse import urlsplit
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.clock import utcnow
-from app.models import ContentReview, ContentVersion, RawContent, Source
+from app.models import ContentReview, ContentVersion, Evidence, RawContent, Source
 
 NEWS_TOPICS = ("OpenAI", "Codex", "Claude", "Gemini", "DeepSeek", "开源模型", "行业动态")
 _AI_SUBJECT = re.compile(
@@ -107,13 +107,18 @@ def reference_links(text: str) -> list[dict]:
     return links
 
 
-async def approved_news_query(session: AsyncSession):
+async def approved_news_query(session: AsyncSession, *, include_archived=False):
     """网页和机器人共用准入条件，不能拿旧版本的审核结果推送新正文。"""
     from app.services.settings import get_media_visibility, hidden_platforms
 
     latest = select(ContentVersion.raw_content_id.label("rid"),
                     func.max(ContentVersion.version).label("version")).group_by(ContentVersion.raw_content_id).subquery()
     news = ContentReview.news
+    approved = and_(ContentReview.relevant.is_(True), ContentReview.promotional.is_(False),
+        ContentReview.violation.is_(False), news["newsworthy"].as_boolean().is_(True))
+    if include_archived:
+        # 旧引擎已公开、但已退出资讯池的文章仍保留详情；不进入列表或机器人候选。
+        approved = or_(approved, news["imported_publication"]["visibility"].as_string() == "public")
     query = (select(RawContent, ContentVersion, Source, ContentReview)
         .options(defer(RawContent.raw_json), defer(ContentVersion.normalized_json))
         .join(latest, latest.c.rid == RawContent.id)
@@ -122,8 +127,9 @@ async def approved_news_query(session: AsyncSession):
         .outerjoin(Source, Source.id == RawContent.source_id)
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
         .where(RawContent.community == "ai", RawContent.hidden.is_(False),
-               ContentReview.relevant.is_(True), ContentReview.promotional.is_(False),
-               ContentReview.violation.is_(False), news["newsworthy"].as_boolean().is_(True),
+                 approved,
+                 ~select(Evidence.raw_content_id).where(Evidence.raw_content_id == RawContent.id,
+                     Evidence.role == "excluded").exists(),
                news["content_hash"].as_string() == RawContent.content_hash,
                news["content_version"].as_integer() == ContentVersion.version))
     hidden = hidden_platforms(await get_media_visibility(session))
@@ -212,8 +218,11 @@ async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None
     ).correlate(RawContent).scalar_subquery()
     query = (select(RawContent.id)
         .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
+        .outerjoin(Source, Source.id == RawContent.source_id)
         .where(
             RawContent.community == "ai",
+            or_(Source.raw_json["participation_mode"].as_string().is_(None),
+                Source.raw_json["participation_mode"].as_string() == "editorial"),
             func.coalesce(RawContent.published_at, RawContent.collected_at) >= utcnow() - timedelta(days=7),
             retry_allowed("review_content", latest_parsed),
             (fingerprint.is_(None)) | (fingerprint != RawContent.content_hash)
