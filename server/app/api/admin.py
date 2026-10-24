@@ -887,6 +887,27 @@ async def update_product(
     return await product_to_out(session, product, include_pending=True)
 
 
+@router.post("/products/{product_id}/rebuild-terms", response_model=ProductOut)
+async def rebuild_product_terms(
+    product_id: int, session: AsyncSession = Depends(get_session)
+):
+    """按最新登记与现役监控词重算匹配词，修复只有官方全名的存量词表。"""
+    from app.services.events import run_aggregation
+    from app.services.fulfillment import build_fulfillment_snapshot
+    from app.services.product_discovery import rebuild_product_watch_terms
+
+    product = await session.get(Product, product_id, with_for_update=True)
+    if product is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "product not found")
+    before = await build_fulfillment_snapshot(session, product_id)
+    terms = await rebuild_product_watch_terms(session, product)
+    await session.flush()
+    await run_aggregation(session, product_snapshots={product_id: before})
+    await session.commit()
+    await session.refresh(product)
+    return await product_to_out(session, product, include_pending=True)
+
+
 @router.get("/product-candidates", response_model=ProductCandidateListOut)
 async def list_product_candidates(
     status_filter: str = Query(default="pending", alias="status", pattern="^(pending|accepted|ignored)$"),

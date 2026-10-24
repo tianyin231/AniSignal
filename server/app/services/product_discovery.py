@@ -57,8 +57,55 @@ def _valid_term(term: str, product_type: str | None = None) -> bool:
     ))
 
 
-def build_watch_terms(name: str, aliases: list[str] | None = None, product_type: str | None = None) -> list[str]:
-    """两到四个匹配词。过短或没有品类的叫法丢掉，避免角色名把审核上下文撑大。"""
+def _game_aliases(community: str | None) -> set[str]:
+    if not community:
+        return set()
+    try:
+        meta = get_community(community)
+    except Exception:  # noqa: BLE001 - 未知分区当作没有可剥的游戏名
+        return set()
+    return {
+        _plain(alias).casefold()
+        for alias in (*meta.game_names, meta.label, *meta.source_aliases, *meta.extra_names)
+        if alias
+    } - {""}
+
+
+def _search_watch_terms(
+    search_keyword: str | None, product_type: str | None, community: str | None,
+) -> list[str]:
+    """搜索词去掉游戏名后的紧凑组合：「鸣潮 长离 手办」→「长离手办」。
+
+    监控搜索抓回的标题常只写“角色名+品类”（长离手办开箱），官方全名匹配不上；
+    这组词就是搜索引擎实际命中的组合，必须进词表，否则专属监控空转。
+    """
+    tokens = [token for token in (_plain(part) for part in (search_keyword or "").split()) if token]
+    if not tokens:
+        return []
+    aliases = _game_aliases(community)
+    core: list[str] = []
+    for token in tokens:
+        folded = token.casefold()
+        if folded in aliases:
+            continue
+        for alias in sorted(aliases, key=len, reverse=True):
+            if len(alias) >= 2 and folded.startswith(alias):
+                token = token[len(alias):]
+                break
+        if token:
+            core.append(token)
+    terms: list[str] = []
+    for joined in ("".join(core), _TERM_FILLER.sub("", "".join(core))):
+        if len(core) >= 2 and _valid_term(joined, product_type) and joined not in terms:
+            terms.append(joined)
+    return terms
+
+
+def build_watch_terms(
+    name: str, aliases: list[str] | None = None, product_type: str | None = None,
+    *, search_keyword: str | None = None, community: str | None = None,
+) -> list[str]:
+    """四到六个匹配词。过短或没有品类的叫法丢掉，避免角色名把审核上下文撑大。"""
     terms: list[str] = []
     for raw in (name, *(aliases or [])):
         compact = _plain(raw)
@@ -69,7 +116,10 @@ def build_watch_terms(name: str, aliases: list[str] | None = None, product_type:
             terms.append(shorter)
         if len(terms) >= 4:
             break
-    return terms[:4]
+    for casual in _search_watch_terms(search_keyword, product_type, community):
+        if casual not in terms:
+            terms.append(casual)
+    return terms[:6]
 
 
 def build_search_keyword(name: str, product_type: str | None = None) -> str:
@@ -104,7 +154,11 @@ async def _store_discovered_product(session: AsyncSession, item: MerchItem, raw:
     ).order_by(ProductCandidate.id.desc()).limit(1))
     if candidate and candidate.status == "ignored":
         raise ValueError("该商品已被管理员忽略")
-    terms = build_watch_terms(item.name, item.aliases, item.product_type)
+    terms = build_watch_terms(
+        item.name, item.aliases, item.product_type,
+        search_keyword=item.search_keyword or build_search_keyword(item.name, item.product_type),
+        community=raw.community,
+    )
     if not terms:
         raise ValueError("商品缺少包含品类的完整匹配词")
     if candidate is None:
@@ -303,7 +357,11 @@ async def accept_product_candidate(session: AsyncSession, candidate_id: int) -> 
         raise ValueError("candidate_not_pending")
     terms = [term for term in (candidate.watch_terms or []) if _valid_term(str(term))]
     if not terms:
-        terms = build_watch_terms(candidate.name, candidate.aliases or [])
+        terms = build_watch_terms(
+            candidate.name, candidate.aliases or [],
+            search_keyword=candidate.search_keyword or build_search_keyword(candidate.name),
+            community=candidate.community,
+        )
     if not terms:
         raise ValueError("candidate_terms_invalid")
     product = Product(
@@ -338,6 +396,41 @@ async def ignore_product_candidate(session: AsyncSession, candidate_id: int) -> 
         raise ValueError("candidate_not_pending")
     candidate.status = "ignored"
     await session.commit()
+
+
+async def rebuild_product_watch_terms(session: AsyncSession, product: Product) -> list[str]:
+    """按最新登记与现役监控词重算匹配词，并与旧词合并。
+
+    早期建档的商品词表里只有官方全名，监控搜索抓回的口语标题
+    （长离手办开箱）匹配不上、专属监控空转；重建把搜索词派生的
+    口语组合补进来。旧词保留，避免正在跟踪的写法被清掉。
+    """
+    from app.models import CollectTarget
+
+    aliases: list[str] = []
+    product_type = (product.discovery or {}).get("product_type")
+    keyword: str | None = None
+    candidates = list(await session.scalars(
+        select(ProductCandidate).where(ProductCandidate.product_id == product.id)
+        .order_by(ProductCandidate.id.desc()).limit(5)
+    ))
+    for candidate in candidates:
+        details = candidate.details if isinstance(candidate.details, dict) else {}
+        aliases.extend(alias for alias in (details.get("aliases") or []) if isinstance(alias, str))
+        product_type = product_type or details.get("product_type")
+        keyword = keyword or candidate.search_keyword
+    if product.monitor_target_id:
+        target = await session.get(CollectTarget, product.monitor_target_id)
+        if target is not None and target.target_type == "keyword_search":
+            keyword = target.target_value or keyword
+    rebuilt = build_watch_terms(
+        product.name, aliases, product_type,
+        search_keyword=keyword or build_search_keyword(product.name, product_type),
+        community=product.community,
+    )
+    merged = list(dict.fromkeys([*(product.watch_terms or []), *rebuilt]))[:8]
+    product.watch_terms = merged
+    return merged
 
 
 async def archive_product(session: AsyncSession, product: Product, *, now: datetime | None = None) -> None:
