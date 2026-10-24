@@ -58,42 +58,38 @@ const footLine = computed(() => {
 
 <template>
   <!-- 当前分区没有追踪商品就整卡隐藏，不留空状态 -->
-  <section v-if="!(status === 'success' && !products.length)" class="panel min-w-0 p-5">
-    <div class="flex items-center justify-between gap-2">
+  <section v-if="!(status === 'success' && !products.length)" class="panel flex max-h-80 min-w-0 flex-col p-5">
+    <div class="flex shrink-0 items-center justify-between gap-2">
       <h2 class="text-base font-bold text-ink">
         <NuxtLink :to="overviewTo" class="inline-flex min-h-11 items-center hover:text-brand-ink xl:min-h-0">履约追踪</NuxtLink>
       </h2>
       <NuxtLink :to="overviewTo" class="link inline-flex min-h-11 shrink-0 items-center text-[13px] xl:min-h-0">全部商品</NuxtLink>
     </div>
-    <p v-if="error" role="alert" class="mt-2 text-xs text-amber-700 dark:text-amber-300">履约信号暂时更新失败。<button class="ml-1 underline" type="button" @click="refresh()">重试</button></p>
-    <template v-if="product">
-      <!-- 多商品按最近信号更新排序，切换只影响当前预览。 -->
-      <div v-if="products.length > 1" class="mt-2 flex flex-wrap gap-1">
-        <button
-          v-for="p in products"
-          :key="p.slug"
-          type="button"
-          class="min-h-9 max-w-full truncate rounded-lg px-2.5 py-1 text-xs transition-colors"
-          :aria-pressed="p.slug === product.slug"
-          :class="p.slug === product.slug ? 'bg-brand-soft font-semibold text-brand-ink' : 'text-muted hover:bg-chip'"
-          @click="selectedSlug = p.slug"
-        >
-          {{ p.name }}
-        </button>
-      </div>
+    <p v-if="error" role="alert" class="mt-2 shrink-0 text-xs text-amber-700 dark:text-amber-300">履约信号暂时更新失败。<button class="ml-1 underline" type="button" @click="refresh()">重试</button></p>
+    <!-- 商品数量和长说明只影响卡片内的滚动区，不再撑高首页头图。 -->
+    <div v-if="product" class="mt-2 min-h-0 overflow-y-auto overscroll-contain pr-1">
+      <select
+        v-if="products.length > 1"
+        :value="product.slug"
+        aria-label="选择追踪商品"
+        class="select min-h-11 w-full min-w-0 truncate text-xs"
+        @change="selectedSlug = ($event.target as HTMLSelectElement).value"
+      >
+        <option v-for="p in products" :key="p.slug" :value="p.slug">{{ p.name }}</option>
+      </select>
       <NuxtLink
         :to="{ path: `/products/${product.slug}`, query: { community: scope } }"
-        class="mt-2 flex flex-wrap items-center gap-2 text-[15px] font-semibold text-ink hover:text-brand-ink [overflow-wrap:anywhere]"
+        class="mt-2 flex items-start gap-2 text-[15px] font-semibold text-ink hover:text-brand-ink"
       >
-        {{ product.name }}
-        <span v-if="productCommunity" class="rounded-md px-1.5 py-0.5 text-[11px] font-semibold" :class="communityClasses(productCommunity.color).chip">{{ productCommunity.label }}</span>
+        <span class="line-clamp-2 min-w-0 [overflow-wrap:anywhere]">{{ product.name }}</span>
+        <span v-if="productCommunity" class="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold" :class="communityClasses(productCommunity.color).chip">{{ productCommunity.label }}</span>
       </NuxtLink>
-      <div v-if="product.brief" class="mt-4">
-        <ProductBrief :brief="product.brief" />
+      <div v-if="product.brief" class="mt-3">
+        <ProductBrief :brief="product.brief" compact clamp-official />
       </div>
       <p v-if="product.brief?.archived" class="mt-3 text-xs text-muted">窗口已结束</p>
-      <p v-if="footLine" class="mono mt-4 text-[11px] text-faint">{{ footLine }}</p>
-    </template>
+      <p v-if="footLine" class="mono mt-3 text-[11px] text-faint">{{ footLine }}</p>
+    </div>
     <p v-else-if="status === 'pending'" class="mt-2 text-xs text-muted">正在加载商品…</p>
     <p v-else-if="!error" class="mt-2 text-xs leading-relaxed text-muted">当前分区暂无追踪中的商品。</p>
   </section>

@@ -303,8 +303,8 @@ onBeforeUnmount(() => {
       部分内容暂时加载失败。<button type="button" class="ml-1 underline" :disabled="refreshing" @click="refreshHome">重新加载</button>
     </section>
 
-    <!-- items-start：精选位保持自身高度，不被右栏（即将到来+履约卡）撑高 -->
-    <div v-if="featuredHighlights.length" class="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+    <!-- 履约卡自身限高，精选大图与右栏保持等高。 -->
+    <div v-if="featuredHighlights.length" class="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <FeaturedHero :items="featuredHighlights" :show-community="aggregate" />
       <div class="flex min-w-0 flex-col gap-5">
         <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" />
