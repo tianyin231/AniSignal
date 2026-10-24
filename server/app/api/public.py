@@ -671,7 +671,7 @@ async def list_products(
     session: AsyncSession = Depends(get_session),
 ):
     from app.models import Product as ProductModel
-    from app.services.views import product_to_out
+    from app.services.views import products_to_out
 
     query = select(ProductModel)
     if not is_all_community(community):
@@ -683,7 +683,7 @@ async def list_products(
             )
         ).scalars()
     )
-    items = [await product_to_out(session, p) for p in products]
+    items = await products_to_out(session, products)
     return ProductListOut(items=items)
 
 

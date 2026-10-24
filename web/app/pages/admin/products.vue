@@ -198,6 +198,19 @@ async function archiveProduct(product: ApiProduct) {
   }
 }
 
+async function rebuildTerms(product: ApiProduct) {
+  busy.value = true
+  try {
+    const updated = await api<ApiProduct>(`/api/admin/products/${product.id}/rebuild-terms`, { method: 'POST' })
+    toast.ok(`「${product.name}」匹配词已重建：${updated.watch_terms.join(' / ')}`)
+    await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '重建匹配词失败，请重试')
+  } finally {
+    busy.value = false
+  }
+}
+
 async function remove(product: ApiProduct) {
   if (!confirm(`删除商品「${product.name}」？关联事件会保留但失去商品关联。`)) return
   busy.value = true
@@ -475,6 +488,7 @@ async function saveSignal() {
             <td class="max-w-48 px-3 py-3 text-xs text-muted">{{ p.fulfillment.quality.state_label }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right">
               <button class="min-h-11 rounded px-2 text-xs text-emerald-700 hover:underline dark:text-emerald-300" @click="openSignals(p)">查看 / 纠正信号<span v-if="p.fulfillment.candidate_total">（{{ p.fulfillment.candidate_total }}）</span></button>
+              <button class="min-h-11 rounded px-2 text-xs text-amber-700 hover:underline dark:text-amber-300" :disabled="busy" @click="rebuildTerms(p)">重建匹配词</button>
               <button v-if="p.monitor_status !== 'archived'" class="min-h-11 rounded px-2 text-xs text-ink-2 hover:underline" :disabled="busy" @click="archiveProduct(p)">归档</button>
               <button class="min-h-11 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="startEdit(p)">编辑</button>
               <button class="min-h-11 rounded px-2 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busy" @click="remove(p)">删除</button>

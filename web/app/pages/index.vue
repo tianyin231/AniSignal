@@ -128,7 +128,7 @@ const officialLinksRequest = import.meta.server && !aggregate.value ? fetchOffic
 await Promise.all([...requests, officialLinksRequest])
 const { data: feedData, status: feedStatus } = feedRequest
 const { data: eventsData } = eventsRequest
-const { data: highlightsData } = highlightsRequest
+const { data: highlightsData, status: highlightsStatus } = highlightsRequest
 const { data: trendingData } = trendingRequest
 const { data: calendarData } = calendarRequest
 const { data: codesData } = codesRequest
@@ -303,14 +303,27 @@ onBeforeUnmount(() => {
       部分内容暂时加载失败。<button type="button" class="ml-1 underline" :disabled="refreshing" @click="refreshHome">重新加载</button>
     </section>
 
-    <div class="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-      <FeaturedHero v-if="featuredHighlights.length" :items="featuredHighlights" :show-community="aggregate" />
-      <div v-else class="panel grid min-h-[340px] place-items-center text-sm text-muted">近 7 天暂无精选内容。</div>
+    <!-- items-start：精选位保持自身高度，不被右栏（即将到来+履约卡）撑高 -->
+    <div v-if="featuredHighlights.length" class="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <FeaturedHero :items="featuredHighlights" :show-community="aggregate" />
       <div class="flex min-w-0 flex-col gap-5">
         <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" />
         <StatusCard embedded />
       </div>
     </div>
+    <!-- 精选加载中：低干扰骨架，避免先闪"暂无"再替换 -->
+    <div v-else-if="highlightsStatus === 'pending' && !highlightsData" class="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" aria-hidden="true">
+      <div class="panel min-h-[300px] animate-pulse sm:min-h-[400px]" />
+      <div class="panel min-h-[140px] animate-pulse" />
+    </div>
+    <!-- 精选缺位（无数据/加载失败）：不放大空框，右栏卡片双列补位 -->
+    <template v-else>
+      <p class="mb-3 text-xs text-muted">近 7 天暂无精选内容，先看进行中的活动与履约动态。</p>
+      <div class="grid items-start gap-5 md:grid-cols-2">
+        <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" />
+        <StatusCard embedded />
+      </div>
+    </template>
 
     <ActivityStrip
       :entries="calendarData?.ongoing ?? []"

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { imageSrcset, imageUrl } from '~/utils/image'
 
-const props = defineProps<{ src?: string | null; name: string; kind?: string | null; priority?: boolean; thumbnail?: boolean }>()
+const props = defineProps<{ src?: string | null; name: string; kind?: string | null; priority?: boolean; thumbnail?: boolean; cover?: boolean }>()
 const failed = ref(false)
 watch(() => props.src, () => { failed.value = false })
 </script>
 
 <template>
   <div class="relative isolate overflow-hidden bg-chip">
+    <!-- cover 供列表封面位：竖构图手办图 contain 会缩成中间一条，
+         裁切填充并把焦点放在中上部（商品主体常在的位置）；
+         详情画廊与缩略图保持 contain 看全图 -->
     <img
       v-if="src && !failed"
       :src="imageUrl(src, 960)"
@@ -18,8 +21,10 @@ watch(() => props.src, () => { failed.value = false })
       :fetchpriority="priority ? 'high' : 'auto'"
       decoding="async"
       referrerpolicy="no-referrer"
-      class="absolute inset-0 size-full object-contain"
-      :class="thumbnail ? 'p-0.5' : 'p-3 sm:p-5'"
+      class="absolute inset-0 size-full"
+      :class="cover
+        ? 'object-cover object-[center_30%]'
+        : ['object-contain', thumbnail ? 'p-0.5' : 'p-3 sm:p-5']"
       @error="failed = true"
     >
     <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-faint" :aria-label="`${name}暂无商品图`">
