@@ -100,7 +100,7 @@ onBeforeUnmount(() => {
 <template>
   <section
     v-if="current"
-    class="relative isolate min-h-[300px] overflow-hidden rounded-[20px] bg-[#0b0f17] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:min-h-[400px]"
+    class="relative isolate aspect-video w-full min-w-0 overflow-hidden rounded-[20px] bg-[#0b0f17] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
     role="region"
     aria-roledescription="轮播"
     aria-label="精选动态"
@@ -129,7 +129,7 @@ onBeforeUnmount(() => {
         v-if="item.cover && requestedCoverIds.has(item.id) && !failedCoverIds.includes(item.id)"
         :src="imageUrl(item.cover, 1600)"
         :srcset="imageSrcset(item.cover, [640, 960, 1600])"
-        sizes="(min-width: 1280px) 795px, (min-width: 1024px) 66vw, 100vw"
+        sizes="(min-width: 1280px) 795px, 100vw"
         alt=""
         decoding="async"
         referrerpolicy="no-referrer"
@@ -145,7 +145,7 @@ onBeforeUnmount(() => {
     <!-- 底部压暗：保证白字在任意封面上可读 -->
     <div class="pointer-events-none absolute inset-0 z-[2] bg-[linear-gradient(180deg,rgb(6_10_18/0)_30%,rgb(6_10_18/0.6)_62%,rgb(6_10_18/0.94)_100%)]" aria-hidden="true" />
 
-    <div class="pointer-events-none absolute inset-x-0 bottom-0 z-[3] flex flex-col gap-2.5 p-5 text-white sm:p-7">
+    <div class="pointer-events-none absolute inset-x-0 bottom-0 z-[3] flex flex-col gap-2 p-4 text-white sm:gap-2.5 sm:p-7">
       <div class="flex flex-wrap gap-2">
         <span v-if="current.identity === 'official'" class="inline-flex h-[26px] items-center gap-1 rounded-[7px] bg-white px-2.5 text-xs font-bold text-[#1c45d0]">
           <BadgeCheck :size="14" aria-hidden="true" />官方
@@ -158,11 +158,11 @@ onBeforeUnmount(() => {
           {{ currentCommunity.label }}
         </span>
       </div>
-      <h2 class="line-clamp-2 max-w-[44rem] text-xl font-bold leading-snug sm:text-[28px] sm:leading-tight">{{ current.title }}</h2>
-      <p v-if="excerptLine" class="hidden max-w-[40rem] truncate text-sm text-white/80 sm:block">{{ excerptLine }}</p>
-      <div class="mt-1 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-        <p class="mono min-w-0 text-xs text-white/75">{{ meta }}</p>
-        <div v-if="hasMultiple" class="pointer-events-auto hidden gap-1.5 sm:flex" role="group" aria-label="切换精选">
+      <h2 class="line-clamp-2 h-[2lh] max-w-[44rem] text-lg font-bold leading-snug sm:text-[28px] sm:leading-tight">{{ current.title }}</h2>
+      <p class="hidden h-5 max-w-[40rem] truncate text-sm text-white/80 sm:block">{{ excerptLine }}</p>
+      <div class="mt-1 flex min-h-7 items-end justify-between gap-3 sm:min-h-11">
+        <p :title="meta" class="mono min-w-0 flex-1 truncate text-[11px] text-white/75 sm:text-xs">{{ meta }}</p>
+        <div v-if="hasMultiple" class="pointer-events-auto hidden shrink-0 gap-1.5 sm:flex" role="group" aria-label="切换精选">
           <button
             v-for="(item, index) in items"
             :key="item.id"
@@ -176,7 +176,7 @@ onBeforeUnmount(() => {
             <img v-if="item.cover && !failedCoverIds.includes(item.id)" :src="imageUrl(item.cover, 160)" alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="size-full object-cover">
           </button>
         </div>
-        <div v-if="hasMultiple" class="pointer-events-auto flex gap-0.5 sm:hidden" role="group" aria-label="切换精选">
+        <div v-if="hasMultiple" class="pointer-events-auto flex shrink-0 gap-0.5 sm:hidden" role="group" aria-label="切换精选">
           <button
             v-for="(item, index) in items"
             :key="item.id"

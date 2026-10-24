@@ -303,17 +303,19 @@ onBeforeUnmount(() => {
       部分内容暂时加载失败。<button type="button" class="ml-1 underline" :disabled="refreshing" @click="refreshHome">重新加载</button>
     </section>
 
-    <!-- 履约卡自身限高，精选大图与右栏保持等高。 -->
-    <div v-if="featuredHighlights.length" class="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+    <!-- 大图由 16:9 决定高度；桌面右栏填入同一行，不再反过来撑高头图。 -->
+    <div v-if="featuredHighlights.length" class="grid items-start gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <FeaturedHero :items="featuredHighlights" :show-community="aggregate" />
-      <div class="flex min-w-0 flex-col gap-5">
-        <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" />
-        <StatusCard embedded />
+      <div class="relative min-w-0 xl:self-stretch">
+        <div class="grid items-start gap-5 md:grid-cols-2 xl:absolute xl:inset-0 xl:flex xl:flex-col xl:items-stretch">
+          <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" class="xl:flex-1" compact />
+          <StatusCard embedded class="xl:h-[216px] xl:shrink-0" />
+        </div>
       </div>
     </div>
     <!-- 精选加载中：低干扰骨架，避免先闪"暂无"再替换 -->
-    <div v-else-if="highlightsStatus === 'pending' && !highlightsData" class="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" aria-hidden="true">
-      <div class="panel min-h-[300px] animate-pulse sm:min-h-[400px]" />
+    <div v-else-if="highlightsStatus === 'pending' && !highlightsData" class="grid gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" aria-hidden="true">
+      <div class="panel aspect-video animate-pulse" />
       <div class="panel min-h-[140px] animate-pulse" />
     </div>
     <!-- 精选缺位（无数据/加载失败）：不放大空框，右栏卡片双列补位 -->
