@@ -25,6 +25,7 @@ class CollectTarget(Base):
     target_type: Mapped[str] = mapped_column(String(32))
     target_value: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str | None] = mapped_column(String(255))
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
     interval_minutes: Mapped[int] = mapped_column(Integer, default=30)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # 相关性过滤：共现词（标题需至少含一个，空 = 不过滤）与热度门槛（0 = 不过滤）

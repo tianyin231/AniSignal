@@ -20,6 +20,7 @@ const combos: Record<string, string[]> = {
   kuro_global: ['notices'],
   youtube: ['channel_rss'],
   x: ['account_dynamics'],
+  rss: ['feed'],
 }
 
 const form = reactive({

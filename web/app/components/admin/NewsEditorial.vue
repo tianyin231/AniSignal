@@ -1,6 +1,6 @@
 <script setup lang="ts">
 interface Policy {
-  enabled: boolean; score_enabled: boolean
+  enabled: boolean; score_enabled: boolean; calls_unlimited: boolean
   first_party_threshold: number; media_threshold: number
   calls_per_minute: number; calls_per_hour: number; calls_per_day: number
   group_model: string; score_model: string
@@ -61,10 +61,11 @@ function retry(receipt: Receipt) {
       <div class="flex flex-wrap gap-5 text-sm">
         <label class="flex min-h-11 cursor-pointer items-center gap-2"><input v-model="policy.enabled" type="checkbox">自动归组与成刊</label>
         <label class="flex min-h-11 cursor-pointer items-center gap-2"><input v-model="policy.score_enabled" type="checkbox">独立双评分</label>
+        <label class="flex min-h-11 cursor-pointer items-center gap-2"><input v-model="policy.calls_unlimited" type="checkbox">不限制归组与评分调用次数</label>
       </div>
       <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <label v-for="field in numericFields" :key="field.key" class="block text-xs text-muted">{{ field.label }}
-          <input v-model.number="policy[field.key]" type="number" min="0" :max="field.max" required class="input mono mt-1 min-h-11 w-full px-3">
+          <input v-model.number="policy[field.key]" :disabled="policy.calls_unlimited && field.key.startsWith('calls_')" type="number" min="0" :max="field.max" required class="input mono mt-1 min-h-11 w-full px-3">
         </label>
         <label class="block text-xs text-muted">归组模型（留空沿用接口配置）<input v-model="policy.group_model" maxlength="64" class="input mt-1 min-h-11 w-full px-3"></label>
         <label class="block text-xs text-muted">评分模型（留空沿用接口配置）<input v-model="policy.score_model" maxlength="64" class="input mt-1 min-h-11 w-full px-3"></label>

@@ -393,7 +393,8 @@ async def test_bot_and_rss_reuse_event_selection(session, monkeypatch, client):
     model(monkeypatch)
     await group_pending_news(session)
     await score_pending_news(session)
-    items = await load_bot_news(session, None, utcnow() - timedelta(days=1), utcnow())
+    # Windows 时钟可能在连续调用间保持同一微秒；窗口需包含刚完成的审核。
+    items = await load_bot_news(session, None, utcnow() - timedelta(days=1), utcnow() + timedelta(microseconds=1))
     assert len(items) == 1
     assert len(items[0]["content_ids"]) == 2
     assert items[0]["event_id"] is not None

@@ -12,6 +12,7 @@ class Platform(StrEnum):
     KURO_GLOBAL = "kuro_global"
     YOUTUBE = "youtube"
     X = "x"
+    RSS = "rss"
 
 
 class Community(StrEnum):
@@ -38,6 +39,7 @@ class TargetType(StrEnum):
     ACCOUNT_DYNAMICS = "account_dynamics"
     NOTICES = "notices"
     CHANNEL_RSS = "channel_rss"
+    FEED = "feed"
 
 
 class ContentType(StrEnum):

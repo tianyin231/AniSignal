@@ -34,7 +34,7 @@ def heat_at(records, at):
     """每个独立参与方取窗口内最新发布时间；48 小时窗口、24 小时半衰期。"""
     latest = {}
     for row in records:
-        published = row.raw.published_at
+        published = row.published_at
         if at - timedelta(hours=48) < published <= at:
             key = participant(row)
             if key is None:
@@ -45,6 +45,12 @@ def heat_at(records, at):
 
 
 def selected_score(row, policy):
+    imported = row.news.get("imported_publication")
+    if imported is not None:
+        # 历史选择是旧引擎的原始判断，不伪造本系统的双轮评分回执。
+        from app.services.news_import import date
+        released = date(imported.get("visible_after"))
+        return imported.get("score"), bool(imported.get("selected") and released and released <= utcnow())
     if not row.current or not row.event or not row.event.is_active:
         return None, False
     value = row.news.get("selection") or {}
@@ -80,7 +86,7 @@ async def list_stories(session, *, q="", topic="", kind="all", hours=168, sort="
         and t.last_success_at >= now - timedelta(minutes=max(90, t.interval_minutes * 3)) for t in targets)
     result = []
     for (key_type, key_id), rows in pools.items():
-        recent = [r for r in rows if r.raw.published_at >= now - timedelta(hours=hours)]
+        recent = [r for r in rows if r.published_at >= now - timedelta(hours=hours)]
         if not recent:
             continue
         matched = [r for r in rows if (kind == "all" or r.news["kind"] == kind)
@@ -104,8 +110,8 @@ async def list_stories(session, *, q="", topic="", kind="all", hours=168, sort="
                 copy["summary"] = rep.event.summary or copy["summary"]
             developments.append({**copy, "event_id": event_id if event_id > 0 else None,
                 "score": score, "selected": eligible, "sources": [source_item(r) for r in members],
-                "occurred_at": min(r.raw.published_at for r in members),
-                "latest_at": max(r.raw.published_at for r in members)})
+                "occurred_at": min(r.published_at for r in members),
+                "latest_at": max(r.published_at for r in members)})
         developments.sort(key=lambda item: (item["occurred_at"], item["id"]), reverse=True)
         eligible = any(item["selected"] for item in developments)
         if selected and not eligible:
@@ -118,11 +124,11 @@ async def list_stories(session, *, q="", topic="", kind="all", hours=168, sort="
         established = all(r.source and r.source.first_seen_at <= now - timedelta(hours=54) for r in rows)
         comparable = complete and established
         trend_pct = round((heat - previous_heat) / previous_heat * 100, 1) if comparable and previous_heat else None
-        first_at = min(r.raw.published_at for r in rows)
+        first_at = min(r.published_at for r in rows)
         trend = ("new" if first_at > now - timedelta(hours=6) else "unknown" if not comparable or trend_pct is None
             else "up" if trend_pct > 10 else "down" if trend_pct < -10 else "flat")
         result.append({**rep, "story_id": key_id if key_type == "story" else None,
-            "sources": [source_item(r) for r in sorted(rows, key=lambda row: row.raw.published_at, reverse=True)],
+            "sources": [source_item(r) for r in sorted(rows, key=lambda row: row.published_at, reverse=True)],
             "developments": developments, "report_count": len(rows), "participant_count": participants,
             "heat": heat, "trend": trend, "trend_pct": trend_pct,
             "first_at": first_at, "latest_at": max(d["occurred_at"] for d in developments),
@@ -153,7 +159,7 @@ async def compose_news_edition(session, *, now=None):
     for record in records:
         if not record.current or not record.event or record.grouping.relation == "ROUNDUP":
             continue
-        available_at = max(record.raw.published_at, record.review.updated_at, record.grouping.created_at)
+        available_at = max(record.published_at, record.review.updated_at, record.grouping.created_at)
         if policy["score_enabled"]:
             selection = record.news.get("selection") or {}
             if selection.get("prompt_version") != SCORE_VERSION:
@@ -176,7 +182,7 @@ async def compose_news_edition(session, *, now=None):
         developments = {}
         for member in members:
             developments.setdefault(member.event.id, []).append(member)
-        latest = max(developments.values(), key=lambda rows: min(r.raw.published_at for r in rows))
+        latest = max(developments.values(), key=lambda rows: min(r.published_at for r in rows))
         rep = representative(latest)
         heat, _ = heat_at(members, end)
         items.append({**source_item(rep), "story_id": story_id,

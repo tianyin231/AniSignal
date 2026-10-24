@@ -19,6 +19,7 @@ TASKS = ("news_group", "news_score")
 DEFAULT_POLICY = {
     "enabled": True,
     "score_enabled": True,
+    "calls_unlimited": False,
     "first_party_threshold": 60,
     "media_threshold": 76,
     "calls_per_minute": 12,
@@ -81,7 +82,8 @@ async def call_json(session, *, task: str, ref_id: int, system: str, payload: di
     if receipt and (receipt.attempts >= 3 or receipt.updated_at > now - timedelta(minutes=10)):
         await session.commit()
         raise EditorialDeferred("请求处于失败冷却期")
-    for name, window in (("minute", timedelta(minutes=1)), ("hour", timedelta(hours=1)), ("day", timedelta(days=1))):
+    windows = () if policy.get("calls_unlimited") else (("minute", timedelta(minutes=1)), ("hour", timedelta(hours=1)), ("day", timedelta(days=1)))
+    for name, window in windows:
         used = await session.scalar(select(func.count(AiUsage.id)).where(
             AiUsage.task.in_(TASKS), AiUsage.created_at > now - window)) or 0
         if used >= policy[f"calls_per_{name}"]:

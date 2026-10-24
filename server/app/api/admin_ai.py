@@ -31,6 +31,7 @@ router = APIRouter(prefix="/api/admin/ai", dependencies=[Depends(require_admin)]
 
 
 class EditorialPolicyBody(BaseModel):
+    calls_unlimited: bool = False
     enabled: bool = True
     score_enabled: bool = True
     first_party_threshold: int = Field(default=60, ge=0, le=100)
@@ -44,7 +45,7 @@ class EditorialPolicyBody(BaseModel):
 
 class EditorialSourceBody(BaseModel):
     owner_key: str | None = Field(default=None, max_length=64)
-    editorial_tier: Literal["first_party", "media"] | None = None
+    editorial_tier: Literal["first_party", "near_source", "media"] | None = None
 
 
 @router.get("/editorial")

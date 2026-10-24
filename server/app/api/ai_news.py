@@ -103,7 +103,7 @@ async def source_status(session):
     ).order_by(CollectTarget.id)))
     sources = []
     for target in targets:
-        if target.platform in hidden_platforms:
+        if target.platform in hidden_platforms or (target.config or {}).get("participation_mode") == "isolated":
             continue
         stale = target.last_success_at and target.last_success_at < utcnow() - timedelta(
             minutes=max(target.interval_minutes * 3, 90)
@@ -122,14 +122,16 @@ async def source_status(session):
 async def _monitoring_sources(session, engine_sources):
     # bridge 条目是文章作者；健康点阵应显示本系统的采集目标和原引擎的 RSS 入口。
     sources = await source_status(session)
-    return sources + [NewsSource.model_validate(source) for source in engine_sources if source["platform"] == "rss"]
+    known = {(source.name, source.platform) for source in sources}
+    return sources + [NewsSource.model_validate(source) for source in engine_sources
+        if source["platform"] == "rss" and (source["name"], source["platform"]) not in known]
 
 
 @router.get("/sources")
 async def news_sources(session: AsyncSession = Depends(get_session)):
     from app.services import aihot
     if aihot.enabled():
-        return {"sources": await _monitoring_sources(session, await aihot.sources()), "engine": "aihot"}
+        return {"sources": await _monitoring_sources(session, await aihot.sources()), "engine": "anisignal" if aihot.unified() else "aihot"}
     return {"sources": await source_status(session), "engine": "legacy"}
 
 

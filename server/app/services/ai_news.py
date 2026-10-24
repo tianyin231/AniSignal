@@ -41,7 +41,7 @@ def constrain_news(news: dict | None, candidate: dict) -> dict | None:
     if candidate.get("platform") == "x":
         if candidate.get("text_truncated") or not (candidate.get("text") or "").strip():
             value["newsworthy"] = False
-    elif not is_news_candidate(title):
+    elif candidate.get("platform") != "rss" and not is_news_candidate(title):
         value["newsworthy"] = False
     # 小模型可能从封面或记忆补数字；新参数、时间与范围必须在输入文字中有依据。
     numbers = re.findall(r"\d+(?:\.\d+)?", value["headline"] + " " + value["summary"])
@@ -214,7 +214,7 @@ async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None
         .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
         .where(
             RawContent.community == "ai",
-            RawContent.published_at >= utcnow() - timedelta(days=7),
+            func.coalesce(RawContent.published_at, RawContent.collected_at) >= utcnow() - timedelta(days=7),
             retry_allowed("review_content", latest_parsed),
             (fingerprint.is_(None)) | (fingerprint != RawContent.content_hash)
             | (ContentReview.news["content_version"].as_integer().is_(None))

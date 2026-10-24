@@ -38,7 +38,10 @@ from app.models.source import Source
 from app.models.statistics import CollectionDailyStat, ContentDailyStat
 from app.models.user import EmailCode, NotificationDelivery, User, UserKeyword, UserSession
 
+from app.models.news_archive import NewsArchive
+
 __all__ = [
+    "NewsArchive",
     "EditorialReceipt",
     "NewsGrouping",
     "NewsEdition",
