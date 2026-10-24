@@ -180,7 +180,7 @@ async def import_news(session, path):
                 "kind": "report", "topics": publication.get("tags") or [],
                 "content_hash": raw.content_hash, "content_version": version.version,
                 "imported_publication": {key: publication.get(key) for key in
-                    ["selected", "score", "visible_after", "seat", "revision", "fact_id", "story_id", "backfill", "selected_ready_at"]}}
+                    ["selected", "score", "visible_after", "seat", "revision", "fact_id", "story_id", "backfill", "selected_ready_at", "visibility", "eligible"]}}
             review = reviews.get(raw.id)
             if review is None:
                 review = ContentReview(raw_content_id=raw.id)
@@ -191,7 +191,7 @@ async def import_news(session, path):
             review.quality_score = int(publication.get("score") or 0)
             review.news, review.model = news, (analysis or {}).get("model") or "imported"
             review.updated_at = date(publication.get("updated_at")) or utcnow()
-            raw.hidden = publication["visibility"] != "public" or not review.relevant
+            raw.hidden = publication["visibility"] != "public"
         archive("article", old_id, {"article": article, "publication": publication,
             "content_version": version.version, "content_hash": raw.content_hash}, raw=raw.id)
         article_map[old_id] = raw.id

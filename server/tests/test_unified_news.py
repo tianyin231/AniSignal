@@ -110,6 +110,20 @@ async def test_withdrawal_invalidates_bot_snapshot_and_report_claims(client, ses
     assert issue.json()["highlights"][0]["available"] is False and issue.json()["lead"] is None
 
 
+async def test_public_archive_keeps_detail_after_leaving_pool(client, session, snapshot, unified):
+    with gzip.open(snapshot, "rt", encoding="utf-8") as file:
+        lines = [json.loads(line) for line in file]
+    for entry in lines[1:]:
+        if entry["table"] == "publications" and entry["row"]["article_id"] == "as-42":
+            entry["row"].update(eligible=False, selected=False)
+    with gzip.open(snapshot, "wt", encoding="utf-8") as file:
+        file.write("\n".join(json.dumps(line) for line in lines) + "\n")
+    await import_news(session, snapshot)
+    assert (await client.get("/api/ai-news/engine/items/as-42")).status_code == 200
+    feed = (await client.get("/api/ai-news/events")).json()
+    assert all(item["id"] != "aihot:as-42" for item in feed["items"])
+
+
 async def test_admin_uses_main_database_and_keeps_shared_auth(client, session, snapshot, unified, admin_headers):
     await import_news(session, snapshot)
     assert (await client.get("/api/admin/aihot/status")).status_code == 422

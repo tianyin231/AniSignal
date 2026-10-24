@@ -45,6 +45,10 @@ def heat_at(records, at):
 
 
 def selected_score(row, policy):
+    if row.source and (row.source.raw_json or {}).get("participation_mode", "editorial") != "editorial":
+        return None, False
+    if row.current and row.event and not row.event.is_active:
+        return None, False
     imported = row.news.get("imported_publication")
     if imported is not None:
         # 历史选择是旧引擎的原始判断，不伪造本系统的双轮评分回执。
@@ -64,10 +68,11 @@ def selected_score(row, policy):
 
 
 async def visible_records(session, *, now=None, days=30):
+    from app.services.native_news import available
     records = await load_news_records(session, since=(now or utcnow()) - timedelta(days=days),
         until=(now or utcnow()) + timedelta(microseconds=1))
     excluded = set(await session.scalars(select(Evidence.raw_content_id).where(Evidence.role == "excluded")))
-    return [row for row in records if row.raw.id not in excluded
+    return [row for row in records if available(row, now) and row.raw.id not in excluded
         and not (row.current and row.event and not row.event.is_active)]
 
 

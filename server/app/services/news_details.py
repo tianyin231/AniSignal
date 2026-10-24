@@ -16,14 +16,14 @@ from app.services.news_publication import participant, selected_score
 from app.services import native_news
 
 
-async def resolve_article(session, key, *, require_news=True):
+async def resolve_article(session, key, *, require_news=False):
     alias = await session.get(NewsArchive, ("article", key))
     match = re.fullmatch(r"(?:as|content)-(\d+)", key)
     rid = alias.raw_content_id if alias else int(match[1]) if match else None
     if rid is None:
         raise HTTPException(404, "资讯不存在")
-    rows = await load_news_records(session, content_ids=[rid])
-    if not rows or not native_news.available(rows[0]):
+    rows = await load_news_records(session, content_ids=[rid], include_archived=not require_news)
+    if not rows or not native_news.available(rows[0], listed=require_news):
         raise HTTPException(404, "资讯已撤下或尚未发布")
     return rows[0], alias
 
@@ -79,7 +79,8 @@ async def group_reports(session, key):
     if eid is None:
         raise HTTPException(404)
     ids = list(await session.scalars(select(NewsGrouping.raw_content_id).where(NewsGrouping.event_id == eid)))
-    rows = [row for row in await load_news_records(session, content_ids=ids) if native_news.available(row)] if ids else []
+    rows = [row for row in await load_news_records(session, content_ids=ids, include_archived=True)
+        if native_news.available(row, listed=False)] if ids else []
     aliases = await native_news.article_aliases(session, ids)
     return {"reports": [await report_item(session, row, aliases) for row in rows]}
 
@@ -92,7 +93,8 @@ async def story(session, key):
         raise HTTPException(404, "事件不存在")
     ids = list(await session.scalars(select(NewsGrouping.raw_content_id).where(or_(
         NewsGrouping.story_id == root, NewsGrouping.event_id == root))))
-    rows = [row for row in await load_news_records(session, content_ids=ids) if native_news.available(row)] if ids else []
+    rows = [row for row in await load_news_records(session, content_ids=ids, include_archived=True)
+        if native_news.available(row, listed=False)] if ids else []
     if not rows:
         raise HTTPException(404, "事件已撤下")
     aliases = await native_news.article_aliases(session, ids)

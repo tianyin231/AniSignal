@@ -43,3 +43,25 @@ async def test_feed_cannot_fetch_loopback_metadata_or_private_network(monkeypatc
 def test_english_rss_uses_editorial_review_without_chinese_title_gate():
     news = {"newsworthy": True, "headline": "研究团队发布模型", "summary": "来源公布了模型。", "kind": "report", "topics": []}
     assert constrain_news(news, {"platform": "rss", "title": "Introducing our model", "text": "The lab released its research."})["newsworthy"]
+
+
+async def test_teaser_body_is_reused_without_redownload_or_new_version(session, monkeypatch):
+    from types import SimpleNamespace
+    from sqlalchemy import func, select
+    from app.models import ContentVersion
+    from app.services import rss_body
+    from app.services.ingest import ingest_items
+    calls = []
+    async def fetch(client, url):
+        calls.append(url)
+        return "Research team released model weights with benchmarks and limitations. " * 12
+    monkeypatch.setattr(rss_body, "fetch_body", fetch)
+    collector = SimpleNamespace(source_config={}, proxy_url=None)
+    xml = b'<rss><channel><item><title>Research</title><link>https://example.org/paper</link><description>Read the full story</description></item></channel></rss>'
+    for _ in range(2):
+        rows = parse_feed(xml, "https://example.org/feed")
+        await rss_body.enrich_items(session, collector, rows)
+        assert len(rows[0]["text"]) > 280 and rows[0]["body_extracted"]
+        await ingest_items(session, "rss_feed", rows, community="ai")
+    assert len(calls) == 1
+    assert await session.scalar(select(func.count(ContentVersion.id))) == 1

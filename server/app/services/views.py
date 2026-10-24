@@ -337,7 +337,6 @@ async def products_to_out(
     if not product_ids:
         return []
     signals_by_product = await load_products_signal_data(session, product_ids)
-    communities = {p.id: p.community for p in products}
     evidence_rows = list(await session.execute(
         select(Evidence, Event, RawContent, Source)
         .options(defer(RawContent.raw_json))
