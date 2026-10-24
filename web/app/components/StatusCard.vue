@@ -64,8 +64,8 @@ const footLine = computed(() => {
 
 <template>
   <!-- 当前分区没有追踪商品就整卡隐藏，不留空状态 -->
-  <section v-if="!(status === 'success' && !products.length)" class="panel flex min-w-0 flex-col" :class="embedded ? 'p-4 xl:p-3' : 'p-5'">
-    <div class="flex h-11 shrink-0 items-center justify-between gap-2">
+  <section v-if="!(status === 'success' && !products.length)" class="panel min-w-0 p-5">
+    <div class="flex items-center justify-between gap-2">
       <h2 class="text-base font-bold text-ink">
         <NuxtLink :to="overviewTo" class="inline-flex min-h-11 items-center hover:text-brand-ink xl:min-h-0">履约追踪</NuxtLink>
       </h2>
@@ -84,19 +84,19 @@ const footLine = computed(() => {
     </div>
     <p v-if="error" role="alert" class="mt-2 text-xs text-amber-700 dark:text-amber-300">履约信号暂时更新失败。<button class="ml-1 underline" type="button" @click="refresh()">重试</button></p>
     <!-- 首页只预览一件商品的摘要；完整说明通过商品链接查看。 -->
-    <div v-if="product" class="mt-1 flex flex-1 flex-col">
+    <div v-if="product" class="mt-2">
       <NuxtLink
         :to="{ path: `/products/${product.slug}`, query: { community: scope } }"
         :title="product.name"
-        class="flex h-10 shrink-0 items-start gap-2 text-[14px] font-semibold leading-5 text-ink hover:text-brand-ink"
+        class="flex items-start gap-2 text-[15px] font-semibold text-ink hover:text-brand-ink"
       >
         <span class="line-clamp-2 min-w-0 [overflow-wrap:anywhere]">{{ product.name }}</span>
         <span v-if="productCommunity" class="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold" :class="communityClasses(productCommunity.color).chip">{{ productCommunity.label }}</span>
       </NuxtLink>
-      <div v-if="product.brief" class="mt-1">
+      <div v-if="product.brief" class="mt-3">
         <ProductBrief :brief="product.brief" compact preview />
       </div>
-      <div class="mt-auto flex h-5 shrink-0 items-end gap-2 pt-1 text-[10px] leading-4 text-faint">
+      <div v-if="product.brief?.archived || footLine" class="mt-3 flex items-center gap-2 text-[11px] text-faint">
         <span v-if="product.brief?.archived" class="shrink-0 text-muted">窗口已结束</span>
         <p v-if="footLine" class="mono truncate">{{ footLine }}</p>
       </div>
