@@ -26,6 +26,7 @@ from app.parsers.miyoushe import parse_post
 from app.parsers.youtube import PARSER_VERSION as YOUTUBE_PARSER_VERSION
 from app.parsers.youtube import parse_rss_item
 from app.parsers.x import PARSER_VERSION as X_PARSER_VERSION, parse_post as parse_x_post
+from app.parsers.rss import PARSER_VERSION as RSS_PARSER_VERSION, parse_item as parse_feed_item
 from app.schemas.content import NormalizedContent
 from app.services.classify import classify_content, load_rules
 from app.services.fingerprint import content_fingerprint
@@ -41,6 +42,7 @@ PARSERS: dict[str, tuple] = {
     "miyoushe_posts": (parse_post, MIYOUSHE_PARSER_VERSION),
     "youtube_rss": (parse_rss_item, YOUTUBE_PARSER_VERSION),
     "x_posts": (parse_x_post, X_PARSER_VERSION),
+    "rss_feed": (parse_feed_item, RSS_PARSER_VERSION),
 }
 
 
@@ -239,6 +241,10 @@ async def _upsert_source(
             identity=identity,
             raw_json=author.model_dump(mode="json", exclude={"identity"}),
         )
+        if normalized.platform == "rss":
+            source.owner_key = normalized.extra.get("owner_key")
+            source.editorial_tier = {"T1": "first_party", "T1_5": "near_source"}.get(normalized.extra.get("tier"), "media")
+            source.raw_json = {**source.raw_json, "participation_mode": normalized.extra.get("participation_mode", "editorial")}
         session.add(source)
         await session.flush()
         return source.id, str(source.identity)
@@ -325,7 +331,7 @@ async def reparse_contents(
     rules = await load_rules(session)
     checked = updated = failed = 0
     for content in rows:
-        kind = "x_posts" if content.platform == "x" else _REPARSE_KIND.get(content.content_type)
+        kind = {"x": "x_posts", "rss": "rss_feed"}.get(content.platform) or _REPARSE_KIND.get(content.content_type)
         if kind is None or not content.raw_json:
             continue
         parse, parser_version = PARSERS[kind]

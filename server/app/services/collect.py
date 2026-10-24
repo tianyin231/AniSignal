@@ -24,6 +24,7 @@ from app.collectors.kuro import KuroCollector
 from app.collectors.miyoushe import MiyousheCollector
 from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
+from app.collectors.rss import RssCollector
 from app.collectors.x import XCollector
 from app.config import get_settings
 from app.db import SessionLocal
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 # platform → 零参工厂；kuro 两个区域共享类但实例需指定 region
 _COLLECTORS = {
+    "rss": lambda: RssCollector(),
     "bilibili": lambda: BilibiliCollector(),
     "miyoushe": lambda: MiyousheCollector(),
     "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
@@ -113,7 +115,7 @@ def filter_relevant(
                 body = str(item.get("text") or "").casefold()
                 if co_terms and not any(term.casefold() in body for term in co_terms):
                     continue
-            elif not aihot.bridge_enabled() and not is_news_candidate(str(item.get("title") or "")):
+            elif target.platform != "rss" and not aihot.bridge_enabled() and not is_news_candidate(str(item.get("title") or "")):
                 continue
             item["_matched_keywords"] = [target.target_value]
             kept.append(item)
@@ -264,6 +266,8 @@ async def run_collection(redis, target_id: int) -> dict:
             if collector_factory is None:
                 raise CollectError(f"no collector for platform {target.platform}")
             collector = collector_factory()
+            if isinstance(collector, RssCollector):
+                collector.source_config = {**(target.config or {}), "name": target.display_name, "feed_url": target.target_value}
             product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))
             is_news = get_community(target.community).domain == "news"
             if is_news and isinstance(collector, BilibiliCollector):
@@ -326,9 +330,7 @@ async def run_collection(redis, target_id: int) -> dict:
                     postprocess_errors.append(f"dynamic backfill failed: {type(exc).__name__}: {exc}")
                     logger.warning("empty DRAW backfill failed", exc_info=True)
             match_stats = None
-            from app.services import aihot
-            engine_news = is_news and aihot.bridge_enabled()
-            if stats.touched_content_ids and not engine_news:
+            if stats.touched_content_ids and not is_news:
                 from app.services.similarity import match_official_contents
 
                 try:
@@ -347,7 +349,7 @@ async def run_collection(redis, target_id: int) -> dict:
                 except Exception as exc:  # noqa: BLE001 - AI 匹配不得阻断采集主链路
                     postprocess_errors.append(f"official content matching failed: {type(exc).__name__}: {exc}")
                     logger.exception("official content matching failed")
-            if not engine_news and (stats.items_new or stats.items_updated or (match_stats and match_stats.decisions)):
+            if not is_news and (stats.items_new or stats.items_updated or (match_stats and match_stats.decisions)):
                 # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
                 from app.services.events import run_aggregation
 

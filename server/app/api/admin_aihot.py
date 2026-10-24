@@ -13,7 +13,10 @@ router = APIRouter(prefix="/api/admin/aihot", dependencies=[Depends(require_admi
 
 
 @router.get("/status")
-async def status():
+async def status(session: AsyncSession = Depends(get_session)):
+    if aihot.unified():
+        from app.services import news_admin
+        return await news_admin.status(session)
     if not aihot.bridge_enabled():
         return {"enabled": False, "read_enabled": False}
     return {"enabled": True, "read_enabled": aihot.enabled(),
@@ -31,6 +34,11 @@ async def admin_proxy(path: str, request: Request, session: AsyncSession = Depen
     if not re.fullmatch(allowed[request.method], path):
         raise HTTPException(404)
     body = await request.json() if request.method != "GET" else None
+    if aihot.unified():
+        from app.api.admin import get_queue
+        from app.services import news_admin
+        queue = await get_queue(request) if request.method == "POST" and path.endswith(("/fetch", "/rerun")) else None
+        return await news_admin.request(session, path, method=request.method, params=dict(request.query_params), body=body or {}, queue=queue)
     result = await aihot.request("/internal/anisignal/" + path, method=request.method,
         params=dict(request.query_params), body=body)
     bridge = re.fullmatch(r"sources/anisignal-(x|bilibili)-(\d+)", path)

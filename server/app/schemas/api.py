@@ -34,6 +34,7 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     ("kuro_cn", "notices"): re.compile(r"^default$"),
     ("kuro_global", "notices"): re.compile(r"^default$"),
     ("youtube", "channel_rss"): re.compile(r"^[A-Za-z0-9_-]{2,64}$"),
+    ("rss", "feed"): re.compile(r"^https?://[^\s]{1,247}$"),
 }
 
 

@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.clock import utcnow
 from app.models import ContentReview, ContentVersion, Event, EventRevision, Evidence, NewsGrouping, RawContent, Source
@@ -53,10 +53,15 @@ class NewsRecord:
         return self.review.news
 
     @property
+    def published_at(self):
+        # 无来源时间的 RSS 按发现时间排队；对外 published_at 仍保留未知。
+        return self.raw.published_at or self.raw.collected_at
+
+    @property
     def current(self):
         return bool(self.grouping and self.grouping.content_hash == self.raw.content_hash
             and self.grouping.content_version == self.version.version
-            and self.grouping.prompt_version == GROUP_VERSION
+            and self.grouping.prompt_version in {GROUP_VERSION, "aihot-import-v1"}
             and self.grouping.review_key == fingerprint(news_review_identity(self.news)))
 
     def material(self):
@@ -69,12 +74,12 @@ async def load_news_records(session, *, since=None, until=None, content_ids=None
     query = (await approved_news_query(session)).add_columns(NewsGrouping, Event).outerjoin(
         NewsGrouping, NewsGrouping.raw_content_id == RawContent.id).outerjoin(Event, Event.id == NewsGrouping.event_id)
     if since:
-        query = query.where(RawContent.published_at >= since)
+        query = query.where(func.coalesce(RawContent.published_at, RawContent.collected_at) >= since)
     if until:
-        query = query.where(RawContent.published_at < until)
+        query = query.where(func.coalesce(RawContent.published_at, RawContent.collected_at) < until)
     if content_ids is not None:
         query = query.where(RawContent.id.in_(content_ids))
-    rows = (await session.execute(query.order_by(RawContent.published_at, RawContent.id)
+    rows = (await session.execute(query.order_by(func.coalesce(RawContent.published_at, RawContent.collected_at), RawContent.id)
         .execution_options(populate_existing=True))).all()
     return [NewsRecord(*row) for row in rows]
 
@@ -89,7 +94,7 @@ def representative(records: list[NewsRecord]) -> NewsRecord:
     return min(records, key=lambda r: (
         0 if first_party(r) else 1,
         0 if r.news["kind"] == "report" else 1,
-        -r.review.quality_score, r.raw.published_at, r.raw.id))
+        -r.review.quality_score, r.published_at, r.raw.id))
 
 
 def first_party(record: NewsRecord) -> bool:
@@ -104,7 +109,7 @@ def recall(current: NewsRecord, records: list[NewsRecord]) -> list[NewsRecord]:
         if (row.raw.id == current.raw.id or not row.current or not row.event or not row.event.is_active
                 or row.event.manual_locked or row.grouping.relation == "ROUNDUP"):
             continue
-        if abs(row.raw.published_at - current.raw.published_at) > timedelta(days=14):
+        if abs(row.published_at - current.published_at) > timedelta(days=14):
             continue
         by_event.setdefault(row.event.id, []).append(row)
     tokens = _tokens(current.news["headline"] + " " + current.news["summary"])
@@ -263,6 +268,7 @@ async def score_pending_news(session, *, limit=20, now=None) -> dict:
         return stats
     records = await load_news_records(session, since=(now or utcnow()) - timedelta(days=30), until=now or utcnow())
     ids = [r.raw.id for r in records if r.current and r.grouping.relation != "ROUNDUP"
+        and not r.news.get("imported_publication")
         and (r.news.get("selection") or {}).get("prompt_version") != SCORE_VERSION][-limit:]
     for content_id in ids:
         fresh = await load_news_records(session, content_ids=[content_id])

@@ -15,6 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 
 from app.clock import utcnow
 from app.models.base import Base
@@ -79,7 +80,7 @@ class ContentVersion(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     parsed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     title: Mapped[str | None] = mapped_column(Text)
-    text: Mapped[str | None] = mapped_column(Text)
+    text: Mapped[str | None] = mapped_column(Text().with_variant(MEDIUMTEXT(), "mysql"))
     normalized_json: Mapped[dict | None] = mapped_column(JSON)
     parser_version: Mapped[str] = mapped_column(String(16), default="1")
     # 规则分类结果（None = 未分类），随版本重算

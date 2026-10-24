@@ -103,6 +103,7 @@ export interface ContentList {
 }
 
 export const platformLabels: Record<string, string> = {
+  rss: 'RSS 新闻源',
   bilibili: 'B站',
   miyoushe: '米游社',
   kuro_cn: '库街区·国服',
@@ -112,6 +113,7 @@ export const platformLabels: Record<string, string> = {
 }
 
 export const targetTypeLabels: Record<string, string> = {
+  feed: 'RSS / Atom',
   keyword_search: '关键词搜索',
   account_videos: '账号视频',
   account_dynamics: '账号动态',

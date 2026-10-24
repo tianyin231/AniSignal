@@ -9,14 +9,18 @@ from fastapi import HTTPException
 from app.config import get_settings
 
 
+def unified() -> bool:
+    return bool(getattr(get_settings(), "news_unified_enabled", False))
+
+
 def enabled() -> bool:
     config = get_settings()
-    return bool(config.aihot_url and config.aihot_read_enabled)
+    return unified() or bool(config.aihot_url and config.aihot_read_enabled)
 
 
 def bridge_enabled() -> bool:
     config = get_settings()
-    return bool(config.aihot_url and config.aihot_token)
+    return not unified() and bool(config.aihot_url and config.aihot_token)
 
 
 def iso(value: datetime) -> str:
@@ -39,6 +43,9 @@ def public_media(value):
 
 
 async def request(path: str, *, method="GET", params=None, body=None, raw=False, missing_ok=False):
+    if unified():
+        from app.services import native_news
+        return await native_news.request(path, method=method, params=params, body=body, raw=raw, missing_ok=missing_ok)
     config = get_settings()
     if not config.aihot_url:
         raise HTTPException(503, "AIHOT 引擎尚未配置")
@@ -74,6 +81,9 @@ def news_item(item):
 
 
 async def sources():
+    if unified():
+        from app.services import native_news
+        return await native_news.sources()
     data = await request("/internal/anisignal/sources")
     rows = data["rows"]
     for page in range(2, (data["totals"]["total"] + 99) // 100 + 1):
@@ -85,6 +95,9 @@ async def sources():
 
 
 async def feed(*, q="", topic="", kind="all", hours=168, sort="time", selected=False, limit=20, offset=0):
+    if unified():
+        from app.services import native_news
+        return await native_news.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected, limit=limit, offset=offset)
     if sort == "hot":
         data = await request("/api/site/hot")
         items = []
@@ -131,6 +144,9 @@ async def edition(day=None):
 
 
 async def bot_items(keywords, start_at, end_at, *, collected_after=None):
+    if unified():
+        from app.services import native_news
+        return await native_news.bot_items(keywords, start_at, end_at, collected_after=collected_after)
     params = {"start": iso(start_at), "end": iso(end_at)}
     if collected_after:
         params["after"] = iso(collected_after)
@@ -157,6 +173,9 @@ async def bot_items(keywords, start_at, end_at, *, collected_after=None):
 
 
 async def validate_bot_items(items):
+    if unified():
+        from app.services import native_news
+        return await native_news.validate_bot_items(items)
     payload = [{"id": i["news"]["engine_id"], "revision": i["news"]["revision"],
         "allowBackfill": bool(i["news"].get("allow_backfill"))} for i in items]
     return {"aihot:"+i for i in await request("/internal/anisignal/bot/validate", method="POST", body=payload)}

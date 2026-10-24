@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # 对外站点基址（生成 RSS 等外部引用链接用；留空则回落到请求基址）
     public_base_url: str = ""
 
+    # 容器部署默认启用统一资讯；旧引擎配置仅保留迁移回退兼容。
+    news_unified_enabled: bool = False
+
     # bridge 开启只迁移资料；read 开启后网页和 Bot 统一读取原版发布层。
     aihot_url: str = ""
     aihot_token: str = ""
