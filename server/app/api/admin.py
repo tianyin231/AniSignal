@@ -56,7 +56,7 @@ from app.schemas.api import (
     RunTriggerOut,
 )
 from app.services.queue import ArqQueue, BaseQueue, LocalQueue
-from app.services.views import events_to_out, product_to_out
+from app.services.views import events_to_out, product_to_out, products_to_out
 
 logger = logging.getLogger(__name__)
 
@@ -800,7 +800,8 @@ async def list_products_admin(
     if community:
         query = query.where(Product.community == community)
     products = list((await session.execute(query)).scalars())
-    return ProductListOut(items=[await product_to_out(session, p, include_pending=True) for p in products])
+    items = await products_to_out(session, products, include_pending=True)
+    return ProductListOut(items=items)
 
 
 @router.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)

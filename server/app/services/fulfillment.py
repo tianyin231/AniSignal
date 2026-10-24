@@ -331,6 +331,46 @@ async def load_product_signal_data(session: AsyncSession, product_id: int) -> tu
     return rows, hints
 
 
+async def load_products_signal_data(session: AsyncSession, product_ids: list[int]) -> dict[int, tuple[list, dict]]:
+    """列表页批量版：商品列表一次取回全部信号行与 AI 提示，行结构与单商品版一致。"""
+    if not product_ids:
+        return {}
+    rows = list(
+        await session.execute(
+            select(ProductSignal, ProductSignalEvidence, RawContent, Source, ProductSignal.product_id)
+            .options(defer(RawContent.raw_json))
+            .join(ProductSignalEvidence, ProductSignalEvidence.signal_id == ProductSignal.id)
+            .join(RawContent, RawContent.id == ProductSignalEvidence.raw_content_id)
+            .join(Product, Product.id == ProductSignal.product_id)
+            .join(Source, Source.id == RawContent.source_id, isouter=True)
+            .where(
+                ProductSignal.product_id.in_(product_ids),
+                ProductSignal.active.is_(True),
+                ProductSignal.community == Product.community,
+                RawContent.community == Product.community,
+                RawContent.hidden.is_(False),
+                ProductSignalEvidence.role != "excluded",
+            )
+            .order_by(ProductSignal.occurred_at.desc(), ProductSignal.id.desc())
+            .execution_options(populate_existing=True)
+        )
+    )
+    grouped: dict[int, list[tuple]] = {pid: [] for pid in product_ids}
+    for signal, evidence, raw, source, pid in rows:
+        grouped[pid].append((signal, evidence, raw, source))
+    raw_ids = {evidence.raw_content_id for items in grouped.values() for _, evidence, _, _ in items}
+    hints: dict[int, dict] = {}
+    if raw_ids:
+        result = await session.execute(
+            select(ContentReview.raw_content_id, ContentReview.fulfillment).where(
+                ContentReview.raw_content_id.in_(raw_ids),
+                ContentReview.fulfillment.is_not(None),
+            )
+        )
+        hints = dict(result.all())
+    return {pid: (items, hints) for pid, items in grouped.items()}
+
+
 KIND_PREVIEW_LABELS = {
     "self_purchase": "自购开箱",
     "pr_sample": "送测样品",
