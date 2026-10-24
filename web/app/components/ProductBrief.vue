@@ -50,7 +50,7 @@ const officialText = computed(() =>
     </div>
     <div class="min-w-0" :class="{ 'col-span-2 border-t border-line-soft pt-3': compact }">
       <p class="text-xs text-muted">官方说明<span v-if="brief.official_registered"> · 登记信息</span></p>
-      <p class="mt-1 text-[13px] font-medium leading-relaxed text-ink-2" :class="{ 'line-clamp-3': clampOfficial }">{{ officialText }}</p>
+      <p class="mt-1 text-[13px] font-medium leading-relaxed text-ink-2" :class="{ 'line-clamp-2': clampOfficial }">{{ officialText }}</p>
     </div>
   </div>
 </template>
