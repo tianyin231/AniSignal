@@ -146,3 +146,69 @@ async def test_ignore_and_archive_leave_the_page_but_stop_the_search(session, cl
     visible = (await client.get("/api/products/old-badge")).json()
     assert visible["monitor_status"] == "archived"
     assert visible["brief"]["archived"] is True
+
+
+def test_watch_terms_gain_the_casual_form_from_the_search_keyword():
+    terms = build_watch_terms(
+        "鸣潮 茶歇时光系列 Q版手办 长离", search_keyword="鸣潮 长离 手办", community="wuwa",
+    )
+    assert terms[0] == "鸣潮茶歇时光系列Q版手办长离"
+    assert "长离手办" in terms
+    assert build_watch_terms("爱弥斯联名机械键盘", search_keyword=None, community=None) == [
+        "爱弥斯联名机械键盘", "爱弥斯键盘",
+    ]
+
+
+def test_casual_terms_match_the_titles_monitors_actually_fetch():
+    from app.services.product_matching import matches_product_text
+
+    terms = build_watch_terms(
+        "鸣潮 茶歇时光系列 Q版手办 长离", search_keyword="鸣潮 长离 手办", community="wuwa",
+    )
+    assert matches_product_text("长离手办开箱！699到底值不值？", "", terms)
+    seek = build_watch_terms(
+        "鸣潮 × APEX-TOYS 寻迹系列 Q版手办", search_keyword="鸣潮 寻迹 Q版手办", community="wuwa",
+    )
+    assert matches_product_text("【手办推荐】鸣潮寻迹Q版手办鉴赏！卡提希娅&守岸人双萌登场", "", seek)
+    assert not matches_product_text("鸣潮新版本剧情解说", "", seek)
+
+
+def test_search_keyword_drops_the_game_name_for_every_community():
+    terms = build_watch_terms(
+        "MOONDROP Sparxie Edition collaboration earphones",
+        product_type="耳机", search_keyword="崩坏星穹铁道 Sparxie 耳机", community="hsr",
+    )
+    assert "Sparxie耳机" in terms
+    assert not any("崩坏星穹铁道" in term for term in terms)
+
+
+async def test_rebuild_terms_merges_the_casual_form_for_existing_products(session, client, admin_headers):
+    raw = await _official(session, title="长离 Q版手办 预售即将开启", text="茶歇时光系列。", external="n4")
+    product = Product(
+        slug="merch-casual", name="鸣潮 茶歇时光系列 Q版手办 长离", community="wuwa",
+        watch_terms=["鸣潮茶歇时光系列Q版手办长离"], monitor_status="watching",
+    )
+    candidate = ProductCandidate(
+        community="wuwa", name="鸣潮 茶歇时光系列 Q版手办 长离",
+        aliases=["长离 Q版手办"], watch_terms=["鸣潮茶歇时光系列Q版手办长离"],
+        search_keyword="鸣潮 长离 手办", details={"aliases": ["长离 Q版手办"], "product_type": "手办"},
+        raw_content_id=raw.id, status="accepted",
+    )
+    session.add(product)
+    session.add(candidate)
+    await session.flush()
+    candidate.product_id = product.id
+    target = CollectTarget(
+        platform="bilibili", target_type="keyword_search", target_value="鸣潮 长离 手办",
+        community="wuwa", tier="core", enabled=True, interval_minutes=30,
+    )
+    session.add(target)
+    await session.flush()
+    product.monitor_target_id = target.id
+    await session.commit()
+
+    response = await client.post(f"/api/admin/products/{product.id}/rebuild-terms", headers=admin_headers)
+    assert response.status_code == 200
+    terms = response.json()["watch_terms"]
+    assert "鸣潮茶歇时光系列Q版手办长离" in terms
+    assert "长离手办" in terms

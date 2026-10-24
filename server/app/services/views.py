@@ -161,39 +161,65 @@ async def events_to_out(
     return result
 
 
-async def product_to_out(session: AsyncSession, product: Product, *, include_pending: bool = False) -> ProductOut:
-    """商品公开视图：结论只来自已核验履约信号，旧事件仅作证据目录。"""
+_UNSET = object()
+
+
+async def product_to_out(
+    session: AsyncSession, product: Product, *, include_pending: bool = False,
+    signal_data: tuple[list, dict] | None = None,
+    evidence_rows: list[tuple] | None = None,
+    titles: dict[int, str | None] | None = None,
+    monitor_target=_UNSET,
+) -> ProductOut:
+    """商品公开视图：结论只来自已核验履约信号，旧事件仅作证据目录。
+
+    signal_data / evidence_rows / titles / monitor_target 由列表页的
+    products_to_out 批量预取后传入；缺省时自行单查，行为与旧版一致。
+    """
     from app.services.fulfillment import build_fulfillment_snapshot, list_product_signals, load_product_signal_data
     from app.services.product_discovery import public_brief
 
-    signal_data = await load_product_signal_data(session, product.id)
+    if signal_data is None:
+        signal_data = await load_product_signal_data(session, product.id)
     if not include_pending:
         signal_data = ([row for row in signal_data[0] if row[0].review_status == "verified"], {})
     fulfillment = await build_fulfillment_snapshot(session, product.id, signal_data=signal_data)
     signals = await list_product_signals(session, product.id, signal_data=signal_data, include_notes=False)
 
-    rows = await session.execute(
-        select(Evidence, Event, RawContent, Source)
-        .options(defer(RawContent.raw_json))
-        .join(Event, Evidence.event_id == Event.id)
-        .join(RawContent, Evidence.raw_content_id == RawContent.id)
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(
-            Event.product_id == product.id,
-            Event.community == product.community,
-            Event.is_active.is_(True),
-            Evidence.role != "excluded",
-            RawContent.hidden.is_(False),
-            RawContent.community == product.community,
+    if evidence_rows is None:
+        rows = await session.execute(
+            select(Evidence, Event, RawContent, Source)
+            .options(defer(RawContent.raw_json))
+            .join(Event, Evidence.event_id == Event.id)
+            .join(RawContent, Evidence.raw_content_id == RawContent.id)
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .where(
+                Event.product_id == product.id,
+                Event.community == product.community,
+                Event.is_active.is_(True),
+                Evidence.role != "excluded",
+                RawContent.hidden.is_(False),
+                RawContent.community == product.community,
+            )
         )
-    )
-    evidence_rows = list(rows)
-    raw_ids = list({raw.id for _, _, raw, _ in evidence_rows})
-    titles = await _latest_titles(session, raw_ids)
+        evidence_rows = list(rows)
+    relevant_rows = [
+        (evidence, event, raw, source)
+        for evidence, event, raw, source in evidence_rows
+        if event.product_id == product.id
+        and event.community == product.community
+        and event.is_active
+        and evidence.role != "excluded"
+        and not raw.hidden
+        and raw.community == product.community
+    ]
+    if titles is None:
+        raw_ids = list({raw.id for _, _, raw, _ in relevant_rows})
+        titles = await _latest_titles(session, raw_ids)
 
     evidence_items: list[ProductEvidenceOut] = []
     seen_raw_ids: set[int] = set()
-    for _, event, raw, source in evidence_rows:
+    for _, event, raw, source in relevant_rows:
         identity = source.identity if source else "unknown"
         if raw.id not in seen_raw_ids:
             seen_raw_ids.add(raw.id)
@@ -252,7 +278,11 @@ async def product_to_out(session: AsyncSession, product: Product, *, include_pen
         ),
     ]
 
-    target = await session.get(CollectTarget, product.monitor_target_id) if product.monitor_target_id else None
+    if monitor_target is _UNSET:
+        monitor_target = (
+            await session.get(CollectTarget, product.monitor_target_id) if product.monitor_target_id else None
+        )
+    target = monitor_target if product.monitor_target_id else None
     monitor = {
         "target_id": target.id, "keyword": target.target_value, "enabled": target.enabled,
         "interval_minutes": target.interval_minutes, "min_views": target.min_views, "tier": target.tier,
@@ -294,3 +324,50 @@ async def product_to_out(session: AsyncSession, product: Product, *, include_pen
         latest_candidate=latest_candidate,
         updated_at=product.updated_at,
     )
+
+
+async def products_to_out(
+    session: AsyncSession, products: list[Product], *, include_pending: bool = False
+) -> list[ProductOut]:
+    """商品列表批量视图：信号、证据、标题与监控目标各查一次，避免逐商品 N+1。"""
+    from app.models import CollectTarget as CollectTargetModel
+    from app.services.fulfillment import load_products_signal_data
+
+    product_ids = [p.id for p in products]
+    if not product_ids:
+        return []
+    signals_by_product = await load_products_signal_data(session, product_ids)
+    communities = {p.id: p.community for p in products}
+    evidence_rows = list(await session.execute(
+        select(Evidence, Event, RawContent, Source)
+        .options(defer(RawContent.raw_json))
+        .join(Event, Evidence.event_id == Event.id)
+        .join(RawContent, Evidence.raw_content_id == RawContent.id)
+        .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .where(
+            Event.product_id.in_(product_ids),
+            Event.is_active.is_(True),
+            Evidence.role != "excluded",
+            RawContent.hidden.is_(False),
+        )
+    ))
+    raw_ids = list({raw.id for _, _, raw, _ in evidence_rows})
+    titles = await _latest_titles(session, raw_ids)
+    target_ids = [p.monitor_target_id for p in products if p.monitor_target_id]
+    targets = {
+        t.id: t for t in (
+            await session.scalars(
+                select(CollectTargetModel).where(CollectTargetModel.id.in_(target_ids))
+            )
+        )
+    } if target_ids else {}
+    return [
+        await product_to_out(
+            session, p, include_pending=include_pending,
+            signal_data=signals_by_product.get(p.id) or ([], {}),
+            evidence_rows=evidence_rows,
+            titles=titles,
+            monitor_target=targets.get(p.monitor_target_id),
+        )
+        for p in products
+    ]

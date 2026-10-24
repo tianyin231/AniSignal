@@ -9,6 +9,18 @@ function communityChip(community?: string) {
   return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
 }
 
+/** 列表卡只留一行履约摘要；三块明细进详情页看。 */
+function briefLine(product: ApiProductList['items'][number]) {
+  const brief = product.brief
+  if (!brief) return ''
+  const parts: string[] = []
+  if (brief.unboxing_accounts) parts.push(`${brief.unboxing_accounts} 个账号开箱`)
+  else if (brief.unboxing_note) parts.push(brief.unboxing_note)
+  if (brief.quality_accounts) parts.push(`${brief.quality_accounts} 条质量反馈`)
+  if (!parts.length && product.monitor_status !== 'archived') parts.push(product.fulfillment.official.state_label || '持续追踪官方动态')
+  return parts.join(' · ')
+}
+
 useSeoMeta({ title: '商品总览' })
 
 const { api } = usePublicApi()
@@ -40,15 +52,16 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
       加载中…
     </section>
     <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">商品暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
-    <div v-else-if="visibleProducts.length" class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+    <div v-else-if="visibleProducts.length" class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       <NuxtLink
         v-for="p in visibleProducts"
         :key="p.slug"
         :to="{ path: `/products/${p.slug}`, query: { community: scope } }"
         class="panel group flex min-w-0 flex-col overflow-hidden transition-shadow hover:shadow-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand [overflow-wrap:anywhere]"
       >
-        <ProductArtwork :src="p.images?.[0]" :name="p.name" :kind="p.product_type" class="aspect-[4/3] border-b border-line-soft" />
-        <div class="flex flex-1 flex-col p-4 sm:p-5">
+        <!-- 无官方图时直接省掉图区：文字信息前置，不留大占位框 -->
+        <ProductArtwork v-if="p.images?.length" :src="p.images[0]" :name="p.name" :kind="p.product_type" cover class="aspect-[16/10] border-b border-line-soft" />
+        <div class="flex flex-1 flex-col p-4" :class="p.images?.length ? '' : 'pt-5'">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
             <div class="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
@@ -69,10 +82,8 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
             </p>
           </div>
         </div>
-        <div v-if="p.brief" class="my-4">
-          <ProductBrief :brief="p.brief" compact clamp-official />
-        </div>
-        <div class="mt-auto flex items-center justify-between gap-2 border-t border-line-soft pt-3 text-xs"><span class="mono text-faint">{{ p.fulfillment.updated_at ? fmtTime(p.fulfillment.updated_at) : '' }}</span><span class="font-medium text-brand-ink">查看进展 →</span></div>
+        <p v-if="briefLine(p)" class="mt-2 truncate text-xs text-muted">{{ briefLine(p) }}</p>
+        <div class="mt-auto flex items-center justify-between gap-2 border-t border-line-soft pt-2.5 text-xs"><span class="mono text-faint">{{ p.fulfillment.updated_at ? fmtTime(p.fulfillment.updated_at) : '' }}</span><span class="font-medium text-brand-ink">查看进展 →</span></div>
         </div>
       </NuxtLink>
     </div>

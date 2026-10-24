@@ -100,7 +100,7 @@ onBeforeUnmount(() => {
 <template>
   <section
     v-if="current"
-    class="relative isolate min-h-[340px] overflow-hidden rounded-[20px] bg-[#0b0f17] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:min-h-[440px]"
+    class="relative isolate min-h-[300px] overflow-hidden rounded-[20px] bg-[#0b0f17] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:min-h-[400px]"
     role="region"
     aria-roledescription="轮播"
     aria-label="精选动态"
