@@ -234,7 +234,7 @@
                   "早报使用情报卡",
                   "使用文字"
                 ],
-                "hint": "情报卡用于结构化早报，其他通知使用文字；来源附图仍遵守单次最多附图设置。"
+                "hint": "使用 {body} 旧模板时，情报卡用于结构化早报，其他通知使用文字；改用拆分字段后按模板组装消息，图片由 {images} 控制。"
               },
               "instructions": {
                 "description": "情报排版与详略补充",
@@ -250,10 +250,16 @@
                 "hint": "留空跟随当前会话模型。仅用于通知引导语；主动查询和日常聊天始终使用 AstrBot 原有模型。"
               },
               "notification_template": {
-                "description": "通知文字模板",
+                "description": "通知消息模板",
                 "type": "text",
                 "default": "{intro}\n\n{body}",
-                "hint": "{intro} 是当前人格的引导语，{body} 是完整通知正文；可自由添加标题、分隔线和调整顺序。遗漏 {body} 时自动补到末尾，卡片模式将正文放在图片中。"
+                "hint": "可用：{intro} 人格引导语、{title} 标题、{summary} 摘要、{content} 原文快照、{time} 发布时间（北京时间）、{source} 来源、{url} 原文链接、{images} 实际图片、{image_urls} 图片链接、{items} 逐条内容、{body} 旧完整正文。缺失字段留空，不拿推送时间冒充发布时间。使用拆分字段时按模板顺序发送，不额外插入旧卡片或原文；未写 {images} 就不附图。原文来自已保存的来源快照，不用摘要冒充。"
+              },
+              "notification_item_template": {
+                "description": "每条内容模板",
+                "type": "text",
+                "default": "{index}. {title}\n{summary}\n发布时间：{time}\n来源：{source}\n{url}\n{images}",
+                "hint": "总模板使用 {items} 时，对早报内每条内容分别套用此模板。支持 {index} 序号、{title}、{summary}、{content}（或 {original}）、{time}、{source}、{url}、{images}、{image_urls}；图片仍遵守整条通知的附图上限，同一图片只发送一次。"
               }
             }
           },

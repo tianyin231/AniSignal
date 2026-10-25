@@ -18,9 +18,10 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 from .configuration import apply_subscription, cleanup_legacy_configuration, to_plugin_target, to_server_target
+from .notification_template import render_notification
 
 
-VERSION = "1.6.1"
+VERSION = "1.7.0"
 
 
 def _strip_meme_control_blocks(text: str) -> str:
@@ -183,16 +184,13 @@ class AniSignalPlugin(Star):
             logger.warning("AniSignal command reply was not recorded into conversation history")
         yield event.plain_result(text)
 
-    def notification_text(self, row, intro=""):
-        template = self.presentation(row["umo"]).get("notification_template", "{intro}\n\n{body}")
-        if "{body}" not in template:
-            template += "\n\n{body}"
-        return template.replace("{intro}", intro).replace("{body}", row["body"]).strip()
+    def notification_message(self, row, intro=""):
+        return render_notification(row, self.presentation(row["umo"]), intro)
 
     async def render_delivery(self, row):
         options = self.presentation(row["umo"])
         if options.get("notification_style", "persona") == "original":
-            return self.notification_text(row)
+            return self.notification_message(row)
         umo = row["umo"]
         provider_id_fallback, persona_prompt, _ = await self._resolve_persona(umo)
         provider_id = options.get("notification_provider_id") or provider_id_fallback
@@ -219,10 +217,20 @@ class AniSignalPlugin(Star):
         intro = _notification_plaintext(response.completion_text or "").strip()
         if intro == "[NO_REPLY]":
             intro = ""
-        return self.notification_text(row, intro)
+        return self.notification_message(row, intro)
 
-    async def send_brief_message(self, umo, text, brief=None, images=None, body="", max_images=1, message_format=None):
+    async def send_brief_message(self, umo, text, brief=None, images=None, body="", max_images=1, message_format=None, notification=None):
         """早报一张小卡，其他消息为短文；制图失败才降级文字，发送异常绝不二次补发。"""
+        if notification and notification.customized:
+            chain = MessageChain()
+            for part in notification.parts:
+                if isinstance(part, str):
+                    if part.strip():
+                        chain = chain.message(part)
+                else:
+                    chain = chain.url_image(part.url)
+            sent = await asyncio.wait_for(self.context.send_message(umo, chain), timeout=25)
+            return sent, notification.text
         with tempfile.TemporaryDirectory(prefix="anisignal-brief-") as directory:
             max_images = max(1, min(9, int(max_images)))
             card = None
@@ -253,10 +261,10 @@ class AniSignalPlugin(Star):
             return sent, sent_text
 
     async def send_delivery(self, row):
-        text, note = self.notification_text(row), ""
+        message, note = self.notification_message(row), ""
         try:
             # 短开场不能拖慢通知；超时后正文与卡片仍可照常发送。
-            text = await asyncio.wait_for(self.render_delivery(row), timeout=30)
+            message = await asyncio.wait_for(self.render_delivery(row), timeout=30)
         except Exception as exc:
             logger.warning("AniSignal persona rendering failed (%s)", type(exc).__name__)
             reason = {402: "模型余额不足", 429: "模型限流", 401: "模型鉴权失败", 403: "模型无访问权限"}.get(
@@ -266,12 +274,13 @@ class AniSignalPlugin(Star):
             if any(term in details for term in ("insufficient balance", "insufficient_quota", "exceeded_current_quota")):
                 reason = "模型余额或额度不足"
             note = f"{reason}，已使用原始资料"
+        text = message.text
         try:
             platform, kind, session_id = row["umo"].split(":", 2)
             adapter = self.context.get_platform_inst(platform)
             if kind == "GroupMessage" and adapter and hasattr(adapter, "remember_session_scene"):
                 adapter.remember_session_scene(session_id, "group")
-            sent, sent_text = await self.send_brief_message(row["umo"], text, row.get("brief"), row.get("images"), row["body"], row.get("max_images", 1))
+            sent, sent_text = await self.send_brief_message(row["umo"], text, row.get("brief"), row.get("images"), row["body"], row.get("max_images", 1), notification=message)
             status = "accepted" if sent else "failed"
             if not sent:
                 note = "未找到匹配的机器人连接"
