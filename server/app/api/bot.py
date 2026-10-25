@@ -309,7 +309,9 @@ async def tool_targets(session: AsyncSession = Depends(get_session), client_id: 
 async def export_configuration(session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     rows = await session.scalars(select(BotTarget).where(BotTarget.client_id == client_id,
         BotTarget.config["delivery_mode"].as_string() == "astrbot",
-        BotTarget.config["_plugin_configured"].as_boolean().is_not(False)).order_by(BotTarget.id))
+        # MySQL 的 JSON 布尔转换会把缺失字段变成 False，旧会话需单独包含。
+        or_(BotTarget.config["_plugin_configured"].as_boolean().is_(True),
+            BotTarget.config["_plugin_configured"].as_string().is_(None))).order_by(BotTarget.id))
     return {"targets": [TargetBody(name=t.name, umo=t.umo, enabled=t.enabled, **t.config).model_dump() for t in rows]}
 
 
