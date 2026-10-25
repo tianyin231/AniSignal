@@ -268,7 +268,7 @@ async def test_format_helpers():
     ], datetime(2026, 9, 13, 4, 0))
     assert '今日速报' in brief
     assert 'https://a' not in brief
-    assert '/展开' in brief
+    assert '/展开' not in brief
     assert '…' not in brief
     assert '完整正文' not in brief
 

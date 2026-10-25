@@ -18,10 +18,10 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 from .configuration import apply_subscription, cleanup_legacy_configuration, to_plugin_target, to_server_target
-from .notification_template import render_notification
+from .notification_template import details_hint, render_notification
 
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 
 def _strip_meme_control_blocks(text: str) -> str:
@@ -132,13 +132,13 @@ class AniSignalPlugin(Star):
         cid = await manager.get_curr_conversation_id(umo)
         conversation = await manager.get_conversation(umo, cid) if cid else None
         platform = self.context.get_platform_inst(umo.split(":", 1)[0])
-        _, persona, _, _ = await self.context.persona_manager.resolve_selected_persona(
+        persona_id, persona, _, _ = await self.context.persona_manager.resolve_selected_persona(
             umo=umo, conversation_persona_id=conversation.persona_id if conversation else None,
             platform_name=platform.meta().name if platform else "",
             provider_settings=self.context.get_config(umo).get("provider_settings", {}),
         )
         provider_id = await self.context.get_current_chat_provider_id(umo)
-        return provider_id or "", (persona or {}).get("prompt", ""), conversation.persona_id if conversation else ""
+        return provider_id or "", (persona or {}).get("prompt", ""), persona_id or ""
 
     def presentation(self, umo):
         """呈现选项只留在插件中，不参与服务端的订阅范围和调度。"""
@@ -189,7 +189,8 @@ class AniSignalPlugin(Star):
 
     async def render_delivery(self, row):
         options = self.presentation(row["umo"])
-        if options.get("notification_style", "persona") == "original":
+        # 用户省略引导语时，不再额外请求模型或偷偷附上引导语。
+        if options.get("notification_style", "persona") == "original" or "{intro}" not in options.get("notification_template", "{intro}\n\n{body}"):
             return self.notification_message(row)
         umo = row["umo"]
         provider_id_fallback, persona_prompt, _ = await self._resolve_persona(umo)
@@ -239,13 +240,14 @@ class AniSignalPlugin(Star):
                 try:
                     from .card import render_brief_card
                     card = await asyncio.to_thread(render_brief_card, brief, str(Path(directory) / "brief.png"),
-                                                   self.config.get("card_font_path", ""))
+                                                   self.config.get("card_font_path", ""),
+                                                   details_hint(brief, self.presentation(umo).get("show_details_hint", False)))
                 except Exception as exc:
                     logger.warning("AniSignal card unavailable (%s)", type(exc).__name__)
             sent_text = text
             if card:
                 lead = text.replace(body, "", 1).strip() if body else ""
-                # 卡片内已有展开提示；卡外只留自然点题，没有就只发图。
+                # 卡外只留模板中的引导内容，交互提示由卡片自身呈现。
                 sent_text = lead
                 chain = MessageChain()
                 if lead:
@@ -381,7 +383,7 @@ class AniSignalPlugin(Star):
                     return {"text": "此会话尚未启用该工具，请在 AstrBot 的 AniSignal 插件设置中配置。"}
                 response.raise_for_status()
                 result = await response.json()
-                # 旧管理员提示词不再作为工具结果里的指令覆盖当前会话。
+                # 连接旧版服务端时，也不接受资料之外的人格或模型覆盖。
                 result.pop("instructions", None)
                 result.pop("provider_id", None)
                 preference = self.presentation(event.unified_msg_origin).get("instructions", "")
@@ -608,7 +610,7 @@ class AniSignalPlugin(Star):
         result = await self.detail(event, number)
         yield event.plain_result(result.get("text") or result.get("error", "没找到这条资料。"))
 
-    @filter.regex(r"^(?:猫猫[，,\s]*)?(?:展开\s*(?:第)?[123一二三](?:条)?|第?[123一二三]条\s*(?:展开|细说))[。！!\s]*$")
+    @filter.regex(r"^(?:展开\s*(?:第)?[123一二三](?:条)?|第?[123一二三]条\s*(?:展开|细说))[。！!\s]*$")
     async def expand_natural(self, event: AstrMessageEvent):
         match = re.search(r"[123一二三]", event.get_message_str())
         if match:
@@ -652,17 +654,6 @@ class AniSignalPlugin(Star):
         now = datetime.now(timezone(timedelta(hours=8))).isoformat()
         if target:
             req.system_prompt += f"\n当前北京时间：{now}。订阅或提醒只有工具返回成功才算完成。"
-            # 站点身份：只在用户明确问到时使用，禁止主动宣传。
-            req.system_prompt += (
-                "\n【站点身份，仅按需使用】"
-                "若用户明确问官网/网站/介绍/谁做的/哪里看/是否官方/产品归属，才可简短回答；"
-                "未问到时禁止主动提及、禁止反复推销。"
-                "可用事实：产品名 AniSignal；关键词驱动的多平台信息采集、事件追踪与订阅工具；"
-                "介绍页 http://anisignal.nanamiyako.cn/intro ；工作台 http://anisignal.nanamiyako.cn/ ；"
-                "开源仓库 https://github.com/tianyin231/AniSignal 。"
-                "边界：按已接入来源与配置采集，不承诺全网实时完整；QQ 推送经 AstrBot 会话配置。"
-                "若被问是否腾讯/QQ 官方：否认，说明是 AniSignal 试运行站提供的资讯服务，用当前人格口吻一句话带过即可。"
-            )
             context = await self.actor_api(event, "/context")
             if context.get("recent_notifications"):
                 # 只附带通知索引，完整资料由展开工具按原编号读取。

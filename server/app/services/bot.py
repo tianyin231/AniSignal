@@ -284,7 +284,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
             brief = await editor(session, items, now, mode="daily" if tool == "digest" else "updates")
             items = brief["items"]
             lines = [format_brief(brief)]
-    return {"text": "\n".join(lines), "items": items, "instructions": config.get("ai_prompt", ""),
+    return {"text": "\n".join(lines), "items": items,
             "brief": brief,
             "grounding": "仅根据查询结果回答，保留来源和时间；待核验消息不得表述为已证实。检索不到不能凭记忆补写。"}
 
@@ -539,6 +539,11 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
         # 去重需要模型比较事实，在 worker 中完成，不能占着领取行锁等待模型。
         return False
     if len(usable) == len(items) and (usable or row.brief.get("mode") == "notice"):
+        # 已排队的早报也使用当前事实模板；不把旧交互提示继续送给插件。
+        if brief.get("mode") == "daily":
+            row.body = format_brief(brief)
+            if commit:
+                await session.commit()
         return True
     if usable:
         brief = notification_brief({**row.brief, "items": usable},

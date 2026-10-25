@@ -75,7 +75,34 @@ def test_legacy_template_keeps_body_and_does_not_consume_original_braces(templat
     row=notice();row['body']='原文中的 {intro} 和 {images} 都是文字'
     result=template_module.render_notification(row,{},'引导语 {body}')
     assert not result.customized and result.text=='引导语 {body}\n\n'+row['body']
-    assert template_module.render_notification(row,{'notification_template':'{intro}'},'引导语').text=='引导语\n\n'+row['body']
+    result = template_module.render_notification(row,{'notification_template':'{intro}'},'引导语')
+    assert result.customized and result.text=='引导语'
+
+
+def test_calendar_schedule_separates_deadlines_from_source_publication(template_module):
+    row={'body':'短日程摘要','kind':'calendar','brief':{'mode':'calendar','items':[
+        {'title':'活动提醒','calendar_entries':[
+            {'title':'天工寻物','kind':'activity','stage_at':'2026-10-25T19:59:00','url':'https://example.test/activity'},
+            {'title':'更新维护','kind':'maintenance','stage_at':'2026-10-26T02:00:00Z','url':'https://example.test/maintenance'},
+        ]}]}}
+    result=template_module.render_notification(row,{'notification_template':'{intro}\n{schedule}\n发布时间：{time}'},'提醒你一下。')
+    assert '天工寻物\n截止：2026-10-26 03:59\nhttps://example.test/activity' in result.text
+    assert '更新维护\n维护开始：2026-10-26 10:00' in result.text
+    assert result.text.endswith('发布时间：') and '/展开' not in result.text
+
+
+def test_expansion_hint_is_opt_in_and_complete_calendar_does_not_get_one(template_module):
+    row=notice()
+    options={'notification_format':'text'}
+    assert '/展开' not in template_module.render_notification(row,options).text
+    options['show_details_hint']=True
+    assert '/展开 2' in template_module.render_notification(row,options).text
+    row['brief']['mode']='calendar'
+    row['brief']['truncated']=False
+    assert '/展开' not in template_module.render_notification(row,options).text
+    row['brief']['truncated']=True
+    options['notification_template']='{body}\n{details_hint}'
+    assert template_module.render_notification(row,options).text.count('/展开')==1
 
 
 def test_image_only_template_without_images_still_has_a_fallback(template_module):

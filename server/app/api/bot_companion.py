@@ -237,9 +237,7 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session), c
         if await reserve_delivery(session, target, row, now=now, receipt=receipt):
             return {"delivery": {"id": row.id, "receipt": receipt, "umo": target.umo, "body": row.body,
                     "kind": row.kind, "images": (row.media or [])[:max_images], "max_images": max_images,
-                    "provider_id": target.config.get("ai_provider_id", ""),
-                    "brief": row.brief,
-                    "instructions": target.config.get("ai_prompt", "")}}
+                    "brief": row.brief}}
     return {"delivery": None}
 
 

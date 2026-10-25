@@ -43,8 +43,6 @@ class TargetBody(BaseModel):
     daily_style: Literal["compact", "split"] = "compact"
     max_images: int = Field(default=1, ge=1, le=9)
     tools: list[Literal["digest", "news", "products", "trending", "calendar", "codes"]] = Field(default_factory=lambda: list(bot.TOOLS))
-    ai_prompt: str = Field(default="简洁、自然地回答，保留来源与时间。", max_length=2000)
-    ai_provider_id: str = Field(default="", max_length=200)
     delivery_mode: Literal["direct", "astrbot"] = "direct"
     chat_controls: bool = False
     reminders_enabled: bool = False
@@ -126,11 +124,6 @@ def target_view(row):
     return {**TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **config).model_dump(),
             "id": row.id, "created_at": row.created_at, "client_id": row.client_id,
             "managed_by_plugin": row.managed_by_plugin, "plugin_configured": row.config.get("_plugin_configured", True)}
-
-
-def plugin_target_view(row):
-    return {**target_view(row), "instructions": row.config.get("ai_prompt", ""),
-            "provider_id": row.config.get("ai_provider_id", "")}
 
 
 async def get_target(target_id, session):
@@ -301,7 +294,7 @@ async def require_tools(x_bot_key: str = Header(default=""), session: AsyncSessi
 async def tool_targets(session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     # 返回全部会话（含已暂停）：插件在聊天里回显注册状态需要名称与启停标记，
     # 工具可用性由插件按 enabled 自行门禁。
-    return [plugin_target_view(t) for t in await session.scalars(select(BotTarget)
+    return [target_view(t) for t in await session.scalars(select(BotTarget)
             .where(BotTarget.client_id == client_id).order_by(BotTarget.id))]
 
 
@@ -342,7 +335,7 @@ async def sync_configuration(body: ConfigurationBody, session: AsyncSession = De
             row.managed_by_plugin = True
             row.config = {**row.config, "_plugin_configured": False}
     await session.commit()
-    return {"targets": [plugin_target_view(row) for row in configured]}
+    return {"targets": [target_view(row) for row in configured]}
 
 
 @tools_router.post("/query", dependencies=[Depends(require_tools)])
