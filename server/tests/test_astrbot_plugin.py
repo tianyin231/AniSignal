@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -74,7 +74,8 @@ def plugin(monkeypatch):
     obj.api = AsyncMock(return_value={'ok':True})
     obj.render_delivery = AsyncMock(return_value='人格播报\n原始资料')
     obj.pending_ack = None
-    obj.config = SavedConfig(cat_followup_platforms=['napcat_nNjs'])
+    # 旧猫系行为单独回归；新安装和默认继承行为见下方测试。
+    obj.config = SavedConfig(cat_followup_platforms=['napcat_nNjs'], legacy_cat_behavior=True)
     obj.configuration_lock = asyncio.Lock()
     obj.configuration_ready = True
     obj.configuration_dirty = False
@@ -89,6 +90,7 @@ def plugin(monkeypatch):
     obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True),
         conversation_manager=SimpleNamespace(
             get_curr_conversation_id=AsyncMock(return_value='cid-1'),
+            new_conversation=AsyncMock(return_value='new-cid'),
             get_conversation=AsyncMock(return_value=SimpleNamespace(persona_id=None)),
             add_message_pair=AsyncMock()))
     return obj
@@ -214,6 +216,7 @@ def event(umo, targets=None):
     extras = {}
     return SimpleNamespace(unified_msg_origin=umo, get_sender_id=lambda: 'user',
         plain_result=lambda text: text, set_extra=extras.__setitem__, get_extra=lambda key: extras.get(key),
+        request_llm=lambda **kwargs: SimpleNamespace(**kwargs),
         is_at_or_wake_command=True, stop_event=lambda: extras.__setitem__('stopped', True))
 
 
@@ -368,6 +371,7 @@ async def test_catgirl_product_query_keeps_facts_for_followup(plugin):
     manager = plugin.context.conversation_manager
     manager.get_conversation.return_value = SimpleNamespace(persona_id='catgirl')
     ev = event('qq:FriendMessage:self')
+    plugin.config['targets'] = [{'umo':ev.unified_msg_origin, 'presentation':{'reply_mode':'text'}}]
     body = '键盘：已出现3位独立用户到货证据。'
     replies = [reply async for reply in plugin.present_with_persona(ev, body, history_label='商品查询')]
     assert len(replies) == 1
@@ -716,44 +720,40 @@ async def test_cat_topic_cooldown_reserves_slot_per_group_and_keeps_direct_calls
     assert not (await trigger('one')).is_at_or_wake_command  # 点名回复之后也留出安静间隔。
 
 
-async def test_persona_intro_rejects_sales_and_long_monologues(plugin):
-    plugin._resolve_persona = AsyncMock(return_value=('model', '明石', 'akashi'))
-    plugin.context.llm_generate = AsyncMock()
+async def test_notification_keeps_original_persona_actions_emoji_and_length(plugin):
+    plugin._resolve_persona = AsyncMock(return_value=('model', '自定义会话人格', 'any-persona'))
+    intro = '（放下手里的书）这份消息里有你一直关注的进展，我也一起看看。🙂'
+    plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text=intro))
     row = delivery()
-    for bad in ['现在下单打九折喵。', '（摇了摇尾巴）喵。', '这是一大段没有必要的开场白' * 4, '下个月9月28日上线喵']:
-        plugin.context.llm_generate.return_value = SimpleNamespace(completion_text=bad)
-        assert await type(plugin).render_delivery(plugin, row) == row['body']
-    plugin.context.llm_generate.return_value = SimpleNamespace(completion_text='钱包先装睡吧喵。')
-    assert await type(plugin).render_delivery(plugin, row) == '钱包先装睡吧喵。\n\n原始资料'
+    assert await type(plugin).render_delivery(plugin, row) == intro+'\n\n'+row['body']
+    prompt = plugin.context.llm_generate.await_args.kwargs['system_prompt']
+    assert prompt.startswith('自定义会话人格') and '最多24字' not in prompt
 
 
 @pytest.mark.parametrize('kind', ['updates', 'critical', 'calendar', 'reminder'])
-async def test_scheduled_notification_has_no_persona_opening_or_model_call(plugin, kind):
-    plugin._resolve_persona = AsyncMock()
-    plugin.context.llm_generate = AsyncMock()
+async def test_all_notification_kinds_follow_the_current_persona(plugin, kind):
+    plugin._resolve_persona = AsyncMock(return_value=('current-model', '原有人格', 'custom'))
+    plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text='你的提醒到啦。'))
     row = {**delivery(), 'kind': kind, 'body': '09/30 10:00 维护开始\n原公告链接'}
-    assert await type(plugin).render_delivery(plugin, row) == row['body']
-    plugin._resolve_persona.assert_not_awaited()
-    plugin.context.llm_generate.assert_not_awaited()
+    assert await type(plugin).render_delivery(plugin, row) == '你的提醒到啦。\n\n'+row['body']
+    assert plugin.context.llm_generate.await_args.kwargs['chat_provider_id']=='current-model'
 
 
 @pytest.mark.parametrize('persona_id,prompt', [
     ('cat', '自定义纯猫语人格'), ('', '你扮演一只在群里生活的小猫。只通过猫叫回应。'),
 ])
-async def test_pure_cat_broadcast_omits_empty_cat_sound_without_changing_chat(plugin, persona_id, prompt):
+async def test_notification_does_not_special_case_persona_names(plugin, persona_id, prompt):
     plugin._resolve_persona = AsyncMock(return_value=('model', prompt, persona_id))
-    plugin.context.llm_generate = AsyncMock()
+    plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text='喵。'))
     row = {**delivery(), 'kind': 'daily'}
-    assert await type(plugin).render_delivery(plugin, row) == row['body']
-    plugin.context.llm_generate.assert_not_awaited()
+    assert await type(plugin).render_delivery(plugin, row) == '喵。\n\n'+row['body']
+    assert plugin.context.llm_generate.await_args.kwargs['system_prompt'].startswith(prompt)
 
 
 @pytest.mark.parametrize('reaction', [
-    '', '喵喵！', '啊！', '哇！', '好期待喵！', '值得期待喵！', '敬请期待！', '猫猫整理好了喵！', '你们觉得怎么样呀？',
-    '要不要猫猫帮你看看呀？', '有什么需要帮助的吗？', '喜欢就回复猫猫呀',
-    '</p><p>', '&lt;/p&gt;&lt;p&gt;', '[NO_REPLY]', '||meme_start||happy||meme_end||',
+    '', '</p><p>', '&lt;/p&gt;&lt;p&gt;', '[NO_REPLY]', '||meme_start||happy||meme_end||',
 ])
-async def test_notification_drops_empty_generic_and_reply_seeking_reactions(plugin, reaction):
+async def test_notification_drops_only_empty_or_control_output(plugin, reaction):
     plugin._resolve_persona = AsyncMock(return_value=('model', '软糯小猫娘', 'catgirl'))
     plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text=reaction))
     row = delivery()
@@ -805,11 +805,74 @@ async def test_daily_card_can_be_sent_without_a_forced_caption(plugin, monkeypat
     plugin.context.send_message.assert_awaited_once()
 
 
-async def test_manual_preview_of_update_share_does_not_add_an_intro(plugin):
+async def test_original_notification_mode_skips_the_model_and_is_per_session(plugin):
     plugin._resolve_persona = AsyncMock()
     row = {**delivery(), 'kind': 'manual', 'brief': {'mode': 'updates'}, 'body': '鸣潮先约电台深夜频道更新啦。'}
+    plugin.config['targets'] = [{'umo':row['umo'], 'presentation':{'notification_style':'original'}}]
     assert await type(plugin).render_delivery(plugin, row) == row['body']
     plugin._resolve_persona.assert_not_awaited()
+    assert plugin.presentation('other:GroupMessage:g') == {}
+
+
+async def test_default_query_uses_native_conversation_without_replacing_its_persona(plugin):
+    ev=event('qq:GroupMessage:g')
+    ev.get_message_str=lambda:'/资讯 请用两段介绍'
+    plugin.targets[ev.unified_msg_origin]={'enabled':True,'tools':['news'], 'instructions':'分为两段'}
+    plugin.config['targets']=[{'umo':ev.unified_msg_origin,'presentation':{'instructions':'分为两段'}}]
+    replies=[r async for r in plugin.present_brief(ev,{'text':'已核验的资料与来源'},'news')]
+    request=replies[0]
+    conversation=await plugin.context.conversation_manager.get_conversation('qq:GroupMessage:g','cid-1')
+    assert request.conversation is conversation
+    assert '已核验的资料与来源' in request.prompt and '分为两段' in request.prompt
+    assert not hasattr(request,'system_prompt')
+    plugin.context.send_message.assert_not_awaited()
+    plugin.context.conversation_manager.add_message_pair.assert_not_awaited()
+
+
+async def test_default_plugin_does_not_override_normal_chat_or_model(plugin):
+    class Tools(list):
+        def remove_tool(self,name):
+            if name in self:self.remove(name)
+    plugin.config.pop('legacy_cat_behavior')
+    umo='qq:GroupMessage:g'
+    plugin.targets[umo]={'enabled':True,'tools':['news'],'provider_id':'old-override','instructions':'旧的固定角色'}
+    plugin.context.get_config=lambda **kwargs: {'provider_ltm_settings':{'active_reply':{'enable':True}}}
+    ev=event(umo)
+    await plugin.select_conversation_provider(ev)
+    assert ev.get_extra('selected_provider') is None
+    history=[{'role':'user','content':'原有聊天'}]
+    req=SimpleNamespace(conversation=SimpleNamespace(persona_id='catgirl'),system_prompt='原有自定义人格',
+                        contexts=history,func_tool=Tools(['web_search','anisignal_query','anisignal_reminder']))
+    await plugin.add_instructions(ev,req)
+    assert req.system_prompt.startswith('原有自定义人格') and '旧的固定角色' not in req.system_prompt
+    assert '不顺带建议' not in req.system_prompt and req.contexts is history
+    assert 'web_search' in req.func_tool and ev.get_extra('anisignal_cat_chat') is None
+
+
+async def test_notification_template_and_missing_body_keep_verified_material(plugin):
+    row=delivery()
+    plugin._resolve_persona=AsyncMock(return_value=('model','原人格','custom'))
+    plugin.context.llm_generate=AsyncMock(return_value=SimpleNamespace(completion_text='自然引导语'))
+    options={'notification_template':'【订阅消息】\n{body}\n---\n{intro}'}
+    plugin.config['targets']=[{'umo':row['umo'],'presentation':options}]
+    assert await type(plugin).render_delivery(plugin,row)=='【订阅消息】\n原始资料\n---\n自然引导语'
+    options['notification_template']='{intro}'
+    assert await type(plugin).render_delivery(plugin,row)=='自然引导语\n\n原始资料'
+    options.update(notification_style='original', notification_template='【原文】\n{body}')
+    plugin.context.llm_generate.reset_mock()
+    assert await type(plugin).render_delivery(plugin,row)=='【原文】\n原始资料'
+    plugin.context.llm_generate.assert_not_awaited()
+
+
+async def test_text_notification_does_not_render_daily_card(plugin,monkeypatch):
+    card=importlib.import_module('plugin_under_test.card')
+    render=Mock()
+    monkeypatch.setattr(card,'render_brief_card',render)
+    plugin.config['targets']=[{'umo':delivery()['umo'],'presentation':{'notification_format':'text'}}]
+    await plugin.send_brief_message(delivery()['umo'],'完整文字',{'mode':'daily','items':[{'title':'消息'}]})
+    render.assert_not_called()
+    chain=plugin.context.send_message.await_args.args[1]
+    assert chain.text=='完整文字' and chain.image_url is None
 
 
 async def test_card_send_error_does_not_send_a_second_text_message(plugin, monkeypatch):

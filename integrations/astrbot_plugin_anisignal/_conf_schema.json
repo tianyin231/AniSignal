@@ -188,6 +188,55 @@
               }
             }
           },
+          "presentation": {
+            "description": "回复与通知呈现",
+            "type": "object",
+            "items": {
+              "reply_mode": {
+                "description": "主动查询回复方式",
+                "type": "string",
+                "default": "bot",
+                "options": ["bot", "text", "card"],
+                "labels": ["跟随 AstrBot 当前会话", "原始资料文字", "原始情报卡（早报）"],
+                "hint": "默认走 AstrBot 原生回复流程，继承当前会话人格、模型及输出插件；帮助和操作确认保留准确文案。"
+              },
+              "notification_style": {
+                "description": "主动通知的引导语",
+                "type": "string",
+                "default": "persona",
+                "options": ["persona", "original"],
+                "labels": ["跟随 AstrBot 当前会话人格", "直接发送原文"],
+                "hint": "适用于早报、动态、日历及定时提醒；人格引导语会附在已核验正文旁，生成失败时照常发送正文。"
+              },
+              "notification_format": {
+                "description": "主动通知的展示格式",
+                "type": "string",
+                "default": "card",
+                "options": ["card", "text"],
+                "labels": ["早报使用情报卡", "使用文字"],
+                "hint": "情报卡用于结构化早报，其他通知使用文字；来源附图仍遵守单次最多附图设置。"
+              },
+              "instructions": {
+                "description": "情报排版与详略补充",
+                "type": "text",
+                "default": "",
+                "hint": "可填写分段、列表、篇幅、语言等要求；留空遵循 AstrBot 人格原有习惯。仅用于情报回复与通知引导语，不覆盖人格，不影响普通聊天。"
+              },
+              "notification_provider_id": {
+                "description": "主动通知模型（可选）",
+                "type": "string",
+                "default": "",
+                "_special": "select_provider",
+                "hint": "留空跟随当前会话模型。仅用于通知引导语；主动查询和日常聊天始终使用 AstrBot 原有模型。"
+              },
+              "notification_template": {
+                "description": "通知文字模板",
+                "type": "text",
+                "default": "{intro}\n\n{body}",
+                "hint": "{intro} 是当前人格的引导语，{body} 是完整通知正文；可自由添加标题、分隔线和调整顺序。遗漏 {body} 时自动补到末尾，卡片模式将正文放在图片中。"
+              }
+            }
+          },
           "interaction": {
             "description": "问答与会话权限",
             "type": "object",
@@ -218,16 +267,19 @@
                 ]
               },
               "ai_provider_id": {
-                "description": "问答模型",
+                "description": "旧版模型覆盖（兼容）",
                 "type": "string",
                 "default": "",
+                "invisible": true,
                 "_special": "select_provider",
-                "hint": "留空跟随当前会话的 AstrBot 模型。"
+                "hint": "仅用于主动通知引导语，留空跟随当前会话模型；主动查询和日常聊天始终使用 AstrBot 原有模型。"
               },
               "ai_prompt": {
-                "description": "回答偏好",
+                "description": "旧版回答偏好（兼容）",
                 "type": "text",
-                "default": "简洁、自然地回答，保留来源与时间。"
+                "default": "",
+                "invisible": true,
+                "hint": "可填写分段、列表、篇幅、语言等要求；留空遵循 AstrBot 人格原有习惯。仅用于情报回复与通知引导语，不覆盖人格，不影响普通聊天。"
               },
               "chat_controls": {
                 "description": "允许聊天修改订阅",
@@ -262,6 +314,12 @@
     "type": "bool",
     "default": false,
     "invisible": true
+  },
+  "legacy_cat_behavior": {
+    "description": "启用旧版猫系互动兼容",
+    "type": "bool",
+    "default": false,
+    "hint": "默认关闭，普通聊天完整跟随 AstrBot。仅在需要旧版猫系提示词、历史过滤和额外关键词唤醒时开启；下方猫系选项仅在开启后生效。"
   },
   "card_font_path": {
     "description": "早报卡片中文字体路径",
