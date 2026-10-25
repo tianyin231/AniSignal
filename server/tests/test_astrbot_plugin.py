@@ -29,20 +29,24 @@ def plugin(monkeypatch):
     class Chain:
         def __init__(self):
             self.images = []
+            self.parts = []
+            self.image_url = None
 
         def message(self, text):
             self.text = text
-            self.image_url = None
+            self.parts.append(('text', text))
             return self
 
         def url_image(self, url):
             self.image_url = url
             self.images.append(url)
+            self.parts.append(('image', url))
             return self
 
         def file_image(self, path):
             self.image_url = path
             self.images.append(path)
+            self.parts.append(('image', path))
             return self
 
     module('aiohttp', ClientError=ConnectionError)
@@ -71,7 +75,7 @@ def plugin(monkeypatch):
     spec.loader.exec_module(mod)
     obj = mod.AniSignalPlugin.__new__(mod.AniSignalPlugin)
     obj.api = AsyncMock(return_value={'ok':True})
-    obj.render_delivery = AsyncMock(return_value='人格播报\n原始资料')
+    obj.render_delivery = AsyncMock(side_effect=lambda row: mod.render_notification(row, {}, '人格播报'))
     obj.pending_ack = None
     obj.config = SavedConfig()
     obj.configuration_lock = asyncio.Lock()
@@ -297,7 +301,7 @@ async def test_accepted_broadcast_is_recorded_into_conversation_history(plugin):
     cid, user_msg, assistant_msg = manager.add_message_pair.await_args.args
     assert cid == 'cid-1'
     assert '每日早报' in user_msg['content'] or '资讯' in user_msg['content']
-    assert assistant_msg['content'] == '人格播报\n原始资料'
+    assert assistant_msg['content'] == '人格播报\n\n原始资料'
 
 
 async def test_history_recording_failure_does_not_break_receipt(plugin):
@@ -364,7 +368,7 @@ async def test_notification_keeps_original_persona_actions_emoji_and_length(plug
     intro = '（放下手里的书）这份消息里有你一直关注的进展，我也一起看看。🙂'
     plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text=intro))
     row = delivery()
-    assert await type(plugin).render_delivery(plugin, row) == intro+'\n\n'+row['body']
+    assert (await type(plugin).render_delivery(plugin, row)).text == intro+'\n\n'+row['body']
     prompt = plugin.context.llm_generate.await_args.kwargs['system_prompt']
     assert prompt.startswith('自定义会话人格') and '最多24字' not in prompt
 
@@ -374,7 +378,7 @@ async def test_all_notification_kinds_follow_the_current_persona(plugin, kind):
     plugin._resolve_persona = AsyncMock(return_value=('current-model', '原有人格', 'custom'))
     plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text='你的提醒到啦。'))
     row = {**delivery(), 'kind': kind, 'body': '09/30 10:00 维护开始\n原公告链接'}
-    assert await type(plugin).render_delivery(plugin, row) == '你的提醒到啦。\n\n'+row['body']
+    assert (await type(plugin).render_delivery(plugin, row)).text == '你的提醒到啦。\n\n'+row['body']
     assert plugin.context.llm_generate.await_args.kwargs['chat_provider_id']=='current-model'
 
 
@@ -385,7 +389,7 @@ async def test_notification_does_not_special_case_persona_names(plugin, persona_
     plugin._resolve_persona = AsyncMock(return_value=('model', prompt, persona_id))
     plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text='喵。'))
     row = {**delivery(), 'kind': 'daily'}
-    assert await type(plugin).render_delivery(plugin, row) == '喵。\n\n'+row['body']
+    assert (await type(plugin).render_delivery(plugin, row)).text == '喵。\n\n'+row['body']
     assert plugin.context.llm_generate.await_args.kwargs['system_prompt'].startswith(prompt)
 
 
@@ -396,7 +400,7 @@ async def test_notification_drops_only_empty_or_control_output(plugin, reaction)
     plugin._resolve_persona = AsyncMock(return_value=('model', '软糯小猫娘', 'catgirl'))
     plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text=reaction))
     row = delivery()
-    assert await type(plugin).render_delivery(plugin, row) == row['body']
+    assert (await type(plugin).render_delivery(plugin, row)).text == row['body']
 
 
 async def test_notification_reaction_uses_snapshot_and_keeps_verified_body_unchanged(plugin):
@@ -410,7 +414,7 @@ async def test_notification_reaction_uses_snapshot_and_keeps_verified_body_uncha
             'text': '<p>角色尾巴上的灯会随着音乐节奏点亮。</p>' + '背景资料' * 200,
         }],
     }]}}
-    result = await type(plugin).render_delivery(plugin, row)
+    result = (await type(plugin).render_delivery(plugin, row)).text
     assert result == '尾巴上的灯还会跟着节奏亮呀。\n\n' + body
     kwargs = plugin.context.llm_generate.await_args.kwargs
     assert kwargs['system_prompt'].startswith('软糯小猫娘')
@@ -448,7 +452,7 @@ async def test_original_notification_mode_skips_the_model_and_is_per_session(plu
     plugin._resolve_persona = AsyncMock()
     row = {**delivery(), 'kind': 'manual', 'brief': {'mode': 'updates'}, 'body': '鸣潮先约电台深夜频道更新啦。'}
     plugin.config['targets'] = [{'umo':row['umo'], 'presentation':{'notification_style':'original'}}]
-    assert await type(plugin).render_delivery(plugin, row) == row['body']
+    assert (await type(plugin).render_delivery(plugin, row)).text == row['body']
     plugin._resolve_persona.assert_not_awaited()
     assert plugin.presentation('other:GroupMessage:g') == {}
 
@@ -493,12 +497,12 @@ async def test_notification_template_and_missing_body_keep_verified_material(plu
     plugin.context.llm_generate=AsyncMock(return_value=SimpleNamespace(completion_text='自然引导语'))
     options={'notification_template':'【订阅消息】\n{body}\n---\n{intro}'}
     plugin.config['targets']=[{'umo':row['umo'],'presentation':options}]
-    assert await type(plugin).render_delivery(plugin,row)=='【订阅消息】\n原始资料\n---\n自然引导语'
+    assert (await type(plugin).render_delivery(plugin,row)).text=='【订阅消息】\n原始资料\n---\n自然引导语'
     options['notification_template']='{intro}'
-    assert await type(plugin).render_delivery(plugin,row)=='自然引导语\n\n原始资料'
+    assert (await type(plugin).render_delivery(plugin,row)).text=='自然引导语\n\n原始资料'
     options.update(notification_style='original', notification_template='【原文】\n{body}')
     plugin.context.llm_generate.reset_mock()
-    assert await type(plugin).render_delivery(plugin,row)=='【原文】\n原始资料'
+    assert (await type(plugin).render_delivery(plugin,row)).text=='【原文】\n原始资料'
     plugin.context.llm_generate.assert_not_awaited()
 
 
@@ -511,6 +515,42 @@ async def test_text_notification_does_not_render_daily_card(plugin,monkeypatch):
     render.assert_not_called()
     chain=plugin.context.send_message.await_args.args[1]
     assert chain.text=='完整文字' and chain.image_url is None
+
+
+async def test_structured_notification_sends_real_image_in_template_order_without_card(plugin,monkeypatch):
+    card=importlib.import_module('plugin_under_test.card')
+    render=Mock()
+    monkeypatch.setattr(card,'render_brief_card',render)
+    row={**delivery(),'images':['https://example.test/cover.jpg'],'brief':{'mode':'daily','items':[
+        {'title':'真实标题','sources':[{'text':'来源原文','published_at':'2026-10-25T04:00:00Z'}]}]}}
+    plugin.config['targets']=[{'umo':row['umo'],'presentation':{'notification_style':'original',
+        'notification_template':'{title}\n{content}\n{images}\n发布：{time}'}}]
+    plugin.render_delivery=type(plugin).render_delivery.__get__(plugin)
+    await plugin.send_delivery(row)
+    chain=plugin.context.send_message.await_args.args[1]
+    assert chain.parts==[('text','真实标题\n来源原文\n'),('image','https://example.test/cover.jpg'),
+                         ('text','\n发布：2026-10-25 12:00')]
+    render.assert_not_called()
+    plugin.context.send_message.assert_awaited_once()
+    assert plugin.api.await_args.args[1]['status']=='accepted'
+
+
+async def test_structured_notification_without_images_placeholder_does_not_attach_covers(plugin):
+    row={**delivery(),'images':['https://example.test/cover.jpg']}
+    plugin.config['targets']=[{'umo':row['umo'],'presentation':{'notification_style':'original','notification_template':'{content}'}}]
+    plugin.render_delivery=type(plugin).render_delivery.__get__(plugin)
+    await plugin.send_delivery(row)
+    assert plugin.context.send_message.await_args.args[1].images==[]
+
+
+async def test_structured_send_error_never_sends_a_second_fallback(plugin):
+    row={**delivery(),'images':['https://example.test/cover.jpg']}
+    plugin.config['targets']=[{'umo':row['umo'],'presentation':{'notification_style':'original','notification_template':'{content}\n{images}'}}]
+    plugin.render_delivery=type(plugin).render_delivery.__get__(plugin)
+    plugin.context.send_message.side_effect=TimeoutError()
+    await plugin.send_delivery(row)
+    plugin.context.send_message.assert_awaited_once()
+    assert plugin.api.await_args.args[1]['status']=='unknown'
 
 
 async def test_card_send_error_does_not_send_a_second_text_message(plugin, monkeypatch):
