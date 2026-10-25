@@ -25,9 +25,10 @@ from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
 from .persona import CATGIRL_REPLY_RULES
+from .configuration import apply_subscription, to_plugin_target, to_server_target
 
 
-VERSION = "1.4.14"
+VERSION = "1.5.0"
 
 
 def _cat_image_preview(uri: str, cache: dict) -> str:
@@ -136,21 +137,45 @@ class AniSignalPlugin(Star):
         self.cat_interjection_pending = set()
         self.cat_followups = {}
         self.cat_vision_cache = {}
+        self.configuration_lock = asyncio.Lock()
+        self.configuration_ready = False
+        self.configuration_dirty = False
 
     async def initialize(self):
         self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
         self.task = asyncio.create_task(self.refresh_targets())
         self.outbox_task = asyncio.create_task(self.consume_outbox())
 
-    async def api(self, path, payload):
-        async with self.client.post(self.config["base_url"].rstrip("/") + "/api/bot" + path,
+    async def api(self, path, payload=None):
+        async with self.client.request("GET" if payload is None else "POST", self.config["base_url"].rstrip("/") + "/api/bot" + path,
             headers={"X-Bot-Key": self.config.get("tools_key", "")}, json=payload,
             timeout=aiohttp.ClientTimeout(total=4 if path == "/context" else 20)) as response:
             data = await response.json()
             if response.status != 200:
                 detail = data.get("detail")
+                if isinstance(detail, list):
+                    detail = "；".join(f"{'.'.join(map(str, item.get('loc', [])[1:]))}: {item.get('msg', '')}" for item in detail[:3])
                 raise ValueError(detail if isinstance(detail, str) else "输入无效或服务暂不可用")
             return data
+
+    async def save_configuration(self):
+        await asyncio.to_thread(self.config.save_config)
+        self.configuration_dirty = False
+
+    async def synchronize_configuration(self):
+        async with self.configuration_lock:
+            if not self.config.get("configuration_imported", False):
+                if not self.config.get("targets"):
+                    previous = await self.api("/configuration")
+                    self.config["targets"] = [to_plugin_target(row) for row in previous["targets"]]
+                self.config["configuration_imported"] = True
+                self.configuration_dirty = True
+            if self.configuration_dirty:
+                await self.save_configuration()
+            result = await self.api("/configuration", {"version": VERSION,
+                "targets": [to_server_target(target) for target in self.config.get("targets", [])]})
+            self.targets = {row["umo"]: row for row in result["targets"]}
+            self.configuration_ready = True
 
     async def consume_outbox(self):
         while True:
@@ -163,6 +188,9 @@ class AniSignalPlugin(Star):
                     except ValueError:
                         logger.warning("AniSignal delivery receipt expired; manual review required")
                     self.pending_ack = None
+                if not self.configuration_ready:
+                    await asyncio.sleep(15)
+                    continue
                 result = await self.api("/outbox/claim", {"version": VERSION})
                 if result.get("delivery"):
                     await self.send_delivery(result["delivery"])
@@ -331,23 +359,27 @@ class AniSignalPlugin(Star):
     async def actor_api(self, event, path, **payload):
         # 会话与操作者只能来自真实消息事件，不能由 LLM 指定。
         try:
-            return await self.api(path, {**payload, "umo": event.unified_msg_origin, "actor_id": event.get_sender_id()})
+            result = await self.api(path, {**payload, "umo": event.unified_msg_origin, "actor_id": event.get_sender_id()})
+            if path == "/subscription" and result.get("changed") and self.config.get("configuration_imported"):
+                async with self.configuration_lock:
+                    targets = copy.deepcopy(self.config.get("targets", []))
+                    apply_subscription(targets, event.unified_msg_origin, result)
+                    self.config["targets"] = targets
+                    self.configuration_dirty = True
+                    await self.save_configuration()
+            return result
         except ValueError as exc:
             return {"error": str(exc)}
         except (aiohttp.ClientError, asyncio.TimeoutError):
             return {"error": "连接暂不可用，不能确认操作成功；请查询当前状态后再试。"}
+        except OSError:
+            return {"error": "订阅已更新，但插件设置保存失败，请检查 AstrBot 配置文件权限后重试。"}
 
     async def refresh_targets(self):
-        """Restore official QQ group routing after restarts and refresh preferences."""
+        """由插件设置同步订阅，并恢复适配器所需的会话路由。"""
         while True:
             try:
-                async with self.client.get(
-                    self.config["base_url"].rstrip("/") + "/api/bot/targets",
-                    headers={"X-Bot-Key": self.config.get("tools_key", "")},
-                ) as response:
-                    response.raise_for_status()
-                    rows = await response.json()
-                self.targets = {row["umo"]: row for row in rows}
+                await self.synchronize_configuration()
                 for umo in self.targets:
                     platform, kind, session_id = umo.split(":", 2)
                     if kind != "GroupMessage":
@@ -360,7 +392,11 @@ class AniSignalPlugin(Star):
                 raise
             except Exception as exc:
                 self.targets = {}
-                logger.warning("AniSignal target refresh failed (%s)", type(exc).__name__)
+                self.configuration_ready = False
+                if isinstance(exc, ValueError):
+                    logger.warning("AniSignal 插件配置未同步：%s", exc)
+                else:
+                    logger.warning("AniSignal target refresh failed (%s)", type(exc).__name__)
             await asyncio.sleep(30)
 
     async def report_activity(self):
@@ -389,7 +425,7 @@ class AniSignalPlugin(Star):
                 timeout=aiohttp.ClientTimeout(total=40),
             ) as response:
                 if response.status == 403:
-                    return {"text": "此会话尚未启用该工具，请在 AniSignal 的机器人通知面板配置。"}
+                    return {"text": "此会话尚未启用该工具，请在 AstrBot 的 AniSignal 插件设置中配置。"}
                 response.raise_for_status()
                 result = await response.json()
                 if result.get("brief"):
@@ -453,7 +489,7 @@ class AniSignalPlugin(Star):
             lines.append("/情报挑战 — 三选一趣味题")
         lines.append("")
         lines.append("自动推送：每日早报 / 重要动态合并 / 关键动态即时")
-        lines.append("要改范围或开关，直接跟我说就行喵～")
+        lines.append("订阅范围和开关在 AstrBot 的 AniSignal 插件设置中维护；开放聊天管理后也可在当前会话修改。")
         body = "\n".join(lines)
         async for result in self.present_with_persona(event, body, "help", history_label="帮助查询"):
             yield result
@@ -466,7 +502,7 @@ class AniSignalPlugin(Star):
             state = "已启用" if registered.get("enabled") else "已暂停"
             status = f"此会话已在 AniSignal 注册为「{registered.get('name', '')}」（{state}）。"
         else:
-            status = "此会话尚未注册，请把下面的会话标识交给管理员，在 AniSignal 机器人面板添加。"
+            status = "此会话尚未注册，请在 AstrBot 的 AniSignal 插件设置中添加下面的会话标识。"
         yield event.plain_result(f"{status}\n本会话标识：\n{umo}\n你的管理标识：{event.get_sender_id()}\n发送 /帮助 查看当前可用功能。")
 
     @filter.command("情报订阅")
@@ -746,7 +782,7 @@ class AniSignalPlugin(Star):
 
     def _cat_followup_scope(self, event):
         umo = event.unified_msg_origin
-        platforms = self.config.get("cat_followup_platforms", ["napcat_nNjs"])
+        platforms = self.config.get("cat_followup_platforms", [])
         if umo.split(":", 1)[0] not in platforms or ":GroupMessage:" not in umo:
             return False
         active = self.context.get_config(umo=umo).get("provider_ltm_settings", {}).get("active_reply", {})

@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
@@ -15,6 +15,7 @@ from app.communities import COMMUNITIES, community_query_pattern
 from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget
 from app.services import bot
+from app.services import bot_clients
 from app.services.settings import get_setting, set_setting
 
 router = APIRouter(prefix="/api/admin/bot", dependencies=[Depends(require_admin)])
@@ -104,10 +105,32 @@ class MessageBody(BaseModel):
     content: str = Field(default="", max_length=3500)
 
 
+class ClientBody(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    enabled: bool = True
+
+
+class ConfigurationBody(BaseModel):
+    targets: list[TargetBody] = Field(default_factory=list, max_length=200)
+    version: str = Field(default="", max_length=30)
+
+    @model_validator(mode="after")
+    def unique_sessions(self):
+        if len({target.umo for target in self.targets}) != len(self.targets):
+            raise ValueError("同一插件内不能重复配置会话标识")
+        return self
+
+
 def target_view(row):
     config = {**row.config, "communities": bot.subscribed_communities(row)}
     return {**TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **config).model_dump(),
-            "id": row.id, "created_at": row.created_at}
+            "id": row.id, "created_at": row.created_at, "client_id": row.client_id,
+            "managed_by_plugin": row.managed_by_plugin, "plugin_configured": row.config.get("_plugin_configured", True)}
+
+
+def plugin_target_view(row):
+    return {**target_view(row), "instructions": row.config.get("ai_prompt", ""),
+            "provider_id": row.config.get("ai_provider_id", "")}
 
 
 async def get_target(target_id, session):
@@ -120,9 +143,51 @@ async def get_target(target_id, session):
 @router.get("")
 async def overview(session: AsyncSession = Depends(get_session)):
     bridge = await get_setting(session, "bot_bridge") or {}
+    rows = list(await session.scalars(select(BotTarget).order_by(BotTarget.id)))
+    clients = await bot_clients.client_views(session)
+    client_names = {client["id"]: client["name"] for client in clients}
+    activity = {client_id: await get_setting(session, bot_clients.setting_key("bot_activity", client_id)) or {}
+                for client_id in {row.client_id for row in rows}}
     return {"bridge": {"endpoint": bridge.get("endpoint", ""), "api_key_set": bool(bridge.get("api_key")), "tools_key_set": bool(bridge.get("tools_key"))},
-            "targets": [target_view(t) for t in await session.scalars(select(BotTarget).order_by(BotTarget.id))], "tools": bot.TOOLS,
-            "activity": await get_setting(session, "bot_activity") or {}}
+            "targets": [{**target_view(t), "client_name": client_names.get(t.client_id, "旧直发通道"),
+                         "last_activity": activity[t.client_id].get(t.umo)} for t in rows],
+            "clients": clients, "tools": bot.TOOLS,
+            "activity": activity.get(bot_clients.LEGACY_CLIENT, {})}
+
+
+@router.post("/clients")
+async def add_client(body: ClientBody, session: AsyncSession = Depends(get_session)):
+    client_id, key = await bot_clients.issue_key(session, body.name)
+    if not body.enabled:
+        await edit_client(client_id, body, session)
+    return {"id": client_id, "key": key}
+
+
+@router.put("/clients/{client_id}")
+async def edit_client(client_id: str, body: ClientBody, session: AsyncSession = Depends(get_session)):
+    views = {row["id"]: row for row in await bot_clients.client_views(session)}
+    if client_id not in views:
+        raise HTTPException(404, "插件接入不存在")
+    clients = dict(await get_setting(session, "bot_clients") or {})
+    clients[client_id] = {**clients.get(client_id, {}), "name": body.name, "enabled": body.enabled}
+    if not body.enabled:
+        owned = select(BotTarget.id).where(BotTarget.client_id == client_id,
+            or_(BotTarget.managed_by_plugin.is_(True), BotTarget.config["delivery_mode"].as_string() == "astrbot"))
+        await session.execute(update(BotDelivery).where(BotDelivery.target_id.in_(owned),
+            BotDelivery.status.in_(["pending", "failed"]), BotDelivery.kind != "reminder")
+            .values(status="cancelled", receipt=None, error="插件接入已停用"))
+        await session.execute(update(BotTarget).where(BotTarget.id.in_(owned)).values(enabled=False))
+    await set_setting(session, "bot_clients", clients)
+    return {"ok": True}
+
+
+@router.post("/clients/{client_id}/rotate")
+async def rotate_client(client_id: str, session: AsyncSession = Depends(get_session)):
+    views = {row["id"]: row for row in await bot_clients.client_views(session)}
+    if client_id not in views:
+        raise HTTPException(404, "插件接入不存在")
+    _, key = await bot_clients.issue_key(session, views[client_id]["name"], client_id)
+    return {"id": client_id, "key": key}
 
 
 @router.put("/bridge")
@@ -136,7 +201,7 @@ async def save_bridge(body: BridgeBody, session: AsyncSession = Depends(get_sess
 
 @router.post("/targets")
 async def add_target(body: TargetBody, session: AsyncSession = Depends(get_session)):
-    if await session.scalar(select(BotTarget.id).where(BotTarget.umo == body.umo)):
+    if await session.scalar(select(BotTarget.id).where(BotTarget.client_id == bot_clients.LEGACY_CLIENT, BotTarget.umo == body.umo)):
         raise HTTPException(409, "该会话已存在，请编辑已有目标")
     row = BotTarget(name=body.name, umo=body.umo, enabled=body.enabled,
                     config=body.model_dump(exclude={"name", "umo", "enabled"}))
@@ -148,27 +213,38 @@ async def add_target(body: TargetBody, session: AsyncSession = Depends(get_sessi
 @router.put("/targets/{target_id}")
 async def edit_target(target_id: int, body: TargetBody, session: AsyncSession = Depends(get_session)):
     row = await get_target(target_id, session)
+    if row.managed_by_plugin:
+        raise HTTPException(409, "此会话由 AstrBot 插件设置维护")
     if body.umo != row.umo:
         raise HTTPException(409, "变更收件人请新建会话，避免旧投递被重发给其他人")
-    if await session.scalar(select(BotTarget.id).where(BotTarget.umo == body.umo, BotTarget.id != target_id)):
-        raise HTTPException(409, "该会话已存在")
-    config = body.model_dump(exclude={"name", "umo", "enabled"})
-    # 重新启用或修改订阅范围时从现在开始，避免补发停用期间的旧消息。
-    if body.enabled and (not row.enabled or config != row.config or body.umo != row.umo):
-        row.last_scan_at = utcnow()
-    if body.umo != row.umo or config != row.config or not body.enabled:
-        await session.execute(delete(BotDelivery).where(BotDelivery.target_id == target_id, BotDelivery.status == "pending", BotDelivery.kind != "reminder"))
-        # 已失败的旧范围消息保留审计，但不再自动重试。
-        from sqlalchemy import update
-        await session.execute(update(BotDelivery).where(BotDelivery.target_id == target_id, BotDelivery.status == "failed", BotDelivery.kind != "reminder").values(attempts=3))
-    row.name, row.umo, row.enabled, row.config = body.name, body.umo, body.enabled, config
+    await apply_target(row, body, session)
     await session.commit()
     return target_view(row)
 
 
+async def apply_target(row, body, session):
+    """配置同步与聊天修改共用，只有实际策略变化才推进扫描起点。"""
+    config = body.model_dump(exclude={"name", "umo", "enabled"})
+    previous = TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **row.config).model_dump(exclude={"name", "umo", "enabled"})
+    def comparable(value):
+        selected = value.get("communities") or (list(COMMUNITIES) if value.get("community") == "all" else [value.get("community")])
+        return {**value, "communities": sorted(selected)}
+    changed = comparable(config) != comparable(previous)
+    # 重新启用或修改订阅范围时从现在开始，避免补发停用期间的旧消息。
+    if body.enabled and (not row.enabled or changed):
+        row.last_scan_at = utcnow()
+    if changed or (row.enabled and not body.enabled):
+        await session.execute(delete(BotDelivery).where(BotDelivery.target_id == row.id, BotDelivery.status == "pending", BotDelivery.kind != "reminder"))
+        # 已失败的旧范围消息保留审计，但不再自动重试。
+        await session.execute(update(BotDelivery).where(BotDelivery.target_id == row.id, BotDelivery.status == "failed", BotDelivery.kind != "reminder").values(attempts=3))
+    row.name, row.umo, row.enabled, row.config = body.name, body.umo, body.enabled, config
+
+
 @router.delete("/targets/{target_id}")
 async def remove_target(target_id: int, session: AsyncSession = Depends(get_session)):
-    await get_target(target_id, session)
+    row = await get_target(target_id, session)
+    if row.managed_by_plugin:
+        raise HTTPException(409, "请在 AstrBot 插件设置中移除此会话，投递记录会保留")
     await session.execute(delete(BotDelivery).where(BotDelivery.target_id == target_id))
     await session.execute(delete(BotReminder).where(BotReminder.target_id == target_id))
     await session.execute(delete(BotTarget).where(BotTarget.id == target_id))
@@ -184,6 +260,8 @@ async def preview(target_id: int, body: QueryBody, session: AsyncSession = Depen
 @router.post("/targets/{target_id}/send")
 async def send(target_id: int, body: MessageBody, session: AsyncSession = Depends(get_session)):
     target = await get_target(target_id, session)
+    if not target.config.get("_plugin_configured", True):
+        raise HTTPException(409, "此会话已从 AstrBot 插件设置中移除")
     payload = {} if body.content.strip() else await bot.query_target(session, target)
     text = body.content.strip() or payload["text"]
     row = await bot.create_delivery(session, target, "manual", text, f"manual:{secrets.token_hex(16)}", brief=payload.get("brief"))
@@ -213,26 +291,62 @@ async def retry(delivery_id: int, session: AsyncSession = Depends(get_session)):
 
 
 async def require_tools(x_bot_key: str = Header(default=""), session: AsyncSession = Depends(get_session)):
-    expected = (await get_setting(session, "bot_bridge") or {}).get("tools_key", "")
-    if not expected or not secrets.compare_digest(x_bot_key, expected):
+    client_id = await bot_clients.authenticate(session, x_bot_key)
+    if client_id is None:
         raise HTTPException(401, "工具鉴权失败")
+    return client_id
 
 
 @tools_router.get("/targets", dependencies=[Depends(require_tools)])
-async def tool_targets(session: AsyncSession = Depends(get_session)):
+async def tool_targets(session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     # 返回全部会话（含已暂停）：插件在聊天里回显注册状态需要名称与启停标记，
     # 工具可用性由插件按 enabled 自行门禁。
-    return [{"umo": t.umo, "name": t.name, "enabled": t.enabled,
-             "tools": t.config.get("tools", []), "instructions": t.config.get("ai_prompt", ""),
-             "provider_id": t.config.get("ai_provider_id", ""),
-             "chat_controls": t.config.get("chat_controls", False), "reminders_enabled": t.config.get("reminders_enabled", False),
-             "activities_enabled": t.config.get("activities_enabled", False)}
-            for t in await session.scalars(select(BotTarget).order_by(BotTarget.id))]
+    return [plugin_target_view(t) for t in await session.scalars(select(BotTarget)
+            .where(BotTarget.client_id == client_id).order_by(BotTarget.id))]
+
+
+@tools_router.get("/configuration")
+async def export_configuration(session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    rows = await session.scalars(select(BotTarget).where(BotTarget.client_id == client_id,
+        BotTarget.config["delivery_mode"].as_string() == "astrbot",
+        BotTarget.config["_plugin_configured"].as_boolean().is_not(False)).order_by(BotTarget.id))
+    return {"targets": [TargetBody(name=t.name, umo=t.umo, enabled=t.enabled, **t.config).model_dump() for t in rows]}
+
+
+@tools_router.post("/configuration")
+async def sync_configuration(body: ConfigurationBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    rows = {row.umo: row for row in await session.scalars(select(BotTarget)
+            .where(BotTarget.client_id == client_id).with_for_update())}
+    for target in body.targets:
+        existing = rows.get(target.umo)
+        if existing and not existing.managed_by_plugin and existing.config.get("delivery_mode") != "astrbot":
+            raise HTTPException(409, "该会话仍在旧直发通道中，请先停用旧通道")
+    configured = []
+    for target in body.targets:
+        target = target.model_copy(update={"delivery_mode": "astrbot"})
+        row = rows.get(target.umo)
+        if row is None:
+            row = BotTarget(client_id=client_id, name=target.name, umo=target.umo, enabled=target.enabled,
+                            config=target.model_dump(exclude={"name", "umo", "enabled"}))
+            session.add(row)
+        else:
+            await apply_target(row, target, session)
+        row.managed_by_plugin = True
+        configured.append(row)
+    selected = {target.umo for target in body.targets}
+    for umo, row in rows.items():
+        if umo not in selected and (row.managed_by_plugin or row.config.get("delivery_mode") == "astrbot"):
+            await apply_target(row, TargetBody(name=row.name, umo=row.umo, enabled=False, **row.config), session)
+            row.managed_by_plugin = True
+            row.config = {**row.config, "_plugin_configured": False}
+    await session.commit()
+    return {"targets": [plugin_target_view(row) for row in configured]}
 
 
 @tools_router.post("/query", dependencies=[Depends(require_tools)])
-async def tool_query(body: ToolQuery, session: AsyncSession = Depends(get_session)):
-    target = await session.scalar(select(BotTarget).where(BotTarget.umo == body.umo, BotTarget.enabled.is_(True)))
+async def tool_query(body: ToolQuery, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    target = await session.scalar(select(BotTarget).where(BotTarget.client_id == client_id,
+        BotTarget.umo == body.umo, BotTarget.enabled.is_(True)))
     if not target or body.tool not in target.config.get("tools", []):
         raise HTTPException(403, "此会话尚未启用该查询工具")
     return await bot.query_target(session, target, body.tool, body.query)

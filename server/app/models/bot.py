@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.clock import utcnow
@@ -11,10 +11,13 @@ from app.models.base import Base
 
 class BotTarget(Base):
     __tablename__ = "bot_targets"
+    __table_args__ = (UniqueConstraint("client_id", "umo", name="uq_bot_targets_client_umo"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
-    umo: Mapped[str] = mapped_column(String(255), unique=True)
+    client_id: Mapped[str] = mapped_column(String(40), default="legacy", server_default="legacy", index=True)
+    managed_by_plugin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    umo: Mapped[str] = mapped_column(String(255))
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

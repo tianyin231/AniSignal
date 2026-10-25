@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.bot import TargetBody, edit_target, require_tools
+from app.api.bot import TargetBody, apply_target, require_tools
 from app.api.deps import require_admin
 from app.clock import utcnow
 from app.db import get_session
@@ -18,6 +18,7 @@ from app.services.bot_policy import reserve_delivery
 from app.services.bot import image_limit, subscribed_communities
 from app.services.bot_briefs import format_detail, publication_label
 from app.services.settings import get_setting, set_setting
+from app.services.bot_clients import setting_key
 
 router = APIRouter(prefix="/api/bot", dependencies=[Depends(require_tools)])
 admin_router = APIRouter(prefix="/api/admin/bot", dependencies=[Depends(require_admin)])
@@ -28,8 +29,9 @@ class Actor(BaseModel):
     actor_id: str = Field(min_length=1, max_length=255)
 
 
-async def actor_target(body, session):
-    target = await session.scalar(select(BotTarget).where(BotTarget.umo == body.umo, BotTarget.enabled.is_(True)))
+async def actor_target(body, session, client_id):
+    target = await session.scalar(select(BotTarget).where(BotTarget.client_id == client_id,
+        BotTarget.umo == body.umo, BotTarget.enabled.is_(True)))
     if not target:
         raise HTTPException(403, "此会话未启用 AniSignal")
     return target
@@ -41,13 +43,13 @@ class SubscriptionBody(Actor):
 
 
 @router.post("/subscription")
-async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(get_session)):
-    target = await actor_target(body, session)
+async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    target = await actor_target(body, session, client_id)
     if body.action != "view":
         if not target.config.get("chat_controls"):
             raise HTTPException(403, "此会话未开放聊天修改订阅")
         if ":GroupMessage:" in target.umo and body.actor_id not in target.config.get("manager_ids", []):
-            raise HTTPException(403, "仅面板授权的群管理者可以修改全群订阅；发送 /情报会话 获取你的标识")
+            raise HTTPException(403, "仅插件设置中授权的群管理者可以修改全群订阅；发送 /情报会话 获取你的标识")
         config = dict(target.config)
         if body.action == "keywords":
             config["keywords"] = body.value.replace("，", ",").split(",")
@@ -69,7 +71,8 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
             validated = TargetBody(name=target.name, umo=target.umo, enabled=target.enabled, **config)
         except ValueError:
             raise HTTPException(422, "设置无效，请核对分区、关键词长度或 HH:mm 时间")
-        await edit_target(target.id, validated, session)
+        await apply_target(target, validated, session)
+        await session.commit()
     return {"name": target.name, "community": target.config.get("community", "all"),
             "communities": subscribed_communities(target),
             "keywords": target.config.get("keywords", []), "daily_enabled": target.config.get("daily_enabled", True),
@@ -103,8 +106,8 @@ async def cancel_reminder(row, session):
 
 
 @router.post("/reminders")
-async def reminders(body: ReminderBody, session: AsyncSession = Depends(get_session)):
-    target = await actor_target(body, session)
+async def reminders(body: ReminderBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    target = await actor_target(body, session, client_id)
     if not target.config.get("reminders_enabled"):
         raise HTTPException(403, "此会话未开放定时提醒")
     if body.action == "create":
@@ -142,8 +145,8 @@ async def reminders(body: ReminderBody, session: AsyncSession = Depends(get_sess
 
 
 @router.post("/context")
-async def conversation_context(body: Actor, session: AsyncSession = Depends(get_session)):
-    target = await actor_target(body, session)
+async def conversation_context(body: Actor, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    target = await actor_target(body, session, client_id)
     rows = await session.scalars(select(BotDelivery).where(BotDelivery.target_id == target.id,
         BotDelivery.status == "accepted", BotDelivery.created_at >= utcnow() - timedelta(days=7))
         .order_by(BotDelivery.id.desc()).limit(3))
@@ -160,8 +163,8 @@ class DetailBody(Actor):
 
 
 @router.post("/detail")
-async def brief_detail(body: DetailBody, session: AsyncSession = Depends(get_session)):
-    target = await actor_target(body, session)
+async def brief_detail(body: DetailBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    target = await actor_target(body, session, client_id)
     if not set(target.config.get("tools", [])).intersection({"digest", "news"}):
         raise HTTPException(403, "此会话未开放资讯查询")
     stmt = select(BotDelivery).where(BotDelivery.target_id == target.id, BotDelivery.status == "accepted",
@@ -191,10 +194,11 @@ class ActivityBody(BaseModel):
 
 
 @router.post("/activity")
-async def report_activity(body: ActivityBody, session: AsyncSession = Depends(get_session)):
+async def report_activity(body: ActivityBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     """插件回传各会话最近活跃时间；仅运营参考数据，失败不影响主流程。"""
-    known = set(await session.scalars(select(BotTarget.umo)))
-    current = {umo: ts for umo, ts in (await get_setting(session, "bot_activity") or {}).items() if umo in known}
+    known = set(await session.scalars(select(BotTarget.umo).where(BotTarget.client_id == client_id)))
+    key = setting_key("bot_activity", client_id)
+    current = {umo: ts for umo, ts in (await get_setting(session, key) or {}).items() if umo in known}
     for umo, value in body.activities.items():
         if umo not in known:
             continue
@@ -207,17 +211,19 @@ async def report_activity(body: ActivityBody, session: AsyncSession = Depends(ge
         prev = current.get(umo)
         if not prev or ts > datetime.fromisoformat(prev):
             current[umo] = ts.isoformat()
-    await set_setting(session, "bot_activity", current)
+    await set_setting(session, key, current)
     return {"ok": True}
 
 
 @router.post("/outbox/claim")
-async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session)):
+async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     now = utcnow()
-    await set_setting(session, "bot_runtime", {"last_seen": now.isoformat(), "version": body.version})
+    await set_setting(session, setting_key("bot_runtime", client_id), {"last_seen": now.isoformat(), "version": body.version})
     rows = (await session.execute(select(BotDelivery, BotTarget).join(BotTarget, BotTarget.id == BotDelivery.target_id)
         .where(or_(BotDelivery.status == "pending", (BotDelivery.status == "failed") & (BotDelivery.updated_at <= now - timedelta(minutes=5))),
-            BotDelivery.attempts < 3, BotTarget.config["delivery_mode"].as_string() == "astrbot",
+            BotDelivery.attempts < 3, BotTarget.client_id == client_id,
+            BotTarget.config["delivery_mode"].as_string() == "astrbot",
+            BotTarget.config["_plugin_configured"].as_boolean().is_not(False),
             or_(BotTarget.enabled.is_(True), BotDelivery.kind == "manual"))
         .order_by(BotDelivery.id).limit(100))).all()
     for row, target in rows:
@@ -244,8 +250,9 @@ class ReceiptBody(BaseModel):
 
 
 @router.post("/outbox/{delivery_id}/complete")
-async def complete(delivery_id: int, body: ReceiptBody, session: AsyncSession = Depends(get_session)):
-    row = await session.get(BotDelivery, delivery_id)
+async def complete(delivery_id: int, body: ReceiptBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    row = await session.scalar(select(BotDelivery).join(BotTarget, BotTarget.id == BotDelivery.target_id)
+        .where(BotDelivery.id == delivery_id, BotTarget.client_id == client_id))
     if not row or not row.receipt or not secrets.compare_digest(row.receipt, body.receipt):
         raise HTTPException(409, "投递凭据已失效")
     if row.status == body.status:
