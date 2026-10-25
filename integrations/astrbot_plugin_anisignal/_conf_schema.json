@@ -1,11 +1,278 @@
 {
-  "base_url": {"description": "AniSignal 服务地址", "type": "string", "default": "http://anisignal-app-1:3000"},
-  "tools_key": {"description": "AniSignal 专用插件密钥", "type": "string", "default": "", "hint": "由部署脚本写入；不要填写管理员 Token 或 AstrBot 发送密钥。"},
-  "card_font_path": {"description": "早报卡片中文字体路径", "type": "string", "default": "", "hint": "留空使用已部署的 Noto Sans CJK 字体；字体不可用时发送短文字。"},
+  "base_url": {
+    "description": "AniSignal 服务地址",
+    "type": "string",
+    "default": "http://anisignal.xyz"
+  },
+  "tools_key": {
+    "description": "AniSignal 专用插件密钥",
+    "type": "string",
+    "default": "",
+    "hint": "在 AniSignal 管理端的机器人接入中获取；每个 AstrBot 实例使用自己的密钥，不要填写管理员 Token。",
+    "secret": true
+  },
+  "targets": {
+    "description": "会话订阅",
+    "type": "template_list",
+    "default": [],
+    "hint": "每个群聊或私聊单独配置。保存后自动同步，移除的会话会暂停，历史投递记录保留。",
+    "templates": {
+      "session": {
+        "name": "群聊或私聊",
+        "display_item": "name",
+        "items": {
+          "name": {
+            "description": "会话名称",
+            "type": "string",
+            "default": ""
+          },
+          "umo": {
+            "description": "会话标识（UMO）",
+            "type": "string",
+            "default": "",
+            "hint": "在目标群聊或私聊发送 /情报会话，复制完整会话标识；支持 AstrBot 的不同消息平台。"
+          },
+          "enabled": {
+            "description": "启用此会话的推送与查询",
+            "type": "bool",
+            "default": false
+          },
+          "subscription": {
+            "description": "订阅范围",
+            "type": "object",
+            "items": {
+              "communities": {
+                "description": "订阅分区",
+                "type": "list",
+                "default": [
+                  "wuwa",
+                  "blhx",
+                  "hsr",
+                  "arknights",
+                  "ai"
+                ],
+                "options": [
+                  "wuwa",
+                  "blhx",
+                  "hsr",
+                  "arknights",
+                  "ai"
+                ],
+                "labels": [
+                  "鸣潮",
+                  "碧蓝航线",
+                  "崩坏星穹铁道",
+                  "明日方舟",
+                  "AI 快讯"
+                ]
+              },
+              "keywords": {
+                "description": "关注关键词",
+                "type": "list",
+                "default": [],
+                "hint": "留空关注所选分区的全部情报，最多 20 个关键词。"
+              }
+            }
+          },
+          "notifications": {
+            "description": "自动通知与免打扰",
+            "type": "object",
+            "items": {
+              "daily_enabled": {
+                "description": "每日早报",
+                "type": "bool",
+                "default": true
+              },
+              "daily_time": {
+                "description": "早报时间（北京时间）",
+                "type": "string",
+                "default": "08:00",
+                "hint": "使用 HH:mm，例如 08:00。"
+              },
+              "updates_enabled": {
+                "description": "推送重要动态",
+                "type": "bool",
+                "default": false
+              },
+              "calendar_enabled": {
+                "description": "活动收尾提醒",
+                "type": "bool",
+                "default": true,
+                "hint": "需同时开启动态推送；汇总未来 24 小时的活动截止和维护，每天最多一条。"
+              },
+              "calendar_time": {
+                "description": "收尾提醒时间（北京时间）",
+                "type": "string",
+                "default": "20:00"
+              },
+              "quiet_start": {
+                "description": "免打扰开始小时",
+                "type": "int",
+                "default": 23,
+                "slider": {
+                  "min": 0,
+                  "max": 23,
+                  "step": 1
+                }
+              },
+              "quiet_end": {
+                "description": "免打扰结束小时",
+                "type": "int",
+                "default": 8,
+                "slider": {
+                  "min": 0,
+                  "max": 23,
+                  "step": 1
+                },
+                "hint": "开始与结束相同则关闭免打扰。"
+              },
+              "quiet_critical": {
+                "description": "允许关键动态穿透免打扰",
+                "type": "bool",
+                "default": false
+              },
+              "merge_minutes": {
+                "description": "普通动态合并窗口（分钟）",
+                "type": "int",
+                "default": 0,
+                "slider": {
+                  "min": 0,
+                  "max": 60,
+                  "step": 1
+                }
+              },
+              "hourly_limit": {
+                "description": "每小时自动消息上限",
+                "type": "int",
+                "default": 2,
+                "slider": {
+                  "min": 0,
+                  "max": 50,
+                  "step": 1
+                },
+                "hint": "0 为不限；不影响你主动设置的定时提醒。"
+              },
+              "min_push_interval_minutes": {
+                "description": "自动消息最小间隔（分钟）",
+                "type": "int",
+                "default": 20,
+                "slider": {
+                  "min": 0,
+                  "max": 120,
+                  "step": 1
+                }
+              },
+              "daily_style": {
+                "description": "早报形态",
+                "type": "string",
+                "default": "compact",
+                "options": [
+                  "compact",
+                  "split"
+                ],
+                "labels": [
+                  "单张情报卡",
+                  "总览与重点分条"
+                ]
+              },
+              "max_images": {
+                "description": "单次最多附图",
+                "type": "int",
+                "default": 1,
+                "slider": {
+                  "min": 1,
+                  "max": 9,
+                  "step": 1
+                },
+                "hint": "早报卡片占一张，其余为来源图片。"
+              }
+            }
+          },
+          "interaction": {
+            "description": "问答与会话权限",
+            "type": "object",
+            "items": {
+              "tools": {
+                "description": "允许使用的情报工具",
+                "type": "list",
+                "default": [
+                  "digest",
+                  "news",
+                  "products"
+                ],
+                "options": [
+                  "digest",
+                  "news",
+                  "products",
+                  "trending",
+                  "calendar",
+                  "codes"
+                ],
+                "labels": [
+                  "今日速报",
+                  "资讯查询",
+                  "商品进展",
+                  "热度飙升",
+                  "活动日历",
+                  "兑换码"
+                ]
+              },
+              "ai_provider_id": {
+                "description": "问答模型",
+                "type": "string",
+                "default": "",
+                "_special": "select_provider",
+                "hint": "留空跟随当前会话的 AstrBot 模型。"
+              },
+              "ai_prompt": {
+                "description": "回答偏好",
+                "type": "text",
+                "default": "简洁、自然地回答，保留来源与时间。"
+              },
+              "chat_controls": {
+                "description": "允许聊天修改订阅",
+                "type": "bool",
+                "default": false
+              },
+              "manager_ids": {
+                "description": "可修改全群订阅的用户标识",
+                "type": "list",
+                "default": [],
+                "hint": "在群内发送 /情报会话 获取管理标识；私聊只作用于当前会话。"
+              },
+              "reminders_enabled": {
+                "description": "允许创建定时提醒",
+                "type": "bool",
+                "default": false
+              },
+              "activities_enabled": {
+                "description": "开启聊点什么与情报挑战",
+                "type": "bool",
+                "default": false,
+                "hint": "需同时启用今日速报工具。"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "configuration_imported": {
+    "description": "已有会话配置已导入",
+    "type": "bool",
+    "default": false,
+    "invisible": true
+  },
+  "card_font_path": {
+    "description": "早报卡片中文字体路径",
+    "type": "string",
+    "default": "",
+    "hint": "留空使用已部署的 Noto Sans CJK 字体；字体不可用时发送短文字。"
+  },
   "cat_followup_platforms": {
     "description": "猫娘自然续聊平台 ID",
     "type": "list",
-    "default": ["napcat_nNjs"],
+    "default": [],
     "hint": "仅对这些平台的主动回复白名单群和 catgirl 人格生效；留空关闭。成功回复点名后，允许同一人短时不再 @ 续聊。"
   },
   "cat_followup_seconds": {
@@ -23,7 +290,37 @@
   "cat_reply_keywords": {
     "description": "猫系话题触发词",
     "type": "list",
-    "default": ["猫", "貓", "喵", "咪咪", "咪呜", "咪嗷", "嗷呜", "哈基米", "哈气", "八条", "柴郡", "撸毛", "摸头", "挠下巴", "neko", "meow", "にゃ", "ニャ", "🐱", "🐈", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾"],
+    "default": [
+      "猫",
+      "貓",
+      "喵",
+      "咪咪",
+      "咪呜",
+      "咪嗷",
+      "嗷呜",
+      "哈基米",
+      "哈气",
+      "八条",
+      "柴郡",
+      "撸毛",
+      "摸头",
+      "挠下巴",
+      "neko",
+      "meow",
+      "にゃ",
+      "ニャ",
+      "🐱",
+      "🐈",
+      "😺",
+      "😸",
+      "😹",
+      "😻",
+      "😼",
+      "😽",
+      "🙀",
+      "😿",
+      "😾"
+    ],
     "hint": "在开启主动回复的白名单群中匹配整句话，英文不区分大小写；命中后按猫话题概率和冷却决定是否接话。留空关闭。"
   },
   "cat_topic_reply_probability": {

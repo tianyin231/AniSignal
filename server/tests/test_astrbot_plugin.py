@@ -1,5 +1,7 @@
 """验证发送结果不明时不重发，以及工具操作者始终取自真实事件。"""
 import importlib.util
+import asyncio
+import copy
 import json
 import sys
 from pathlib import Path
@@ -11,6 +13,10 @@ import pytest
 
 @pytest.fixture
 def plugin(monkeypatch):
+    class SavedConfig(dict):
+        def save_config(self):
+            self.saved = copy.deepcopy(dict(self))
+
     def module(name, **attrs):
         obj = ModuleType(name)
         obj.__dict__.update(attrs)
@@ -68,7 +74,10 @@ def plugin(monkeypatch):
     obj.api = AsyncMock(return_value={'ok':True})
     obj.render_delivery = AsyncMock(return_value='人格播报\n原始资料')
     obj.pending_ack = None
-    obj.config = {}
+    obj.config = SavedConfig(cat_followup_platforms=['napcat_nNjs'])
+    obj.configuration_lock = asyncio.Lock()
+    obj.configuration_ready = True
+    obj.configuration_dirty = False
     obj.targets = {}
     obj.last_activity = {}
     obj.last_briefs = {}
@@ -98,6 +107,71 @@ async def test_successful_send_with_lost_ack_is_only_acknowledged_again(plugin):
     plugin.api.side_effect = None
     await plugin.api(*plugin.pending_ack)
     assert plugin.context.send_message.await_count == 1
+
+
+async def test_existing_sessions_are_imported_once_and_saved_before_sync(plugin):
+    row = {'name': '已有会话', 'umo': 'qq:GroupMessage:existing', 'enabled': True,
+           'community': 'wuwa', 'communities': None, 'daily_time': '09:15', 'keywords': ['角色']}
+    plugin.configuration_ready = False
+    plugin.api.side_effect = [{'targets': [row]}, {'targets': [row]}, {'targets': [row]}]
+    await plugin.synchronize_configuration()
+    assert plugin.config.saved['configuration_imported'] is True
+    imported = plugin.config.saved['targets'][0]
+    assert imported['subscription'] == {'communities': ['wuwa'], 'keywords': ['角色']}
+    assert imported['notifications']['daily_time'] == '09:15'
+    assert plugin.configuration_ready and plugin.targets[row['umo']]['enabled']
+    await plugin.synchronize_configuration()
+    assert [call.args[0] for call in plugin.api.await_args_list] == ['/configuration'] * 3
+    assert len(plugin.api.await_args_list[0].args) == 1
+    assert all(len(call.args) == 2 for call in plugin.api.await_args_list[1:])
+    plugin.context.send_message.assert_not_awaited()
+
+
+async def test_clearing_plugin_targets_does_not_import_old_sessions_again(plugin):
+    plugin.config.update(configuration_imported=True, targets=[])
+    plugin.api.return_value = {'targets': []}
+    await plugin.synchronize_configuration()
+    assert plugin.api.await_count == 1 and plugin.api.call_args.args[1]['targets'] == []
+    assert plugin.targets == {}
+
+
+async def test_chat_subscription_changes_are_persisted_back_to_plugin_settings(plugin):
+    mod = sys.modules[plugin.__class__.__module__]
+    umo = 'telegram:GroupMessage:real'
+    plugin.config.update(configuration_imported=True, targets=[mod.to_plugin_target({'name': '群聊', 'umo': umo})])
+    changed = {'changed': True, 'communities': ['hsr'], 'keywords': ['角色'],
+               'daily_enabled': True, 'daily_time': '09:30', 'updates_enabled': False}
+    plugin.api.return_value = changed
+    assert await plugin.actor_api(event(umo), '/subscription', action='community', value='hsr') == changed
+    saved = plugin.config.saved['targets'][0]
+    assert saved['subscription']['communities'] == ['hsr']
+    assert saved['notifications']['daily_time'] == '09:30'
+    plugin.context.send_message.assert_not_awaited()
+
+
+async def test_failed_local_save_is_retried_before_claiming_configuration_ready(plugin):
+    row = {'name': '已有会话', 'umo': 'qq:GroupMessage:existing', 'enabled': True}
+    plugin.configuration_ready = False
+    plugin.api.side_effect = [{'targets': [row]}, {'targets': [row]}]
+    original_save = plugin.config.save_config
+    def fail():
+        raise PermissionError('readonly')
+    plugin.config.save_config = fail
+    with pytest.raises(PermissionError):
+        await plugin.synchronize_configuration()
+    assert not plugin.configuration_ready and plugin.configuration_dirty
+    assert plugin.api.await_count == 1
+    plugin.config.save_config = original_save
+    await plugin.synchronize_configuration()
+    assert plugin.configuration_ready and not plugin.configuration_dirty
+
+
+def test_new_install_defaults_are_portable_and_mask_the_access_key():
+    path = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal/_conf_schema.json'
+    schema = json.loads(path.read_text(encoding='utf-8'))
+    assert schema['tools_key']['secret'] is True
+    assert schema['base_url']['default'] == 'http://anisignal.xyz'
+    assert schema['cat_followup_platforms']['default'] == []
 
 
 async def test_model_failure_falls_back_to_original_and_timeout_is_unknown(plugin):

@@ -1,6 +1,6 @@
 name: astrbot_plugin_anisignal
 display_name: AniSignal 情报助手
-desc: 按会话送达资讯、每日速报与商品进展。
-version: v1.4.14
+desc: 在插件设置中管理各会话的资讯订阅、每日速报与商品进展。
+version: v1.5.0
 author: AniSignal
 astrbot_version: ">=4.27.2"
