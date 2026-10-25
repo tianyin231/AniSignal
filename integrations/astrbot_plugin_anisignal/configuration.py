@@ -32,6 +32,8 @@ def to_plugin_target(target):
 def to_server_target(target):
     result = {}
     for field, metadata in target_schema().items():
+        if field == "presentation":
+            continue  # 只影响 AstrBot 的呈现，不传给服务端调度配置。
         if metadata["type"] == "object":
             result.update({key: copy.deepcopy(target.get(field, {}).get(key, item["default"]))
                            for key, item in metadata["items"].items()})
