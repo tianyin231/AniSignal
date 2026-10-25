@@ -223,7 +223,8 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session), c
         .where(or_(BotDelivery.status == "pending", (BotDelivery.status == "failed") & (BotDelivery.updated_at <= now - timedelta(minutes=5))),
             BotDelivery.attempts < 3, BotTarget.client_id == client_id,
             BotTarget.config["delivery_mode"].as_string() == "astrbot",
-            BotTarget.config["_plugin_configured"].as_boolean().is_not(False),
+            or_(BotTarget.config["_plugin_configured"].as_boolean().is_(True),
+                BotTarget.config["_plugin_configured"].as_string().is_(None)),
             or_(BotTarget.enabled.is_(True), BotDelivery.kind == "manual"))
         .order_by(BotDelivery.id).limit(100))).all()
     for row, target in rows:
