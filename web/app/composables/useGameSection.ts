@@ -112,7 +112,7 @@ export function usePageCommunity(source: () => string | null | undefined) {
 }
 
 /**
- * 当前高亮的频道：聚合首页 → home；分区首页 → 该分区；/ai → ai；定制化 → custom；
+ * 当前高亮的频道：聚合首页及全站工具页 → home；分区首页 → 该分区；/ai → ai；定制化 → custom；
  * 详情页优先用 usePageCommunity 声明的分区；聚合视角（community=all）不高亮任何分区。
  * 顶栏选中态与布局的频道主题色（accent）都以此为准。
  */
@@ -127,6 +127,8 @@ export function useActiveChannel() {
   const active = computed<string | null>(() => {
     if (route.path === '/ai' || route.path.startsWith('/ai/')) return 'ai'
     if (route.path.startsWith('/custom')) return 'custom'
+    // 全站工具页不属于游戏分区，不能回退到上次浏览的分区记忆。
+    if (['/sources', '/stats', '/watch'].includes(route.path)) return 'home'
     const query = String(route.query.community || '')
     const queryKey = VALID_KEYS.has(query as GameCommunityKey) ? query : null
     if (route.path === '/') return queryKey ?? 'home'
