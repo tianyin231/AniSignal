@@ -6,6 +6,14 @@ from functools import cache
 from pathlib import Path
 
 
+def cleanup_legacy_configuration(config):
+    """升级时仅移除已退役的猫系设置，连接凭据与会话订阅保留。"""
+    obsolete = [key for key in config if key == "legacy_cat_behavior" or key.startswith("cat_")]
+    for key in obsolete:
+        config.pop(key)
+    return bool(obsolete)
+
+
 @cache
 def target_schema():
     schema = json.loads(Path(__file__).with_name("_conf_schema.json").read_text(encoding="utf-8"))
