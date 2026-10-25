@@ -69,24 +69,17 @@ def plugin(monkeypatch):
     mod = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, mod)
     spec.loader.exec_module(mod)
-    monkeypatch.setattr(mod.random, 'random', lambda: 0.0)
     obj = mod.AniSignalPlugin.__new__(mod.AniSignalPlugin)
     obj.api = AsyncMock(return_value={'ok':True})
     obj.render_delivery = AsyncMock(return_value='人格播报\n原始资料')
     obj.pending_ack = None
-    # 旧猫系行为单独回归；新安装和默认继承行为见下方测试。
-    obj.config = SavedConfig(cat_followup_platforms=['napcat_nNjs'], legacy_cat_behavior=True)
+    obj.config = SavedConfig()
     obj.configuration_lock = asyncio.Lock()
     obj.configuration_ready = True
     obj.configuration_dirty = False
     obj.targets = {}
     obj.last_activity = {}
     obj.last_briefs = {}
-    obj.last_cat_reply = {}
-    obj.last_cat_topic_trigger = {}
-    obj.cat_interjection_pending = set()
-    obj.cat_followups = {}
-    obj.cat_vision_cache = {}
     obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True),
         conversation_manager=SimpleNamespace(
             get_curr_conversation_id=AsyncMock(return_value='cid-1'),
@@ -173,7 +166,39 @@ def test_new_install_defaults_are_portable_and_mask_the_access_key():
     schema = json.loads(path.read_text(encoding='utf-8'))
     assert schema['tools_key']['secret'] is True
     assert schema['base_url']['default'] == 'http://anisignal.xyz'
-    assert schema['cat_followup_platforms']['default'] == []
+    assert not any(key.startswith('cat_') or key == 'legacy_cat_behavior' for key in schema)
+    assert 'card_font_path' in schema
+
+
+def test_legacy_cleanup_keeps_connection_and_session_configuration(plugin):
+    config = {'base_url':'http://example.test', 'tools_key':'test-key', 'targets':[{'umo':'qq:GroupMessage:g'}],
+              'card_font_path':'/fonts/custom.ttf', 'legacy_cat_behavior':False, 'cat_reply_keywords':['猫']}
+    clean = sys.modules['plugin_under_test.configuration'].cleanup_legacy_configuration
+    assert clean(config) is True
+    assert config == {'base_url':'http://example.test', 'tools_key':'test-key',
+                      'targets':[{'umo':'qq:GroupMessage:g'}], 'card_font_path':'/fonts/custom.ttf'}
+    assert clean(config) is False
+
+
+@pytest.mark.parametrize('persona_id',['cat','catgirl','akashi','custom'])
+async def test_unregistered_persona_history_and_media_are_untouched(plugin,persona_id):
+    history=[{'role':'user','content':'原有聊天与图片'}]
+    images=['file:///original.gif']
+    req=SimpleNamespace(conversation=SimpleNamespace(persona_id=persona_id),system_prompt='原始人格',
+                        contexts=history,image_urls=images,func_tool=None)
+    await plugin.add_instructions(event('unregistered:GroupMessage:g'),req)
+    assert req.system_prompt=='原始人格' and req.contexts is history and req.image_urls is images
+    plugin.api.assert_not_awaited()
+
+
+async def test_ordinary_chat_output_is_not_processed_by_anisignal(plugin):
+    Plain = sys.modules['astrbot.api.message_components'].Plain
+    Face = sys.modules['astrbot.api.message_components'].Face
+    chain=[Plain('正常表情 😺 &&custom&&'),Face()]
+    ev=event('qq:GroupMessage:g')
+    ev.get_result=lambda:SimpleNamespace(is_llm_result=lambda:True,chain=chain)
+    await plugin.strip_residual_emotion_markup(ev)
+    assert chain[0].text=='正常表情 😺 &&custom&&' and len(chain)==2
 
 
 async def test_model_failure_falls_back_to_original_and_timeout_is_unknown(plugin):
@@ -239,7 +264,7 @@ async def test_paused_session_does_not_activate_tools_or_provider(plugin):
     plugin.last_activity = {}
     paused = event('qq:GroupMessage:paused')
     assert plugin.session_target(paused) is None
-    await plugin.select_conversation_provider(paused)
+    await plugin.track_activity(paused)
     plugin.targets['qq:GroupMessage:paused']['enabled'] = True
     assert plugin.session_target(paused) is not None
 
@@ -247,8 +272,8 @@ async def test_paused_session_does_not_activate_tools_or_provider(plugin):
 async def test_message_events_track_last_activity_per_session(plugin):
     plugin.targets = {}
     plugin.last_activity = {}
-    await plugin.select_conversation_provider(event('qq:GroupMessage:g1'))
-    await plugin.select_conversation_provider(event('qq:GroupMessage:g2'))
+    await plugin.track_activity(event('qq:GroupMessage:g1'))
+    await plugin.track_activity(event('qq:GroupMessage:g2'))
     assert set(plugin.last_activity) == {'qq:GroupMessage:g1', 'qq:GroupMessage:g2'}
 
 
@@ -286,6 +311,7 @@ async def test_residual_emotion_markup_is_stripped_from_replies(plugin):
     Plain = sys.modules['astrbot.api.message_components'].Plain
     chain = [Plain('你好 &&reply&& 不错，&&happy&&')]
     ev = event('qq:GroupMessage:g')
+    ev.set_extra('anisignal_reply', True)
     ev.get_result = lambda: SimpleNamespace(is_llm_result=lambda: True,
         get_plain_text=lambda: chain[0].text, chain=chain)
     await plugin.strip_residual_emotion_markup(ev)
@@ -304,70 +330,7 @@ async def test_residual_emotion_markup_is_stripped_from_replies(plugin):
     assert chain[0].text == '咪…  喵？\n呜——'
 
 
-async def test_cat_chat_does_not_inject_news_instructions(plugin):
-    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'), system_prompt='猫语',
-        func_tool=object())
-    await plugin.add_instructions(event('qq:GroupMessage:g'), req)
-    assert req.system_prompt == '猫语'
-    assert req.func_tool is None
-    plugin.api.assert_not_called()
-
-
-async def test_catgirl_keeps_tools_news_context_and_reply_cleanup(plugin):
-    class Tools(list):
-        remove_tool = list.remove
-
-    umo = 'qq:GroupMessage:g'
-    plugin.targets[umo] = {'enabled': True, 'tools': ['news']}
-    plugin.api.return_value = {'recent_notifications': [{'text': '昨天已发的公告'}]}
-    original_tools = Tools(['web_search', 'anisignal_query', 'anisignal_expand',
-        'anisignal_subscription', 'anisignal_reminder'])
-    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='catgirl'),
-        system_prompt='软糯猫娘', func_tool=original_tools)
-    ev = event(umo)
-    await plugin.add_instructions(ev, req)
-    assert req.func_tool == original_tools[:-1]  # 无提醒权限，其余工具仍可用。
-    assert 'anisignal_reminder' in original_tools
-    assert 'anisignal_query' in req.system_prompt and '昨天已发的公告' in req.system_prompt
-    assert ev.get_extra('anisignal_cat_chat') and ev.get_extra('anisignal_model_started')
-    plugin.api.assert_awaited_once_with('/context', {'umo': umo, 'actor_id': 'user'})
-
-    response = SimpleNamespace(completion_text='还要摸摸头 &happy&')
-    await plugin.suppress_cat_interjection(ev, response)
-    assert response.completion_text == '还要摸摸头 &&happy&&'
-    Plain = sys.modules['astrbot.api.message_components'].Plain
-    result = SimpleNamespace(is_llm_result=lambda: True, chain=[Plain(response.completion_text)])
-    ev.get_result = lambda: result
-    await plugin.strip_residual_emotion_markup(ev)
-    assert result.chain[0].text == '还要摸摸头'
-    assert umo not in plugin.last_cat_reply  # 整理回复还不能当成已发送。
-    ev._has_send_oper = True
-    await plugin.log_cat_reply_time(ev)
-    assert umo in plugin.last_cat_reply and ev.get_extra('anisignal_model_finished')
-
-
-async def test_catgirl_chat_filters_material_pairs_without_losing_conversation_or_tools(plugin):
-    history = [
-        {'role': 'user', 'content': '我喜欢巧克力'},
-        {'role': 'assistant', 'content': '记着呢。'},
-        {'role': 'user', 'content': '（AniSignal 向本会话推送了一条每日早报）'},
-        {'role': 'assistant', 'content': '长篇资讯正文'},
-        {'role': 'user', 'content': '（处理了情报查询）'},
-        {'role': 'assistant', 'content': '查询资料清单'},
-        {'role': 'user', 'content': '刚才第二条什么时候结束？'},
-        {'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'lookup'}]},
-        {'role': 'tool', 'tool_call_id': 'lookup', 'content': '10月10日截止'},
-        {'role': 'assistant', 'content': '10月10日截止。'},
-    ]
-    original = json.loads(json.dumps(history))
-    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='catgirl'),
-        system_prompt='猫娘', contexts=history, func_tool=None)
-    await plugin.add_instructions(event('qq:FriendMessage:self'), req)
-    assert req.contexts == history[:2] + history[4:]
-    assert history == original  # 不原地改写调用方传入的上下文。
-
-
-async def test_catgirl_product_query_keeps_facts_for_followup(plugin):
+async def test_raw_product_query_keeps_facts_for_followup(plugin):
     manager = plugin.context.conversation_manager
     manager.get_conversation.return_value = SimpleNamespace(persona_id='catgirl')
     ev = event('qq:FriendMessage:self')
@@ -379,7 +342,7 @@ async def test_catgirl_product_query_keeps_facts_for_followup(plugin):
     assert user_msg['content'] == '（处理了商品查询）' and assistant_msg['content'] == body
 
 
-async def test_catgirl_notification_index_keeps_detail_reference_without_broadcast_body(plugin):
+async def test_notification_index_keeps_detail_reference_without_broadcast_body(plugin):
     umo = 'qq:FriendMessage:self'
     plugin.targets[umo] = {'enabled': True, 'tools': ['news']}
     plugin.api.return_value = {'recent_notifications': [{
@@ -394,330 +357,6 @@ async def test_catgirl_notification_index_keeps_detail_reference_without_broadca
     assert '"id": 73' in req.system_prompt and '10月10日截止' in req.system_prompt
     assert 'anisignal_expand' in req.system_prompt
     assert 'sent_at只是推送时间' in req.system_prompt
-
-
-@pytest.mark.parametrize('text,expected', [
-    ('哈。嘶？||meme_start||，||meme_end||', '哈。嘶？'),
-    (r'咪～\|\|meme\_start\|\|angry\|\|meme\_end\|\|  喵？', '咪～  喵？'),
-    ('咪……\n||MEME_START||\nangry\n||MEME_END||\n喵！', '咪……\n\n喵！'),
-    ('咪？||meme_start||unfinished', '咪？'),
-    ('||meme_end||咪？', '咪？'),
-    ('||meme_start||，||meme_end||', ''),
-    ('咪～ (=^･ω･^=) &&happy&&', '咪～ (=^･ω･^=) &&happy&&'),
-    ('喵……，哈？&annoyed&', '喵……，哈？&&annoyed&&'),
-    ('咪？&& ANNOYED &', '咪？&&annoyed&&'),
-    (r'咪？\&annoyed\&', '咪？&&annoyed&&'),
-    ('咪？&amp;annoyed&amp;', '咪？&&annoyed&&'),
-    ('咪？＆annoyed＆', '咪？&&annoyed&&'),
-    ('咪？&annoyed', '咪？&&annoyed&&'),
-    ('咪？&annoyed\n喵！', '咪？&&annoyed&&\n喵！'),
-    ('咪？&&annoyed&&&&happy&&', '咪？&&annoyed&&&&happy&&'),
-    ('咪？&annoyed&&sad&', '咪？&&annoyed&&&&sad&&'),
-    ('咪～ (&&) (&ω&) (=^･ω･^=) &lt;3', '咪～ (&&) (&ω&) (=^･ω･^=) &lt;3'),
-])
-async def test_meme_markup_is_cleaned_or_normalized_before_selection(plugin, text, expected):
-    ev = event('qq:GroupMessage:g')
-    ev.set_extra('anisignal_cat_chat', True)
-    response = SimpleNamespace(completion_text=text)
-    await plugin.suppress_cat_interjection(ev, response)
-    assert response.completion_text == expected
-    if not expected:
-        assert not ev.get_extra('stopped')  # 空文本不能打断同轮的工具调用。
-
-
-@pytest.mark.parametrize('marker', [
-    '&annoyed&', '&&annoyed&', '&annoyed&&', '&& annoyed &&',
-    r'\&annoyed\&', '&amp;annoyed&amp;', '＆annoyed＆', '&annoyed', '&unknown_tag&',
-    '&&annoyed&&&&happy&&', '&annoyed&&sad&', '&&&annoyed&&&',
-])
-async def test_final_cleanup_removes_malformed_emotion_markers_without_losing_cat_rhythm(plugin, marker):
-    components = sys.modules['astrbot.api.message_components']
-    image = SimpleNamespace(type='Image', file='cat.gif')
-    text = '喵……，哈？  (=^･ω･^=)\n咪～'
-    result = SimpleNamespace(is_llm_result=lambda: True, chain=[components.Plain(text + marker), image])
-    ev = event('qq:GroupMessage:g')
-    ev.set_extra('anisignal_cat_chat', True)
-    ev.get_result = lambda: result
-    await plugin.strip_residual_emotion_markup(ev)
-    assert result.chain[0].text == text and result.chain[1] is image
-
-
-async def test_final_cleanup_removes_invalid_meme_block_and_keeps_image(plugin):
-    components = sys.modules['astrbot.api.message_components']
-    image = SimpleNamespace(type='Image', file='cat.gif')
-    result = SimpleNamespace(is_llm_result=lambda: True,
-        chain=[components.Plain('哈。嘶？||meme_start||，||meme_end||'), image])
-    ev = event('qq:GroupMessage:g')
-    ev.set_extra('anisignal_cat_chat', True)
-    ev.get_result = lambda: result
-    await plugin.strip_residual_emotion_markup(ev)
-    assert result.chain[0].text == '哈。嘶？' and result.chain[1] is image
-
-    result.chain = [components.Plain('||meme_start||，||meme_end||')]
-    await plugin.strip_residual_emotion_markup(ev)
-    assert not result.chain and not ev.get_extra('stopped')
-    assert not ev.get_extra('anisignal_cat_result_ready')
-
-
-async def test_cat_reply_removes_emoji_and_native_faces_but_keeps_cat_images(plugin):
-    components = sys.modules['astrbot.api.message_components']
-    image = SimpleNamespace(type='Image', file='cat.gif')
-    chain = [components.Plain('咪😺～  喵？！\n(=^･ω･^=) ~ ……❤️🐈‍⬛👍🏽1️⃣🇨🇳 &&happy&&'),
-        components.Face(), image]
-    result = SimpleNamespace(is_llm_result=lambda: True, chain=chain)
-    ev = event('qq:GroupMessage:g')
-    ev.set_extra('anisignal_cat_chat', True)
-    ev.get_result = lambda: result
-    await plugin.strip_residual_emotion_markup(ev)
-    assert len(result.chain) == 2 and result.chain[1] is image
-    assert result.chain[0].text == '咪～  喵？！\n(=^･ω･^=) ~ ……'
-
-
-async def test_emoji_only_reply_is_not_sent_as_an_empty_message(plugin):
-    components = sys.modules['astrbot.api.message_components']
-    result = SimpleNamespace(is_llm_result=lambda: True,
-        chain=[components.Plain('😺'), components.Face()])
-    ev = event('qq:GroupMessage:g')
-    ev.set_extra('anisignal_cat_chat', True)
-    ev.get_result = lambda: result
-    await plugin.strip_residual_emotion_markup(ev)
-    assert not result.chain and not ev.get_extra('stopped')
-    assert not ev.get_extra('anisignal_cat_result_ready')
-
-
-@pytest.mark.parametrize('placeholder', ['', '||meme_start||，||meme_end||', '😺'])
-async def test_empty_llm_stage_resumes_tool_execution_and_sends_only_final_answer(plugin, placeholder):
-    """框架先 yield LLM 结果，再执行工具；装饰阶段 stop 会让外层提前关闭生成器。"""
-    components = sys.modules['astrbot.api.message_components']
-    ev = event('napcat_nNjs:FriendMessage:test')
-    ev._has_send_oper = False
-    ev.set_extra('anisignal_cat_chat', True)
-    # 确认空阶段会撤销旧 ready 标记，不能误记发送成功或开启续聊。
-    ev.set_extra('anisignal_cat_result_ready', True)
-    search = AsyncMock(return_value='已核对的查询结果')
-    send = AsyncMock()
-
-    async def agent_turn():
-        response = SimpleNamespace(completion_text=placeholder)
-        await plugin.suppress_cat_interjection(ev, response)
-        chain = [components.Plain(response.completion_text)] if response.completion_text else []
-        yield SimpleNamespace(is_llm_result=lambda: True, chain=chain)
-        answer = await search()
-        yield SimpleNamespace(is_llm_result=lambda: True, chain=[components.Plain(answer)])
-
-    async for result in agent_turn():
-        ev.get_result = lambda: result
-        await plugin.strip_residual_emotion_markup(ev)
-        if ev.get_extra('stopped'):
-            break  # 与 AstrBot Scheduler 对 stop_event 的行为一致。
-        if not result.chain:
-            assert not ev.get_extra('anisignal_cat_result_ready')
-            assert not plugin.last_cat_reply
-            continue  # RespondStage 原生跳过空结果，不发送、不触发 after_message_sent。
-        await send(result.chain[0].text)
-        ev._has_send_oper = True
-        await plugin.log_cat_reply_time(ev)
-
-    search.assert_awaited_once()
-    send.assert_awaited_once_with('已核对的查询结果')
-    assert not ev.get_extra('stopped')
-    assert ev.unified_msg_origin in plugin.last_cat_reply
-
-
-@pytest.mark.parametrize('persona_id,recorded', [('cat', False), ('catgirl', False), ('akashi', True)])
-async def test_cat_broadcast_history_follows_persona(plugin, persona_id, recorded):
-    manager = plugin.context.conversation_manager
-    manager.get_conversation.return_value = SimpleNamespace(persona_id=persona_id)
-    await plugin.send_delivery(delivery())
-    assert manager.add_message_pair.await_count == int(recorded)
-
-
-@pytest.mark.parametrize('persona_id', ['cat', 'catgirl'])
-async def test_cat_interjection_quiet_hours_cooldown_and_unanswered(plugin, monkeypatch, persona_id):
-    from datetime import datetime, timezone, timedelta
-    umo = 'qq:GroupMessage:g'
-    clock = SimpleNamespace(now=lambda tz: datetime(2026, 9, 21, 15, tzinfo=tz))
-    monkeypatch.setitem(plugin.add_instructions.__func__.__globals__, 'datetime', clock)
-    req = SimpleNamespace(conversation=SimpleNamespace(persona_id=persona_id),
-        system_prompt='猫系人格', func_tool=None)
-    ev = event(umo)
-    ev.is_at_or_wake_command = False
-    await plugin.add_instructions(ev, req)
-    assert ev.get_extra('anisignal_cat_interject') and not ev.get_extra('stopped')
-    assert '[NO_REPLY]' in req.system_prompt
-    if persona_id == 'catgirl':
-        assert '简短中文' in req.system_prompt and '猫叫' not in req.system_prompt
-
-    plugin.last_cat_reply[umo] = clock.now(timezone(timedelta(hours=8))).timestamp() - 60
-    await plugin.add_instructions(ev, req)
-    assert ev.get_extra('stopped')
-    plugin.last_cat_reply.clear()
-    plugin.cat_interjection_pending.add(umo)
-    ev.set_extra('stopped', False)
-    await plugin.add_instructions(ev, req)
-    assert ev.get_extra('stopped')
-
-    plugin.cat_interjection_pending.clear()
-    clock.now = lambda tz: datetime(2026, 9, 21, 23, tzinfo=tz)
-    ev.set_extra('stopped', False)
-    await plugin.add_instructions(ev, req)
-    assert ev.get_extra('stopped')
-    ev.is_at_or_wake_command = True
-    ev.set_extra('stopped', False)
-    await plugin.add_instructions(ev, req)
-    assert not ev.get_extra('stopped')  # 夜间主动冒泡关闭，点名仍回复。
-
-
-async def test_cat_can_decline_to_interject(plugin):
-    ev = event('qq:GroupMessage:g')
-    ev.set_extra('anisignal_cat_interject', True)
-    response = SimpleNamespace(completion_text='[NO_REPLY]')
-    await plugin.suppress_cat_interjection(ev, response)
-    assert ev.get_extra('stopped') and response.completion_text == ''
-
-
-@pytest.mark.parametrize('persona_id', ['cat', 'catgirl'])
-async def test_cat_vision_previews_animation_and_preserves_speakers(plugin, tmp_path, persona_id):
-    import base64
-    import io
-    from PIL import Image
-
-    frames = [Image.new('RGB', (80, 60), color) for color in ('red', 'green', 'blue')]
-    path = tmp_path / 'cat.gif'
-    frames[0].save(path, save_all=True, append_images=frames[1:], duration=100, loop=0)
-    original = path.read_bytes()
-    uri = 'data:image/gif;base64,' + base64.b64encode(original).decode()
-    history = [{'role': 'user', 'content': [
-        {'type': 'text', 'text': '[user_id=123] 这是甲发的动图'},
-        {'type': 'image_url', 'image_url': {'url': uri, 'detail': 'low'}},
-    ]}]
-    req = SimpleNamespace(conversation=SimpleNamespace(persona_id=persona_id),
-        system_prompt='猫系人格', contexts=history, image_urls=[str(path)], func_tool=None)
-    ev = event('qq:FriendMessage:self')
-    await plugin.add_instructions(ev, req)
-    preview = req.contexts[0]['content'][1]['image_url']
-    assert preview['url'].startswith('data:image/jpeg;base64,')
-    assert req.image_urls == [preview['url']]  # 当前附件与历史附件使用同一预览。
-    assert preview['detail'] == 'low'
-    assert req.contexts[0]['content'][0] == history[0]['content'][0]
-    assert history[0]['content'][1]['image_url']['url'] == uri
-    assert path.read_bytes() == original
-    with Image.open(io.BytesIO(base64.b64decode(preview['url'].split(',', 1)[1]))) as image:
-        assert image.getpixel((192, 192))[0] > 200
-        assert image.getpixel((576, 192))[1] > 100
-        assert image.getpixel((960, 192))[2] > 200
-
-
-async def test_cat_bounds_history_and_keeps_static_images(plugin, tmp_path):
-    from PIL import Image
-
-    path = tmp_path / 'static.png'
-    Image.new('RGB', (8, 8), 'white').save(path)
-    history = [{'role': 'user', 'content': f'[user_id={i}] 喵'} for i in range(30)]
-    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'),
-        system_prompt='猫语', contexts=history, image_urls=[str(path)])
-    await plugin.add_instructions(event('qq:FriendMessage:self'), req)
-    assert req.contexts == history[-24:]
-    assert len(history) == 30
-    assert req.image_urls == [str(path)]
-
-
-@pytest.mark.parametrize('text,expected', [
-    ('今天看到一只可爱的猫娘', True),
-    ('给你看看柴郡的新表情', True),
-    ('这只哈基米在做什么', True),
-    ('来给你挠下巴', True),
-    ('I like NEKO stickers', True),
-    ('路过放一只🐱', True),
-    ('今天更新了游戏', False),
-])
-async def test_cat_topic_wakes_once_without_losing_message(plugin, text, expected):
-    umo = 'qq:GroupMessage:g'
-    schema = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal/_conf_schema.json'
-    plugin.config['cat_reply_keywords'] = json.loads(schema.read_text(encoding='utf-8'))['cat_reply_keywords']['default']
-    plugin.context.get_config = lambda **kwargs: {
-        'provider_ltm_settings': {'active_reply': {'enable': True, 'whitelist': [umo]}}}
-    ev = event(umo)
-    ev.is_at_or_wake_command = False
-    ev.get_message_str = lambda: text
-    ev.get_group_id = lambda: 'g'
-    plugin.cat_interjection_pending.add(umo)
-    await plugin.select_conversation_provider(ev)
-    assert ev.is_at_or_wake_command is expected
-    assert ev.get_message_str() == text
-    plugin.context.send_message.assert_not_called()  # 只唤醒，由原有管线发送一次。
-    if expected:
-        req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'), system_prompt='猫语')
-        await plugin.add_instructions(ev, req)
-        assert not ev.get_extra('stopped') and umo not in plugin.cat_interjection_pending
-        assert not ev.get_extra('anisignal_cat_interject')
-
-
-@pytest.mark.parametrize('enabled,whitelist,keywords,expected', [
-    (True, ['other'], ['猫'], False),
-    (False, [], ['猫'], False),
-    (True, [], [], False),
-    (True, [], [' '], False),
-    (True, ['g'], ['猫'], True),
-])
-async def test_cat_topic_respects_group_settings(plugin, enabled, whitelist, keywords, expected):
-    plugin.config['cat_reply_keywords'] = keywords
-    plugin.context.get_config = lambda **kwargs: {
-        'provider_ltm_settings': {'active_reply': {'enable': enabled, 'whitelist': whitelist}}}
-    ev = event('qq:GroupMessage:g')
-    ev.is_at_or_wake_command = False
-    ev.get_message_str = lambda: '好可爱的猫'
-    ev.get_group_id = lambda: 'g'
-    await plugin.select_conversation_provider(ev)
-    assert ev.is_at_or_wake_command is expected
-
-
-@pytest.mark.parametrize('draw,expected', [(0.29, True), (0.30, False), (0.99, False)])
-async def test_cat_topic_probability_and_no_random_fallback(plugin, monkeypatch, draw, expected):
-    plugin.config.update(cat_reply_keywords=['猫'], cat_topic_reply_probability=0.3)
-    plugin.context.get_config = lambda **kwargs: {
-        'provider_ltm_settings': {'active_reply': {'enable': True, 'whitelist': []}}}
-    monkeypatch.setattr(plugin.select_conversation_provider.__func__.__globals__['random'], 'random', lambda: draw)
-    ev = event('qq:GroupMessage:g')
-    ev.is_at_or_wake_command = False
-    ev.get_message_str = lambda: '这只猫好可爱'
-    ev.get_group_id = lambda: 'g'
-    await plugin.select_conversation_provider(ev)
-    assert ev.is_at_or_wake_command is expected
-    if not expected:
-        req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'), system_prompt='猫语')
-        await plugin.add_instructions(ev, req)
-        assert ev.get_extra('stopped')  # 不能被另一条随机回复链路重新触发。
-
-
-async def test_cat_topic_cooldown_reserves_slot_per_group_and_keeps_direct_calls(plugin, monkeypatch):
-    plugin.config.update(cat_reply_keywords=['猫'], cat_topic_reply_probability=1.0,
-                         cat_topic_cooldown_seconds=90)
-    plugin.context.get_config = lambda **kwargs: {
-        'provider_ltm_settings': {'active_reply': {'enable': True, 'whitelist': []}}}
-    clock = [10000.0]
-    monkeypatch.setattr(plugin.select_conversation_provider.__func__.__globals__['time'], 'time', lambda: clock[0])
-
-    async def trigger(group, direct=False):
-        ev = event(f'qq:GroupMessage:{group}')
-        ev.is_at_or_wake_command = direct
-        ev.get_message_str = lambda: '这只猫'
-        ev.get_group_id = lambda: group
-        await plugin.select_conversation_provider(ev)
-        return ev
-
-    assert (await trigger('one')).is_at_or_wake_command
-    assert not (await trigger('one')).is_at_or_wake_command  # 第一条还在生成也不能连着触发。
-    assert (await trigger('two')).is_at_or_wake_command
-    direct = await trigger('one', direct=True)
-    assert direct.is_at_or_wake_command and not direct.get_extra('anisignal_cat_topic_skipped')
-    clock[0] += 89
-    assert not (await trigger('one')).is_at_or_wake_command
-    clock[0] += 1
-    assert (await trigger('one')).is_at_or_wake_command
-    clock[0] += 100
-    plugin.last_cat_reply['qq:GroupMessage:one'] = clock[0] - 20
-    assert not (await trigger('one')).is_at_or_wake_command  # 点名回复之后也留出安静间隔。
 
 
 async def test_notification_keeps_original_persona_actions_emoji_and_length(plugin):
@@ -833,12 +472,11 @@ async def test_default_plugin_does_not_override_normal_chat_or_model(plugin):
     class Tools(list):
         def remove_tool(self,name):
             if name in self:self.remove(name)
-    plugin.config.pop('legacy_cat_behavior')
     umo='qq:GroupMessage:g'
     plugin.targets[umo]={'enabled':True,'tools':['news'],'provider_id':'old-override','instructions':'旧的固定角色'}
     plugin.context.get_config=lambda **kwargs: {'provider_ltm_settings':{'active_reply':{'enable':True}}}
     ev=event(umo)
-    await plugin.select_conversation_provider(ev)
+    await plugin.track_activity(ev)
     assert ev.get_extra('selected_provider') is None
     history=[{'role':'user','content':'原有聊天'}]
     req=SimpleNamespace(conversation=SimpleNamespace(persona_id='catgirl'),system_prompt='原有自定义人格',
@@ -943,194 +581,3 @@ async def test_daily_card_counts_toward_image_limit(plugin, monkeypatch):
     assert len(images) == 3 and images[0].endswith('brief.png')
     assert images[1:] == ['first', 'second']
     plugin.context.send_message.assert_awaited_once()
-
-
-@pytest.fixture
-def followup_chat(plugin, monkeypatch):
-    clock = [10000.0]
-    monkeypatch.setattr(plugin.select_conversation_provider.__func__.__globals__['time'], 'time', lambda: clock[0])
-    plugin.config.update(cat_followup_platforms=['napcat_nNjs'])
-    active = {'enable': True, 'whitelist': ['napcat_nNjs:GroupMessage:g']}
-    plugin.context.get_config = lambda **kwargs: {'provider_ltm_settings': {'active_reply': active}}
-    plugin.context.conversation_manager.get_conversation.return_value = SimpleNamespace(persona_id='catgirl')
-    components = sys.modules['astrbot.api.message_components']
-
-    async def incoming(text='那你喜欢哪个呀', sender='user', group='g', platform='napcat_nNjs',
-                       at=None, quote=None, direct=False, private=False):
-        kind = 'FriendMessage' if private else 'GroupMessage'
-        ev = event(f'{platform}:{kind}:{group}')
-        chain = ([components.At(at)] if at is not None else [])
-        chain += [components.Reply(quote)] if quote is not None else []
-        chain.append(components.Plain(text))
-        ev.get_sender_id = lambda: sender
-        ev.get_self_id = lambda: 'bot'
-        ev.get_group_id = lambda: '' if private else group
-        ev.get_messages = lambda: chain
-        ev.get_message_str = lambda: text
-        ev.is_at_or_wake_command = direct or at == 'bot' or quote == 'bot' or private
-        ev._has_send_oper = False
-        await plugin.select_conversation_provider(ev)
-        return ev
-
-    async def reply(ev, success=True, prior_send=False, persona='catgirl', text='草莓的呀'):
-        req = SimpleNamespace(conversation=SimpleNamespace(persona_id=persona), system_prompt='', func_tool=None)
-        await plugin.add_instructions(ev, req)
-        result = SimpleNamespace(is_llm_result=lambda: True, chain=[components.Plain(text)])
-        ev.get_result = lambda: result
-        ev._has_send_oper = prior_send
-        await plugin.strip_residual_emotion_markup(ev)
-        ev._has_send_oper = prior_send or success
-        await plugin.log_cat_reply_time(ev)
-        return req
-
-    return SimpleNamespace(incoming=incoming, reply=reply, clock=clock, active=active)
-
-
-@pytest.mark.parametrize('address', [{'at': 'bot'}, {'quote': 'bot'}])
-async def test_cat_followup_opens_only_after_a_successful_direct_reply(plugin, followup_chat, address):
-    chat = followup_chat
-    direct = await chat.incoming(**address)
-    assert not plugin.cat_followups
-    await chat.reply(direct)
-    umo = direct.unified_msg_origin
-    assert plugin.cat_followups[umo] == {'sender': 'user', 'expires': 10090.0, 'remaining': 3}
-    followup = await chat.incoming()
-    assert followup.is_at_or_wake_command and followup.get_extra('anisignal_cat_followup')
-    assert followup.get_message_str() == '那你喜欢哪个呀'
-    req = await chat.reply(followup)
-    assert '[NO_REPLY]' in req.system_prompt and '同一位群友' in req.system_prompt
-    assert plugin.cat_followups[umo]['expires'] == 10090.0
-    assert plugin.cat_followups[umo]['remaining'] == 2
-    plugin.context.send_message.assert_not_called()  # 续聊仍交给原有聊天管线发送。
-
-
-@pytest.mark.parametrize('success,prior_send', [(False, False), (False, True), (True, True)])
-async def test_cat_followup_does_not_treat_failed_or_prior_sends_as_success(plugin, followup_chat, success, prior_send):
-    direct = await followup_chat.incoming(at='bot')
-    await followup_chat.reply(direct, success=success, prior_send=prior_send)
-    assert not plugin.cat_followups and not plugin.last_cat_reply
-
-
-async def test_cat_followup_never_opens_from_an_unaddressed_or_non_llm_reply(plugin, followup_chat):
-    ev = await followup_chat.incoming(direct=True)  # 仅唤醒词不是 @/引用。
-    await followup_chat.reply(ev)
-    assert not plugin.cat_followups
-    direct = await followup_chat.incoming(at='bot')
-    direct.set_extra('anisignal_cat_chat', True)
-    direct.set_extra('anisignal_catgirl_chat', True)
-    direct.get_result = lambda: SimpleNamespace(is_llm_result=lambda: False, chain=['command'])
-    await plugin.strip_residual_emotion_markup(direct)
-    direct._has_send_oper = True
-    await plugin.log_cat_reply_time(direct)
-    assert not plugin.cat_followups
-
-
-async def test_cat_followup_keeps_people_groups_and_platforms_separate(plugin, followup_chat):
-    chat = followup_chat
-    direct = await chat.incoming(at='bot')
-    await chat.reply(direct)
-    chat.active['whitelist'].append('napcat_nNjs:GroupMessage:other')
-    for kwargs in [{'sender': 'other'}, {'group': 'other'}, {'platform': 'qq_official'}]:
-        ev = await chat.incoming(**kwargs)
-        assert not ev.is_at_or_wake_command and not ev.get_extra('anisignal_cat_followup')
-    assert plugin.cat_followups[direct.unified_msg_origin]['remaining'] == 3
-    private = await chat.incoming(private=True)
-    assert private.is_at_or_wake_command and not private.get_extra('anisignal_cat_followup')
-
-
-@pytest.mark.parametrize('active,platforms,persona', [
-    ({'enable': False, 'whitelist': ['g']}, ['napcat_nNjs'], 'catgirl'),
-    ({'enable': True, 'whitelist': []}, ['napcat_nNjs'], 'catgirl'),
-    ({'enable': True, 'whitelist': ['other']}, ['napcat_nNjs'], 'catgirl'),
-    ({'enable': True, 'whitelist': ['g']}, [], 'catgirl'),
-    ({'enable': True, 'whitelist': ['g']}, ['napcat_nNjs'], 'cat'),
-])
-async def test_cat_followup_requires_enabled_platform_explicit_group_and_catgirl(plugin, followup_chat, active, platforms, persona):
-    chat = followup_chat
-    chat.active.clear()
-    chat.active.update(active)
-    plugin.config['cat_followup_platforms'] = platforms
-    plugin.context.conversation_manager.get_conversation.return_value.persona_id = persona
-    direct = await chat.incoming(at='bot')
-    await chat.reply(direct, persona=persona)
-    assert direct.is_at_or_wake_command and not plugin.cat_followups
-
-
-async def test_cat_followup_expires_and_does_not_extend_itself(plugin, followup_chat):
-    chat = followup_chat
-    direct = await chat.incoming(at='bot')
-    await chat.reply(direct)
-    chat.clock[0] = 10089
-    followup = await chat.incoming()
-    await chat.reply(followup)
-    assert plugin.cat_followups[direct.unified_msg_origin]['expires'] == 10090
-    chat.clock[0] = 10090
-    expired = await chat.incoming()
-    assert not expired.is_at_or_wake_command and not plugin.cat_followups
-
-
-async def test_cat_followup_reserves_at_most_three_turns_before_model_reply(plugin, followup_chat):
-    chat = followup_chat
-    await chat.reply(await chat.incoming(at='bot'))
-    for _ in range(3):
-        assert (await chat.incoming()).is_at_or_wake_command
-    exhausted = await chat.incoming()
-    assert not exhausted.is_at_or_wake_command and not plugin.cat_followups
-
-
-@pytest.mark.parametrize('kwargs', [
-    {'at': 'someone-else'}, {'quote': 'someone-else'}, {'quote': ''},
-    {'text': '晚安啦！'}, {'text': '猫猫，先不聊了'}, {'text': '不用回了'},
-])
-async def test_cat_followup_closes_when_user_redirects_or_finishes(plugin, followup_chat, kwargs):
-    chat = followup_chat
-    await chat.reply(await chat.incoming(at='bot'))
-    ev = await chat.incoming(**kwargs)
-    assert not ev.is_at_or_wake_command and not plugin.cat_followups
-    assert ev.get_extra('anisignal_cat_topic_skipped')
-    assert not (await chat.incoming()).is_at_or_wake_command
-
-
-async def test_cat_followup_does_not_suppress_normal_direct_goodbye(plugin, followup_chat):
-    chat = followup_chat
-    await chat.reply(await chat.incoming(at='bot'))
-    goodbye = await chat.incoming(at='bot', text='晚安')
-    assert goodbye.is_at_or_wake_command and not goodbye.get_extra('stopped')
-    await chat.reply(goodbye, text='晚安呀')
-    assert not plugin.cat_followups
-
-
-@pytest.mark.parametrize('text', ['[NO_REPLY]', ' [NO_REPLY] &&neutral&& '])
-async def test_cat_followup_model_can_close_window_without_leaking_control_text(plugin, followup_chat, text):
-    chat = followup_chat
-    await chat.reply(await chat.incoming(at='bot'))
-    followup = await chat.incoming()
-    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='catgirl'), system_prompt='', func_tool=None)
-    await plugin.add_instructions(followup, req)
-    response = SimpleNamespace(completion_text=text)
-    await plugin.suppress_cat_interjection(followup, response)
-    assert response.completion_text == '' and followup.get_extra('stopped')
-    assert not plugin.cat_followups
-
-
-async def test_cat_followup_stale_silence_cannot_close_a_new_direct_window(plugin, followup_chat):
-    chat = followup_chat
-    await chat.reply(await chat.incoming(at='bot'))
-    old = await chat.incoming()
-    await chat.reply(await chat.incoming(at='bot'))
-    await plugin.suppress_cat_interjection(old, SimpleNamespace(completion_text='[NO_REPLY]'))
-    assert plugin.cat_followups[old.unified_msg_origin]['remaining'] == 3
-
-
-async def test_cat_followup_rechecks_changed_persona_before_trigger_and_request(plugin, followup_chat):
-    chat = followup_chat
-    await chat.reply(await chat.incoming(at='bot'))
-    plugin.context.conversation_manager.get_conversation.return_value.persona_id = 'cat'
-    changed = await chat.incoming()
-    assert not changed.is_at_or_wake_command and not plugin.cat_followups
-    plugin.context.conversation_manager.get_conversation.return_value.persona_id = 'catgirl'
-    await chat.reply(await chat.incoming(at='bot'))
-    changed = await chat.incoming()
-    req = SimpleNamespace(conversation=SimpleNamespace(persona_id='cat'), system_prompt='', func_tool=None)
-    await plugin.add_instructions(changed, req)
-    assert changed.get_extra('stopped') and not plugin.cat_followups
