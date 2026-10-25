@@ -7,11 +7,18 @@ from pathlib import Path
 
 
 def cleanup_legacy_configuration(config):
-    """升级时仅移除已退役的猫系设置，连接凭据与会话订阅保留。"""
+    """退役配置只清理一次；人格和模型不再从站点配置导入。"""
     obsolete = [key for key in config if key == "legacy_cat_behavior" or key.startswith("cat_")]
     for key in obsolete:
         config.pop(key)
-    return bool(obsolete)
+    changed = bool(obsolete)
+    for target in config.get("targets", []):
+        interaction = target.get("interaction", {})
+        for key in ("ai_prompt", "ai_provider_id"):
+            if key in interaction:
+                interaction.pop(key)
+                changed = True
+    return changed
 
 
 @cache

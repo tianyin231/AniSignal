@@ -21,7 +21,7 @@ def test_relative_dates_are_anchored_to_source_and_brief_is_bounded():
     brief = {'title': '今日速报', 'date': '09/20', 'items': items}
     text = briefs.format_brief(brief)
     assert len(items) == 3 and len(text) < 300
-    assert 'http' not in text and '/展开' in text
+    assert 'http' not in text and '/展开' not in text
     assert 'https://example.com/0' in briefs.format_detail(items[0])
 
 
@@ -209,7 +209,7 @@ async def test_explicit_empty_editor_selection_is_not_filled(session, monkeypatc
     assert await briefs.select_brief_items(session, [content(1)], datetime(2026, 9, 20)) == []
 
 
-async def test_updates_keep_two_topics_daily_three_and_daily_expansion_number_is_valid(session, monkeypatch):
+async def test_updates_keep_two_topics_daily_three_without_plugin_interaction_copy(session, monkeypatch):
     monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={}))
     items = [content(n, title=f'官方合作影像{n}', text=f'合作影像{n}已上线。') for n in range(4)]
     updates = await briefs.build_brief(session, items)
@@ -217,10 +217,8 @@ async def test_updates_keep_two_topics_daily_three_and_daily_expansion_number_is
     assert len(updates['items']) == 2
     assert len(daily['items']) == 3
     single = await briefs.build_brief(session, items[:1], mode='daily')
-    assert '/展开 1' in briefs.format_brief(single)
-    assert '/展开 2' not in briefs.format_brief(single)
-    assert '/展开 2' in briefs.format_brief(daily)
-    assert '/展开' not in briefs.format_brief(updates)
+    for brief in (single, daily, updates):
+        assert '/展开' not in briefs.format_brief(brief)
 
 
 async def test_updates_are_complete_shares_and_arknights_is_not_rejected_as_a_date(session, monkeypatch):

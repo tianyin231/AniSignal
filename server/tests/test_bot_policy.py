@@ -181,7 +181,9 @@ async def test_calendar_one_short_digest_deduplicates_actual_titles_and_has_full
     assert len(entries) == 5
     assert {entry["title"] for entry in entries} == {titles[0], titles[2], titles[4], "更新维护", "报名截止"}
     assert sum(len(entry["schedule_ids"]) for entry in entries) == 8
-    assert len(delivery.body) <= 190 and "/展开 1" in delivery.body
+    assert len(delivery.body) <= 190 and "/展开" not in delivery.body
+    assert delivery.brief['truncated'] is True
+    assert '想参与的' not in delivery.body
     assert "未领取" not in delivery.body and "已经结束" not in delivery.body
     assert all(entry["url"] and entry["expires_at"] for entry in entries)
 
@@ -389,9 +391,28 @@ async def test_calendar_skips_date_only_and_maintenance_copy_is_relevant(session
     await session.commit()
     await schedule(session, now, title="3.7版本更新维护", kind="maintenance")
     entries = await upcoming_entries(session, "wuwa", now)
-    text, _ = calendar_brief(entries, now)
+    text, brief = calendar_brief(entries, now)
     assert len(entries) == 1 and entries[0]["kind"] == "maintenance"
-    assert "想参与" not in text and "提前安排好游戏时间" in text
+    assert "开始维护" in text and '3.7版本更新维护' in text
+    assert '想参与' not in text and '/展开' not in text and brief['truncated'] is False
+
+
+async def test_queued_daily_uses_current_fact_template_without_rewriting_accepted_history(session):
+    now=utcnow().replace(hour=0,minute=0,second=0,microsecond=0)
+    row=await target(session,now,daily_enabled=True,daily_time='08:00')
+    brief={'mode':'daily','title':'今日速报','date':'10/25','scheduled_at':now.isoformat(),
+           'items':[{'title':'官方新公告','community':'wuwa','summary':'活动将开放',
+                     'sources':[{'text':'官方新公告：活动将开放。','community':'wuwa'}]}]}
+    pending=BotDelivery(target_id=row.id,kind='daily',body='旧正文\n想细看，发 /展开 1',
+                        brief=brief,dedupe_key='queued-before-template-upgrade',created_at=now)
+    history=BotDelivery(target_id=row.id,kind='daily',body='历史正文\n想细看，发 /展开 1',
+                        brief=brief,status='accepted',dedupe_key='accepted-before-template-upgrade',
+                        created_at=now-timedelta(days=1),updated_at=now-timedelta(days=1))
+    session.add_all([pending,history]);await session.commit()
+    assert await reserve_delivery(session,row,pending,now=now)
+    assert '官方新公告' in pending.body and '/展开' not in pending.body
+    await session.refresh(history)
+    assert history.body=='历史正文\n想细看，发 /展开 1'
 
 
 async def test_same_window_video_dynamic_repost_enters_buffer_once(session, monkeypatch):

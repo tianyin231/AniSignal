@@ -82,6 +82,30 @@ async def test_import_keeps_identity_history_and_scan_cursor(client, admin_heade
     assert (await client.delete(f'/api/admin/bot/targets/{row.id}', headers=admin_headers)).status_code == 409
 
 
+async def test_legacy_persona_and_model_fields_are_retired_without_resetting_delivery_state(client,admin_headers,session):
+    _,headers=await access(client,admin_headers,'原生人格')
+    settings=target(tools=['news','products'])
+    created=(await client.post('/api/bot/configuration',headers=headers,json={'targets':[settings]})).json()['targets'][0]
+    row=await session.get(BotTarget,created['id'])
+    cursor=utcnow()-timedelta(hours=1)
+    row.last_scan_at=cursor
+    row.config={**row.config,'ai_prompt':'过期角色指令','ai_provider_id':'old-model'}
+    session.add(BotDelivery(target_id=row.id,kind='manual',body='待发送的事实正文',dedupe_key='keep-retired-fields'))
+    await session.commit()
+    settings.update(ai_prompt='过期角色指令',ai_provider_id='old-model')
+    result=await client.post('/api/bot/configuration',headers=headers,json={'targets':[settings]})
+    assert result.status_code==200
+    await session.refresh(row)
+    assert row.last_scan_at==cursor and 'ai_prompt' not in row.config and 'ai_provider_id' not in row.config
+    response=result.json()['targets'][0]
+    assert not {'ai_prompt','ai_provider_id','instructions','provider_id'}.intersection(response)
+    queried=(await client.post('/api/bot/query',headers=headers,json={'umo':row.umo,'tool':'products'})).json()
+    assert 'instructions' not in queried and 'provider_id' not in queried
+    claimed=(await client.post('/api/bot/outbox/claim',headers=headers,json={'version':'1.8.0'})).json()['delivery']
+    assert claimed['body']=='待发送的事实正文'
+    assert 'instructions' not in claimed and 'provider_id' not in claimed
+
+
 async def test_removal_pauses_without_reimporting_or_sending_to_retired_session(client, admin_headers, session):
     _, headers = await access(client, admin_headers, '移除测试')
     paused = target()

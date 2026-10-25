@@ -500,10 +500,7 @@ def format_brief(brief: dict) -> str:
                 lines.append(item["url"])
         if when := publication_label(item):
             lines.append(when)
-    if items:
-        number = min(2, len(items))
-        lines.append(f"\n想细看，发 /展开 {number}" + ("（数字可换）" if len(items) > 1 else ""))
-    else:
+    if not items:
         lines.append("暂时没有值得单独推送的新消息。")
     return "\n".join(lines)
 

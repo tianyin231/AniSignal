@@ -72,6 +72,7 @@ def calendar_brief(entries: list[dict], due: datetime) -> tuple[str, dict]:
     for entry in entries:
         key = (entry["community"], entry["stage_at"], entry["kind"] == "maintenance")
         groups.setdefault(key, []).append(entry)
+    truncated = len(groups) > 2
     for (community, when, maintenance_start), group in list(groups.items())[:2]:
         label = COMMUNITY_LABELS.get(community, community)
         when = (datetime.fromisoformat(when) + timedelta(hours=8)).strftime("%m/%d %H:%M")
@@ -82,16 +83,16 @@ def calendar_brief(entries: list[dict], due: datetime) -> tuple[str, dict]:
             if len(name) <= 15:
                 names.append(name)
         topic = "、".join(names)
+        truncated = truncated or len(group) > len(names)
         if len(group) > len(names) and topic:
             topic += "等"
         action = "开始维护" if maintenance_start else f"{len(group)} 项截止"
         lines.append(f"· [{label}] {when} {action}" + (f"：{topic}" if topic else ""))
     if len(groups) > 2:
-        lines.append("其余时间见完整清单。")
-    lines.append(("想参与的记得留点时间。" if ending else "可以提前安排好游戏时间。") + "\n发 /展开 1 查看完整清单和来源。")
+        lines.append(f"另有 {len(groups) - 2} 组日程。")
     text = "\n".join(lines)
     brief = {"mode": "calendar", "title": "明日前的小提醒", "date": (due + timedelta(hours=8)).strftime("%m/%d %H:%M"),
-             "scheduled_at": due.isoformat(), "expires_at": max(entry["expires_at"] for entry in entries),
+             "scheduled_at": due.isoformat(), "expires_at": max(entry["expires_at"] for entry in entries), "truncated": truncated,
              "items": [{"title": "明日前的小提醒", "summary": "，".join(overview), "community": "",
                         "calendar_entries": entries, "sources": entries}]}
     return text, brief

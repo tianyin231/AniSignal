@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-def render_brief_card(brief: dict, output: str, font_path: str = "") -> str:
+def render_brief_card(brief: dict, output: str, font_path: str = "", detail_hint: str = "") -> str:
     from PIL import Image, ImageDraw, ImageFont
 
     candidates = [font_path, "/AstrBot/data/plugin_data/astrbot_plugin_anisignal/NotoSansCJKsc-Regular.otf",
@@ -56,9 +56,8 @@ def render_brief_card(brief: dict, output: str, font_path: str = "") -> str:
             draw.text((126, y + 42 + n * 36), line, font=font(30), fill=ink)
         for n, line in enumerate(wrapped(item.get("summary") or "", 760, font(25))):
             draw.text((127, y + 89 + n * 32), line, font=font(25), fill=muted)
-    number = min(2, len(items)) or 1
-    hint = f"想细看，发 /展开 {number}" + ("（数字可换）" if len(items) > 1 else "")
-    draw.text((54, height - 64), hint, font=font(23), fill=green)
+    if detail_hint:
+        draw.text((54, height - 64), detail_hint, font=font(23), fill=green)
     draw.text((807, height - 62), "AniSignal", font=font(19), fill=muted)
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     image.save(output, "PNG", optimize=True)

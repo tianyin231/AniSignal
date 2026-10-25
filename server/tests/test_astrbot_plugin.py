@@ -172,15 +172,21 @@ def test_new_install_defaults_are_portable_and_mask_the_access_key():
     assert schema['base_url']['default'] == 'http://anisignal.xyz'
     assert not any(key.startswith('cat_') or key == 'legacy_cat_behavior' for key in schema)
     assert 'card_font_path' in schema
+    session=schema['targets']['templates']['session']['items']
+    assert not {'ai_prompt','ai_provider_id'}.intersection(session['interaction']['items'])
+    assert session['presentation']['items']['show_details_hint']['default'] is False
 
 
 def test_legacy_cleanup_keeps_connection_and_session_configuration(plugin):
-    config = {'base_url':'http://example.test', 'tools_key':'test-key', 'targets':[{'umo':'qq:GroupMessage:g'}],
+    config = {'base_url':'http://example.test', 'tools_key':'test-key', 'targets':[{'umo':'qq:GroupMessage:g',
+              'interaction':{'ai_prompt':'旧人格覆盖','ai_provider_id':'old-model','tools':['news']},
+              'presentation':{'notification_template':'{content}'}}],
               'card_font_path':'/fonts/custom.ttf', 'legacy_cat_behavior':False, 'cat_reply_keywords':['猫']}
     clean = sys.modules['plugin_under_test.configuration'].cleanup_legacy_configuration
     assert clean(config) is True
     assert config == {'base_url':'http://example.test', 'tools_key':'test-key',
-                      'targets':[{'umo':'qq:GroupMessage:g'}], 'card_font_path':'/fonts/custom.ttf'}
+                      'targets':[{'umo':'qq:GroupMessage:g','interaction':{'tools':['news']},
+                                  'presentation':{'notification_template':'{content}'}}], 'card_font_path':'/fonts/custom.ttf'}
     assert clean(config) is False
 
 
@@ -373,6 +379,46 @@ async def test_notification_keeps_original_persona_actions_emoji_and_length(plug
     assert prompt.startswith('自定义会话人格') and '最多24字' not in prompt
 
 
+@pytest.mark.parametrize('conversation_persona',[None,'previous-persona'])
+async def test_notifications_resolve_native_session_rules_on_every_call(plugin,conversation_persona):
+    manager=plugin.context.conversation_manager
+    manager.get_conversation.return_value=SimpleNamespace(persona_id=conversation_persona)
+    resolver=AsyncMock(side_effect=[('session-rule',{'prompt':'当前原生人格'},None,False),
+                                    ('new-selection',{'prompt':'切换后的原生人格'},None,False)])
+    plugin.context.persona_manager=SimpleNamespace(resolve_selected_persona=resolver)
+    plugin.context.get_config=lambda umo:{'provider_settings':{}}
+    plugin.context.get_current_chat_provider_id=AsyncMock(return_value='native-model')
+    assert await plugin._resolve_persona('qq:FriendMessage:self')==('native-model','当前原生人格','session-rule')
+    assert await plugin._resolve_persona('qq:FriendMessage:self')==('native-model','切换后的原生人格','new-selection')
+    assert resolver.await_args.kwargs['conversation_persona_id']==conversation_persona
+    assert resolver.await_args.kwargs['umo']=='qq:FriendMessage:self'
+    manager.new_conversation.assert_not_awaited()
+
+
+async def test_omitting_intro_skips_persona_generation_and_follows_template(plugin):
+    plugin._resolve_persona=AsyncMock()
+    plugin.context.llm_generate=AsyncMock()
+    row=delivery()
+    plugin.config['targets']=[{'umo':row['umo'],'presentation':{'notification_template':'{body}'}}]
+    assert (await type(plugin).render_delivery(plugin,row)).text=='原始资料'
+    plugin._resolve_persona.assert_not_awaited()
+    plugin.context.llm_generate.assert_not_awaited()
+
+
+async def test_daily_card_hint_is_controlled_by_the_same_plugin_option(plugin,monkeypatch):
+    render=Mock(return_value='/tmp/brief.png')
+    monkeypatch.setattr(importlib.import_module('plugin_under_test.card'),'render_brief_card',render)
+    umo='qq:FriendMessage:self'
+    options={}
+    plugin.config['targets']=[{'umo':umo,'presentation':options}]
+    brief={'mode':'daily','items':[{'title':'消息','summary':'摘要','sources':[{'text':'有来源正文的完整消息'}]}]}
+    await plugin.send_brief_message(umo,'摘要',brief,body='摘要')
+    assert render.call_args.args[3]==''
+    options['show_details_hint']=True
+    await plugin.send_brief_message(umo,'摘要',brief,body='摘要')
+    assert render.call_args.args[3]=='查看详情：/展开 1'
+
+
 @pytest.mark.parametrize('kind', ['updates', 'critical', 'calendar', 'reminder'])
 async def test_all_notification_kinds_follow_the_current_persona(plugin, kind):
     plugin._resolve_persona = AsyncMock(return_value=('current-model', '原有人格', 'custom'))
@@ -428,7 +474,7 @@ async def test_notification_reaction_uses_snapshot_and_keeps_verified_body_uncha
 @pytest.mark.parametrize('count', [1, 3])
 async def test_daily_card_does_not_repeat_expansion_hint_in_caption(plugin, monkeypatch, count):
     card = importlib.import_module('plugin_under_test.card')
-    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font: path)
+    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font, hint: path)
     brief = {'mode': 'daily', 'items': [{'title': '动态', 'summary': '具体变化'}] * count}
     sent, text = await plugin.send_brief_message('qq:FriendMessage:self', '短反应\n\n正文', brief, body='正文')
     assert sent and text == '短反应'
@@ -439,7 +485,7 @@ async def test_daily_card_does_not_repeat_expansion_hint_in_caption(plugin, monk
 
 async def test_daily_card_can_be_sent_without_a_forced_caption(plugin, monkeypatch):
     card = importlib.import_module('plugin_under_test.card')
-    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font: path)
+    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font, hint: path)
     brief = {'mode': 'daily', 'items': [{'title': '动态', 'summary': '具体变化'}]}
     sent, text = await plugin.send_brief_message('qq:FriendMessage:self', '正文', brief, body='正文')
     assert sent and text == ''
@@ -488,10 +534,11 @@ async def test_default_plugin_does_not_override_normal_chat_or_model(plugin):
     await plugin.add_instructions(ev,req)
     assert req.system_prompt.startswith('原有自定义人格') and '旧的固定角色' not in req.system_prompt
     assert '不顺带建议' not in req.system_prompt and req.contexts is history
+    assert '站点身份' not in req.system_prompt and '产品名 AniSignal' not in req.system_prompt
     assert 'web_search' in req.func_tool and ev.get_extra('anisignal_cat_chat') is None
 
 
-async def test_notification_template_and_missing_body_keep_verified_material(plugin):
+async def test_notification_template_does_not_silently_restore_omitted_parts(plugin):
     row=delivery()
     plugin._resolve_persona=AsyncMock(return_value=('model','原人格','custom'))
     plugin.context.llm_generate=AsyncMock(return_value=SimpleNamespace(completion_text='自然引导语'))
@@ -499,7 +546,7 @@ async def test_notification_template_and_missing_body_keep_verified_material(plu
     plugin.config['targets']=[{'umo':row['umo'],'presentation':options}]
     assert (await type(plugin).render_delivery(plugin,row)).text=='【订阅消息】\n原始资料\n---\n自然引导语'
     options['notification_template']='{intro}'
-    assert (await type(plugin).render_delivery(plugin,row)).text=='自然引导语\n\n原始资料'
+    assert (await type(plugin).render_delivery(plugin,row)).text=='自然引导语'
     options.update(notification_style='original', notification_template='【原文】\n{body}')
     plugin.context.llm_generate.reset_mock()
     assert (await type(plugin).render_delivery(plugin,row)).text=='【原文】\n原始资料'
@@ -555,7 +602,7 @@ async def test_structured_send_error_never_sends_a_second_fallback(plugin):
 
 async def test_card_send_error_does_not_send_a_second_text_message(plugin, monkeypatch):
     card = importlib.import_module('plugin_under_test.card')
-    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font: path)
+    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font, hint: path)
     plugin.context.send_message.side_effect = TimeoutError()
     row = {**delivery(), 'brief': {'mode': 'daily', 'items': [{'title': '动态'}]}}
     await plugin.send_delivery(row)
@@ -613,7 +660,7 @@ async def test_delivery_honors_configured_image_limit(plugin, max_images):
 
 async def test_daily_card_counts_toward_image_limit(plugin, monkeypatch):
     card = importlib.import_module('plugin_under_test.card')
-    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font: path)
+    monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font, hint: path)
     row = {**delivery(), 'brief': {'mode': 'daily', 'items': [{'title': '今日消息'}]},
            'images': ['first', 'second', 'third'], 'max_images': 3}
     await plugin.send_delivery(row)
