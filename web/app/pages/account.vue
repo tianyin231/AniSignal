@@ -114,29 +114,44 @@ interface CustomFeedRow {
   status: string
   item_count: number
   last_collected_at: string | null
+  interval_minutes: number
+  filters: { include?: string[], exclude?: string[] }
 }
+const customQuota = ref({ admitted: false, used: 0, max_feeds: 10, min_interval_minutes: 30 })
 const customFeeds = ref<CustomFeedRow[]>([])
 const customError = ref('')
 const customMessage = ref('')
-const customForm = reactive({ name: '', kind: 'keyword', target_value: '', min_views: 0, push_enabled: false, is_public: false })
+const customForm = reactive({ name: '', kind: 'keyword', target_value: '', min_views: 0, push_enabled: false, is_public: false, interval_minutes: 30, includeText: '', excludeText: '' })
 const customBusy = ref(false)
 const customEditing = ref<number | null>(null)
-const customDraft = reactive({ name: '', target_value: '', min_views: 0 })
+const customDraft = reactive({ name: '', target_value: '', min_views: 0, interval_minutes: 30, includeText: '', excludeText: '' })
+function customPayload(form: typeof customDraft) {
+  const { includeText, excludeText, ...rest } = form
+  const words = (value: string) => value.split(/[,，\n]+/).map(v => v.trim()).filter(Boolean)
+  return { ...rest, filters: { include: words(includeText), exclude: words(excludeText) } }
+}
 
 async function refreshCustomFeeds() {
   await loadSection('custom', async () => {
-    customFeeds.value = await $fetch<CustomFeedRow[]>('/api/account/custom-feeds')
+    const [feeds, quota] = await Promise.all([
+      $fetch<CustomFeedRow[]>('/api/account/custom-feeds'),
+      $fetch<typeof customQuota.value>('/api/account/custom-quota'),
+    ])
+    customFeeds.value = feeds
+    customQuota.value = quota
+    customForm.interval_minutes = Math.max(customForm.interval_minutes, quota.min_interval_minutes)
   })
 }
 
 function editCustomFeed(feed: CustomFeedRow) {
   customEditing.value = feed.id
-  Object.assign(customDraft, { name: feed.name, target_value: feed.target_value, min_views: feed.min_views })
+  Object.assign(customDraft, { name: feed.name, target_value: feed.target_value, min_views: feed.min_views,
+    interval_minutes: feed.interval_minutes, includeText: (feed.filters?.include || []).join('，'), excludeText: (feed.filters?.exclude || []).join('，') })
   customError.value = customMessage.value = ''
 }
 
 async function saveCustomFeed(feed: CustomFeedRow) {
-  const saved = await patchCustomFeed(feed, { ...customDraft, name: customDraft.name.trim(), target_value: customDraft.target_value.trim() }, '监控已更新。')
+  const saved = await patchCustomFeed(feed, { ...customPayload(customDraft), name: customDraft.name.trim(), target_value: customDraft.target_value.trim() }, '监控已更新。')
   if (saved) customEditing.value = null
 }
 
@@ -147,12 +162,13 @@ async function createCustomFeed() {
   try {
     await $fetch('/api/account/custom-feeds', {
       method: 'POST',
-      body: { ...customForm, min_views: Number(customForm.min_views) || 0 },
+      body: { ...customPayload(customForm), min_views: Number(customForm.min_views) || 0 },
     })
     customError.value = ''
     customForm.name = ''
     customForm.target_value = ''
     customForm.min_views = 0
+    customForm.includeText = customForm.excludeText = ''
     customMessage.value = '监控已创建，后台会开始采集。'
     await refreshCustomFeeds()
   } catch (exc: any) {
@@ -186,6 +202,7 @@ async function removeCustomFeed(feed: CustomFeedRow) {
   try {
     await $fetch(`/api/account/custom-feeds/${feed.id}`, { method: 'DELETE' })
     customFeeds.value = customFeeds.value.filter(f => f.id !== feed.id)
+    customQuota.value.used = Math.max(0, customQuota.value.used - 1)
     if (customEditing.value === feed.id) customEditing.value = null
     customMessage.value = '监控已删除。'
   } catch (exc: any) {
@@ -560,6 +577,8 @@ async function changePassword() {
           <p class="mt-1 text-xs text-muted">
             自建 UID / 关键词抓取源；公开后出现在"定制化"频道，不公开仅自己可见。
           </p>
+          <p class="mt-2 text-xs text-muted">受控公测 · 已用 {{ customQuota.used }}/{{ customQuota.max_feeds }} 个监控 · 新监控至少间隔 {{ customQuota.min_interval_minutes }} 分钟。</p>
+          <p v-if="!sectionLoading.custom && !customQuota.admitted" class="mt-2 text-xs text-amber-700 dark:text-amber-300">当前账号尚未开通公测名额，请联系管理员。</p>
           <form class="mt-3 grid gap-2 sm:grid-cols-[7rem_1fr]" @submit.prevent="createCustomFeed">
             <select
               v-model="customForm.kind"
@@ -594,13 +613,18 @@ async function changePassword() {
               class="input px-3 py-2 text-sm"
             />
             <div class="flex flex-wrap items-center gap-4 sm:col-span-2">
+              <label class="text-xs text-muted">采集周期（分钟）<input v-model.number="customForm.interval_minutes" type="number" required :min="customQuota.min_interval_minutes" max="1440" class="input ml-2 w-24 px-2 py-1.5"></label>
+            </div>
+            <label class="text-xs text-muted">包含任一词（逗号分隔）<input v-model="customForm.includeText" class="input mt-1 w-full px-3 py-2 text-sm"></label>
+            <label class="text-xs text-muted">排除词（逗号分隔）<input v-model="customForm.excludeText" class="input mt-1 w-full px-3 py-2 text-sm"></label>
+            <div class="flex flex-wrap items-center gap-4 sm:col-span-2">
               <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-ink-2">
                 <input v-model="customForm.push_enabled" type="checkbox" class="checkbox" /> 新消息邮件推送
               </label>
               <label class="inline-flex cursor-pointer items-center gap-1.5 text-sm text-ink-2">
                 <input v-model="customForm.is_public" type="checkbox" class="checkbox" /> 公开到全站
               </label>
-              <button type="submit" class="btn-primary ml-auto px-4 py-2 text-sm" :disabled="customBusy">创建监控</button>
+              <button type="submit" class="btn-primary ml-auto px-4 py-2 text-sm" :disabled="customBusy || !customQuota.admitted || customQuota.used >= customQuota.max_feeds">创建监控</button>
             </div>
           </form>
           <p class="mt-2 text-xs leading-relaxed text-faint">推送需开启邮件通知总开关；每个监控每天最多一封新内容摘要。</p>
@@ -622,6 +646,7 @@ async function changePassword() {
               <span class="font-medium">{{ f.name }}</span>
               <span class="mono truncate text-xs text-faint">{{ f.target_value }}</span>
               <span class="mono text-xs text-faint">{{ f.item_count }} 条</span>
+              <span class="text-xs text-faint">{{ f.interval_minutes }} 分钟/次</span>
               <span class="text-xs text-faint">{{ f.status !== 'active' ? '管理员已停用' : f.enabled ? '采集中' : '已暂停' }}</span>
               <button type="button" :disabled="customBusy" class="link text-xs disabled:opacity-40" @click="editCustomFeed(f)">编辑</button>
               <button type="button" :disabled="customBusy" :aria-label="`${f.is_public ? '设为私有' : '公开到全站'}：${f.name}`" class="link text-xs disabled:opacity-40" @click="patchCustomFeed(f, { is_public: !f.is_public }, f.is_public ? '监控已设为私有。' : '监控已公开到全站。')">{{ f.is_public ? '设为私有' : '公开到全站' }}</button>
@@ -643,6 +668,9 @@ async function changePassword() {
                 <label class="text-xs text-muted">监控名称<input v-model="customDraft.name" required maxlength="64" class="input mt-1 w-full px-3 py-2 text-sm"></label>
                 <label class="text-xs text-muted">{{ f.kind === 'uid' ? 'B 站 UID' : '监控关键词' }}<input v-model="customDraft.target_value" required maxlength="128" :pattern="f.kind === 'uid' ? '[0-9]+' : undefined" class="input mt-1 w-full px-3 py-2 text-sm"></label>
                 <label v-if="f.kind === 'keyword'" class="text-xs text-muted">最低播放量<input v-model.number="customDraft.min_views" type="number" required min="0" max="10000000" step="1" class="input mt-1 w-full px-3 py-2 text-sm"></label>
+                <label class="text-xs text-muted">采集周期（分钟）<input v-model.number="customDraft.interval_minutes" type="number" required :min="Math.min(f.interval_minutes, customQuota.min_interval_minutes)" max="1440" class="input mt-1 w-full px-3 py-2 text-sm"></label>
+                <label class="text-xs text-muted">包含任一词（逗号分隔）<input v-model="customDraft.includeText" class="input mt-1 w-full px-3 py-2 text-sm"></label>
+                <label class="text-xs text-muted">排除词（逗号分隔）<input v-model="customDraft.excludeText" class="input mt-1 w-full px-3 py-2 text-sm"></label>
                 <p class="text-xs leading-relaxed text-faint sm:col-span-2">修改目标后保留已采集内容，之后按新目标采集。</p>
                 <div class="flex gap-3 sm:col-span-2">
                   <button type="submit" :disabled="customBusy" class="btn-primary px-3 py-2 text-xs">{{ customBusy ? '保存中…' : '保存监控' }}</button>
@@ -651,7 +679,7 @@ async function changePassword() {
               </form>
             </li>
             <li v-if="!customFeeds.length" class="text-xs text-faint">
-              还没有定制监控。创建一个 UID 或关键词监控，后台会每 30 分钟抓取一次。
+              还没有定制监控。开通公测名额后可创建 UID 或关键词监控。
             </li>
           </ul>
         </section>

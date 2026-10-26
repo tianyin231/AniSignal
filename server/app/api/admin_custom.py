@@ -1,19 +1,70 @@
 """Admin 定制监控管理：全站用户的定制源巡查与处置。"""
 
 import logging
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 from app.api.admin import get_queue
 from app.api.deps import require_admin
 from app.db import get_session
-from app.models import CustomFeed, CustomFeedItem, User
+from app.models import CustomFeed, CustomFeedItem, CustomFeedSource, CustomCollectRun, User
+from app.clock import utcnow
+from app.services.custom_policy import capacity, get_policy
+from app.services.settings import get_setting, set_setting
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin/custom-feeds", dependencies=[Depends(require_admin)])
+
+
+class UserQuotaOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_feeds: int | None = Field(default=None, ge=1, le=100)
+    min_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
+
+
+class CustomPolicyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    open_beta: bool = False
+    allowed_user_ids: list[PositiveInt] = Field(default_factory=list, max_length=1000)
+    user_overrides: dict[str, UserQuotaOverride] = Field(default_factory=dict)
+    max_feeds_per_user: int = Field(default=10, ge=1, le=100)
+    min_interval_minutes: int = Field(default=30, ge=5, le=1440)
+    max_active_sources: int = Field(default=60, ge=1, le=5000)
+    custom_hourly_budget: int = Field(default=120, ge=1, le=10000)
+    platform_hourly_budget: int = Field(default=360, ge=1, le=10000)
+
+
+@router.get("/capacity")
+async def custom_capacity(session: AsyncSession = Depends(get_session)):
+    runs = (await session.execute(select(CustomCollectRun.status, func.count(), func.sum(CustomCollectRun.items_found),
+        func.sum(CustomCollectRun.items_delivered)).where(CustomCollectRun.started_at >= utcnow()-timedelta(days=1))
+        .group_by(CustomCollectRun.status))).all()
+    sources = list(await session.scalars(select(CustomFeedSource).order_by(CustomFeedSource.id.desc()).limit(100)))
+    budget = await get_setting(session, "collector_budget_bilibili") or {}
+    if budget.get("hour") != utcnow().replace(minute=0, second=0, microsecond=0).isoformat():
+        budget = {"total": 0, "custom": 0}
+    return {"policy": await get_policy(session), "capacity": await capacity(session), "budget": budget,
+        "usage_24h": [{"status": status, "tasks": count, "fetched_items": found or 0, "distributed_items": delivered or 0}
+                      for status, count, found, delivered in runs],
+        "sources": [{"id": s.id, "platform": s.platform, "kind": s.kind, "target_value": s.target_value,
+                     "last_success_at": s.last_success_at, "next_run_at": s.next_run_at,
+                     "consecutive_failures": s.consecutive_failures, "last_error": s.last_error} for s in sources],
+        "notification_channels": ["email"], "planned_channels": ["astrbot"], "astrbot_requires_authorized_binding": True}
+
+
+@router.put("/policy")
+async def update_custom_policy(body: CustomPolicyBody, session: AsyncSession = Depends(get_session)):
+    if body.custom_hourly_budget > body.platform_hourly_budget:
+        raise HTTPException(400, "定制任务预算不能超过 B站全平台任务预算")
+    if any(not key.isdigit() or int(key) < 1 for key in body.user_overrides):
+        raise HTTPException(400, "用户配额覆盖项需使用用户 ID")
+    await set_setting(session, "custom_feed_policy", body.model_dump(exclude_none=True))
+    return await get_policy(session)
 
 
 async def _feed_or_404(session: AsyncSession, feed_id: int) -> CustomFeed:
@@ -77,6 +128,9 @@ async def list_custom_feeds(
                 "owner_email": email,
                 "owner_name": display_name,
                 "item_count": cnt,
+                "user_id": feed.user_id,
+                "source_id": feed.source_id,
+                "interval_minutes": feed.interval_minutes,
                 "created_at": feed.created_at,
             }
         )
@@ -129,6 +183,9 @@ async def collect_custom_feed_now(
     """管理端手动触发一次抓取（复用定制轮询任务，立即入队）。"""
     feed = await _feed_or_404(session, feed_id)
     feed.next_run_at = None
+    source = await session.get(CustomFeedSource, feed.source_id) if feed.source_id else None
+    if source and not source.last_error:
+        source.next_run_at = None  # 冷却、预算和租约仍由共享调度执行。
     await session.commit()
     job_id = await queue.enqueue_custom_sweep()
     if job_id is None:
