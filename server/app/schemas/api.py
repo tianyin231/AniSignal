@@ -33,6 +33,7 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     ("miyoushe", "keyword_search"): re.compile(r"^[^\x00-\x1f\x7f]{1,64}$"),
     ("kuro_cn", "notices"): re.compile(r"^default$"),
     ("kuro_global", "notices"): re.compile(r"^default$"),
+    ("game_official", "notices"): re.compile(r"^(genshin|endfield)$"),
     ("youtube", "channel_rss"): re.compile(r"^[A-Za-z0-9_-]{2,64}$"),
     ("rss", "feed"): re.compile(r"^https?://[^\s]{1,247}$"),
 }
@@ -74,6 +75,8 @@ class CollectTargetCreate(BaseModel):
             )
         except ValueError as exc:
             raise ValueError(str(exc)) from None
+        if self.platform == "game_official" and self.target_value != self.community:
+            raise ValueError("游戏官网公告目标必须与所属游戏分区一致")
         return self
 
 

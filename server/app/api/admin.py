@@ -172,6 +172,8 @@ async def update_target(
     target = await session.get(CollectTarget, target_id)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "target not found")
+    if target.platform == "game_official" and (body.target_value or target.target_value) != (body.community or target.community):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "游戏官网公告目标必须与所属游戏分区一致")
     if target.platform == "x":
         body.target_value = _x_target_value(body.target_value or target.target_value, target.target_type,
                                           body.interval_minutes if body.interval_minutes is not None else target.interval_minutes)

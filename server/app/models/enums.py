@@ -13,6 +13,7 @@ class Platform(StrEnum):
     YOUTUBE = "youtube"
     X = "x"
     RSS = "rss"
+    GAME_OFFICIAL = "game_official"
 
 
 class Community(StrEnum):
@@ -26,6 +27,8 @@ class Community(StrEnum):
     BLHX = "blhx"  # 碧蓝航线
     HSR = "hsr"  # 崩坏星穹铁道
     ARKNIGHTS = "arknights"  # 明日方舟
+    GENSHIN = "genshin"
+    ENDFIELD = "endfield"
     AI = "ai"
 
 

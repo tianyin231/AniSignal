@@ -87,6 +87,21 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         source_aliases=("Arknights", "明日方舟"),
         source_exclusions=("Endfield", "终末地", "終末地"),
     ),
+    "genshin": CommunityMeta(
+        key="genshin", label="原神", game_name="米哈游《原神》", bare_name="原神",
+        game_note="不要把《原神》写成星穹铁道或其他游戏；",
+        other_games_examples="（如鸣潮、星穹铁道、碧蓝航线、明日方舟、终末地等）",
+        color="cyan", bili_mid_setting="genshin_bili_mid", official_bili_mid_default="401742377",
+        source_aliases=("Genshin Impact", "Genshin", "原神"),
+    ),
+    "endfield": CommunityMeta(
+        key="endfield", label="终末地", game_name="鹰角网络《明日方舟：终末地》", bare_name="终末地",
+        game_note="《明日方舟：终末地》与《明日方舟》本体独立，不混入本体更新；",
+        other_games_examples="（如明日方舟本体、原神、鸣潮、星穹铁道等）",
+        color="lime", bili_mid_setting="endfield_bili_mid", official_bili_mid_default="1265652806",
+        extra_names=("明日方舟：终末地", "明日方舟:终末地", "明日方舟终末地", "終末地"),
+        source_aliases=("Arknights Endfield", "Arknights: Endfield", "Endfield", "终末地", "終末地"),
+    ),
     "ai": CommunityMeta(
         key="ai", label="AI", game_name="人工智能", bare_name="AI",
         game_note="区分已发布、测试中与传闻；不把转述当作事实确认；",
@@ -140,7 +155,8 @@ def crosstalk_names(community_key: str) -> tuple[str, ...]:
 
     本分区游戏名不进名单——联动内容摘要里合法出现时不应被回退。
     """
-    names: list[str] = list(_CROSSTALK_EXTRAS)
+    own_names = set(get_community(community_key).game_names)
+    names: list[str] = [name for name in _CROSSTALK_EXTRAS if name not in own_names]
     for meta in COMMUNITIES.values():
         if meta.key != community_key and meta.domain == "game":
             names.extend(meta.game_names)

@@ -31,6 +31,7 @@ _REGION_OF_PLATFORM = {
     "miyoushe": "cn",
     "kuro_cn": "cn",
     "kuro_global": "global",
+    "game_official": "cn",
     "youtube": "global",
 }
 

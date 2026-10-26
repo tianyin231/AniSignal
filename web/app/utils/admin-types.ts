@@ -103,6 +103,7 @@ export interface ContentList {
 }
 
 export const platformLabels: Record<string, string> = {
+  game_official: '游戏官网公告',
   rss: 'RSS 新闻源',
   bilibili: 'B站',
   miyoushe: '米游社',

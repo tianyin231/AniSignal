@@ -90,6 +90,28 @@
                   "arknights:community:web",
                   "arknights:community:miyoushe",
                   "arknights:product",
+                  "genshin:official:bilibili",
+                  "genshin:official:youtube",
+                  "genshin:official:x",
+                  "genshin:official:web",
+                  "genshin:official:miyoushe",
+                  "genshin:community:bilibili",
+                  "genshin:community:youtube",
+                  "genshin:community:x",
+                  "genshin:community:web",
+                  "genshin:community:miyoushe",
+                  "genshin:product",
+                  "endfield:official:bilibili",
+                  "endfield:official:youtube",
+                  "endfield:official:x",
+                  "endfield:official:web",
+                  "endfield:official:miyoushe",
+                  "endfield:community:bilibili",
+                  "endfield:community:youtube",
+                  "endfield:community:x",
+                  "endfield:community:web",
+                  "endfield:community:miyoushe",
+                  "endfield:product",
                   "ai:news"
                 ],
                 "labels": [
@@ -137,6 +159,28 @@
                   "明日方舟_社区_官网",
                   "明日方舟_社区_米游社",
                   "明日方舟_商品",
+                  "原神_官方_B",
+                  "原神_官方_YB",
+                  "原神_官方_X",
+                  "原神_官方_官网",
+                  "原神_官方_米游社",
+                  "原神_社区_B",
+                  "原神_社区_YB",
+                  "原神_社区_X",
+                  "原神_社区_官网",
+                  "原神_社区_米游社",
+                  "原神_商品",
+                  "终末地_官方_B",
+                  "终末地_官方_YB",
+                  "终末地_官方_X",
+                  "终末地_官方_官网",
+                  "终末地_官方_米游社",
+                  "终末地_社区_B",
+                  "终末地_社区_YB",
+                  "终末地_社区_X",
+                  "终末地_社区_官网",
+                  "终末地_社区_米游社",
+                  "终末地_商品",
                   "AI_快讯"
                 ],
                 "hint": "可多选；选定后按频道订阅。留空沿用下方分区；商品频道包含公告与已采纳履约变化。"
@@ -149,6 +193,8 @@
                   "blhx",
                   "hsr",
                   "arknights",
+                  "genshin",
+                  "endfield",
                   "ai"
                 ],
                 "options": [
@@ -156,6 +202,8 @@
                   "blhx",
                   "hsr",
                   "arknights",
+                  "genshin",
+                  "endfield",
                   "ai"
                 ],
                 "labels": [
@@ -163,7 +211,9 @@
                   "碧蓝航线",
                   "崩坏星穹铁道",
                   "明日方舟",
-                  "AI 快讯"
+                  "原神",
+                  "终末地",
+                  "AI"
                 ]
               },
               "keywords": {
