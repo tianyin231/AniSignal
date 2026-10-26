@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     bili_bin: str = "bili"
     bili_timeout_seconds: float = 120.0
     bili_max_retries: int = 2
+    # 私有 Cookie 文件只读挂载；留空沿用匿名采集，凭据不进入数据库或镜像。
+    bili_cookie_file: str = ""
 
     # 鸣潮官方账号等账号 UID 走配置，禁止硬编码（见项目 skill 合规红线）
     wuthering_waves_bili_mid: str = "1955897084"

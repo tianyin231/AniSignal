@@ -47,7 +47,10 @@ services:
       ANISIGNAL_PUBLIC_BASE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
       ANISIGNAL_NEWS_UNIFIED_ENABLED: ${ANISIGNAL_NEWS_UNIFIED_ENABLED:-true}
       ANISIGNAL_YOUTUBE_API_KEY: ${ANISIGNAL_YOUTUBE_API_KEY:-}
+      ANISIGNAL_BILI_COOKIE_FILE: /run/anisignal/bilibili/cookies.txt
       TZ: Asia/Shanghai
+    volumes: &bili_session
+      - ${DATA_DIR:-./data}/bilibili:/run/anisignal/bilibili:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -67,6 +70,7 @@ services:
     logging: *bounded_logs
     command: ["bash", "/app/deploy/start-collector.sh"]
     environment: *app_env
+    volumes: *bili_session
     depends_on:
       mysql:
         condition: service_healthy

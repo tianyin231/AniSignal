@@ -161,6 +161,8 @@ async def main() -> None:
                             target.next_run_at,
                         )
                     await _enqueue_morning_if_due(redis, now)
+                    # 半小时检测一次授权状态；固定桶 ID 在任务结果保留期内去重。
+                    await redis.enqueue_job("check_bilibili_session", _job_id=f"bili-session:{int(now.timestamp() // 1800)}")
                     await redis.enqueue_job("send_bot_notifications", _job_id=f"bot-sweep:{int(now.timestamp() // 60)}")
                     await redis.enqueue_job("send_instant_notifications", _job_id="instant-notifications")
                     # 定制监控轮询：5 分钟桶去重，worker 内部再按 next_run_at 限速

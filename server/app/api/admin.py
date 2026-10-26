@@ -81,6 +81,20 @@ async def get_queue(request: Request) -> BaseQueue:
 # ---------- 采集目标 ----------
 
 
+@router.get("/bilibili-session")
+async def bilibili_session_status(session: AsyncSession = Depends(get_session)):
+    from app.services.bilibili_session import get_status
+
+    return await get_status(session)
+
+
+@router.post("/bilibili-session/check")
+async def check_bilibili_session(session: AsyncSession = Depends(get_session)):
+    from app.services.bilibili_session import check_status
+
+    return await check_status(session)
+
+
 def _x_target_value(value: str, target_type: str, interval_minutes: int) -> str:
     from app.parsers.x import normalize_account
 

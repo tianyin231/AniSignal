@@ -21,6 +21,14 @@ async def collect_target(ctx, target_id: int) -> dict:
     return result
 
 
+async def check_bilibili_session(ctx) -> dict:
+    from app.db import SessionLocal
+    from app.services.bilibili_session import check_status
+
+    async with SessionLocal() as session:
+        return await check_status(session)
+
+
 async def summarize_event(ctx, event_id: int) -> dict:
     """AI 事件摘要（未配置 LLM 时安全跳过）。"""
     from app.db import SessionLocal
@@ -248,6 +256,7 @@ class WorkerSettings:
     functions = [
         send_bot_notifications,
         collect_target,
+        check_bilibili_session,
         summarize_event,
         translate_content,
         func(repair_ai_item, keep_result=0),
