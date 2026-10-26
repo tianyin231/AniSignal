@@ -16,6 +16,7 @@ from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget
 from app.services import bot
 from app.services import bot_clients
+from app.services.bot_channels import channel_options, selected_communities
 from app.services.settings import get_setting, set_setting
 
 router = APIRouter(prefix="/api/admin/bot", dependencies=[Depends(require_admin)])
@@ -28,6 +29,7 @@ class TargetBody(BaseModel):
     enabled: bool = False
     community: str = Field(default="all", pattern=community_query_pattern())
     communities: list[str] | None = Field(default=None, max_length=len(COMMUNITIES))
+    channels: list[str] = Field(default_factory=list, max_length=200)
     keywords: list[str] = Field(default_factory=list, max_length=20)
     daily_enabled: bool = True
     daily_time: str = Field(default="08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -56,8 +58,17 @@ class TargetBody(BaseModel):
             raise ValueError("至少选择一个有效分区")
         return list(dict.fromkeys(values)) if values is not None else None
 
+    @field_validator("channels")
+    @classmethod
+    def clean_channels(cls, values):
+        if any(value not in channel_options() for value in values):
+            raise ValueError("通知频道无效")
+        return list(dict.fromkeys(values))
+
     @model_validator(mode="after")
     def sync_legacy_community(self):
+        if self.channels:
+            self.communities = selected_communities(self.channels)
         if self.communities is not None:
             self.community = self.communities[0] if len(self.communities) == 1 else "all"
         return self
@@ -144,7 +155,7 @@ async def overview(session: AsyncSession = Depends(get_session)):
     return {"bridge": {"endpoint": bridge.get("endpoint", ""), "api_key_set": bool(bridge.get("api_key")), "tools_key_set": bool(bridge.get("tools_key"))},
             "targets": [{**target_view(t), "client_name": client_names.get(t.client_id, "旧直发通道"),
                          "last_activity": activity[t.client_id].get(t.umo)} for t in rows],
-            "clients": clients, "tools": bot.TOOLS,
+            "clients": clients, "tools": bot.TOOLS, "channels": channel_options(),
             "activity": activity.get(bot_clients.LEGACY_CLIENT, {})}
 
 
@@ -221,7 +232,7 @@ async def apply_target(row, body, session):
     previous = TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **row.config).model_dump(exclude={"name", "umo", "enabled"})
     def comparable(value):
         selected = value.get("communities") or (list(COMMUNITIES) if value.get("community") == "all" else [value.get("community")])
-        return {**value, "communities": sorted(selected)}
+        return {**value, "communities": sorted(selected), "channels": sorted(value.get("channels", []))}
     changed = comparable(config) != comparable(previous)
     # 重新启用或修改订阅范围时从现在开始，避免补发停用期间的旧消息。
     if body.enabled and (not row.enabled or changed):

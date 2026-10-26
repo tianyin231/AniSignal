@@ -16,6 +16,7 @@ from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget, RawContent
 from app.services.bot_policy import reserve_delivery
 from app.services.bot import image_limit, subscribed_communities
+from app.services.bot_channels import channel_options
 from app.services.bot_briefs import format_detail, publication_label
 from app.services.settings import get_setting, set_setting
 from app.services.bot_clients import setting_key
@@ -38,7 +39,7 @@ async def actor_target(body, session, client_id):
 
 
 class SubscriptionBody(Actor):
-    action: Literal["view", "keywords", "community", "daily", "updates"] = "view"
+    action: Literal["view", "keywords", "community", "channels", "daily", "updates"] = "view"
     value: str = Field(default="", max_length=1300)
 
 
@@ -56,9 +57,13 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
         elif body.action == "community":
             from app.models.enums import COMMUNITY_LABELS
             config["communities"] = None
+            config["channels"] = []
             config["community"] = next((k for k, v in COMMUNITY_LABELS.items() if v == body.value), body.value)
             if body.value == "全站":
                 config["community"] = "all"
+        elif body.action == "channels":
+            labels = {label: key for key, label in channel_options().items()}
+            config["channels"] = [labels.get(value.strip(), value.strip()) for value in body.value.replace("，", ",").split(",") if value.strip()]
         elif body.action == "daily":
             config["daily_enabled"] = body.value != "off"
             if body.value != "off":
@@ -75,6 +80,8 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
         await session.commit()
     return {"name": target.name, "community": target.config.get("community", "all"),
             "communities": subscribed_communities(target),
+            "channels": target.config.get("channels", []),
+            "channel_labels": [channel_options()[key] for key in target.config.get("channels", [])],
             "keywords": target.config.get("keywords", []), "daily_enabled": target.config.get("daily_enabled", True),
             "daily_time": target.config.get("daily_time", "08:00"), "updates_enabled": target.config.get("updates_enabled", False),
             "changed": body.action != "view"}

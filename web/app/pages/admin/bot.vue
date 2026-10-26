@@ -7,7 +7,7 @@ useSeoMeta({ title: '机器人通知 · AniSignal' })
 const { api } = useAdminApi()
 const toast = useAdminToast()
 interface Target {
-  id: number; name: string; umo: string; enabled: boolean; communities: string[]; community: string; keywords: string[]
+  id: number; name: string; umo: string; enabled: boolean; communities: string[]; community: string; keywords: string[]; channels: string[]
   client_id: string; client_name: string; managed_by_plugin: boolean; plugin_configured: boolean; last_activity?: string
   daily_enabled: boolean; daily_time: string; updates_enabled: boolean; min_push_interval_minutes: number
   calendar_enabled: boolean; calendar_time: string; tools: string[]; delivery_mode: string
@@ -16,6 +16,7 @@ interface BotClient { id: string; name: string; enabled: boolean; online: boolea
 interface Delivery { id: number; target_id: number; name: string; kind: string; status: string; error: string | null; body: string; rendered_body?: string; created_at: string }
 interface Reminder { id: number; name: string; body: string; due_at: string; status: string }
 const clients = ref<BotClient[]>([])
+const channelLabels = ref<Record<string, string>>({})
 const targets = ref<Target[]>([])
 const deliveries = ref<Delivery[]>([])
 const companion = ref<{ counts: Record<string, number>; reminders: Reminder[] }>({ counts: {}, reminders: [] })
@@ -39,6 +40,7 @@ const toolNames: Record<string, string> = { digest: '今日速报', news: '资�
 const statuses: Record<string, string> = { pending: '待发送', sending: '发送中', accepted: '已接收', failed: '发送失败', unknown: '结果待核对', cancelled: '已取消' }
 
 function subscriptionLabel(target: Target) {
+  if (target.channels?.length) return target.channels.map(key => channelLabels.value[key] || key).join(' / ')
   const communities = target.communities || (target.community === 'all' ? ADMIN_COMMUNITIES.map(c => c.key) : [target.community])
   return communities.length === ADMIN_COMMUNITIES.length ? '全站' : communities.map(key => ADMIN_COMMUNITY_LABELS[key] || key).join(' / ')
 }
@@ -56,12 +58,13 @@ async function refresh() {
   loadError.value = ''
   try {
     const [data, logs, state] = await Promise.all([
-      api<{ clients: BotClient[]; targets: Target[] }>('/api/admin/bot'),
+      api<{ clients: BotClient[]; targets: Target[]; channels: Record<string, string> }>('/api/admin/bot'),
       api<Delivery[]>('/api/admin/bot/deliveries'),
       api<typeof companion.value>('/api/admin/bot/companion'),
     ])
     clients.value = data.clients
     targets.value = data.targets
+    channelLabels.value = data.channels || {}
     deliveries.value = logs
     companion.value = state
     if (!availableTargets.value.some(t => t.id === selectedId.value)) selectedId.value = availableTargets.value[0]?.id ?? null

@@ -160,6 +160,7 @@ async def load_candidates(
     preferences: dict | None = None,
     text_limit: int | None = 800,
     content_ids: list[int] | None = None,
+    extra_conditions: tuple = (),
 ) -> list[dict]:
     """None 表示全站早报；关键词通知只取明确命中内容，正文命中交给 AI 复核。"""
     if keywords == [] or content_ids == []:
@@ -178,7 +179,7 @@ async def load_candidates(
         select(RawContent, ContentVersion, Source, ContentTranslation)
         .options(defer(RawContent.raw_json), defer(Source.raw_json))
         .join(latest_sq, latest_sq.c.rid == RawContent.id)
-        .where(RawContent.hidden.is_(False))
+        .where(RawContent.hidden.is_(False), *extra_conditions)
         .join(
             ContentVersion,
             (ContentVersion.raw_content_id == latest_sq.c.rid)
@@ -281,7 +282,7 @@ async def _event_map(session: AsyncSession, content_ids: list[int]) -> dict[int,
     return result
 
 
-async def group_candidates(session: AsyncSession, candidates: list[dict]) -> list[dict]:
+async def group_candidates(session: AsyncSession, candidates: list[dict], *, use_event_summary: bool = True) -> list[dict]:
     """同一事件的跨平台内容只保留一条，关键词和证据 ID 合并。"""
     events = await _event_map(session, [item["id"] for item in candidates])
     grouped: dict[str, dict] = {}
@@ -300,8 +301,8 @@ async def group_candidates(session: AsyncSession, candidates: list[dict]) -> lis
         grouped[key] = {
             **item,
             "source_title": item["title"],
-            "title": event.title if event else item["title"],
-            "summary": (event.summary or event.conclusion) if event else item["text"],
+            "title": event.title if event and use_event_summary else item["title"],
+            "summary": (event.summary or event.conclusion) if event and use_event_summary else item["text"],
             "event_id": event.id if event else None,
             "importance": bool(event.importance) if event else False,
             "content_ids": [item["id"]],

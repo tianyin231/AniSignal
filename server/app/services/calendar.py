@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.models import ContentSchedule, RawContent
+from app.models import ContentSchedule, RawContent, Source
 
 
 def schedule_topic(title: str, kind: str) -> str:
@@ -43,6 +43,7 @@ def schedule_entry(schedule: ContentSchedule, url: str | None) -> dict:
 async def calendar_entries(
     session: AsyncSession, community: str, *, now: datetime | None = None,
     window_start: datetime | None = None, window_end: datetime | None = None,
+    extra_conditions: tuple = (),
 ) -> list[dict]:
     now = now or utcnow()
     window_start = window_start or now - timedelta(days=14)
@@ -57,7 +58,8 @@ async def calendar_entries(
     rows = await session.execute(
         select(ContentSchedule, RawContent.url)
         .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
-        .where(*conditions)
+        .outerjoin(Source, Source.id == RawContent.source_id)
+        .where(*conditions, *extra_conditions)
         .order_by(ContentSchedule.id)
     )
     unique: dict[tuple, dict] = {}

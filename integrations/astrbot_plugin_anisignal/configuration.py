@@ -63,8 +63,9 @@ def apply_subscription(targets, umo, response):
     for target in targets:
         if target.get("umo") != umo:
             continue
-        for field in ("communities", "keywords"):
-            target["subscription"][field] = copy.deepcopy(response[field])
+        for field in ("communities", "keywords", "channels"):
+            if field in response:
+                target["subscription"][field] = copy.deepcopy(response[field])
         for field in ("daily_enabled", "daily_time", "updates_enabled"):
             target["notifications"][field] = response[field]
         break
