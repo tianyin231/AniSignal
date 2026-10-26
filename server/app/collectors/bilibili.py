@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
 from app.services.collector_proxy import http_proxy_kwargs, redact_proxy
+from app.services.bilibili_session import cookie_header, credential_version, read_cookie_file, redact
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ _CIRCUIT_STATE: dict[str, dict] = {}
 
 
 class BiliRiskControlError(CollectorError):
-    """B 站风控门禁拒绝匿名访问。门禁按 IP 持续生效，秒级重试只会加剧打点。"""
+    """B站风控门禁拒绝访问；登录后仍保留熔断，避免持续重试。"""
 
 
 def _circuit_open(command: str) -> bool:
@@ -103,13 +104,21 @@ class BilibiliCollector:
     def _circuit_key(self, command: str) -> str:
         # 各出口分别冷却，冷却中的直连不再请求；日志只带摘要，不含代理认证。
         url = getattr(self, "proxy_url", None)
-        return f"{command}:{hashlib.sha256(url.encode()).hexdigest()[:12]}" if url else command
+        key = f"{command}:{hashlib.sha256(url.encode()).hexdigest()[:12]}" if url else command
+        # 更换授权会话后允许自然探测，不继承旧会话/匿名请求的冷却。
+        return f"{key}:auth:{credential_version(self._cookies)}" if self._cookies else key
 
     def __init__(self) -> None:
         settings = get_settings()
         self._bin = settings.bili_bin
         self._timeout = settings.bili_timeout_seconds
         self._max_retries = settings.bili_max_retries
+        self._cookie_file = settings.bili_cookie_file
+        try:
+            self._cookies = read_cookie_file(self._cookie_file)
+        except (OSError, ValueError, UnicodeError):
+            # 不中断公开匿名链路；管理端及定期状态检测会提示重新授权。
+            self._cookies = {}
         self.newest_first = False
 
     async def _run(self, *args: str) -> object:
@@ -145,13 +154,14 @@ class BilibiliCollector:
     async def _run_once(self, *args: str) -> object:
         env = os.environ.copy()
         # 通过子进程环境传递，代理密码不出现在 argv / 命令日志中。
-        for name in ("BILI_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        for name in ("BILI_COOKIE", "BILI_COOKIE_FILE", "BILI_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
             env.pop(name, None)
         if getattr(self, "proxy_url", None):
             env["BILI_PROXY"] = self.proxy_url
         proc = await asyncio.create_subprocess_exec(
             self._bin,
             *args,
+            *(["--cookie-file", self._cookie_file] if self._cookies else []),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -168,14 +178,17 @@ class BilibiliCollector:
             await proc.communicate()
             raise
         if proc.returncode != 0:
-            stderr_text = redact_proxy(stderr.decode(errors="replace"), getattr(self, "proxy_url", None))
+            stderr_text = redact(redact_proxy(stderr.decode(errors="replace"), getattr(self, "proxy_url", None)), self._cookies)
             # bili 0.3: 4=匿名首屏静默拒绝，6=限频；不再只靠英文 risk control。
             if proc.returncode in (4, 6) or "risk control" in stderr_text.casefold():
                 raise BiliRiskControlError(
                     f"bili exited {proc.returncode}: {stderr_text[:500]}"
                 ) from None
             raise CollectorError(f"bili exited {proc.returncode}: {stderr_text[:500]}")
-        return _loads(stdout.decode(errors="replace"))
+        try:
+            return _loads(stdout.decode(errors="replace"))
+        except CollectorError as exc:
+            raise CollectorError(redact(str(exc), self._cookies)) from None
 
     async def fetch(self, target_type: str, target_value: str, limit: int) -> FetchResult:
         if target_type == "keyword_search":
@@ -270,7 +283,7 @@ class BilibiliCollector:
                 try:
                     rich = await self._fetch_draw_detail(dynamic_id)
                 except (httpx.HTTPError, ValueError) as exc:
-                    logger.warning("anonymous DRAW detail failed for %s: %s", dynamic_id, exc)
+                    logger.warning("DRAW detail failed for %s: %s", dynamic_id, redact(redact_proxy(str(exc), getattr(self, "proxy_url", None)), self._cookies))
                     continue
             if (rich.get("text") or "").strip() or rich.get("pics"):
                 original_text = (item.get("text") or "").strip()
@@ -280,20 +293,23 @@ class BilibiliCollector:
                 item["pics"] = list(rich.get("pics") or item.get("pics") or [])
                 enriched += 1
         if enriched:
-            logger.info("enriched %s DRAW dynamics with anonymous public detail", enriched)
+            logger.info("enriched %s DRAW dynamics with public detail", enriched)
         return items
 
     async def _fetch_draw_detail(self, dynamic_id: str) -> dict:
         """列表补全与历史回填共用缓存；风控冷却，失效动态延后重查。"""
         if dynamic_id in _DRAW_DETAIL_CACHE:
             return _DRAW_DETAIL_CACHE[dynamic_id]
-        retry_at = _DRAW_DETAIL_RETRY_AT.get(dynamic_id)
+        retry_key = self._circuit_key(f"detail:{dynamic_id}")
+        retry_at = _DRAW_DETAIL_RETRY_AT.get(retry_key)
         if (retry_at and retry_at > utcnow()) or _circuit_open(self._circuit_key("dynamic-detail")):
             return {}
         headers = {
             "User-Agent": "Mozilla/5.0",
             "Referer": f"https://t.bilibili.com/{dynamic_id}",
         }
+        if self._cookies:
+            headers["Cookie"] = cookie_header(self._cookies)
         async with httpx.AsyncClient(timeout=self._timeout, headers=headers, **http_proxy_kwargs(self)) as client:
             response = await client.get(
                 _DYNAMIC_DETAIL_URL,
@@ -301,8 +317,8 @@ class BilibiliCollector:
             )
             if response.status_code in (412, 429):
                 _circuit_record_failure(self._circuit_key("dynamic-detail"))
-                _defer_dynamic_detail(dynamic_id)
-                logger.warning("anonymous dynamic detail refused: HTTP %s", response.status_code)
+                _defer_dynamic_detail(retry_key)
+                logger.warning("dynamic detail refused: HTTP %s", response.status_code)
                 return {}
             response.raise_for_status()
         payload = response.json()
@@ -310,25 +326,24 @@ class BilibiliCollector:
             if payload.get("code") in (-352, -412, -509):
                 _circuit_record_failure(self._circuit_key("dynamic-detail"))
             _defer_dynamic_detail(
-                dynamic_id,
+                retry_key,
                 timedelta(hours=6) if payload.get("code") == 4101152 else _CIRCUIT_COOLDOWN,
             )
             logger.warning(
-                "anonymous DRAW detail refused for %s: code=%s message=%s",
+                "DRAW detail refused for %s: code=%s",
                 dynamic_id,
                 payload.get("code"),
-                payload.get("message"),
             )
             return {}
         _circuit_reset(self._circuit_key("dynamic-detail"))
         rich = _extract_dynamic_detail(payload)
         if (rich.get("text") or "").strip() or rich.get("pics"):
-            _DRAW_DETAIL_RETRY_AT.pop(dynamic_id, None)
+            _DRAW_DETAIL_RETRY_AT.pop(retry_key, None)
             _DRAW_DETAIL_CACHE[dynamic_id] = rich
             if len(_DRAW_DETAIL_CACHE) > _DRAW_DETAIL_CACHE_LIMIT:
                 _DRAW_DETAIL_CACHE.pop(next(iter(_DRAW_DETAIL_CACHE)))
         else:
-            _defer_dynamic_detail(dynamic_id)
+            _defer_dynamic_detail(retry_key)
         return rich
 
 

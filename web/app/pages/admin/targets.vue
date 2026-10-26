@@ -11,6 +11,25 @@ const targets = ref<CollectTarget[]>([])
 const error = ref<string | null>(null)
 const busyId = ref<number | null>(null)
 const toast = useAdminToast()
+const biliSession = ref<{ state: string; message: string; checked_at?: string } | null>(null)
+const checkingBili = ref(false)
+
+async function loadBiliSession(check = false) {
+  if (checkingBili.value) return
+  checkingBili.value = true
+  try {
+    biliSession.value = await api('/api/admin/bilibili-session' + (check ? '/check' : ''), { method: check ? 'POST' : 'GET' })
+    if (check) {
+      const notify = biliSession.value?.state === 'logged_in' ? toast.ok : toast.info
+      notify(biliSession.value?.message ?? '检测完成')
+    }
+  } catch (exc: any) {
+    toast.err(exc?.message ?? 'B站登录状态检测失败')
+  } finally {
+    checkingBili.value = false
+  }
+}
+onMounted(() => loadBiliSession())
 
 // 与后端能力对齐的可选组合（platform → 支持的 target_type）
 const combos: Record<string, string[]> = {
@@ -216,6 +235,16 @@ onMounted(refreshRuns)
       <p class="mt-0.5 text-sm text-muted">
         关键词、账号与频率配置；调度器按频率自动投递采集任务。
       </p>
+    </div>
+
+    <div v-if="biliSession" class="panel flex flex-wrap items-center justify-between gap-3 px-5 py-4" aria-live="polite">
+      <div>
+        <p class="text-sm font-medium" :class="biliSession.state === 'logged_in' ? 'text-ok' : 'text-warn'">{{ biliSession.message }}</p>
+        <p v-if="biliSession.checked_at" class="mono mt-1 text-xs text-muted">检测时间 {{ fmtTime(biliSession.checked_at) }}</p>
+      </div>
+      <button class="btn-primary px-3 py-2 text-sm" :disabled="checkingBili" @click="loadBiliSession(true)">
+        {{ checkingBili ? '检测中…' : '检测B站登录态' }}
+      </button>
     </div>
 
     <form id="collect-target-form" class="panel grid gap-3 p-5 sm:grid-cols-[9rem_9rem_1fr_6rem_auto]" @submit.prevent="create">

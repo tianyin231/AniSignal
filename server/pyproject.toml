@@ -20,6 +20,7 @@ dependencies = [
   "onepush>=1.9,<2",
   "pyyaml>=6.0",
   "trafilatura>=2.0,<3",
+  "qrcode[pil]>=8.2,<9",
 ]
 
 [dependency-groups]

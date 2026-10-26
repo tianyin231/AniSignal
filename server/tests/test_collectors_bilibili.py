@@ -381,3 +381,78 @@ async def test_guard_argv_blocks_unknown_flag(monkeypatch):
     with pytest.raises(CollectorError):
         await BilibiliCollector()._run("video", "BV1", "--out", "/tmp/x")
     assert called is False
+
+
+@pytest.fixture
+def authorized_cookie(tmp_path, monkeypatch):
+    from app.config import get_settings
+
+    path = tmp_path / "cookies.txt"
+    path.write_text("SESSDATA=secret%2Csession; bili_jct=secret-csrf", encoding="utf-8")
+    monkeypatch.setattr(get_settings(), "bili_cookie_file", str(path))
+    return path
+
+
+async def test_cli_uses_file_and_cleans_inherited_secrets(monkeypatch, authorized_cookie):
+    monkeypatch.setenv("BILI_COOKIE", "do-not-inherit")
+    monkeypatch.setenv("BILI_COOKIE_FILE", "/unrelated/file")
+    calls = []
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self):
+            return b"[]", b""
+
+    async def execute(*args, **kw):
+        calls.append((args, kw["env"]))
+        return Process()
+
+    monkeypatch.setattr(bili_module.asyncio, "create_subprocess_exec", execute)
+    assert await BilibiliCollector()._run_once("dynamics", "1955897084", "-o", "json") == []
+    args, env = calls[0]
+    assert args[-2:] == ("--cookie-file", str(authorized_cookie))
+    assert "BILI_COOKIE" not in env and "BILI_COOKIE_FILE" not in env
+    assert "secret" not in str(args)
+
+
+@pytest.mark.parametrize("exit_code", [0, 2])
+async def test_cli_redacts_stderr_and_malformed_stdout(monkeypatch, authorized_cookie, exit_code, caplog):
+    class Process:
+        returncode = exit_code
+
+        async def communicate(self):
+            return b"bad secret%2Csession secret,session", b"SESSDATA=secret%2Csession secret-csrf"
+
+    async def execute(*args, **kw):
+        return Process()
+
+    monkeypatch.setattr(bili_module.asyncio, "create_subprocess_exec", execute)
+    with pytest.raises(CollectorError) as error:
+        await BilibiliCollector()._run("dynamics", "1")
+    assert "secret" not in str(error.value) + caplog.text
+
+
+async def test_http_detail_uses_same_session_and_new_auth_escapes_old_cooldown(monkeypatch, authorized_cookie):
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if "cookie" not in request.headers:
+            return httpx.Response(200, json={"code": -352})
+        return httpx.Response(200, json={"code": 0, "data": {"item": {"modules": {
+            "module_dynamic": {"desc": {"text": "公开正文"}}
+        }}}})
+
+    _mock_detail_http(monkeypatch, respond)
+    from app.config import get_settings
+    path = get_settings().bili_cookie_file
+    monkeypatch.setattr(get_settings(), "bili_cookie_file", "")
+    anonymous = BilibiliCollector()
+    assert await anonymous._fetch_draw_detail("123") == {}
+    bili_module._CIRCUIT_STATE["dynamics"] = {"consecutive": 2, "until": bili_module.utcnow() + timedelta(minutes=30)}
+    monkeypatch.setattr(get_settings(), "bili_cookie_file", path)
+    logged_in = BilibiliCollector()
+    assert (await logged_in._fetch_draw_detail("123"))["text"] == "公开正文"
+    assert requests[-1].headers["cookie"] == "SESSDATA=secret%2Csession; bili_jct=secret-csrf"
+    assert not bili_module._circuit_open(logged_in._circuit_key("dynamics"))
