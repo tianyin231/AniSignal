@@ -442,9 +442,6 @@ def _excerpt(text: str) -> str | None:
 
 # ---------- 定制监控（用户自建 UID/关键词抓取源） ----------
 
-MAX_CUSTOM_FEEDS = 10
-
-
 def _validate_custom_payload(body: dict, *, partial: bool = False) -> dict:
     kind = str(body.get("kind") or "").strip()
     if kind and kind not in {"uid", "keyword"}:
@@ -471,6 +468,17 @@ def _validate_custom_payload(body: dict, *, partial: bool = False) -> dict:
             min_views = parsed_views
         except (TypeError, ValueError, OverflowError):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "播放量门槛需为 0 至 10000000 的整数")
+    interval = body.get("interval_minutes")
+    if interval is not None and (type(interval) is not int or not 1 <= interval <= 1440):
+        raise HTTPException(400, "采集周期需为 1 至 1440 分钟的整数")
+    filters = body.get("filters")
+    if filters is not None:
+        if (not isinstance(filters, dict) or set(filters) - {"include", "exclude"}
+            or any(not isinstance(values, list) or len(values) > 10
+                   or any(not isinstance(term, str) or not 1 <= len(term.strip()) <= 64 for term in values)
+                   for values in filters.values())):
+            raise HTTPException(400, "包含词、排除词各最多 10 个，每个 1 至 64 字")
+        filters = {key: list(dict.fromkeys(term.strip() for term in values)) for key, values in filters.items()}
     return {
         "name": name,
         "kind": kind,
@@ -480,6 +488,8 @@ def _validate_custom_payload(body: dict, *, partial: bool = False) -> dict:
         "push_enabled": body.get("push_enabled"),
         "is_public": body.get("is_public"),
         "enabled": body.get("enabled"),
+        "interval_minutes": interval,
+        "filters": filters,
     }
 
 
@@ -515,10 +525,19 @@ async def my_custom_feeds(
             "status": f.status,
             "item_count": counts.get(f.id, 0),
             "last_collected_at": f.last_collected_at,
+            "interval_minutes": f.interval_minutes,
+            "filters": f.filters,
             "created_at": f.created_at,
         }
         for f in feeds
     ]
+
+
+@router.get("/custom-quota")
+async def custom_quota(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    from app.services.custom_policy import user_quota
+    return {**(await user_quota(session, user.id)), "notification_channels": ["email"],
+            "planned_channels": ["astrbot"], "astrbot_requires_authorized_binding": True}
 
 
 @router.post("/custom-feeds", status_code=status.HTTP_201_CREATED)
@@ -531,11 +550,12 @@ async def create_custom_feed(
     payload = _validate_custom_payload(body)
     if not payload["name"] or not payload["kind"] or not payload["target_value"]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "名称、监控类型与目标均不能为空")
-    count = await session.scalar(
-        select(func.count(CustomFeed.id)).where(CustomFeed.user_id == user.id)
-    )
-    if (count or 0) >= MAX_CUSTOM_FEEDS:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"最多 {MAX_CUSTOM_FEEDS} 个定制监控")
+    from app.services.custom_policy import check_admission, shared_source, user_quota, request_interval
+    quota = await user_quota(session, user.id)
+    interval = payload["interval_minutes"] or max(30, quota["min_interval_minutes"])
+    await check_admission(session, user.id, payload["platform"], payload["kind"], payload["target_value"], interval)
+    source = await shared_source(session, payload["platform"], payload["kind"], payload["target_value"])
+    request_interval(source, interval)
     feed = CustomFeed(
         user_id=user.id,
         name=payload["name"],
@@ -545,6 +565,9 @@ async def create_custom_feed(
         min_views=payload["min_views"] or 0,
         push_enabled=bool(payload["push_enabled"]),
         is_public=bool(payload["is_public"]),
+        source_id=source.id,
+        interval_minutes=interval,
+        filters=payload["filters"] or {},
     )
     session.add(feed)
     await session.commit()
@@ -566,14 +589,19 @@ async def update_custom_feed(
         "platform" in body and payload["platform"] != feed.platform
     ):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控类型与平台创建后不可修改")
+    from app.services.custom_policy import check_admission, shared_source, request_interval
+    if feed.kind == "uid" and payload["target_value"] and not payload["target_value"].isdigit():
+        raise HTTPException(400, "UID 只能是数字")
+    if payload["target_value"] or payload["interval_minutes"] is not None or payload["enabled"] is True:
+        await check_admission(session, user.id, feed.platform, feed.kind,
+            payload["target_value"] or feed.target_value, payload["interval_minutes"] or feed.interval_minutes, exclude_id=feed.id)
     if payload["name"]:
         feed.name = payload["name"]
     if payload["target_value"]:
-        if feed.kind == "uid" and not payload["target_value"].isdigit():
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
         if payload["target_value"] != feed.target_value:
             # 已采集历史保留，新的目标从下一次调度开始生效。
             feed.target_value = payload["target_value"]
+            feed.source_id = (await shared_source(session, feed.platform, feed.kind, feed.target_value)).id
             feed.last_collected_at = None
             feed.next_run_at = None
     if payload["min_views"] is not None and payload["min_views"] != feed.min_views:
@@ -586,6 +614,21 @@ async def update_custom_feed(
     if payload["enabled"] is not None:
         feed.enabled = bool(payload["enabled"])
         feed.next_run_at = None  # 重新启用立即调度
+    if payload["filters"] is not None:
+        feed.filters = payload["filters"]
+        feed.next_run_at = None
+    if payload["interval_minutes"] is not None:
+        feed.interval_minutes = payload["interval_minutes"]
+        feed.next_run_at = None
+        if feed.source_id:
+            from app.models import CustomFeedSource
+            source = await session.get(CustomFeedSource, feed.source_id)
+            if source and not source.last_error:
+                source.next_run_at = None
+    if feed.source_id and (payload["target_value"] or payload["enabled"] is True):
+        from app.models import CustomFeedSource
+        source = await session.get(CustomFeedSource, feed.source_id)
+        request_interval(source, feed.interval_minutes)
     await session.commit()
     return {"id": feed.id, "updated": True}
 

@@ -269,6 +269,8 @@ async def run_collection(redis, target_id: int) -> dict:
             if collector_factory is None:
                 raise CollectError(f"no collector for platform {target.platform}")
             collector = collector_factory()
+            from app.services.custom_policy import claim_collection_budget
+            await claim_collection_budget(session, target.platform)
             if isinstance(collector, RssCollector):
                 collector.source_config = {**(target.config or {}), "name": target.display_name, "feed_url": target.target_value}
             product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))

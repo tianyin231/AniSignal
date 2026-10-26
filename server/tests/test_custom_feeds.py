@@ -17,6 +17,12 @@ admin_headers = {"X-Admin-Token": "test-admin-token"}
 
 
 @pytest.fixture(autouse=True)
+async def beta_access(session):
+    from app.services.settings import set_setting
+    await set_setting(session, "custom_feed_policy", {"open_beta": True})
+
+
+@pytest.fixture(autouse=True)
 def fake_mail(monkeypatch):
     send = AsyncMock(return_value=True)
     monkeypatch.setattr("app.services.notifications.send_email", send)
@@ -219,7 +225,7 @@ async def test_worker_collect_custom_feeds(session, session_factory, fake_bili, 
     stats = await collect_custom_feeds({"redis": None})
 
     expected = 1 if has_feed else 0
-    assert stats == {"feeds": expected, "new_items": expected, "pushed": 0, "failed": 0}
+    assert stats == {"feeds": expected, "sources": expected, "new_items": expected, "pushed": 0, "failed": 0, "deferred": 0}
     items = list((await session.execute(select(CustomFeedItem))).scalars())
     assert len(items) == expected
     if has_feed:
