@@ -43,9 +43,12 @@ def merge_entries(entries: list[dict]) -> list[dict]:
     return merged
 
 
-async def upcoming_entries(session, community: str, now: datetime) -> list[dict]:
+async def upcoming_entries(session, community: str, now: datetime, *, channels=None) -> list[dict]:
+    from app.services.bot_channels import channel_condition
     entries = []
-    for entry in await calendar_entries(session, community, now=now):
+    candidates = await calendar_entries(session, community, now=now,
+        extra_conditions=(channel_condition(channels),) if channels else ())
+    for entry in candidates:
         if entry["all_day"]:
             continue
         due = stage_at(entry)
@@ -98,18 +101,22 @@ def calendar_brief(entries: list[dict], due: datetime) -> tuple[str, dict]:
     return text, brief
 
 
-async def refresh_calendar(session, brief: dict, now: datetime) -> tuple[str, dict] | None:
+async def refresh_calendar(session, brief: dict, now: datetime, *, channels=None) -> tuple[str, dict] | None:
+    from app.services.bot_channels import allowed_content_ids
     entries = [entry for item in brief.get("items", []) for entry in item.get("calendar_entries", [])]
     ids = {sid for entry in entries for sid in entry.get("schedule_ids", [])}
     rows = (await session.execute(select(ContentSchedule, RawContent.url).join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
                                   .where(ContentSchedule.id.in_(ids), RawContent.hidden.is_(False)))).all() if ids else []
     current = {schedule.id: (schedule, url) for schedule, url in rows}
+    allowed = await allowed_content_ids(session, channels or [], [schedule.raw_content_id for schedule, _ in rows])
     valid = []
     for entry in entries:
         for sid in entry.get("schedule_ids", []):
             if sid not in current:
                 continue
             schedule, url = current[sid]
+            if schedule.raw_content_id not in allowed:
+                continue
             due = schedule.start_at if schedule.kind in {"maintenance", "deadline"} else schedule.end_at
             if schedule.all_day or schedule.kind not in {"activity", "pool", "deadline", "maintenance"} or not due or due <= now:
                 continue

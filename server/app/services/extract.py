@@ -181,9 +181,16 @@ async def _push_to_targets(
     session: AsyncSession, community: str, kind: str, text: str, dedupe_key: str, *, brief: dict | None = None
 ) -> int:
     from app.services.bot import create_delivery
+    from app.services.bot import matches_target_scope
+    from app.services.bot_channels import annotate_candidates
 
     delivered = 0
+    if brief:
+        sources = [source for item in brief.get("items", []) for source in (item.get("sources") or [item])]
+        await annotate_candidates(session, sources)
     for target in await _targets_for_community(session, community):
+        if target.config.get("channels") and (not brief or not all(matches_target_scope(target, item) for item in brief.get("items", []))):
+            continue
         await create_delivery(session, target, kind, text, f"{dedupe_key}:target:{target.id}", brief=brief)
         delivered += 1
     return delivered
