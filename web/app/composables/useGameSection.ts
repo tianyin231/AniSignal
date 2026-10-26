@@ -12,12 +12,12 @@
  */
 
 export interface GameCommunity {
-  key: 'wuwa' | 'blhx' | 'hsr' | 'arknights' | 'ai'
+  key: 'wuwa' | 'blhx' | 'hsr' | 'arknights' | 'genshin' | 'endfield' | 'ai'
   label: string
   /** 频道头图上的英文名 */
   en: string
   /** 分区语义色键，映射 COMMUNITY_CLASSES 的 Tailwind 类组（不用动态拼接，避免被 purge） */
-  color: 'yellow' | 'sky' | 'violet' | 'orange' | 'teal'
+  color: 'yellow' | 'sky' | 'violet' | 'orange' | 'cyan' | 'lime' | 'teal'
 }
 
 // 分区主题色对齐各游戏品牌色：鸣潮金 / 碧蓝天蓝 / 星穹铁道紫 / 明日方舟橙
@@ -26,6 +26,8 @@ export const GAME_COMMUNITIES: GameCommunity[] = [
   { key: 'blhx', label: '碧蓝航线', en: 'Azur Lane', color: 'sky' },
   { key: 'hsr', label: '崩坏星穹铁道', en: 'Honkai: Star Rail', color: 'violet' },
   { key: 'arknights', label: '明日方舟', en: 'Arknights', color: 'orange' },
+  { key: 'genshin', label: '原神', en: 'Genshin Impact', color: 'cyan' },
+  { key: 'endfield', label: '终末地', en: 'Arknights: Endfield', color: 'lime' },
   { key: 'ai', label: 'AI', en: 'AI News', color: 'teal' },
 ]
 
@@ -49,6 +51,8 @@ const COMMUNITY_CLASSES: Record<
   sky: { chip: 'bg-blhx-soft text-blhx-ink', nav: 'border-blhx text-ink', dot: 'bg-blhx', text: 'text-blhx-ink' },
   violet: { chip: 'bg-hsr-soft text-hsr-ink', nav: 'border-hsr text-ink', dot: 'bg-hsr', text: 'text-hsr-ink' },
   orange: { chip: 'bg-arknights-soft text-arknights-ink', nav: 'border-arknights text-ink', dot: 'bg-arknights', text: 'text-arknights-ink' },
+  cyan: { chip: 'bg-genshin-soft text-genshin-ink', nav: 'border-genshin text-ink', dot: 'bg-genshin', text: 'text-genshin-ink' },
+  lime: { chip: 'bg-endfield-soft text-endfield-ink', nav: 'border-endfield text-ink', dot: 'bg-endfield', text: 'text-endfield-ink' },
   teal: { chip: 'bg-ai-soft text-ai-ink', nav: 'border-ai text-ink', dot: 'bg-ai', text: 'text-ai-ink' },
 }
 
@@ -72,6 +76,8 @@ export const PLATFORMS_BY_COMMUNITY: Record<GameCommunityKey, string[]> = {
   blhx: ['bilibili'],
   hsr: ['bilibili', 'youtube'],
   arknights: ['bilibili', 'youtube'],
+  genshin: ['bilibili', 'youtube', 'game_official', 'x', 'miyoushe'],
+  endfield: ['bilibili', 'youtube', 'game_official', 'x'],
   ai: ['bilibili', 'x', 'rss'],
 }
 

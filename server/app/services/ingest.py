@@ -27,6 +27,7 @@ from app.parsers.youtube import PARSER_VERSION as YOUTUBE_PARSER_VERSION
 from app.parsers.youtube import parse_rss_item
 from app.parsers.x import PARSER_VERSION as X_PARSER_VERSION, parse_post as parse_x_post
 from app.parsers.rss import PARSER_VERSION as RSS_PARSER_VERSION, parse_item as parse_feed_item
+from app.parsers.game_official import PARSER_VERSION as GAME_OFFICIAL_PARSER_VERSION, parse_notice as parse_game_notice
 from app.schemas.content import NormalizedContent
 from app.services.classify import classify_content, load_rules
 from app.services.fingerprint import content_fingerprint
@@ -43,6 +44,7 @@ PARSERS: dict[str, tuple] = {
     "youtube_rss": (parse_rss_item, YOUTUBE_PARSER_VERSION),
     "x_posts": (parse_x_post, X_PARSER_VERSION),
     "rss_feed": (parse_feed_item, RSS_PARSER_VERSION),
+    "game_official_notices": (parse_game_notice, GAME_OFFICIAL_PARSER_VERSION),
 }
 
 

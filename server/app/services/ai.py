@@ -214,8 +214,13 @@ def _summary_supported(summary: str, evidence_text: str, community: str = DEFAUL
     """
     if all_official and re.search(r"非官方|未经官方|官方尚未(?:确认|证实)|来源不明|仅为传闻", summary):
         return False
+    comparison_summary, comparison_evidence = summary, evidence_text
+    # 独立作品的全称可能含本体名（明日方舟：终末地），先移除本分区完整名称再检查串区。
+    for own_name in sorted(get_community(community).game_names, key=len, reverse=True):
+        comparison_summary = comparison_summary.replace(own_name, "")
+        comparison_evidence = comparison_evidence.replace(own_name, "")
     for game_name in crosstalk_names(community):
-        if game_name in summary and game_name not in evidence_text:
+        if game_name in comparison_summary and game_name not in comparison_evidence:
             return False
     for number in re.findall(r"\d+(?:\.\d+)?", summary):
         if number not in evidence_text:
@@ -375,7 +380,7 @@ async def translate_content(session: AsyncSession, content_id: int) -> dict:
     if pair is None:
         return {"status": "skipped", "reason": "content_not_found"}
     raw, version = pair
-    if raw.platform not in ("kuro_global", "youtube"):
+    if raw.platform not in ("kuro_global", "youtube", "x"):
         return {"status": "skipped", "reason": "not_foreign_platform"}
     text = (version.text if version else None) or ""
     title = (version.title if version else None) or raw.external_id

@@ -26,6 +26,7 @@ from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
 from app.collectors.rss import RssCollector
 from app.collectors.x import XCollector
+from app.collectors.game_official import GameOfficialCollector
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import CollectRun, CollectTarget, Platform, Product, RawContent, RunStatus
@@ -43,6 +44,7 @@ _COLLECTORS = {
     "miyoushe": lambda: MiyousheCollector(),
     "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
     "x": XCollector,
+    "game_official": GameOfficialCollector,
     "kuro_cn": lambda: KuroCollector(Platform.KURO_CN),
     "kuro_global": lambda: KuroCollector(Platform.KURO_GLOBAL),
 }
@@ -66,6 +68,7 @@ def youtube_title_communities(title: str) -> set[str]:
     return {
         meta.key for meta in COMMUNITIES.values() if meta.domain == "game"
         and any(_source_alias_hit(title, alias) for alias in (*meta.game_names, *meta.source_aliases))
+        and not any(_source_alias_hit(title, term) for term in meta.source_exclusions)
     }
 
 
@@ -365,7 +368,7 @@ async def run_collection(redis, target_id: int) -> dict:
                 if agg.touched_event_ids and hasattr(redis, "enqueue_job"):
                     for event_id in agg.touched_event_ids:
                         await redis.enqueue_job("summarize_event", event_id)
-                if target.platform in ("youtube", "kuro_global") and hasattr(redis, "enqueue_job"):
+                if target.platform in ("youtube", "kuro_global", "x") and hasattr(redis, "enqueue_job"):
                     for content_id in stats.touched_content_ids:
                         await redis.enqueue_job("translate_content", content_id)
                 if not is_news and stats.touched_content_ids and hasattr(redis, "enqueue_job"):

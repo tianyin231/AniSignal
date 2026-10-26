@@ -60,17 +60,21 @@ class Settings(BaseSettings):
     star_rail_bili_mid: str = "1340190821"
     # 明日方舟官方 B 站账号（UID 2026-09-06 经 bili CLI 核验，认证"明日方舟官方账号"）
     arknights_bili_mid: str = "161775300"
+    genshin_bili_mid: str = "401742377"
+    endfield_bili_mid: str = "1265652806"
 
     # YouTube 官方频道白名单："频道ID:名称" 逗号分隔（分区归属由采集目标的 community 决定）
     official_youtube_channels: str = (
         "UC0Bi5KMcECRVYis5Gb_ZYZQ:Wuthering Waves 官方频道,"
         "UCPeJaqP6WgxUVDcpYkXZKMQ:Azur Lane Official,"
         "UC2PeMPA8PAOp-bynLoCeMLA:Honkai Star Rail 官方频道,"
-        "UCR0J2NYGuC8epsa1O4DMmXQ:Arknights Official"
+        "UCR0J2NYGuC8epsa1O4DMmXQ:Arknights Official,"
+        "UCiS882YPwZt1NfaM0gR0D9Q:Genshin Impact 官方频道,"
+        "UCowPaVRBzg8CE6K4CB6LJfw:Arknights Endfield 官方频道"
     )
 
     # 只有已核对的组织账号标为官方；开发者个人账号保持用户身份。
-    official_x_accounts: str = "openai:OpenAI,deepseek_ai:DeepSeek"
+    official_x_accounts: str = "openai:OpenAI,deepseek_ai:DeepSeek,genshinimpact:原神官方,akendfield:终末地官方"
 
     # 米游社默认游戏 ID（2 = 原神），管理员看板可按目标覆盖
     miyoushe_default_gids: int = 2

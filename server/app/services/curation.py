@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import DEFAULT_COMMUNITY, get_community, is_all_community
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community, is_all_community
 from app.models import (
     ClassificationRule,
     CollectTarget,
@@ -851,8 +851,10 @@ def _review_system_prompt(community: str = DEFAULT_COMMUNITY) -> str:
         from app.services.ai_news import NEWS_REVIEW_PROMPT
 
         return NEWS_REVIEW_PROMPT
-    game, other_games = f"《{meta.bare_name}》", meta.other_games_examples
-    return f"""你是{game}主题情报站的编辑兼内容安全审核员。本站对{game}及其周边生态做定向采集，你的知识库可能不包含最新的角色、版本与活动——判断相关性必须以下面两条为准，不得依赖你自己认识与否：
+    game = f"《{meta.bare_name}》"
+    other_games = "（如" + "、".join(other.bare_name for key, other in COMMUNITIES.items()
+                                if key != meta.key and other.domain == "game") + "等）"
+    return f"""你是{game}主题情报站的编辑兼内容安全审核员。{meta.game_note}本站对{game}及其周边生态做定向采集，你的知识库可能不包含最新的角色、版本与活动——判断相关性必须以下面两条为准，不得依赖你自己认识与否：
 
 1. 内容自带的 matched_keywords 是它被采集入库的原因（来自站点配置的采集关键词）。
 2. 输入里的 known_terms 是管理员维护的"已确认相关词表"（含最新角色/系统/活动名）。标题、正文或封面命中词表中任一词，即视为相关（relevant=true）。

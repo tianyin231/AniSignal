@@ -33,6 +33,7 @@ onMounted(() => loadBiliSession())
 
 // 与后端能力对齐的可选组合（platform → 支持的 target_type）
 const combos: Record<string, string[]> = {
+  game_official: ['notices'],
   bilibili: ['keyword_search', 'account_videos', 'account_dynamics'],
   miyoushe: ['keyword_search'],
   kuro_cn: ['notices'],
@@ -77,6 +78,11 @@ watch(() => form.platform, () => {
   }
 })
 watch([() => form.target_type, () => form.community, supportsViews], () => { form.min_views = defaultMinViews() })
+watch([() => form.platform, () => form.community], () => {
+  if (!editingId.value && form.platform === 'game_official' && ['genshin', 'endfield'].includes(form.community)) {
+    form.target_value = form.community
+  }
+})
 
 async function refresh() {
   try {

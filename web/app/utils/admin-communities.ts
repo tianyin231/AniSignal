@@ -8,6 +8,8 @@ export const ADMIN_COMMUNITIES = [
   { key: 'blhx', label: '碧蓝航线', short: '碧蓝' },
   { key: 'hsr', label: '崩坏星穹铁道', short: '星穹' },
   { key: 'arknights', label: '明日方舟', short: '方舟' },
+  { key: 'genshin', label: '原神', short: '原神' },
+  { key: 'endfield', label: '终末地', short: '终末地' },
   { key: 'ai', label: 'AI', short: 'AI' },
 ] as const
 
@@ -25,5 +27,7 @@ export const ADMIN_COMMUNITY_BADGE: Record<string, string> = {
   blhx: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
   hsr: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
   arknights: 'bg-orange-500/10 text-orange-700 dark:text-orange-300',
+  genshin: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300',
+  endfield: 'bg-lime-500/10 text-lime-700 dark:text-lime-300',
   ai: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
 }

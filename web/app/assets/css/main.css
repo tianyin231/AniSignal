@@ -48,6 +48,12 @@
   --sd-arknights: #ec741c;
   --sd-arknights-ink: #a04b0b;
   --sd-arknights-soft: #fceee2;
+  --sd-genshin: #4d9cb4;
+  --sd-genshin-ink: #226780;
+  --sd-genshin-soft: #e5f3f6;
+  --sd-endfield: #a8b638;
+  --sd-endfield-ink: #626b12;
+  --sd-endfield-soft: #f2f5dd;
   --sd-ai: #12a08e;
   --sd-ai-ink: #0a6e62;
   --sd-ai-soft: #e2f5f2;
@@ -87,6 +93,12 @@
   --sd-arknights: #f2883a;
   --sd-arknights-ink: #f7ae74;
   --sd-arknights-soft: rgb(242 136 58 / 0.15);
+  --sd-genshin: #63bdd4;
+  --sd-genshin-ink: #91d6e7;
+  --sd-genshin-soft: rgb(99 189 212 / 0.14);
+  --sd-endfield: #d0dd58;
+  --sd-endfield-ink: #e0eaa0;
+  --sd-endfield-soft: rgb(208 221 88 / 0.14);
   --sd-ai: #2cc0ac;
   --sd-ai-ink: #6fdbcb;
   --sd-ai-soft: rgb(44 192 172 / 0.14);
@@ -97,6 +109,8 @@
 .ch-blhx { --sd-accent: var(--sd-blhx); --sd-accent-ink: var(--sd-blhx-ink); --sd-accent-soft: var(--sd-blhx-soft); }
 .ch-hsr { --sd-accent: var(--sd-hsr); --sd-accent-ink: var(--sd-hsr-ink); --sd-accent-soft: var(--sd-hsr-soft); }
 .ch-arknights { --sd-accent: var(--sd-arknights); --sd-accent-ink: var(--sd-arknights-ink); --sd-accent-soft: var(--sd-arknights-soft); }
+.ch-genshin { --sd-accent: var(--sd-genshin); --sd-accent-ink: var(--sd-genshin-ink); --sd-accent-soft: var(--sd-genshin-soft); }
+.ch-endfield { --sd-accent: var(--sd-endfield); --sd-accent-ink: var(--sd-endfield-ink); --sd-accent-soft: var(--sd-endfield-soft); }
 .ch-ai { --sd-accent: var(--sd-ai); --sd-accent-ink: var(--sd-ai-ink); --sd-accent-soft: var(--sd-ai-soft); }
 
 @theme inline {
@@ -130,6 +144,12 @@
   --color-arknights: var(--sd-arknights);
   --color-arknights-ink: var(--sd-arknights-ink);
   --color-arknights-soft: var(--sd-arknights-soft);
+  --color-genshin: var(--sd-genshin);
+  --color-genshin-ink: var(--sd-genshin-ink);
+  --color-genshin-soft: var(--sd-genshin-soft);
+  --color-endfield: var(--sd-endfield);
+  --color-endfield-ink: var(--sd-endfield-ink);
+  --color-endfield-soft: var(--sd-endfield-soft);
   --color-ai: var(--sd-ai);
   --color-ai-ink: var(--sd-ai-ink);
   --color-ai-soft: var(--sd-ai-soft);

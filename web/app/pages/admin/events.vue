@@ -35,7 +35,7 @@ const summaryLabels: Record<string, string> = {
   legacy: '历史摘要',
 }
 
-const communityFilter = ref<'' | 'wuwa' | 'blhx'>('')
+const communityFilter = ref('')
 
 async function refresh() {
   try {
