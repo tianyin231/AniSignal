@@ -37,6 +37,7 @@ from app.models import (
     MerchScan,
     RawContent,
     Source,
+    SiteSetting,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ _REGION_OF_PLATFORM = {
     "kuro_cn": "cn",
     "kuro_global": "global",
     "youtube": "global",
+    "game_official": "cn",
 }
 
 
@@ -310,6 +312,17 @@ async def run_aggregation(session: AsyncSession, *, product_snapshots: dict | No
     """全量扫描并维护事件（ensure 语义），调用方负责 commit。"""
     from app.services.classify import seed_defaults
 
+    # 多个采集任务会同时扫描全库。用事务行锁串行对账，锁随调用方 commit/rollback 释放，
+    # 防止两轮都读到“证据不存在”再重复插入；不串行网络采集或模型调用。
+    key = "event_aggregation_lock"
+    if session.get_bind().dialect.name == "mysql":
+        from sqlalchemy.dialects.mysql import insert
+        statement = insert(SiteSetting).values(key=key, value={})
+        await session.execute(statement.on_duplicate_key_update(key=key))
+    else:
+        from sqlalchemy.dialects.sqlite import insert
+        await session.execute(insert(SiteSetting).values(key=key, value={}).on_conflict_do_nothing())
+    await session.execute(select(SiteSetting.key).where(SiteSetting.key == key).with_for_update())
     stats = AggStats()
     await seed_defaults(session, commit=False)
     contents = await load_classified_contents(session)
