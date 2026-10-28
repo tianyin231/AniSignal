@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
@@ -29,7 +29,7 @@ from app.collectors.x import XCollector
 from app.collectors.game_official import GameOfficialCollector
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import CollectRun, CollectTarget, Platform, Product, RawContent, RunStatus
+from app.models import CollectRun, CollectTarget, Platform, Product, RawContent, RunStatus, Source
 from app.services.ingest import IngestStats, ingest_items
 from app.services.collector_proxy import fetch_with_fallback, configure_collector, redact_proxy
 from app.services.queue import enqueue_review_jobs
@@ -275,6 +275,12 @@ async def run_collection(redis, target_id: int) -> dict:
         target = await session.get(CollectTarget, target_id)
         if target is None:
             raise CollectError(f"collect target {target_id} not found")
+
+        if _is_merch_source(target):
+            # 这些账号过去可能已通过社区搜索入库；即便本轮都是抽奖而被过滤，
+            # 已核验的账号身份也要同步更新，避免被商品发现的官方身份筛选漏掉。
+            await session.execute(update(Source).where(Source.platform == "bilibili",
+                Source.external_id == target.target_value, Source.identity != "official").values(identity="official"))
 
         run = CollectRun(target_id=target.id, started_at=utcnow(), status=RunStatus.RUNNING)
         session.add(run)
