@@ -181,6 +181,31 @@ async def test_youtube_existing_other_community_content_is_not_updated(session, 
     assert raw.community == "wuwa" and raw.raw_json["title"] == old["title"]
 
 
+async def test_merch_collection_filters_foreign_game_and_preserves_official_identity(session, patched_collect, monkeypatch):
+    from app.models import Source
+    from tests.test_parsers_bilibili import DYNAMIC_RAW
+
+    target = await _make_target(session)
+    target.target_type, target.target_value, target.tier = "account_dynamics", "3493082584582776", "core"
+    await session.commit()
+
+    async def fetch(*args):
+        return FetchResult(platform="bilibili", fetch_kind="bilibili_dynamics", items=[
+            dict(DYNAMIC_RAW, id="merch-wuwa", author_mid=3493082584582776, author_name="库洛游戏周边",
+                 type="DYNAMIC_TYPE_DRAW", text="#鸣潮# 主题手办预售", pics=["https://example.com/figure.jpg"]),
+            dict(DYNAMIC_RAW, id="merch-other", author_mid=3493082584582776, text="#战双帕弥什# 手办预售"),
+        ])
+
+    monkeypatch.setattr(_StubCollector, "fetch", fetch)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    run = await session.get(CollectRun, result["run_id"])
+    raw = await session.scalar(select(RawContent))
+    source = await session.get(Source, raw.source_id)
+    assert run.items_fetched == 2 and run.items_filtered == 1 and run.items_new == 1
+    assert run.official_items == 1 and source.identity == "official"
+    assert raw.external_id == "merch-wuwa" and raw.community == "wuwa"
+
+
 async def test_run_collection_failure_updates_health(session, patched_collect):
     target = await _make_target(session)
     _StubCollector.fail = True

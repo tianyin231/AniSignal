@@ -3,11 +3,11 @@
 import re
 from datetime import datetime, timezone
 
-from app.communities import COMMUNITIES
+from app.communities import COMMUNITIES, official_merch_bilibili_sources
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
-PARSER_VERSION = "4"
+PARSER_VERSION = "5"
 
 # 已知官方账号兜底（身份判定用；正常路径由 communities 注册表驱动读配置）
 _OFFICIAL_MIDS = {meta.official_bili_mid_default for meta in COMMUNITIES.values() if meta.official_bili_mid_default}
@@ -24,7 +24,7 @@ def _official_mids() -> set[str]:
             configured.add(getattr(settings, meta.bili_mid_setting, "") or "")
     configured.discard("")
     known = configured or _OFFICIAL_MIDS
-    return {str(mid) for mid in known}
+    return {str(mid) for mid in known} | set(official_merch_bilibili_sources())
 
 
 def parse_video(raw: dict) -> NormalizedContent:

@@ -17,7 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community, official_merch_bilibili_sources
 from app.collectors.base import CollectorDeferred, CollectorError, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.kuro import KuroCollector
@@ -36,6 +36,11 @@ from app.services.queue import enqueue_review_jobs
 from app.services.product_matching import matches_product_text
 
 logger = logging.getLogger(__name__)
+
+_MERCH_UPDATE = re.compile(
+    r"预售|预订|开售|发售|贩售|售卖|售价|定价|上新|新品|上架|售罄|补货|定金|尾款|补款|"
+    r"发货|出货|售后|延期|延后|即将上线|pre.?order|shipping", re.I,
+)
 
 # platform → 零参工厂；kuro 两个区域共享类但实例需指定 region
 _COLLECTORS = {
@@ -63,13 +68,22 @@ def _source_alias_hit(title: str, alias: str) -> bool:
     return bool(re.search(prefix + re.escape(alias) + suffix, title))
 
 
-def youtube_title_communities(title: str) -> set[str]:
-    """只按标题识别游戏，供共享频道目标做排他的分区匹配。"""
+def text_communities(value: str) -> set[str]:
+    """匹配明确的游戏名；终末地不因完整名称含明日方舟而归入本体。"""
     return {
         meta.key for meta in COMMUNITIES.values() if meta.domain == "game"
-        and any(_source_alias_hit(title, alias) for alias in (*meta.game_names, *meta.source_aliases))
-        and not any(_source_alias_hit(title, term) for term in meta.source_exclusions)
+        and any(_source_alias_hit(value, alias) for alias in (*meta.game_names, *meta.source_aliases))
+        and not any(_source_alias_hit(value, term) for term in meta.source_exclusions)
     }
+
+
+def youtube_title_communities(title: str) -> set[str]:
+    return text_communities(title)
+
+
+def _is_merch_source(target: CollectTarget) -> bool:
+    return (target.platform == "bilibili" and target.target_type in {"account_dynamics", "account_videos"}
+            and target.target_value in official_merch_bilibili_sources())
 
 
 def filter_relevant(
@@ -77,10 +91,20 @@ def filter_relevant(
 ) -> tuple[list[dict], int]:
     """采集相关性过滤：共现词（标题需至少命中一个）+ 热度门槛。
 
-    返回 (保留列表, 过滤数量)。官方账号类目标（notices/dynamics/videos）
-    不做过滤——官方内容本身就是信号。
+    返回 (保留列表, 过滤数量)。周边共享账号先按游戏筛选，
+    游戏官号及其余目标保留原有的过滤规则。
     """
     original_count = len(items)
+    if _is_merch_source(target):
+        community, _name = official_merch_bilibili_sources()[target.target_value]
+        # 周边号可能同时发其他游戏，不能沿用 core 来源豁免共现词的规则。
+        # B站动态没有 title 字段，须使用补全后的正文识别所属游戏。
+        kept = []
+        for item in items:
+            body = "\n".join(str(item.get(field) or "") for field in ("title", "text", "description"))
+            if target.community == community and text_communities(body) == {community} and _MERCH_UPDATE.search(body):
+                kept.append(item)
+        items = kept
     if product_watch_terms is not None:
         # 只过滤显式关联的商品目标。搜索引擎的宽泛相关结果不等于商品证据。
         items = [item for item in items if matches_product_text(
@@ -294,7 +318,7 @@ async def run_collection(redis, target_id: int) -> dict:
                 fetch_result.items, target,
                 product_watch_terms=product.watch_terms if product is not None else None,
             )
-            if target.platform == "youtube" and fetch_result.items:
+            if (target.platform == "youtube" or _is_merch_source(target)) and fetch_result.items:
                 # 标题后续改成另一游戏时，也不能经新分区目标更新已有异区证据。
                 other_owned = set((await session.scalars(select(RawContent.external_id).where(
                     RawContent.platform == "youtube",
