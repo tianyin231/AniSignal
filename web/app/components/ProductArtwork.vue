@@ -31,7 +31,7 @@ watch(() => props.src, () => { failed.value = false })
       <svg class="size-14 opacity-45" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
         <path d="m8 15 16-8 16 8v20l-16 8-16-8V15Z" /><path d="m8 15 16 8 16-8M24 23v20M16 11l16 8v9" />
       </svg>
-      <span v-if="kind" class="text-xs tracking-widest">{{ kind }}</span>
+      <span class="text-xs tracking-widest">{{ kind || '暂无商品图' }}</span>
     </div>
   </div>
 </template>
