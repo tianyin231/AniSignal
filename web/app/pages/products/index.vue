@@ -75,7 +75,7 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
             <h2 class="line-clamp-2 min-h-12 text-lg font-bold leading-6 text-ink group-hover:text-brand-ink">
               {{ p.name }}
             </h2>
-            <p class="num mt-2 min-h-6 truncate text-base font-semibold text-ink-2" :title="p.price_note || undefined">{{ p.price_note }}</p>
+            <p class="num mt-2 line-clamp-2 min-h-12 text-base font-semibold leading-6 text-ink-2" :title="p.price_note || undefined">{{ p.price_note }}</p>
             <p class="mt-1 min-h-4 truncate text-xs text-muted">
               {{ [p.publisher, p.skus.join(' / ')].filter(Boolean).join(' · ') }}
             </p>
