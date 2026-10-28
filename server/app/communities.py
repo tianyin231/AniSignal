@@ -29,6 +29,8 @@ class CommunityMeta:
     domain: str = "game"  # news 分区采用资讯筛选，不沿用游戏词典与审核规则
     source_aliases: tuple[str, ...] = ()  # 仅用于跨区采集分流，英文缩写需按词边界匹配
     source_exclusions: tuple[str, ...] = ()  # 含同系列名称的独立游戏，不能借简称入本分区
+    # 已核验认证的周边专号；共享品牌账号只采集明确属于本游戏的内容。
+    official_merch_bili_sources: tuple[tuple[str, str], ...] = ()
 
     @property
     def game_names(self) -> tuple[str, ...]:
@@ -48,6 +50,7 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         bili_mid_setting="wuthering_waves_bili_mid",
         official_bili_mid_default="1955897084",
         source_aliases=("Wuthering Waves", "WuWa", "鳴潮"),
+        official_merch_bili_sources=(("3493082584582776", "库洛游戏周边"),),
     ),
     "blhx": CommunityMeta(
         key="blhx",
@@ -73,6 +76,7 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         official_bili_mid_default="1340190821",
         extra_names=("崩坏：星穹铁道", "崩壞星穹鐵道", "崩壞：星穹鐵道", "星穹铁道", "星穹鐵道"),
         source_aliases=("Honkai Star Rail", "Honkai: Star Rail", "Star Rail", "HSR"),
+        official_merch_bili_sources=(("508103429", "帕姆的收藏夹"),),
     ),
     "arknights": CommunityMeta(
         key="arknights",
@@ -86,6 +90,7 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         official_bili_mid_default="161775300",
         source_aliases=("Arknights", "明日方舟"),
         source_exclusions=("Endfield", "终末地", "終末地"),
+        official_merch_bili_sources=(("3546864272017883", "朝陇山播报站"),),
     ),
     "genshin": CommunityMeta(
         key="genshin", label="原神", game_name="米哈游《原神》", bare_name="原神",
@@ -111,6 +116,12 @@ COMMUNITIES: dict[str, CommunityMeta] = {
 }
 
 DEFAULT_COMMUNITY = "wuwa"
+
+
+def official_merch_bilibili_sources() -> dict[str, tuple[str, str]]:
+    """UID →（分区、账号名）；2026-10-28 已逐个核对 B站企业认证。"""
+    return {mid: (meta.key, name) for meta in COMMUNITIES.values()
+            for mid, name in meta.official_merch_bili_sources}
 
 # 摘要防串扰的固定扩展名单：与现有分区无关、出现即视为串台的同类游戏
 _CROSSTALK_EXTRAS = (
