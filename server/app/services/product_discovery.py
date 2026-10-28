@@ -205,6 +205,9 @@ async def _store_discovered_product(session: AsyncSession, item: MerchItem, raw:
                              "images": images or previous.get("images") or [],
                              "images_source_url": safe_link(raw.url) if images else previous.get("images_source_url"),
                              "quote": item.quote, "published_at": published.isoformat()}
+    # 较早公告也能补上缺图，商品价格和进度仍由较新的公告决定。
+    if images and not (product.discovery or {}).get("images"):
+        product.discovery = {**(product.discovery or {}), "images": images, "images_source_url": safe_link(raw.url)}
     candidate.status = "accepted"
     candidate.product_id = product.id
     return product, created
@@ -550,6 +553,9 @@ def public_brief(product: Product, fulfillment: dict, signals: list[dict]) -> di
 
 
 async def run_product_monitor_loop(session: AsyncSession, *, now: datetime | None = None) -> dict:
+    from app.services.product_media import backfill_product_images
+
     discovered = await discover_merch_candidates(session, now=now)
+    images = await backfill_product_images(session, now=now)
     archived = await archive_quiet_products(session, now=now)
-    return {"discover": discovered, "archive": archived}
+    return {"discover": discovered, "images": images, "archive": archived}

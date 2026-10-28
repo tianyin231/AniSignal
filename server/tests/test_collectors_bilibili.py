@@ -151,9 +151,10 @@ async def test_enriches_empty_articles_but_skips_live_and_image_only(monkeypatch
         {"id": "article", "type": "DYNAMIC_TYPE_ARTICLE", "text": "", "pics": []},
         {"id": "live", "type": "DYNAMIC_TYPE_LIVE_RCMD", "text": "", "pics": []},
         {"id": "image", "type": "DYNAMIC_TYPE_DRAW", "pics": ["https://example.com/b.jpg"]},
+        {"id": "text-only", "type": "DYNAMIC_TYPE_DRAW", "text": "商品已预售", "pics": []},
     ]
     result = await collector._enrich_draw_dynamics(items)
-    assert calls == ["article"]
+    assert calls == ["article", "text-only"]
     assert result[0]["text"] == "专栏补全"
 
 

@@ -52,16 +52,15 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
       加载中…
     </section>
     <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">商品暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
-    <div v-else-if="visibleProducts.length" class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div v-else-if="visibleProducts.length" class="grid auto-rows-fr grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       <NuxtLink
         v-for="p in visibleProducts"
         :key="p.slug"
         :to="{ path: `/products/${p.slug}`, query: { community: scope } }"
         class="panel group flex min-w-0 flex-col overflow-hidden transition-shadow hover:shadow-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand [overflow-wrap:anywhere]"
       >
-        <!-- 无官方图时直接省掉图区：文字信息前置，不留大占位框 -->
-        <ProductArtwork v-if="p.images?.length" :src="p.images[0]" :name="p.name" :kind="p.product_type" cover class="aspect-[16/10] border-b border-line-soft" />
-        <div class="flex flex-1 flex-col p-4" :class="p.images?.length ? '' : 'pt-5'">
+        <ProductArtwork :src="p.images?.[0]" :name="p.name" :kind="p.product_type" cover class="aspect-[16/10] shrink-0 border-b border-line-soft" />
+        <div class="flex flex-1 flex-col p-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
             <div class="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted">
@@ -76,14 +75,14 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
             <h2 class="line-clamp-2 min-h-12 text-lg font-bold leading-6 text-ink group-hover:text-brand-ink">
               {{ p.name }}
             </h2>
-            <p v-if="p.price_note" class="num mt-2 text-base font-semibold text-ink-2">{{ p.price_note }}</p>
-            <p v-if="p.publisher || p.skus.length" class="mt-1 truncate text-xs text-muted">
+            <p class="num mt-2 min-h-6 truncate text-base font-semibold text-ink-2" :title="p.price_note || undefined">{{ p.price_note }}</p>
+            <p class="mt-1 min-h-4 truncate text-xs text-muted">
               {{ [p.publisher, p.skus.join(' / ')].filter(Boolean).join(' · ') }}
             </p>
           </div>
         </div>
-        <p v-if="briefLine(p)" class="mt-2 truncate text-xs text-muted">{{ briefLine(p) }}</p>
-        <div class="mt-auto flex items-center justify-between gap-2 border-t border-line-soft pt-2.5 text-xs"><span class="mono text-faint">{{ p.fulfillment.updated_at ? fmtTime(p.fulfillment.updated_at) : '' }}</span><span class="font-medium text-brand-ink">查看进展 →</span></div>
+        <p class="mt-2 min-h-4 truncate text-xs text-muted">{{ briefLine(p) }}</p>
+        <div class="mt-auto flex items-center justify-between gap-2 border-t border-line-soft pt-2.5 text-xs"><span class="mono text-faint">{{ p.fulfillment.updated_at ? fmtTime(p.fulfillment.updated_at) : '' }}</span><span class="shrink-0 font-medium text-brand-ink">查看进展 →</span></div>
         </div>
       </NuxtLink>
     </div>

@@ -270,7 +270,7 @@ class BilibiliCollector:
             if item.get("type") not in _RICH_DYNAMIC_TYPES:
                 continue
             forwarded = item.get("type") == "DYNAMIC_TYPE_FORWARD" and item.get("orig_id")
-            if item.get("pics") or ((item.get("text") or "").strip() and not forwarded):
+            if item.get("pics"):
                 continue
             dynamic_id = str((item.get("orig_id") if forwarded else item.get("id")) or "")
             if not dynamic_id:
