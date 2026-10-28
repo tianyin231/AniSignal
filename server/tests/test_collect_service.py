@@ -206,6 +206,28 @@ async def test_merch_collection_filters_foreign_game_and_preserves_official_iden
     assert raw.external_id == "merch-wuwa" and raw.community == "wuwa"
 
 
+async def test_verified_merch_source_updates_old_identity_even_if_all_posts_are_filtered(session, patched_collect, monkeypatch):
+    from app.models import Source
+    from tests.test_parsers_bilibili import DYNAMIC_RAW
+
+    source = Source(platform="bilibili", external_id="508103429", name="帕姆的收藏夹", identity="unknown")
+    session.add(source)
+    target = await _make_target(session)
+    target.target_type, target.target_value, target.tier, target.community = "account_dynamics", "508103429", "core", "hsr"
+    await session.commit()
+
+    async def fetch(*args):
+        return FetchResult(platform="bilibili", fetch_kind="bilibili_dynamics", items=[
+            dict(DYNAMIC_RAW, author_mid=508103429, text="#崩坏星穹铁道# 同人绘画展示，转发抽奖送角色立牌。")])
+
+    monkeypatch.setattr(_StubCollector, "fetch", fetch)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    await session.refresh(source)
+    run = await session.get(CollectRun, result["run_id"])
+    assert source.identity == "official"
+    assert run.items_fetched == 1 and run.items_filtered == 1 and run.items_new == 0
+
+
 async def test_run_collection_failure_updates_health(session, patched_collect):
     target = await _make_target(session)
     _StubCollector.fail = True
