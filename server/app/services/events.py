@@ -352,9 +352,10 @@ async def _backfill_facts(session: AsyncSession, stats: AggStats) -> None:
 
     rows = await session.execute(
         select(RawContent, Evidence)
+        # facts 只用日期、平台和数量；不读取原始 JSON，也不依赖证据顺序。
+        .options(defer(RawContent.raw_json))
         .join(Evidence, Evidence.raw_content_id == RawContent.id)
         .where(Evidence.event_id.in_([e.id for e in missing]))
-        .order_by(RawContent.published_at.asc())
     )
     evidences_by_event: dict[int, list[RawContent]] = {}
     for raw, evidence in rows:
