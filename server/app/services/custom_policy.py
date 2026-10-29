@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.clock import utcnow
 from app.collectors.base import CollectorDeferred
@@ -41,8 +41,8 @@ async def user_quota(session, user_id, *, lock=False):
 async def capacity(session):
     # 共享目标取订阅者要求的最短周期；人数不直接决定平台任务数。
     rows = (await session.execute(select(CustomFeed.platform, CustomFeed.kind, CustomFeed.target_value, CustomFeed.interval_minutes)
-        .join(User, User.id == CustomFeed.user_id).where(CustomFeed.enabled.is_(True), CustomFeed.status == "active",
-            User.status == "active", User.is_verified.is_(True)))).all()
+        .outerjoin(User, User.id == CustomFeed.user_id).where(CustomFeed.enabled.is_(True), CustomFeed.status == "active",
+            or_(CustomFeed.user_id.is_(None), (User.status == "active") & User.is_verified.is_(True))))).all()
     targets = {}
     for p, k, t, minutes in rows:
         key = (p, k, canonical_target(k, t))

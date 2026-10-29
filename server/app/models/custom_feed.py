@@ -33,11 +33,12 @@ class CustomFeed(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(
+    # 空所有者表示站点维护的公开信息源，不占个人名额，也不推送个人邮件。
+    user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", name="fk_custom_feeds_user_id_users", ondelete="CASCADE"),
     )
     name: Mapped[str] = mapped_column(String(64))
-    kind: Mapped[str] = mapped_column(String(16))  # uid / keyword
+    kind: Mapped[str] = mapped_column(String(16))  # uid / keyword；站点源支持 notices
     platform: Mapped[str] = mapped_column(String(16), default="bilibili")
     # uid 监控存 UID；关键词监控存关键词
     target_value: Mapped[str] = mapped_column(String(128))

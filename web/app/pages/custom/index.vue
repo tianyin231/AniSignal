@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { customKindLabel } from '~/utils/custom-feeds'
 useSeoMeta({ title: '定制化 · AniSignal' })
 
 interface CustomFeedCard {
@@ -7,6 +8,8 @@ interface CustomFeedCard {
   kind: string
   platform: string
   target_value: string
+  target_label: string
+  description: string
   item_count: number
   owner_name: string | null
   created_at: string
@@ -38,7 +41,6 @@ function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
 }
 
-const kindLabel = (kind: string) => (kind === 'uid' ? 'UID 监控' : '关键词监控')
 </script>
 
 <template>
@@ -62,12 +64,13 @@ const kindLabel = (kind: string) => (kind === 'uid' ? 'UID 监控' : '关键词�
         >
           <div class="flex items-center justify-between gap-2">
             <span class="chip whitespace-nowrap bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300">
-              {{ kindLabel(feed.kind) }}
+              {{ customKindLabel(feed.kind) }}
             </span>
             <span class="mono text-[11px] text-slate-400">{{ feed.item_count }} 条</span>
           </div>
           <h2 class="mt-2 truncate text-base font-bold text-ink">{{ feed.name }}</h2>
-          <p class="mt-1 truncate text-xs text-slate-500 dark:text-zinc-400">监控目标：{{ feed.target_value }}</p>
+          <p class="mt-1 truncate text-xs text-slate-500 dark:text-zinc-400">{{ feed.target_label || feed.target_value }}</p>
+          <p v-if="feed.description" class="mt-2 text-xs leading-relaxed text-muted">{{ feed.description }}</p>
           <p class="mt-1 truncate text-xs text-slate-400 dark:text-zinc-500">
             {{ feed.owner_name || '匿名' }} · 持续抓取中
           </p>

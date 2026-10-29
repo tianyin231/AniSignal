@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import to_naive_utc, utcnow
 from app.collectors.base import CollectorDeferred, platform_slot
 from app.collectors.bilibili import BilibiliCollector
+from app.collectors.nikke import NikkeCollector, parse_notice
+from app.custom_presets import CUSTOM_PRESETS
 from app.models import CustomFeed, CustomFeedItem, CustomFeedSource, CustomSourceItem, CustomCollectRun, NotificationDelivery, User
 from app.parsers.bilibili import parse_dynamic, parse_video
 from app.services.notifications import beijing_today
@@ -31,20 +33,27 @@ CUSTOM_PLATFORMS = {"bilibili"}
 def _collector(platform: str):
     if platform == "bilibili":
         return BilibiliCollector()
+    if platform == "game_official":
+        return NikkeCollector()
     raise ValueError(f"unsupported custom platform: {platform}")
 
 
 async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> list:
     """抓取并解析定制源；平台礼貌间隔与主采集共享同一个 Redis 槽。"""
     collector = _collector(source.platform)
-    if source.kind not in CUSTOM_KINDS:
+    is_official = source.platform == "game_official" and source.kind == "notices" and source.target_value in CUSTOM_PRESETS
+    if not is_official and (source.platform not in CUSTOM_PLATFORMS or source.kind not in CUSTOM_KINDS):
         raise ValueError(f"unsupported custom kind: {source.kind}")
     async def fetch():
         async with platform_slot(redis, source.platform, 5.0):
+            if is_official:
+                return await collector.fetch(source.kind, source.target_value, 30)
             if source.kind == "uid":
                 return await collector.user_dynamics(source.target_value, 20)
             return await collector.search_videos(source.target_value, 30)
     raw_items = await fetch_with_fallback(collector, session, source.platform, fetch)
+    if is_official:
+        return [parse_notice(item) for item in raw_items.items]
     parse = parse_dynamic if source.kind == "uid" else parse_video
     return [n for n in (parse(i) if i else None for i in raw_items) if n is not None]
 
@@ -99,6 +108,8 @@ async def distribute_custom_feed(session: AsyncSession, feed: CustomFeed) -> int
 
 async def push_custom_feed_digest(session: AsyncSession, feed: CustomFeed, new_count: int) -> bool:
     """新消息推送：每监控每天至多一封，正文列出最新几条标题。"""
+    if feed.user_id is None:
+        return False
     user = await session.get(User, feed.user_id, populate_existing=True)
     if user is None or user.status != "active" or not user.is_verified or not user.notification_enabled:
         return False
@@ -144,9 +155,11 @@ async def push_custom_feed_digest(session: AsyncSession, feed: CustomFeed, new_c
 
 
 def _active_feeds():
-    return select(CustomFeed).join(User, User.id == CustomFeed.user_id).where(
-        CustomFeed.enabled.is_(True), CustomFeed.status == "active", CustomFeed.platform == "bilibili",
-        User.status == "active", User.is_verified.is_(True))
+    return select(CustomFeed).outerjoin(User, User.id == CustomFeed.user_id).where(
+        CustomFeed.enabled.is_(True), CustomFeed.status == "active",
+        or_(CustomFeed.platform == "bilibili", (CustomFeed.platform == "game_official") &
+            (CustomFeed.kind == "notices") & CustomFeed.target_value.in_(CUSTOM_PRESETS)),
+        or_(CustomFeed.user_id.is_(None), (User.status == "active") & User.is_verified.is_(True)))
 
 
 async def _run_shared_source(session, redis, source_id, stats):
