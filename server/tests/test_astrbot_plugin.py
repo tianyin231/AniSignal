@@ -9,10 +9,12 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+import yaml
 
 
-@pytest.fixture
-def plugin(monkeypatch):
+@pytest.fixture(params=['integrations/astrbot_plugin_anisignal/main.py', 'main.py'],
+                ids=['standalone', 'repository'])
+def plugin(monkeypatch, request):
     class SavedConfig(dict):
         def save_config(self):
             self.saved = copy.deepcopy(dict(self))
@@ -67,7 +69,7 @@ def plugin(monkeypatch):
     module('astrbot.core.provider.entities', ProviderRequest=object)
     module('astrbot.core.message')
     module('astrbot.core.message.message_event_result', MessageChain=Chain)
-    path = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal/main.py'
+    path = Path(__file__).parents[2] / request.param
     spec = importlib.util.spec_from_file_location('plugin_under_test', path,
         submodule_search_locations=[str(path.parent)])
     mod = importlib.util.module_from_spec(spec)
@@ -175,6 +177,17 @@ def test_new_install_defaults_are_portable_and_mask_the_access_key():
     session=schema['targets']['templates']['session']['items']
     assert not {'ai_prompt','ai_provider_id'}.intersection(session['interaction']['items'])
     assert session['presentation']['items']['show_details_hint']['default'] is False
+
+
+def test_repository_install_manifests_match_standalone_plugin(plugin):
+    root = Path(__file__).parents[2]
+    standalone = root / 'integrations/astrbot_plugin_anisignal'
+    for filename in ['metadata.yaml', '_conf_schema.json']:
+        assert (root / filename).read_bytes() == (standalone / filename).read_bytes(), \
+            f'修改插件设置或元数据后，需要同步根目录的 {filename}'
+    metadata = yaml.safe_load((root / 'metadata.yaml').read_text(encoding='utf-8'))
+    assert metadata['version'] == 'v' + sys.modules[plugin.__class__.__module__].VERSION
+    assert metadata['repo'] == 'https://github.com/tianyin231/AniSignal'
 
 
 def test_legacy_cleanup_keeps_connection_and_session_configuration(plugin):

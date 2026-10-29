@@ -6,8 +6,8 @@
 
 ## 快速接入
 
-1. 将本目录完整复制到 AstrBot 的 `data/plugins/astrbot_plugin_anisignal/`。保留 `main.py`、`configuration.py`、`notification_template.py`、`card.py`、`_conf_schema.json`、`metadata.yaml` 和 `requirements.txt`。
-2. 在 AstrBot 使用的 Python 环境安装依赖，然后在插件管理中加载或重载插件：
+1. 在 AstrBot 的「插件管理 → 安装插件 → 从链接安装」中填写 `https://github.com/tianyin231/AniSignal`，点击安装。仓库根目录已提供插件入口、元数据、设置和依赖声明，AstrBot 会自动安装依赖。后续更新继续使用同一仓库。
+2. 也可手动将本目录完整复制到 AstrBot 的 `data/plugins/astrbot_plugin_anisignal/`。保留 `main.py`、`configuration.py`、`notification_template.py`、`card.py`、`_conf_schema.json`、`metadata.yaml` 和 `requirements.txt`，安装依赖后在插件管理中加载或重载：
 
    ```bash
    # 在 AstrBot 项目目录执行
