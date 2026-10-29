@@ -1,0 +1,492 @@
+{
+  "base_url": {
+    "description": "AniSignal 服务地址",
+    "type": "string",
+    "default": "http://anisignal.xyz"
+  },
+  "tools_key": {
+    "description": "AniSignal 专用插件密钥",
+    "type": "string",
+    "default": "",
+    "hint": "在 AniSignal 管理端的机器人接入中获取；每个 AstrBot 实例使用自己的密钥，不要填写管理员 Token。",
+    "secret": true
+  },
+  "targets": {
+    "description": "会话订阅",
+    "type": "template_list",
+    "default": [],
+    "hint": "每个群聊或私聊单独配置。保存后自动同步，移除的会话会暂停，历史投递记录保留。",
+    "templates": {
+      "session": {
+        "name": "群聊或私聊",
+        "display_item": "name",
+        "items": {
+          "name": {
+            "description": "会话名称",
+            "type": "string",
+            "default": ""
+          },
+          "umo": {
+            "description": "会话标识（UMO）",
+            "type": "string",
+            "default": "",
+            "hint": "在目标群聊或私聊发送 /情报会话，复制完整会话标识；支持 AstrBot 的不同消息平台。"
+          },
+          "enabled": {
+            "description": "启用此会话的推送与查询",
+            "type": "bool",
+            "default": false
+          },
+          "subscription": {
+            "description": "订阅范围",
+            "type": "object",
+            "items": {
+              "channels": {
+                "description": "订阅频道",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "wuwa:official:bilibili",
+                  "wuwa:official:youtube",
+                  "wuwa:official:x",
+                  "wuwa:official:web",
+                  "wuwa:official:miyoushe",
+                  "wuwa:community:bilibili",
+                  "wuwa:community:youtube",
+                  "wuwa:community:x",
+                  "wuwa:community:web",
+                  "wuwa:community:miyoushe",
+                  "wuwa:product",
+                  "blhx:official:bilibili",
+                  "blhx:official:youtube",
+                  "blhx:official:x",
+                  "blhx:official:web",
+                  "blhx:official:miyoushe",
+                  "blhx:community:bilibili",
+                  "blhx:community:youtube",
+                  "blhx:community:x",
+                  "blhx:community:web",
+                  "blhx:community:miyoushe",
+                  "blhx:product",
+                  "hsr:official:bilibili",
+                  "hsr:official:youtube",
+                  "hsr:official:x",
+                  "hsr:official:web",
+                  "hsr:official:miyoushe",
+                  "hsr:community:bilibili",
+                  "hsr:community:youtube",
+                  "hsr:community:x",
+                  "hsr:community:web",
+                  "hsr:community:miyoushe",
+                  "hsr:product",
+                  "arknights:official:bilibili",
+                  "arknights:official:youtube",
+                  "arknights:official:x",
+                  "arknights:official:web",
+                  "arknights:official:miyoushe",
+                  "arknights:community:bilibili",
+                  "arknights:community:youtube",
+                  "arknights:community:x",
+                  "arknights:community:web",
+                  "arknights:community:miyoushe",
+                  "arknights:product",
+                  "genshin:official:bilibili",
+                  "genshin:official:youtube",
+                  "genshin:official:x",
+                  "genshin:official:web",
+                  "genshin:official:miyoushe",
+                  "genshin:community:bilibili",
+                  "genshin:community:youtube",
+                  "genshin:community:x",
+                  "genshin:community:web",
+                  "genshin:community:miyoushe",
+                  "genshin:product",
+                  "endfield:official:bilibili",
+                  "endfield:official:youtube",
+                  "endfield:official:x",
+                  "endfield:official:web",
+                  "endfield:official:miyoushe",
+                  "endfield:community:bilibili",
+                  "endfield:community:youtube",
+                  "endfield:community:x",
+                  "endfield:community:web",
+                  "endfield:community:miyoushe",
+                  "endfield:product",
+                  "ai:news"
+                ],
+                "labels": [
+                  "鸣潮_官方_B",
+                  "鸣潮_官方_YB",
+                  "鸣潮_官方_X",
+                  "鸣潮_官方_官网",
+                  "鸣潮_官方_米游社",
+                  "鸣潮_社区_B",
+                  "鸣潮_社区_YB",
+                  "鸣潮_社区_X",
+                  "鸣潮_社区_官网",
+                  "鸣潮_社区_米游社",
+                  "鸣潮_商品",
+                  "碧蓝航线_官方_B",
+                  "碧蓝航线_官方_YB",
+                  "碧蓝航线_官方_X",
+                  "碧蓝航线_官方_官网",
+                  "碧蓝航线_官方_米游社",
+                  "碧蓝航线_社区_B",
+                  "碧蓝航线_社区_YB",
+                  "碧蓝航线_社区_X",
+                  "碧蓝航线_社区_官网",
+                  "碧蓝航线_社区_米游社",
+                  "碧蓝航线_商品",
+                  "崩坏星穹铁道_官方_B",
+                  "崩坏星穹铁道_官方_YB",
+                  "崩坏星穹铁道_官方_X",
+                  "崩坏星穹铁道_官方_官网",
+                  "崩坏星穹铁道_官方_米游社",
+                  "崩坏星穹铁道_社区_B",
+                  "崩坏星穹铁道_社区_YB",
+                  "崩坏星穹铁道_社区_X",
+                  "崩坏星穹铁道_社区_官网",
+                  "崩坏星穹铁道_社区_米游社",
+                  "崩坏星穹铁道_商品",
+                  "明日方舟_官方_B",
+                  "明日方舟_官方_YB",
+                  "明日方舟_官方_X",
+                  "明日方舟_官方_官网",
+                  "明日方舟_官方_米游社",
+                  "明日方舟_社区_B",
+                  "明日方舟_社区_YB",
+                  "明日方舟_社区_X",
+                  "明日方舟_社区_官网",
+                  "明日方舟_社区_米游社",
+                  "明日方舟_商品",
+                  "原神_官方_B",
+                  "原神_官方_YB",
+                  "原神_官方_X",
+                  "原神_官方_官网",
+                  "原神_官方_米游社",
+                  "原神_社区_B",
+                  "原神_社区_YB",
+                  "原神_社区_X",
+                  "原神_社区_官网",
+                  "原神_社区_米游社",
+                  "原神_商品",
+                  "终末地_官方_B",
+                  "终末地_官方_YB",
+                  "终末地_官方_X",
+                  "终末地_官方_官网",
+                  "终末地_官方_米游社",
+                  "终末地_社区_B",
+                  "终末地_社区_YB",
+                  "终末地_社区_X",
+                  "终末地_社区_官网",
+                  "终末地_社区_米游社",
+                  "终末地_商品",
+                  "AI_快讯"
+                ],
+                "hint": "可多选；选定后按频道订阅。留空沿用下方分区；商品频道包含公告与已采纳履约变化。"
+              },
+              "communities": {
+                "description": "订阅分区",
+                "type": "list",
+                "default": [
+                  "wuwa",
+                  "blhx",
+                  "hsr",
+                  "arknights",
+                  "genshin",
+                  "endfield",
+                  "ai"
+                ],
+                "options": [
+                  "wuwa",
+                  "blhx",
+                  "hsr",
+                  "arknights",
+                  "genshin",
+                  "endfield",
+                  "ai"
+                ],
+                "labels": [
+                  "鸣潮",
+                  "碧蓝航线",
+                  "崩坏星穹铁道",
+                  "明日方舟",
+                  "原神",
+                  "终末地",
+                  "AI"
+                ]
+              },
+              "keywords": {
+                "description": "关注关键词",
+                "type": "list",
+                "default": [],
+                "hint": "留空关注所选分区的全部情报，最多 20 个关键词。"
+              }
+            }
+          },
+          "notifications": {
+            "description": "自动通知与免打扰",
+            "type": "object",
+            "items": {
+              "daily_enabled": {
+                "description": "每日早报",
+                "type": "bool",
+                "default": true
+              },
+              "daily_time": {
+                "description": "早报时间（北京时间）",
+                "type": "string",
+                "default": "08:00",
+                "hint": "使用 HH:mm，例如 08:00。"
+              },
+              "updates_enabled": {
+                "description": "推送重要动态",
+                "type": "bool",
+                "default": false
+              },
+              "calendar_enabled": {
+                "description": "活动收尾提醒",
+                "type": "bool",
+                "default": true,
+                "hint": "需同时开启动态推送；汇总未来 24 小时的活动截止和维护，每天最多一条。"
+              },
+              "calendar_time": {
+                "description": "收尾提醒时间（北京时间）",
+                "type": "string",
+                "default": "20:00"
+              },
+              "quiet_start": {
+                "description": "免打扰开始小时",
+                "type": "int",
+                "default": 23,
+                "slider": {
+                  "min": 0,
+                  "max": 23,
+                  "step": 1
+                }
+              },
+              "quiet_end": {
+                "description": "免打扰结束小时",
+                "type": "int",
+                "default": 8,
+                "slider": {
+                  "min": 0,
+                  "max": 23,
+                  "step": 1
+                },
+                "hint": "开始与结束相同则关闭免打扰。"
+              },
+              "quiet_critical": {
+                "description": "允许关键动态穿透免打扰",
+                "type": "bool",
+                "default": false
+              },
+              "merge_minutes": {
+                "description": "普通动态合并窗口（分钟）",
+                "type": "int",
+                "default": 0,
+                "slider": {
+                  "min": 0,
+                  "max": 60,
+                  "step": 1
+                }
+              },
+              "hourly_limit": {
+                "description": "每小时自动消息上限",
+                "type": "int",
+                "default": 2,
+                "slider": {
+                  "min": 0,
+                  "max": 50,
+                  "step": 1
+                },
+                "hint": "0 为不限；不影响你主动设置的定时提醒。"
+              },
+              "min_push_interval_minutes": {
+                "description": "自动消息最小间隔（分钟）",
+                "type": "int",
+                "default": 20,
+                "slider": {
+                  "min": 0,
+                  "max": 120,
+                  "step": 1
+                }
+              },
+              "daily_style": {
+                "description": "早报发送方式",
+                "type": "string",
+                "default": "compact",
+                "options": [
+                  "compact",
+                  "split"
+                ],
+                "labels": [
+                  "合并为一条早报",
+                  "总览与重点分条"
+                ],
+                "hint": "只控制早报合并发送或拆条发送，不改变人格、回复风格或其他提醒。"
+              },
+              "max_images": {
+                "description": "单次最多附图",
+                "type": "int",
+                "default": 1,
+                "slider": {
+                  "min": 1,
+                  "max": 9,
+                  "step": 1
+                },
+                "hint": "早报卡片占一张，其余为来源图片。"
+              }
+            }
+          },
+          "presentation": {
+            "description": "回复与通知呈现",
+            "type": "object",
+            "items": {
+              "reply_mode": {
+                "description": "主动查询回复方式",
+                "type": "string",
+                "default": "bot",
+                "options": [
+                  "bot",
+                  "text",
+                  "card"
+                ],
+                "labels": [
+                  "跟随 AstrBot 当前会话",
+                  "原始资料文字",
+                  "原始情报卡（早报）"
+                ],
+                "hint": "默认走 AstrBot 原生回复流程，继承当前会话人格、模型及输出插件；帮助和操作确认保留准确文案。"
+              },
+              "notification_style": {
+                "description": "主动通知的引导语",
+                "type": "string",
+                "default": "persona",
+                "options": [
+                  "persona",
+                  "original"
+                ],
+                "labels": [
+                  "跟随 AstrBot 当前会话人格",
+                  "直接发送原文"
+                ],
+                "hint": "适用于早报、动态、日历及定时提醒；人格引导语会附在已核验正文旁，生成失败时照常发送正文。"
+              },
+              "notification_format": {
+                "description": "主动通知的展示格式",
+                "type": "string",
+                "default": "card",
+                "options": [
+                  "card",
+                  "text"
+                ],
+                "labels": [
+                  "早报使用情报卡",
+                  "使用文字"
+                ],
+                "hint": "总模板包含 {body} 时，早报可使用情报卡，其他通知使用文字。改用拆分字段后严格按模板组装，图片由 {images} 控制。"
+              },
+              "instructions": {
+                "description": "情报排版与详略补充",
+                "type": "text",
+                "default": "",
+                "hint": "可填写分段、列表、篇幅、语言等要求；留空遵循 AstrBot 人格原有习惯。仅用于情报回复与通知引导语，不覆盖人格，不影响普通聊天。"
+              },
+              "notification_provider_id": {
+                "description": "主动通知模型（可选）",
+                "type": "string",
+                "default": "",
+                "_special": "select_provider",
+                "hint": "留空跟随当前会话模型。仅用于通知引导语；主动查询和日常聊天始终使用 AstrBot 原有模型。"
+              },
+              "notification_template": {
+                "description": "通知消息模板",
+                "type": "text",
+                "default": "{intro}\n\n{body}",
+                "hint": "可用：{intro} 当前人格引导语、{body} 已核验摘要正文、{title} 标题、{summary} 摘要、{content} 原文快照、{time} 来源发布时间（北京时间）、{source} 来源、{url} 原文链接、{images} 实际图片、{image_urls} 图片链接、{items} 逐条内容、{schedule} 活动名称及截止/维护时间、{details_hint} 展开提示。严格按模板选择内容；省略 {intro} 不调用通知模型。拆分字段模式不额外附卡片或封面。缺失字段留空，发布时间与活动截止时间分开。"
+              },
+              "notification_item_template": {
+                "description": "每条内容模板",
+                "type": "text",
+                "default": "{index}. {title}\n{summary}\n发布时间：{time}\n来源：{source}\n{url}\n{images}",
+                "hint": "总模板使用 {items} 时，逐条套用此模板。支持 {index} 序号、{title}、{summary}、{content}（或 {original}）、{time}、{source}、{url}、{images}、{image_urls}、{schedule}；图片遵守整条通知的上限，同一图片只发送一次。"
+              },
+              "show_details_hint": {
+                "description": "压缩内容时显示展开入口",
+                "type": "bool",
+                "default": false,
+                "hint": "默认关闭。开启后，摘要省略原文或日程清单未列全时显示 /展开 提示；完整短清单不显示。卡片与文字共用此开关，自定义拆分模板用 {details_hint} 决定位置。"
+              }
+            }
+          },
+          "interaction": {
+            "description": "问答与会话权限",
+            "type": "object",
+            "items": {
+              "tools": {
+                "description": "允许使用的情报工具",
+                "type": "list",
+                "default": [
+                  "digest",
+                  "news",
+                  "products"
+                ],
+                "options": [
+                  "digest",
+                  "news",
+                  "products",
+                  "trending",
+                  "calendar",
+                  "codes"
+                ],
+                "labels": [
+                  "今日速报",
+                  "资讯查询",
+                  "商品进展",
+                  "热度飙升",
+                  "活动日历",
+                  "兑换码"
+                ]
+              },
+              "chat_controls": {
+                "description": "允许聊天修改订阅",
+                "type": "bool",
+                "default": false
+              },
+              "manager_ids": {
+                "description": "可修改全群订阅的用户标识",
+                "type": "list",
+                "default": [],
+                "hint": "在群内发送 /情报会话 获取管理标识；私聊只作用于当前会话。"
+              },
+              "reminders_enabled": {
+                "description": "允许创建定时提醒",
+                "type": "bool",
+                "default": false
+              },
+              "activities_enabled": {
+                "description": "开启聊点什么与情报挑战",
+                "type": "bool",
+                "default": false,
+                "hint": "需同时启用今日速报工具。"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "configuration_imported": {
+    "description": "已有会话配置已导入",
+    "type": "bool",
+    "default": false,
+    "invisible": true
+  },
+  "card_font_path": {
+    "description": "早报卡片中文字体路径",
+    "type": "string",
+    "default": "",
+    "hint": "留空使用已部署的 Noto Sans CJK 字体；字体不可用时发送短文字。"
+  }
+}

@@ -73,6 +73,16 @@ docker compose ps
 
 本地开发使用 SQLite 与进程内队列，步骤见[部署指南](docs/deployment.md)。本地模式不等于完整部署。
 
+## AstrBot 插件
+
+在 AstrBot 的「插件管理 → 安装插件 → 从链接安装」中填写：
+
+```text
+https://github.com/tianyin231/AniSignal
+```
+
+安装后填写 AniSignal 服务地址和插件专用密钥，再配置会话订阅。需要 AstrBot 4.28.2 或以上；具体设置见[插件使用说明](integrations/astrbot_plugin_anisignal/README.md)。
+
 ## 来源与运行方式
 
 | 来源 | 已实现的接入方式 |
