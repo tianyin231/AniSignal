@@ -441,7 +441,7 @@ def notification_topic(item: dict) -> str | None:
 
 def item_was_notified(item: dict, known: set[str]) -> bool:
     return (item.get("dedupe") in known or (not item.get("is_followup") and (
-            (item.get("topic_key") or notification_topic(item)) in known
+            item.get("topic_key") in known or notification_topic(item) in known
             or (item.get("event_id") and f"legacy-event:{item['event_id']}" in known))))
 
 

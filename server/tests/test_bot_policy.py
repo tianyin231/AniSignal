@@ -582,6 +582,18 @@ async def test_original_and_reposts_collected_together_only_enqueue_once(session
     assert rows[0].brief['items'][0]['sources'][0]['repost_key'].endswith('1264580967053393942')
 
 
+async def test_repost_link_keeps_existing_cross_platform_title_deduplication(session, bili_reposts):
+    now, items = bili_reposts
+    row = await target(session, now)
+    video = {**items[0], 'id': 99999, 'platform': 'youtube', 'content_type': 'video'}
+    old = await bot.create_delivery(session, row, 'updates', '视频消息', 'old-video', brief=bot.single_item_brief(video))
+    old.status = 'pending'
+    await session.commit()
+    known = await bot.known_notification_keys(session, row.id, now)
+    linked = await bot._with_repost_keys(session, [items[0]])
+    assert bot.item_was_notified(await bot.identify_item(session, linked[0]), known)
+
+
 async def test_repost_with_new_price_still_reports_only_the_change_in_same_group(session, bili_reposts):
     now, items = bili_reposts
     row = await target(session, now)
