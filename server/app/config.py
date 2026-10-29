@@ -70,11 +70,12 @@ class Settings(BaseSettings):
         "UC2PeMPA8PAOp-bynLoCeMLA:Honkai Star Rail 官方频道,"
         "UCR0J2NYGuC8epsa1O4DMmXQ:Arknights Official,"
         "UCiS882YPwZt1NfaM0gR0D9Q:Genshin Impact 官方频道,"
-        "UCowPaVRBzg8CE6K4CB6LJfw:Arknights Endfield 官方频道"
+        "UCowPaVRBzg8CE6K4CB6LJfw:Arknights Endfield 官方频道,"
+        "UCmmgZwsqQRD6PKeo87uq1bA:NIKKE 国际服官方频道"
     )
 
     # 只有已核对的组织账号标为官方；开发者个人账号保持用户身份。
-    official_x_accounts: str = "openai:OpenAI,deepseek_ai:DeepSeek,genshinimpact:原神官方,akendfield:终末地官方"
+    official_x_accounts: str = "openai:OpenAI,deepseek_ai:DeepSeek,genshinimpact:原神官方,akendfield:终末地官方,nikke_en:NIKKE 国际服官方"
 
     # 米游社默认游戏 ID（2 = 原神），管理员看板可按目标覆盖
     miyoushe_default_gids: int = 2

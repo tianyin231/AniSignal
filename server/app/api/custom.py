@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
-from app.custom_presets import CUSTOM_PRESETS
+from app.custom_presets import custom_preset
 from app.models import CustomFeed, CustomFeedItem, User
 from app.services.auth import get_user_by_token
 from app.services.urls import safe_link, safe_media_url
@@ -35,7 +35,7 @@ async def _optional_user(request: Request, session: AsyncSession) -> User | None
 
 
 def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None = None) -> dict:
-    preset = CUSTOM_PRESETS.get(feed.target_value, {}) if feed.user_id is None and feed.platform == "game_official" else {}
+    preset = custom_preset(feed.platform, feed.kind, feed.target_value) if feed.user_id is None else {}
     return {
         "id": feed.id,
         "name": feed.name,
@@ -153,6 +153,7 @@ async def feed_detail(
                 "author_name": item.author_name,
                 "view": item.view,
                 "content_type": item.content_type,
+                "platform": item.platform,
                 "published_at": item.published_at,
             }
             for item in items
