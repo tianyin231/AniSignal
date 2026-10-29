@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { fmtTime } from '~/utils/admin-types'
+import { customKindLabel } from '~/utils/custom-feeds'
 
 useSeoMeta({ title: '定制监控 · AniSignal' })
 
@@ -19,6 +20,9 @@ interface CustomFeedDetail {
   kind: string
   platform: string
   target_value: string
+  target_label: string
+  description: string
+  source_url: string | null
   min_views: number
   is_public: boolean
   owner_name: string | null
@@ -67,41 +71,43 @@ const goPage = (value: number) => router.replace({ query: { ...route.query, page
         <div class="min-w-0">
           <h1 class="truncate text-2xl font-bold text-ink">{{ data.name }}</h1>
           <p class="mt-0.5 truncate text-xs text-slate-400 dark:text-zinc-500">
-            {{ data.kind === 'uid' ? 'UID 监控' : '关键词监控' }} · {{ data.target_value }}
+            {{ customKindLabel(data.kind) }} · {{ data.target_label || data.target_value }}
             <template v-if="data.min_views > 0"> · 播放量 ≥ {{ data.min_views.toLocaleString('zh-CN') }}</template>
             · {{ data.owner_name || '匿名' }}
           </p>
         </div>
         <div class="flex items-center gap-3 text-xs">
           <span class="mono text-slate-400">{{ data.total }} 条</span>
+          <a v-if="data.source_url" :href="data.source_url" target="_blank" rel="noopener" class="link">官网原文</a>
           <NuxtLink v-if="data.is_owner" to="/account#custom-monitors" class="link">管理监控</NuxtLink>
         </div>
       </div>
+      <p v-if="data.description" class="mb-4 text-sm leading-relaxed text-muted">{{ data.description }}</p>
 
       <section class="panel overflow-hidden">
         <article
           v-for="item in data.items"
           :key="item.id"
-          class="flex items-center gap-3 border-b border-slate-900/5 px-4 py-3 last:border-0 dark:border-white/5"
+          class="flex flex-wrap items-center gap-3 border-b border-slate-900/5 px-4 py-3 last:border-0 dark:border-white/5"
         >
           <span
             class="grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-bold text-white"
-            :class="item.content_type === 'dynamic' ? 'bg-sky-500' : 'bg-pink-500'"
-          >{{ item.content_type === 'dynamic' ? '动' : 'B' }}</span>
+            :class="item.content_type === 'notice' ? 'bg-blue-600' : item.content_type === 'dynamic' ? 'bg-sky-500' : 'bg-pink-500'"
+          >{{ item.content_type === 'notice' ? '官' : item.content_type === 'dynamic' ? '动' : 'B' }}</span>
           <div class="min-w-0 flex-1">
             <a
               v-if="item.url"
               :href="item.url"
               target="_blank"
               rel="noopener"
-              class="block truncate text-[14px] text-slate-800 hover:text-blue-700 dark:text-zinc-200 dark:hover:text-blue-300"
+              class="line-clamp-2 text-[14px] text-slate-800 hover:text-blue-700 dark:text-zinc-200 dark:hover:text-blue-300"
             >{{ item.title || item.url }}</a>
             <span v-else class="block truncate text-[14px] text-slate-800 dark:text-zinc-200">{{ item.title }}</span>
             <p class="mt-0.5 truncate text-xs text-slate-400 dark:text-zinc-500">
-              {{ item.author_name || '—' }}<template v-if="item.view"> · {{ item.view.toLocaleString('zh-CN') }} 播放</template>
+              {{ item.author_name || '—' }}<template v-if="item.view"> · {{ item.view.toLocaleString('zh-CN') }} {{ item.content_type === 'notice' ? '阅读' : '播放' }}</template>
             </p>
           </div>
-          <span class="mono shrink-0 text-xs text-slate-400">{{ fmtTime(item.published_at) }}</span>
+          <span class="mono ml-8 w-full shrink-0 text-xs text-slate-400 sm:ml-0 sm:w-auto">{{ fmtTime(item.published_at) }}</span>
         </article>
         <p v-if="!data.items.length" class="px-4 py-10 text-center text-sm text-slate-400">
           {{ data.total ? '这一页没有内容，请返回上一页。' : data.status !== 'active' ? '该监控已被管理员停用。' : data.enabled ? '还没有抓到内容，监控会在后台持续抓取。' : '监控已暂停，恢复后会继续抓取。' }}

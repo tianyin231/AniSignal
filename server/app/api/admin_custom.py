@@ -77,7 +77,7 @@ async def _feed_or_404(session: AsyncSession, feed_id: int) -> CustomFeed:
 @router.get("")
 async def list_custom_feeds(
     q: str = Query(default="", max_length=120, description="监控名/目标/用户邮箱搜索"),
-    kind: str = Query(default="", pattern="^(|uid|keyword)$"),
+    kind: str = Query(default="", pattern="^(|uid|keyword|notices)$"),
     feed_status: str = Query(default="", pattern="^(|active|disabled)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
@@ -100,11 +100,11 @@ async def list_custom_feeds(
         .subquery()
     )
     total = await session.scalar(
-        select(func.count(CustomFeed.id)).join(User, User.id == CustomFeed.user_id).where(*conditions)
+        select(func.count(CustomFeed.id)).outerjoin(User, User.id == CustomFeed.user_id).where(*conditions)
     ) or 0
     rows = await session.execute(
         select(CustomFeed, User.email, User.display_name, func.coalesce(item_count_sq.c.cnt, 0))
-        .join(User, User.id == CustomFeed.user_id)
+        .outerjoin(User, User.id == CustomFeed.user_id)
         .outerjoin(item_count_sq, item_count_sq.c.feed_id == CustomFeed.id)
         .where(*conditions)
         .order_by(CustomFeed.id.desc())

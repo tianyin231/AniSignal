@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
+from app.custom_presets import CUSTOM_PRESETS
 from app.models import CustomFeed, CustomFeedItem, User
 from app.services.auth import get_user_by_token
 from app.services.urls import safe_link, safe_media_url
@@ -34,6 +35,7 @@ async def _optional_user(request: Request, session: AsyncSession) -> User | None
 
 
 def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None = None) -> dict:
+    preset = CUSTOM_PRESETS.get(feed.target_value, {}) if feed.user_id is None and feed.platform == "game_official" else {}
     return {
         "id": feed.id,
         "name": feed.name,
@@ -45,7 +47,11 @@ def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None =
         "is_public": feed.is_public,
         "enabled": feed.enabled,
         "status": feed.status,
-        "owner_name": owner_name,
+        "owner_name": owner_name if feed.user_id is not None else "AniSignal · 站点维护",
+        "site_managed": feed.user_id is None,
+        "target_label": preset.get("target_label", feed.target_value),
+        "description": preset.get("description", ""),
+        "source_url": preset.get("source_url"),
         "item_count": item_count,
         "created_at": feed.created_at,
     }
@@ -80,7 +86,7 @@ async def public_feeds(
     )
     rows = await session.execute(
         select(CustomFeed, User.display_name, func.coalesce(item_count_sq.c.cnt, 0), latest_sq.c.latest)
-        .join(User, User.id == CustomFeed.user_id)
+        .outerjoin(User, User.id == CustomFeed.user_id)
         .outerjoin(item_count_sq, item_count_sq.c.feed_id == CustomFeed.id)
         .outerjoin(latest_sq, latest_sq.c.feed_id == CustomFeed.id)
         .where(*feed_scope)

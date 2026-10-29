@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { fmtTime } from '~/utils/admin-types'
+import { customKindLabel } from '~/utils/custom-feeds'
 import { Search } from 'lucide-vue-next'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
@@ -19,11 +20,11 @@ interface CustomFeedAdminRow {
   is_public: boolean
   enabled: boolean
   status: string
-  owner_email: string
+  owner_email: string | null
   owner_name: string | null
   item_count: number
   created_at: string
-  user_id: number
+  user_id: number | null
   source_id: number | null
   interval_minutes: number
 }
@@ -241,6 +242,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <option value="">全部类型</option>
           <option value="uid">UID 监控</option>
           <option value="keyword">关键词监控</option>
+          <option value="notices">官方公告</option>
         </select>
         <select
           v-model="statusFilter"
@@ -282,10 +284,10 @@ async function removeFeed(feed: CustomFeedAdminRow) {
                 <span class="ml-1 text-xs text-faint">{{ f.interval_minutes }} 分钟/次 · 共享源 #{{ f.source_id || '待绑定' }}</span>
                 <span v-if="f.min_views > 0" class="mono ml-1 text-[11px] text-faint">≥{{ f.min_views }} 播放</span>
               </td>
-              <td class="px-3 py-2.5 text-muted">{{ f.kind === 'uid' ? 'UID' : '关键词' }}</td>
+              <td class="px-3 py-2.5 text-muted">{{ customKindLabel(f.kind) }}</td>
               <td class="px-3 py-2.5">
-                <span class="text-ink-2">{{ f.owner_email }}</span>
-                <span class="ml-1 text-xs text-faint">用户 #{{ f.user_id }}</span>
+                <span class="text-ink-2">{{ f.owner_email || '站点维护' }}</span>
+                <span v-if="f.user_id" class="ml-1 text-xs text-faint">用户 #{{ f.user_id }}</span>
                 <span v-if="f.owner_name" class="ml-1 text-xs text-faint">{{ f.owner_name }}</span>
               </td>
               <td class="mono px-3 py-2.5 text-muted">{{ f.item_count }}</td>
