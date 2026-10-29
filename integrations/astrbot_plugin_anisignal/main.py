@@ -21,7 +21,7 @@ from .configuration import apply_subscription, cleanup_legacy_configuration, to_
 from .notification_template import details_hint, render_notification
 
 
-VERSION = "1.9.2"
+VERSION = "1.9.3"
 
 
 def _strip_meme_control_blocks(text: str) -> str:

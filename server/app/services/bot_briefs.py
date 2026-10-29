@@ -258,6 +258,7 @@ def _source(item: dict) -> dict:
         "is_supplement": bool(item.get("is_supplement")),
         **({"notification_channels": item["notification_channels"]} if item.get("notification_channels") is not None else {}),
         **({"fulfillment_revision": item["fulfillment_revision"]} if item.get("fulfillment_revision") else {}),
+        **({"custom_feed": item["custom_feed"]} if item.get("custom_feed") else {}),
         **({"news": item["news"]} if item.get("news") else {}),
     }
 
@@ -532,7 +533,10 @@ async def build_shared_brief(session, items: list[dict], now=None, *, mode="upda
     selected = []
     for item in items:
         source = _source(item)
-        if source.get("fulfillment_revision"):
+        if source.get("custom_feed"):
+            # 定制官号直接保留原文；复用模板和投递限流，不为新增频道调用摘要模型。
+            edited = [{**source, "summary": _complete_text(source["text"], 240), "sources": [source]}]
+        elif source.get("fulfillment_revision"):
             edited = [{**source, "summary": source["text"], "sources": [source]}]
         elif source["is_followup"]:
             # 本群续报只取可确认的新增事实，不套用完整公告或重新调用编辑模型。

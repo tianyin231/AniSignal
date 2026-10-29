@@ -20,7 +20,7 @@ from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 from app.services.bot_calendar import calendar_brief, upcoming_entries, refresh_calendar, scheduled_at, normalized_title
 from app.services.bot_policy import reserve_delivery
-from app.services import bot_channels
+from app.services import bot_channels, bot_custom
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +128,8 @@ def subscribed_communities(target: BotTarget) -> list[str]:
 
 
 def matches_target_scope(target: BotTarget, item: dict) -> bool:
+    if item.get("custom_feed"):
+        return bot_custom.matches_scope(target, item)
     if target.config.get("channels"):
         sources = item.get("sources") or [item]
         selected = set(target.config["channels"])
@@ -156,6 +158,7 @@ async def load_target_candidates(session, target, keywords, start_at, end_at, *,
         # 同一公告同时形成履约修订时只保留状态变化，避免官方频道和商品频道各发一次。
         covered = {cid for item in revisions for cid in item["fulfillment_evidence_ids"]}
         candidates = [item for item in candidates if item["id"] not in covered] + revisions
+    candidates += await bot_custom.candidates(session, target, keywords, start_at, end_at, collected_after=collected_after)
     return candidates
 
 
@@ -279,9 +282,9 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
             candidates = [c for c in candidates if query.casefold() in (c["title"] + c["text"]).casefold()]
         candidates = [c for c in candidates if matches_target_scope(target, c)]
         candidates = [c for c in candidates if c["strength"] == "strong"]
-        items = await group_candidates(session, [item for item in candidates if not item.get("news") and not item.get("fulfillment_revision")],
+        items = await group_candidates(session, [item for item in candidates if not item.get("news") and not item.get("fulfillment_revision") and not item.get("custom_feed")],
                                        use_event_summary=not bool(config.get("channels")))
-        items += [item for item in candidates if item.get("news") or item.get("fulfillment_revision")]
+        items += [item for item in candidates if item.get("news") or item.get("fulfillment_revision") or item.get("custom_feed")]
         if collected_after:
             community_channels = {key for key in config.get("channels", []) if ":community:" in key}
             items = [i for i in items if is_recent_item(i, now) and (
@@ -584,10 +587,11 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     from app.services.bot_products import valid_item
     verified_items = []
     for item in usable:
-        revisions = [source for source in (item.get("sources") or [item]) if source.get("fulfillment_revision")]
+        revisions = [source for source in (item.get("sources") or [item]) if source.get("fulfillment_revision") or source.get("custom_feed")]
         valid = True
         for source in revisions:
-            if not await valid_item(session, source):
+            check = bot_custom.valid_item if source.get("custom_feed") else valid_item
+            if not await check(session, source):
                 valid = False
                 break
         if valid:

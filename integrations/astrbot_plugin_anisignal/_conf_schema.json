@@ -221,6 +221,21 @@
                 "type": "list",
                 "default": [],
                 "hint": "留空关注所选分区的全部情报，最多 20 个关键词。"
+              },
+              "custom_feeds": {
+                "description": "定制信息源",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "nikke_global",
+                  "nikke_youtube",
+                  "nikke_x"
+                ],
+                "labels": [
+                  "NIKKE 国际服_官方_官网",
+                  "NIKKE 国际服_官方_YB",
+                  "NIKKE 国际服_官方_X"
+                ]
               }
             }
           },

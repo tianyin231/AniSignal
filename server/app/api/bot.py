@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_admin
 from app.clock import utcnow
 from app.communities import COMMUNITIES, community_query_pattern
+from app.custom_presets import CUSTOM_PRESETS
 from app.db import get_session
 from app.models import BotDelivery, BotReminder, BotTarget
 from app.services import bot
@@ -30,6 +31,7 @@ class TargetBody(BaseModel):
     community: str = Field(default="all", pattern=community_query_pattern())
     communities: list[str] | None = Field(default=None, max_length=len(COMMUNITIES))
     channels: list[str] = Field(default_factory=list, max_length=200)
+    custom_feeds: list[str] = Field(default_factory=list, max_length=30)
     keywords: list[str] = Field(default_factory=list, max_length=20)
     daily_enabled: bool = True
     daily_time: str = Field(default="08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -63,6 +65,13 @@ class TargetBody(BaseModel):
     def clean_channels(cls, values):
         if any(value not in channel_options() for value in values):
             raise ValueError("通知频道无效")
+        return list(dict.fromkeys(values))
+
+    @field_validator("custom_feeds")
+    @classmethod
+    def clean_custom_feeds(cls, values):
+        if any(value not in CUSTOM_PRESETS for value in values):
+            raise ValueError("定制信息源无效")
         return list(dict.fromkeys(values))
 
     @model_validator(mode="after")
