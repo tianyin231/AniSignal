@@ -12,17 +12,24 @@ depends_on = None
 
 
 def _owner_nullable(nullable):
-    if op.get_bind().dialect.name == "mysql":
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    current_fk = next(fk["name"] for fk in inspector.get_foreign_keys("custom_feeds") if fk["constrained_columns"] == ["user_id"])
+    target_fk = "fk_custom_feeds_owner_users" if nullable else "fk_custom_feeds_user_id_users"
+    column = next(col for col in inspector.get_columns("custom_feeds") if col["name"] == "user_id")
+    if column["nullable"] == nullable and current_fk == target_fk:
+        return
+    if bind.dialect.name == "mysql":
         # 一条原子 DDL 完成外键与空值约束变更，重启不会停在已删外键的中间状态。
         constraint = "NULL" if nullable else "NOT NULL"
-        op.execute(sa.text("ALTER TABLE custom_feeds DROP FOREIGN KEY fk_custom_feeds_user_id_users, "
+        op.execute(sa.text(f"ALTER TABLE custom_feeds DROP FOREIGN KEY {current_fk}, "
             f"MODIFY COLUMN user_id INTEGER {constraint}, "
-            "ADD CONSTRAINT fk_custom_feeds_user_id_users FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"))
+            f"ADD CONSTRAINT {target_fk} FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE"))
         return
     with op.batch_alter_table("custom_feeds") as batch:
-        batch.drop_constraint("fk_custom_feeds_user_id_users", type_="foreignkey")
+        batch.drop_constraint(current_fk, type_="foreignkey")
         batch.alter_column("user_id", existing_type=sa.Integer(), nullable=nullable)
-        batch.create_foreign_key("fk_custom_feeds_user_id_users", "users", ["user_id"], ["id"], ondelete="CASCADE")
+        batch.create_foreign_key(target_fk, "users", ["user_id"], ["id"], ondelete="CASCADE")
 
 
 def upgrade():
