@@ -118,7 +118,7 @@ async def test_existing_sessions_are_imported_once_and_saved_before_sync(plugin)
     await plugin.synchronize_configuration()
     assert plugin.config.saved['configuration_imported'] is True
     imported = plugin.config.saved['targets'][0]
-    assert imported['subscription'] == {'communities': ['wuwa'], 'keywords': ['角色'], 'channels': []}
+    assert imported['subscription'] == {'communities': ['wuwa'], 'keywords': ['角色'], 'channels': [], 'custom_feeds': []}
     assert imported['notifications']['daily_time'] == '09:15'
     assert plugin.configuration_ready and plugin.targets[row['umo']]['enabled']
     await plugin.synchronize_configuration()
