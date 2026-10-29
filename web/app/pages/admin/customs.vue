@@ -243,6 +243,8 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <option value="uid">UID 监控</option>
           <option value="keyword">关键词监控</option>
           <option value="notices">官方公告</option>
+          <option value="channel_rss">官方视频</option>
+          <option value="account_dynamics">官方动态</option>
         </select>
         <select
           v-model="statusFilter"

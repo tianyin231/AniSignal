@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { fmtTime } from '~/utils/admin-types'
-import { customKindLabel } from '~/utils/custom-feeds'
+import { customKindLabel, customPlatformBadge } from '~/utils/custom-feeds'
 
 useSeoMeta({ title: '定制监控 · AniSignal' })
 
@@ -12,6 +12,7 @@ interface CustomItem {
   author_name: string | null
   view: number
   content_type: string
+  platform: string
   published_at: string | null
 }
 interface CustomFeedDetail {
@@ -78,7 +79,7 @@ const goPage = (value: number) => router.replace({ query: { ...route.query, page
         </div>
         <div class="flex items-center gap-3 text-xs">
           <span class="mono text-slate-400">{{ data.total }} 条</span>
-          <a v-if="data.source_url" :href="data.source_url" target="_blank" rel="noopener" class="link">官网原文</a>
+          <a v-if="data.source_url" :href="data.source_url" target="_blank" rel="noopener" class="link">官方主页</a>
           <NuxtLink v-if="data.is_owner" to="/account#custom-monitors" class="link">管理监控</NuxtLink>
         </div>
       </div>
@@ -92,8 +93,8 @@ const goPage = (value: number) => router.replace({ query: { ...route.query, page
         >
           <span
             class="grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-bold text-white"
-            :class="item.content_type === 'notice' ? 'bg-blue-600' : item.content_type === 'dynamic' ? 'bg-sky-500' : 'bg-pink-500'"
-          >{{ item.content_type === 'notice' ? '官' : item.content_type === 'dynamic' ? '动' : 'B' }}</span>
+            :class="item.platform === 'youtube' ? 'bg-red-600' : item.platform === 'x' ? 'bg-slate-800 dark:bg-slate-100 dark:text-slate-900' : item.content_type === 'notice' ? 'bg-blue-600' : item.content_type === 'dynamic' ? 'bg-sky-500' : 'bg-pink-500'"
+          >{{ customPlatformBadge(item.platform, item.content_type) }}</span>
           <div class="min-w-0 flex-1">
             <a
               v-if="item.url"

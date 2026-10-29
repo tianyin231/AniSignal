@@ -7,14 +7,18 @@
 import logging
 from datetime import timedelta
 
-from sqlalchemy import delete, exists, func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
 from app.collectors.base import CollectorDeferred, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.nikke import NikkeCollector, parse_notice
-from app.custom_presets import CUSTOM_PRESETS
+from app.collectors.x import XCollector
+from app.collectors.youtube_api import YoutubeApiCollector
+from app.custom_presets import CUSTOM_PRESETS, custom_preset
+from app.parsers.x import parse_post
+from app.parsers.youtube import parse_rss_item
 from app.models import CustomFeed, CustomFeedItem, CustomFeedSource, CustomSourceItem, CustomCollectRun, NotificationDelivery, User
 from app.parsers.bilibili import parse_dynamic, parse_video
 from app.services.notifications import beijing_today
@@ -35,25 +39,36 @@ def _collector(platform: str):
         return BilibiliCollector()
     if platform == "game_official":
         return NikkeCollector()
+    if platform == "youtube":
+        return YoutubeApiCollector()
+    if platform == "x":
+        return XCollector()
     raise ValueError(f"unsupported custom platform: {platform}")
 
 
 async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> list:
     """抓取并解析定制源；平台礼貌间隔与主采集共享同一个 Redis 槽。"""
     collector = _collector(source.platform)
-    is_official = source.platform == "game_official" and source.kind == "notices" and source.target_value in CUSTOM_PRESETS
-    if not is_official and (source.platform not in CUSTOM_PLATFORMS or source.kind not in CUSTOM_KINDS):
+    preset = custom_preset(source.platform, source.kind, source.target_value)
+    if not preset and (source.platform not in CUSTOM_PLATFORMS or source.kind not in CUSTOM_KINDS):
         raise ValueError(f"unsupported custom kind: {source.kind}")
+    if source.platform == "x":
+        collector.redis = redis
     async def fetch():
+        if source.platform == "x":
+            # X 自己按全局 30–90 秒间隔读取，主页/全文共用冷却；不叠加一个宽松槽位。
+            return await collector.fetch(source.kind, source.target_value, 10)
         async with platform_slot(redis, source.platform, 5.0):
-            if is_official:
+            if preset:
                 return await collector.fetch(source.kind, source.target_value, 30)
             if source.kind == "uid":
                 return await collector.user_dynamics(source.target_value, 20)
             return await collector.search_videos(source.target_value, 30)
     raw_items = await fetch_with_fallback(collector, session, source.platform, fetch)
-    if is_official:
-        return [parse_notice(item) for item in raw_items.items]
+    if preset:
+        parse = {"game_official": parse_notice, "youtube": parse_rss_item, "x": parse_post}[source.platform]
+        items = [parse(item) for item in raw_items.items]
+        return sorted(items, key=lambda item: item.published_at.timestamp() if item.published_at else 0, reverse=True)
     parse = parse_dynamic if source.kind == "uid" else parse_video
     return [n for n in (parse(i) if i else None for i in raw_items) if n is not None]
 
@@ -155,10 +170,10 @@ async def push_custom_feed_digest(session: AsyncSession, feed: CustomFeed, new_c
 
 
 def _active_feeds():
+    presets = [(p["platform"], p["kind"], p["target_value"]) for p in CUSTOM_PRESETS.values()]
     return select(CustomFeed).outerjoin(User, User.id == CustomFeed.user_id).where(
         CustomFeed.enabled.is_(True), CustomFeed.status == "active",
-        or_(CustomFeed.platform == "bilibili", (CustomFeed.platform == "game_official") &
-            (CustomFeed.kind == "notices") & CustomFeed.target_value.in_(CUSTOM_PRESETS)),
+        or_(CustomFeed.platform == "bilibili", tuple_(CustomFeed.platform, CustomFeed.kind, CustomFeed.target_value).in_(presets)),
         or_(CustomFeed.user_id.is_(None), (User.status == "active") & User.is_verified.is_(True)))
 
 
@@ -228,6 +243,8 @@ async def _run_shared_source(session, redis, source_id, stats):
         source.last_error = redact(str(exc), local_status()[1])[:1000]
         if isinstance(exc, CollectorDeferred):
             source.next_run_at = exc.retry_at
+            if source.platform == "x":
+                source.next_run_at = max(source.next_run_at, utcnow() + timedelta(minutes=interval))
             stats["deferred"] += 1
         else:
             source.consecutive_failures += 1
