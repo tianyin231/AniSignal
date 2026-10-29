@@ -242,6 +242,7 @@ def _source(item: dict) -> dict:
     return {
         "id": item.get("id"), "content_ids": item.get("content_ids") or ([item["id"]] if item.get("id") else []),
         "event_id": item.get("event_id"), "dedupe": item.get("dedupe"),
+        **({"repost_key": item["repost_key"]} if item.get("repost_key") else {}),
         "notification_keys": item.get("notification_keys") or [],
         "title": dated_text(item.get("source_title") or item.get("title", ""), published),
         # 显式空正文不能拿事件摘要补上，否则会把采集失败伪装成有内容。

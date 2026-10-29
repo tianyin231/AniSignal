@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 
 import httpx
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -351,12 +351,37 @@ async def create_delivery(session, target, kind, text, key, media=None, brief=No
     return row
 
 
-async def known_notification_keys(session, target_id: int, now=None) -> set[str]:
+async def _with_repost_keys(session, items: list[dict]) -> list[dict]:
+    """按 B 站原帖关联官方动态；旧投递快照也能直接使用已保存的 orig_id。"""
+    ids = {item["id"] for item in items if isinstance(item.get("id"), int)
+           and item.get("identity") == "official" and not item.get("repost_key")
+           and not item.get("news") and not item.get("fulfillment_revision")}
+    if not ids:
+        return items
+    rows = await session.execute(select(RawContent.id, RawContent.community, RawContent.external_id,
+        RawContent.raw_json["orig_id"].as_string()).where(
+            RawContent.id.in_(ids), RawContent.platform == "bilibili", RawContent.content_type == "dynamic"))
+    keys = {cid: (community, f"repost:{community}:bilibili:{original or external}")
+            for cid, community, external, original in rows}
+    return [{**item, "repost_key": keys[item["id"]][1]}
+            if item.get("identity") == "official" and not item.get("news") and not item.get("fulfillment_revision")
+            and item.get("id") in keys and item.get("community") == keys[item["id"]][0]
+            else item for item in items]
+
+
+async def known_notification_keys(session, target_id: int, now=None, *, before_delivery_id=None) -> set[str]:
     now = now or utcnow()
-    rows = await session.scalars(select(BotDelivery).where(BotDelivery.target_id == target_id,
+    rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.target_id == target_id,
         BotDelivery.kind.in_(["updates", "critical", "daily"]),
-        BotDelivery.status.in_(["pending", "failed", "sending", "accepted", "unknown"])))
+        BotDelivery.status.in_(["pending", "failed", "sending", "accepted", "unknown"]),
+        *([or_(BotDelivery.id < before_delivery_id, BotDelivery.status.in_(["sending", "accepted", "unknown"]))]
+          if before_delivery_id is not None else []))))
     keys = set()
+    sources = [source for row in rows if row.created_at >= now - timedelta(days=7)
+               for item in (row.brief or {}).get("items", []) for source in (item.get("sources") or [item])]
+    for source in await _with_repost_keys(session, sources):
+        if source.get("repost_key"):
+            keys.add((await identify_item(session, source))["dedupe"])
     legacy_content_ids = set()
     legacy_event_ids = set()
     for row in rows:
@@ -396,9 +421,13 @@ async def identify_item(session, item: dict) -> dict:
     facts = point_key(item.get("source_title") or item.get("title") or "") + "\n" + "\n".join(sorted(point_key(point) for point in news_points(item)))
     # 事件结论常是固定模板；用实际来源事实辨认修订，改写摘要本身不触发续报。
     identity = f"event:{item['event_id']}:{facts}" if item.get("event_id") else f"content:{item['id']}"
+    if item.get("repost_key"):
+        # 原帖和转发的标题、账号不同，但同一原帖的相同事实只推一次。
+        identity = item["repost_key"] + ":" + "\n".join(sorted(point_key(point) for point in news_points(item)))
     if item.get("news", {}).get("engine") == "aihot" and item["news"].get("fact_id"):
         identity = f"aihot-fact:{item['news']['fact_id']}"
-    return {**item, "dedupe": hashlib.sha256(identity.encode()).hexdigest()[:32], "topic_key": notification_topic(item)}
+    return {**item, "dedupe": hashlib.sha256(identity.encode()).hexdigest()[:32],
+            "topic_key": item.get("repost_key") or notification_topic(item)}
 
 
 def notification_topic(item: dict) -> str | None:
@@ -417,9 +446,15 @@ def item_was_notified(item: dict, known: set[str]) -> bool:
 
 
 def update_topic(item: dict) -> str:
-    if item.get("event_id"):
-        return f"{item.get('community', '')}:event:{item['event_id']}"
-    return notification_topic(item) or f"{item.get('community', '')}:content:{item.get('id')}"
+    return update_topics(item)[0]
+
+
+def update_topics(item: dict) -> list[str]:
+    return list(dict.fromkeys(filter(None, (
+        item.get("repost_key"),
+        f"{item.get('community', '')}:event:{item['event_id']}" if item.get("event_id") else None,
+        notification_topic(item), f"{item.get('community', '')}:content:{item.get('id')}",
+    ))))
 
 
 async def prepare_update_items(session, target_id: int, items: list[dict], now: datetime, known: set[str]) -> list[dict]:
@@ -431,28 +466,34 @@ async def prepare_update_items(session, target_id: int, items: list[dict], now: 
         BotDelivery.kind.in_(["daily", "updates", "critical"]),
         BotDelivery.updated_at >= now - timedelta(days=7),
     ).order_by(BotDelivery.updated_at.desc(), BotDelivery.id.desc()).limit(200))
+    sources = [source for brief in briefs for item in (brief or {}).get("items", [])
+               for source in (item.get("sources") or [item])]
     previous, history_points = {}, {}
-    for brief in briefs:
-        for item in (brief or {}).get("items", []):
-            for source in item.get("sources") or [item]:
-                for topic in filter(None, (update_topic(source), notification_topic(source))):
-                    previous.setdefault(topic, source)
-                    points = history_points.setdefault(topic, {})
-                    for point in [source.get("title") or "", *news_points(source)]:
-                        points.setdefault(point_key(point), point)
+    for source in await _with_repost_keys(session, sources):
+        for topic in update_topics(source):
+            previous.setdefault(topic, source)
+            points = history_points.setdefault(topic, {})
+            for point in [source.get("title") or "", *news_points(source)]:
+                points.setdefault(point_key(point), point)
     prepared = []
-    for item in items:
+    seen = set(known)
+    for item in await _with_repost_keys(session, items):
         item = await identify_item(session, item)
-        topic = update_topic(item) if update_topic(item) in previous else notification_topic(item)
+        topic = next((topic for topic in update_topics(item) if topic in previous), None)
         old = previous.get(topic)
         if old:
-            changes = changed_points(item, old)
+            if item.get("repost_key") and item["repost_key"] == old.get("repost_key"):
+                # 转发导语或标题变化不算新增事实，也不能把早先发过的事实重新带回来。
+                changes = [point for point in news_points(item) if point_key(point) not in history_points[topic]]
+            else:
+                changes = changed_points(item, old)
             if not changes:
                 continue
             item = {**item, "is_followup": True, "key_points": news_points(item),
                     "new_points": changes, "previous_points": list(history_points[topic].values())[:18]}
-        if not item_was_notified(item, known):
+        if not item_was_notified(item, seen):
             prepared.append(item)
+            seen.add(item["dedupe"])
     return prepared
 
 
@@ -579,6 +620,17 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     # 早报拆条和兑换码各自有有效期；普通即时消息不能用刚入队的时间续命。
     if row.kind in {"updates", "critical"} and not brief.get("scheduled_at") and brief.get("mode") != "notice":
         usable = [item for item in usable if is_recent_item(item, now)]
+    duplicate_reposts = False
+    if row.kind in {"updates", "critical"} and not brief.get("scheduled_at"):
+        sources = [source for item in usable for source in (item.get("sources") or [item])]
+        linked = await _with_repost_keys(session, sources)
+        if any(source.get("repost_key") for source in linked):
+            known = await known_notification_keys(session, target.id, now, before_delivery_id=row.id)
+            duplicates = {id(source) for source, enriched in zip(sources, linked)
+                          if enriched.get("repost_key") and (await identify_item(session, enriched))["dedupe"] in known}
+            filtered = [item for item in usable if not all(id(source) in duplicates for source in (item.get("sources") or [item]))]
+            duplicate_reposts = len(filtered) < len(usable)
+            usable = filtered
     if any(item.get("news") for item in usable) and not brief.get("news_dedupe_checked"):
         # 去重需要模型比较事实，在 worker 中完成，不能占着领取行锁等待模型。
         return False
@@ -602,7 +654,8 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
         values = {"brief": brief, "body": body, "media": collect_images(usable, image_limit(config)) or None}
     else:
         values = {"status": "cancelled", "receipt": None, "updated_at": now,
-                  "error": "消息已不符合此会话订阅范围或审核结果" if invalid_review or len(scoped) < len(items) else
+                  "error": "同一原帖的相同事实已推送或已排队，取消重复转发" if duplicate_reposts else
+                           "消息已不符合此会话订阅范围或审核结果" if invalid_review or len(scoped) < len(items) else
                            "来源动态正文和图片均为空，已取消本次推送" if empty_sources else "来源发布时间未知或已超过 24 小时，不再作为新动态推送"}
     for key, value in values.items():
         setattr(row, key, value)

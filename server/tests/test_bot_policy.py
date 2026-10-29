@@ -531,3 +531,84 @@ async def test_followup_remembers_earlier_reward_after_a_date_only_notice(sessio
     prepared = await bot.prepare_update_items(session, row.id, [new], now, set())
     assert '奖励包含500星声。' in prepared[0]['previous_points']
     assert fallback_items(prepared) == []
+
+
+@pytest.fixture
+async def bili_reposts(session):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    text = ('“如果月亮不愿再照亮未来的黑暗，那就由我来指引命运！”\n'
+            '2026年10月30日18:00，尤诺1/7手办预售开启。\n'
+            '产品售价899元，预计2027年9月出货。')
+    items = []
+    for external, original, title in [
+        ('1264580967053393942', None, '“如果月亮不愿再照亮未来的黑暗，那就由我来指引命运！”'),
+        ('1264588854738812936', '1264580967053393942', '尤诺手办预售即将开启，关注库洛游戏周边查看。'),
+        ('1264588854738812937', '1264580967053393942', '尤诺手办预售情报来了，前往官方店铺查看。'),
+    ]:
+        raw = RawContent(platform='bilibili', content_type='dynamic', external_id=external,
+                         community='wuwa', raw_json={'orig_id': original}, published_at=now)
+        session.add(raw)
+        await session.flush()
+        items.append({'id': raw.id, 'community': 'wuwa', 'platform': 'bilibili', 'content_type': 'dynamic',
+                      'identity': 'official', 'title': title, 'source_title': title,
+                      'text': (title + '\n\n' if original else '') + text, 'published_at': now,
+                      'url': f'https://t.bilibili.com/{external}'})
+    await session.commit()
+    return now, items
+
+
+@pytest.mark.parametrize('old_index,new_index', [(0, 1), (1, 0), (1, 2)])
+async def test_original_and_reposts_share_facts_in_legacy_delivery_history(session, bili_reposts, old_index, new_index):
+    now, items = bili_reposts
+    row = await target(session, now)
+    old = await bot.create_delivery(session, row, 'updates', '历史消息', 'legacy-repost',
+                                    brief=bot.single_item_brief(items[old_index]))
+    old.status, old.updated_at = 'accepted', now
+    await session.commit()
+    known = await bot.known_notification_keys(session, row.id, now)
+    assert await bot.prepare_update_items(session, row.id, [items[new_index]], now, known) == []
+    linked = await bot._with_repost_keys(session, [items[new_index]])
+    assert (await bot.identify_item(session, linked[0]))['dedupe'] in known
+
+
+async def test_original_and_reposts_collected_together_only_enqueue_once(session, bili_reposts, monkeypatch):
+    now, items = bili_reposts
+    row = await target(session, now, merge_minutes=0)
+    monkeypatch.setattr(bot, 'query_target', AsyncMock(return_value={'items': items}))
+    monkeypatch.setattr('app.services.bot_briefs.get_ai_config', AsyncMock(return_value={}))
+    await bot.run_bot_notifications(session, now)
+    rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.target_id == row.id)))
+    assert len(rows) == 1
+    assert rows[0].brief['items'][0]['sources'][0]['repost_key'].endswith('1264580967053393942')
+
+
+async def test_repost_with_new_price_still_reports_only_the_change_in_same_group(session, bili_reposts):
+    now, items = bili_reposts
+    row = await target(session, now)
+    other = await target(session, now, umo='qq:GroupMessage:other-repost')
+    old = await bot.create_delivery(session, row, 'updates', '旧售价', 'old-price', brief=bot.single_item_brief(items[0]))
+    old.status, old.updated_at = 'accepted', now
+    await session.commit()
+    changed = {**items[1], 'text': items[1]['text'].replace('899元', '869元')}
+    known = await bot.known_notification_keys(session, row.id, now)
+    prepared = await bot.prepare_update_items(session, row.id, [changed], now, known)
+    assert len(prepared) == 1 and prepared[0]['is_followup']
+    assert prepared[0]['new_points'] == ['产品售价869元，预计2027年9月出货。']
+    assert '899元' in ' '.join(prepared[0]['previous_points'])
+    assert not (await bot.prepare_update_items(session, other.id, [items[1]], now, set()))[0].get('is_followup')
+    queued = await bot.create_delivery(session, row, 'updates', '新售价', 'new-price', brief=bot.single_item_brief(prepared[0]))
+    assert await bot.prepare_delivery(session, queued, target=row, now=now)
+
+
+@pytest.mark.parametrize('status', ['pending', 'accepted', 'unknown'])
+async def test_queued_repost_is_cancelled_before_sending_without_cancelling_original(session, bili_reposts, status):
+    now, items = bili_reposts
+    row = await target(session, now)
+    original = await bot.create_delivery(session, row, 'updates', '原帖', 'queued-original', brief=bot.single_item_brief(items[0]))
+    duplicate = await bot.create_delivery(session, row, 'updates', '转发', 'queued-repost', brief=bot.single_item_brief(items[1]))
+    original.status, original.updated_at = status, now
+    await session.commit()
+    if status == 'pending':
+        assert await bot.prepare_delivery(session, original, target=row, now=now)
+    assert not await bot.prepare_delivery(session, duplicate, target=row, now=now)
+    assert duplicate.status == 'cancelled' and '同一原帖' in duplicate.error
