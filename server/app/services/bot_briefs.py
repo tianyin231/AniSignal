@@ -17,6 +17,7 @@ from app.communities import COMMUNITIES
 from app.models import SiteSetting
 from app.models.enums import COMMUNITY_LABELS
 from app.services.ai import _summary_supported, ai_available, chat, get_ai_config, record_usage
+from app.services.bot_media import notification_image
 from app.services.notifications import _is_low_signal_notification, _plain, _summary_respects_identity, is_empty_dynamic_item
 from app.services.settings import get_setting, set_setting
 
@@ -253,7 +254,8 @@ def _source(item: dict) -> dict:
         "source": item.get("source") or item.get("platform") or "原始来源",
         "platform": item.get("platform"), "content_type": item.get("content_type"),
         "identity": item.get("identity", "unknown"), "community": item.get("community", ""),
-        "url": item.get("url") or "", "image": item.get("image"),
+        "url": item.get("url") or "", "image": notification_image(item),
+        "media": item.get("media") or [],
         "published_at": published.isoformat() if published else None,
         "is_supplement": bool(item.get("is_supplement")),
         **({"notification_channels": item["notification_channels"]} if item.get("notification_channels") is not None else {}),

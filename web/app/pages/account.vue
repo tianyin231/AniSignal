@@ -473,6 +473,7 @@ async function changePassword() {
             <button class="chip bg-chip text-muted hover:text-ink-2" @click="startEditProfile">
               <Pencil :size="11" /> 编辑资料
             </button>
+            <a href="#bot-access" class="inline-flex min-h-11 items-center gap-1 text-sm text-brand-ink"><KeyRound :size="14" />机器人接入</a>
             <span v-if="overview?.is_verified" class="chip bg-emerald-500/10 font-medium text-emerald-600 dark:text-emerald-400">邮箱已验证</span>
           </div>
           <p class="mono mt-1 text-xs text-faint">
@@ -728,6 +729,8 @@ async function changePassword() {
 
       <!-- 右栏：通知 + 安全 -->
       <div class="space-y-5">
+        <AccountBotAccess v-if="user" />
+
         <section id="email-notifications" class="panel scroll-mt-20 p-5">
           <div class="flex items-center justify-between gap-3">
             <div>

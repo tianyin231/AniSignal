@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import utcnow
 from app.communities import COMMUNITIES
 from app.models.enums import COMMUNITY_LABELS
-from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, Event, Evidence, Product, RawContent, RedeemCode, Source
+from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, ContentVersion, Event, Evidence, Product, RawContent, RedeemCode, Source
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
 from app.services.bot_briefs import (_source, build_brief, build_shared_brief, changed_points, fallback_items, format_brief,
                                     is_recent_item, news_points, point_key, prune_shared_copies, publication_label, single_item_brief)
@@ -21,6 +21,8 @@ from app.services.views import product_to_out
 from app.services.bot_calendar import calendar_brief, upcoming_entries, refresh_calendar, scheduled_at, normalized_title
 from app.services.bot_policy import reserve_delivery
 from app.services import bot_channels, bot_custom
+from app.services.bot_preferences import resolve_target
+from app.services.bot_access import matches_keywords, target_error
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +120,14 @@ def classify_item(item: dict) -> str:
 
 
 def subscribed_communities(target: BotTarget) -> list[str]:
+    if "_communities" in target.config:
+        return target.config["_communities"]
+    if target.config.get("scope_mode") == "custom":
+        return []
     if target.config.get("channels"):
         return bot_channels.selected_communities(target.config["channels"])
+    if target.config.get("scope_mode") == "channels":
+        return []
     if selected := target.config.get("communities"):
         return selected
     # 兼容多选上线前的单分区配置。
@@ -128,8 +136,12 @@ def subscribed_communities(target: BotTarget) -> list[str]:
 
 
 def matches_target_scope(target: BotTarget, item: dict) -> bool:
+    if not matches_keywords(target.config, item):
+        return False
     if item.get("custom_feed"):
         return bot_custom.matches_scope(target, item)
+    if not subscribed_communities(target):
+        return False
     if target.config.get("channels"):
         sources = item.get("sources") or [item]
         selected = set(target.config["channels"])
@@ -145,7 +157,7 @@ async def load_target_candidates(session, target, keywords, start_at, end_at, *,
     games = [key for key in selected if COMMUNITIES[key].domain == "game"]
     channels = target.config.get("channels") or []
     candidates = await load_candidates(session, keywords, start_at, end_at,
-        preferences={"communities": games}, collected_after=collected_after, text_limit=None,
+        preferences={"communities": games, "exclude_keywords": target.config.get("exclude_keywords", [])}, collected_after=collected_after, text_limit=None,
         extra_conditions=(bot_channels.channel_condition(channels),) if channels else ()) if games else []
     if any(COMMUNITIES[key].domain == "news" for key in selected):
         from app.services.ai_news import load_bot_news
@@ -163,13 +175,14 @@ async def load_target_candidates(session, target, keywords, start_at, end_at, *,
 
 
 async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None,
-                       *, shared_copy=False) -> dict:
+                       *, shared_copy=False, notification=None) -> dict:
     now = now or utcnow()
+    target = await resolve_target(session, target, notification)
     config = target.config
     selected = subscribed_communities(target)
     community = selected[0] if len(selected) == 1 else "all"
     keywords = config.get("keywords", [])
-    scope = "全站" if len(selected) == len(COMMUNITIES) else " / ".join(COMMUNITY_LABELS[key] for key in selected)
+    scope = ("全站" if len(selected) == len(COMMUNITIES) else " / ".join(COMMUNITY_LABELS[key] for key in selected)) or "定制订阅"
     brief = None
     if tool == "trending":
         from app.services.curation import select_trending
@@ -199,7 +212,8 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         items = []
         entries = await calendar_entries(session, community, now=now,
             extra_conditions=(bot_channels.channel_condition(config["channels"]),) if config.get("channels") else ())
-        entries = [entry for entry in entries if entry["community"] in selected]
+        entries = [entry for entry in entries if entry["community"] in selected and matches_keywords(config, entry)
+                   and entry["kind"] in config.get("calendar_kinds", ["activity", "pool", "maintenance", "deadline"])]
         entries.sort(key=lambda e: e["end_at"] or e["start_at"])
         lines = [f"{scope} · 活动日历", _fmt_bj(now, "更新于 %Y/%m/%d %H:%M（北京时间）")]
         count = 0
@@ -227,8 +241,10 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if config.get("channels"):
             conditions.append(bot_channels.channel_condition(config["channels"]))
         rows = await session.execute(
-            select(RedeemCode, RawContent.url)
+            select(RedeemCode, RawContent.url, ContentVersion.title, ContentVersion.text)
             .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
+            .outerjoin(ContentVersion, (ContentVersion.raw_content_id == RawContent.id) & (ContentVersion.id ==
+                select(func.max(ContentVersion.id)).where(ContentVersion.raw_content_id == RawContent.id).correlate(RawContent).scalar_subquery()))
             .outerjoin(Source, Source.id == RawContent.source_id)
             .where(*conditions)
             .order_by(RedeemCode.created_at.desc())
@@ -236,7 +252,9 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         )
         lines = [f"{scope} · 可用兑换码", (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）")]
         found = 0
-        for code, url in rows:
+        for code, url, title, text in rows:
+            if not matches_keywords(config, {"title": title, "text": text}):
+                continue
             expiry = f"（{_fmt_bj(code.expires_at)} 前）" if code.expires_at else ""
             lines.append(f"\n{code.code}{expiry}")
             if url:
@@ -247,9 +265,11 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
     elif tool == "products":
         stmt = select(Product).order_by(Product.id)
         stmt = stmt.where(Product.community.in_(selected))
+        if config.get("channels"):
+            stmt = stmt.where(Product.community.in_([key.split(":", 1)[0] for key in config["channels"] if key.endswith(":product")]))
         products = list(await session.scalars(stmt))
         products = [p for p in products if (not query or query.casefold() in (p.name + " " + " ".join(p.watch_terms or [])).casefold())
-                    and (not keywords or any(k.casefold() in p.name.casefold() for k in keywords))]
+                    and matches_keywords(config, {"title": p.name})]
         items = [(await product_to_out(session, p)).model_dump(mode="json") for p in products[:5]]
         lines = [f"{scope} · 商品进展"]
         for p in items:
@@ -288,7 +308,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if collected_after:
             community_channels = {key for key in config.get("channels", []) if ":community:" in key}
             items = [i for i in items if is_recent_item(i, now) and (
-                i.get("news") or i["identity"] == "official" or i["importance"]
+                i.get("news") or i.get("custom_feed") or i["identity"] == "official" or i["importance"]
                 or community_channels.intersection(bot_channels.item_channels(i)))]
         elif tool == "digest":
             known = await known_notification_keys(session, target.id, now)
@@ -529,12 +549,16 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     """发送前重新检查开关、时效和日程，不补发过期快照。"""
     now = now or utcnow()
     target = target or await session.get(BotTarget, row.target_id)
+    notification = "daily" if row.kind == "daily" or (row.kind in {"updates", "critical"} and (row.brief or {}).get("scheduled_at")) else "updates"
+    target = await resolve_target(session, target, notification)
     config = target.config
     brief = dict(row.brief or {})
-    reason = None
-    if row.kind in {"updates", "critical", "calendar"} and not config.get("updates_enabled"):
+    reason = await target_error(session, target)
+    if reason:
+        pass
+    elif row.kind in {"updates", "critical", "calendar"} and notification != "daily" and not config.get("updates_enabled"):
         reason = "此会话已关闭自动动态，取消积压消息"
-    elif row.kind == "daily" and not config.get("daily_enabled", True):
+    elif notification == "daily" and not config.get("daily_enabled", True):
         reason = "此会话已关闭早报"
     elif row.kind == "calendar" and not config.get("calendar_enabled", True):
         reason = "此会话已关闭日程提醒"
@@ -546,6 +570,9 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
             reason = "已错过早报发送窗口，不补发"
     if brief.get("expires_at") and datetime.fromisoformat(brief["expires_at"]) <= now:
         reason = "消息已过有效期，不再补发"
+    if not reason and row.kind in {"daily", "updates", "critical", "calendar"} and not row.brief and (
+            config.get("scope_mode", "legacy") != "legacy" or any(config.get(key) for key in ("channels", "keywords", "exclude_keywords", "custom_feed_ids"))):
+        reason = "旧通知缺少来源快照，无法核对当前筛选，已取消"
     if not reason and row.kind == "critical" and (brief.get("code") or row.dedupe_key.startswith("code:")):
         code_value = brief.get("code") or row.dedupe_key.split(":")[2]
         community = row.dedupe_key.split(":")[1]
@@ -555,7 +582,7 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     if not reason and row.kind == "calendar":
         if brief.get("mode") == "calendar":
             due = datetime.fromisoformat(brief["scheduled_at"])
-            refreshed = await refresh_calendar(session, brief, now, channels=config.get("channels", [])) if due <= now < due + timedelta(hours=2) else None
+            refreshed = await refresh_calendar(session, brief, now, channels=config.get("channels", []), target=target) if due <= now < due + timedelta(hours=2) else None
             if refreshed:
                 row.body, row.brief = refreshed
             else:
@@ -590,8 +617,8 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
         revisions = [source for source in (item.get("sources") or [item]) if source.get("fulfillment_revision") or source.get("custom_feed")]
         valid = True
         for source in revisions:
-            check = bot_custom.valid_item if source.get("custom_feed") else valid_item
-            if not await check(session, source):
+            valid_source = await bot_custom.valid_item(session, source, target) if source.get("custom_feed") else await valid_item(session, source)
+            if not valid_source:
                 valid = False
                 break
         if valid:
@@ -670,6 +697,7 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
 
 async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, quiet: bool, quiet_critical: bool,
                               hourly_limit: int, max_images: int) -> None:
+    target = await resolve_target(session, target, "updates")
     known = await known_notification_keys(session, target.id, now)
     previously_known = set(known)
     usable = []
@@ -734,6 +762,8 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
     processed = 0
     for target_id in ids:
         target = await session.get(BotTarget, target_id)
+        if await target_error(session, target):
+            continue
         config = target.config
         quiet = _is_quiet(local.hour, config)
         quiet_critical = bool(config.get("quiet_critical", False))
@@ -759,7 +789,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             if due <= now < due + timedelta(hours=2) and target.created_at <= due:
                 key = f"daily:{target.id}:{local.date()}"
                 if not await session.scalar(select(BotDelivery.id).where(BotDelivery.dedupe_key == key)):
-                    payload = await query_target(session, target, now=due, shared_copy=True)
+                    payload = await query_target(session, target, now=due, shared_copy=True, notification="daily")
                     items = payload.get("items") or []
                     style = config.get("daily_style", "compact")
                     covers = collect_images(items, max_images)
@@ -787,15 +817,17 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             due = scheduled_at(now, config.get("calendar_time", "20:00"))
             key = f"calendar-digest:{target.id}:{local.date()}"
             if due <= now < due + timedelta(hours=2) and not await session.scalar(select(BotDelivery.id).where(BotDelivery.dedupe_key == key)):
-                selected = subscribed_communities(target)
-                entries = await upcoming_entries(session, selected[0] if len(selected) == 1 else "all", now, channels=config.get("channels", []))
-                entries = [entry for entry in entries if entry["community"] in selected]
+                scoped = await resolve_target(session, target, "updates")
+                selected = subscribed_communities(scoped)
+                entries = await upcoming_entries(session, selected[0] if len(selected) == 1 else "all", now, channels=scoped.config.get("channels", []))
+                entries = [entry for entry in entries if entry["community"] in selected and matches_keywords(scoped.config, entry)
+                           and entry["kind"] in config.get("calendar_kinds", ["activity", "pool", "maintenance", "deadline"])]
                 if entries:
                     text, brief = calendar_brief(entries, due)
                     await create_delivery(session, target, "calendar", text, key, brief=brief)
         buffer = await load_merge_buffer(session, target.id)
         if config.get("updates_enabled"):
-            payload = await query_target(session, target, now=now, collected_after=target.last_scan_at)
+            payload = await query_target(session, target, now=now, collected_after=target.last_scan_at, notification="updates")
             critical_items = []
             normal_items = []
             already = await known_notification_keys(session, target.id, now)

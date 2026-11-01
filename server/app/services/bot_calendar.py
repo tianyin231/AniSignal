@@ -101,8 +101,10 @@ def calendar_brief(entries: list[dict], due: datetime) -> tuple[str, dict]:
     return text, brief
 
 
-async def refresh_calendar(session, brief: dict, now: datetime, *, channels=None) -> tuple[str, dict] | None:
+async def refresh_calendar(session, brief: dict, now: datetime, *, channels=None, target=None) -> tuple[str, dict] | None:
     from app.services.bot_channels import allowed_content_ids
+    from app.services.bot import subscribed_communities
+    from app.services.bot_access import matches_keywords
     entries = [entry for item in brief.get("items", []) for entry in item.get("calendar_entries", [])]
     ids = {sid for entry in entries for sid in entry.get("schedule_ids", [])}
     rows = (await session.execute(select(ContentSchedule, RawContent.url).join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
@@ -115,6 +117,10 @@ async def refresh_calendar(session, brief: dict, now: datetime, *, channels=None
             if sid not in current:
                 continue
             schedule, url = current[sid]
+            if target and (schedule.community not in subscribed_communities(target)
+                           or not matches_keywords(target.config, {"title": schedule.title})
+                           or schedule.kind not in target.config.get("calendar_kinds", ["activity", "pool", "maintenance", "deadline"])):
+                continue
             if schedule.raw_content_id not in allowed:
                 continue
             due = schedule.start_at if schedule.kind in {"maintenance", "deadline"} else schedule.end_at

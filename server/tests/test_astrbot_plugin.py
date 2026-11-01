@@ -118,7 +118,11 @@ async def test_existing_sessions_are_imported_once_and_saved_before_sync(plugin)
     await plugin.synchronize_configuration()
     assert plugin.config.saved['configuration_imported'] is True
     imported = plugin.config.saved['targets'][0]
-    assert imported['subscription'] == {'communities': ['wuwa'], 'keywords': ['角色'], 'channels': [], 'custom_feeds': []}
+    assert imported['subscription']['communities'] == ['wuwa']
+    assert imported['subscription']['keywords'] == ['角色']
+    assert imported['subscription']['scope_mode'] == 'legacy'
+    assert imported['subscription']['inherit_preferences'] is False
+    assert not imported['subscription']['channel_wuwa']
     assert imported['notifications']['daily_time'] == '09:15'
     assert plugin.configuration_ready and plugin.targets[row['umo']]['enabled']
     await plugin.synchronize_configuration()
@@ -134,6 +138,40 @@ async def test_clearing_plugin_targets_does_not_import_old_sessions_again(plugin
     await plugin.synchronize_configuration()
     assert plugin.api.await_count == 1 and plugin.api.call_args.args[1]['targets'] == []
     assert plugin.targets == {}
+
+
+async def test_switching_user_token_clears_cached_briefs_and_shows_authenticated_account(plugin):
+    plugin.config.update(configuration_imported=True, targets=[])
+    plugin.identity = {'client_id': 'previous-account'}
+    plugin.last_briefs = {'qq:FriendMessage:self': {'brief': {'items': [{'title': '旧账号资料'}]}}}
+    plugin.api.return_value = {'targets': [], 'identity': {'client_id': 'new-account',
+        'user': {'id': 5, 'display_name': 'tianyin231'}, 'legacy': False}}
+    await plugin.synchronize_configuration()
+    assert plugin.last_briefs == {} and plugin.identity['user']['id'] == 5
+    current = SimpleNamespace(unified_msg_origin='qq:FriendMessage:self', get_sender_id=lambda: 'self', plain_result=lambda text: text)
+    replies = [reply async for reply in plugin.session_info(current)]
+    assert 'tianyin231' in replies[0] and '#5' in replies[0]
+
+
+async def test_account_catalog_populates_choices_and_grouped_platform_selection_reaches_server(plugin):
+    mod = sys.modules[plugin.__class__.__module__]
+    path = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal/_conf_schema.json'
+    plugin.config.schema = json.loads(path.read_text(encoding='utf-8'))
+    target = mod.to_plugin_target({'name': '按平台定制', 'umo': 'qq:GroupMessage:g',
+        'channels': ['wuwa:official:youtube'], 'inherit_preferences': True})
+    target['subscription']['channel_wuwa'] = ['wuwa:official:bilibili']
+    plugin.config.update(configuration_imported=True, targets=[target])
+    plugin.api.return_value = {'targets': [], 'identity': {'user': {'id': 5, 'display_name': '我的账号'}},
+        'catalog': {'channels': {'wuwa:official:bilibili': '鸣潮_官方_B'}, 'custom_presets': {},
+                    'custom_feeds': [{'id': 10, 'name': '我的私有源', 'owned': True}]}}
+    await plugin.synchronize_configuration()
+    sent = plugin.api.call_args.args[1]['targets'][0]
+    assert sent['channels'] == ['wuwa:official:bilibili']
+    assert not any(key.startswith('channel_') for key in sent)
+    items = plugin.config.schema['targets']['templates']['session']['items']
+    assert items['subscription']['items']['custom_feed_ids']['options'] == [10]
+    assert '我的私有源' in str(items['notifications']['items']['daily_sources']['labels'])
+    assert '我的账号' in plugin.config.schema['tools_key']['hint']
 
 
 async def test_chat_subscription_changes_are_persisted_back_to_plugin_settings(plugin):
