@@ -20,6 +20,8 @@ from app.services.bot_channels import channel_options
 from app.services.bot_briefs import format_detail, publication_label
 from app.services.settings import get_setting, set_setting
 from app.services.bot_clients import setting_key
+from app.services.bot_access import actor_error, target_error
+from app.services.bot_preferences import resolve_target
 
 router = APIRouter(prefix="/api/bot", dependencies=[Depends(require_tools)])
 admin_router = APIRouter(prefix="/api/admin/bot", dependencies=[Depends(require_admin)])
@@ -35,11 +37,13 @@ async def actor_target(body, session, client_id):
         BotTarget.umo == body.umo, BotTarget.enabled.is_(True)))
     if not target:
         raise HTTPException(403, "此会话未启用 AniSignal")
+    if reason := actor_error(body.umo, body.actor_id) or await target_error(session, target):
+        raise HTTPException(403, reason)
     return target
 
 
 class SubscriptionBody(Actor):
-    action: Literal["view", "keywords", "community", "channels", "daily", "updates"] = "view"
+    action: Literal["view", "keywords", "exclude_keywords", "community", "channels", "daily", "updates"] = "view"
     value: str = Field(default="", max_length=1300)
 
 
@@ -52,9 +56,10 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
         if ":GroupMessage:" in target.umo and body.actor_id not in target.config.get("manager_ids", []):
             raise HTTPException(403, "仅插件设置中授权的群管理者可以修改全群订阅；发送 /情报会话 获取你的标识")
         config = dict(target.config)
-        if body.action == "keywords":
-            config["keywords"] = body.value.replace("，", ",").split(",")
+        if body.action in {"keywords", "exclude_keywords"}:
+            config[body.action] = body.value.replace("，", ",").split(",")
         elif body.action == "community":
+            config["scope_mode"] = "legacy"
             from app.models.enums import COMMUNITY_LABELS
             config["communities"] = None
             config["channels"] = []
@@ -62,6 +67,7 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
             if body.value == "全站":
                 config["community"] = "all"
         elif body.action == "channels":
+            config["scope_mode"] = "channels"
             labels = {label: key for key, label in channel_options().items()}
             config["channels"] = [labels.get(value.strip(), value.strip()) for value in body.value.replace("，", ",").split(",") if value.strip()]
         elif body.action == "daily":
@@ -78,10 +84,18 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
             raise HTTPException(422, "设置无效，请核对分区、关键词长度或 HH:mm 时间")
         await apply_target(target, validated, session)
         await session.commit()
+    effective = await resolve_target(session, target)
     return {"name": target.name, "community": target.config.get("community", "all"),
             "communities": subscribed_communities(target),
+            "scope_mode": target.config.get("scope_mode", "legacy"),
+            "effective_communities": subscribed_communities(effective),
+            "effective_keywords": effective.config.get("keywords", []),
+            "effective_exclude_keywords": effective.config.get("exclude_keywords", []),
+            "inherit_preferences": target.config.get("inherit_preferences", False),
+            "inherit_keywords": target.config.get("inherit_keywords", False),
             "channels": target.config.get("channels", []),
             "channel_labels": [channel_options()[key] for key in target.config.get("channels", [])],
+            "exclude_keywords": target.config.get("exclude_keywords", []),
             "keywords": target.config.get("keywords", []), "daily_enabled": target.config.get("daily_enabled", True),
             "daily_time": target.config.get("daily_time", "08:00"), "updates_enabled": target.config.get("updates_enabled", False),
             "changed": body.action != "view"}
@@ -157,11 +171,27 @@ async def conversation_context(body: Actor, session: AsyncSession = Depends(get_
     rows = await session.scalars(select(BotDelivery).where(BotDelivery.target_id == target.id,
         BotDelivery.status == "accepted", BotDelivery.created_at >= utcnow() - timedelta(days=7))
         .order_by(BotDelivery.id.desc()).limit(3))
+    effective = await resolve_target(session, target)
+    visible = []
+    for row in rows:
+        if all([await snapshot_accessible(session, effective, item) for item in (row.brief or {}).get("items", [])]):
+            visible.append(row)
     return {"recent_notifications": [{"id": r.id, "kind": r.kind, "text": (r.rendered_body or r.body)[:4000],
             "brief": {"items": [{**{k: item.get(k) for k in ("title", "summary", "community", "published_at")},
                                  "published_label": publication_label(item)}
                                 for item in r.brief["items"]]} if r.brief else None,
-            "sent_at": (r.updated_at + timedelta(hours=8)).isoformat() + "+08:00"} for r in rows]}
+            "sent_at": (r.updated_at + timedelta(hours=8)).isoformat() + "+08:00"} for r in visible]}
+
+
+async def snapshot_accessible(session, target, item):
+    from app.services.bot import matches_target_scope
+    from app.services.bot_custom import valid_item
+    if not matches_target_scope(target, item):
+        return False
+    for source in item.get("sources") or [item]:
+        if source.get("custom_feed") and not await valid_item(session, source, target):
+            return False
+    return True
 
 
 class DetailBody(Actor):
@@ -183,6 +213,9 @@ async def brief_detail(body: DetailBody, session: AsyncSession = Depends(get_ses
     if not row or body.number > len(row.brief["items"]):
         raise HTTPException(404, "没找到这条编号，先发 /早报 看一下最新清单吧。")
     item = row.brief["items"][body.number - 1]
+    effective = await resolve_target(session, target)
+    if not await snapshot_accessible(session, effective, item):
+        raise HTTPException(404, "此资料已不在当前账号的订阅或可访问范围，请重新查询。")
     ids = {i for s in item.get("sources", []) for i in s.get("content_ids", [])}
     if ids:
         visible = set(await session.scalars(select(RawContent.id).where(RawContent.id.in_(ids), RawContent.hidden.is_(False))))

@@ -462,6 +462,7 @@ async def test_source_age_is_checked_when_flushing_and_claiming_without_resettin
     assert await reserve_delivery(session, row, mixed, now=now)
     assert '旧版' not in mixed.body and mixed.brief['notification_keys'] == ['fresh-source']
     # 带明确早报刊期和有效期的补充项可以在早报窗口内发送。
+    row.config = {**row.config, 'daily_enabled': True, 'updates_enabled': False}
     daily_part = await bot.create_delivery(session, row, 'updates', '补充 · 旧版预告', 'daily:part',
         brief={**bot.single_item_brief(old), 'scheduled_at': now.isoformat(),
                'expires_at': (now + timedelta(hours=2)).isoformat()})

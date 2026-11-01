@@ -14,9 +14,11 @@ from app.clock import utcnow
 from app.communities import COMMUNITIES, community_query_pattern
 from app.custom_presets import CUSTOM_PRESETS
 from app.db import get_session
-from app.models import BotDelivery, BotReminder, BotTarget
+from app.models import BotClient, BotDelivery, BotReminder, BotTarget
 from app.services import bot
 from app.services import bot_clients
+from app.services import bot_preferences
+from app.services.bot_access import actor_error, target_error
 from app.services.bot_channels import channel_options, selected_communities
 from app.services.settings import get_setting, set_setting
 
@@ -31,8 +33,16 @@ class TargetBody(BaseModel):
     community: str = Field(default="all", pattern=community_query_pattern())
     communities: list[str] | None = Field(default=None, max_length=len(COMMUNITIES))
     channels: list[str] = Field(default_factory=list, max_length=200)
+    scope_mode: Literal["legacy", "channels", "custom"] = "legacy"
+    inherit_preferences: bool = False
+    inherit_keywords: bool = False
     custom_feeds: list[str] = Field(default_factory=list, max_length=30)
+    custom_feed_ids: list[int] = Field(default_factory=list, max_length=100)
+    daily_sources: list[str] = Field(default_factory=list, max_length=200)
+    updates_sources: list[str] = Field(default_factory=list, max_length=200)
+    calendar_kinds: list[Literal["activity", "pool", "maintenance", "deadline"]] = Field(default_factory=lambda: ["activity", "pool", "maintenance", "deadline"])
     keywords: list[str] = Field(default_factory=list, max_length=20)
+    exclude_keywords: list[str] = Field(default_factory=list, max_length=20)
     daily_enabled: bool = True
     daily_time: str = Field(default="08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     updates_enabled: bool = False
@@ -74,10 +84,27 @@ class TargetBody(BaseModel):
             raise ValueError("定制信息源无效")
         return list(dict.fromkeys(values))
 
+    @field_validator("custom_feed_ids")
+    @classmethod
+    def clean_feed_ids(cls, values):
+        if any(value <= 0 for value in values):
+            raise ValueError("定制监控标识无效")
+        return list(dict.fromkeys(values))
+
+    @field_validator("daily_sources", "updates_sources")
+    @classmethod
+    def clean_sources(cls, values):
+        options = set(channel_options()) | {f"preset:{key}" for key in CUSTOM_PRESETS}
+        if any(value not in options and not (value.startswith("feed:") and value[5:].isascii() and value[5:].isdigit() and 0 < int(value[5:]) < 2**63) for value in values):
+            raise ValueError("通知来源无效")
+        return list(dict.fromkeys(values))
+
     @model_validator(mode="after")
     def sync_legacy_community(self):
         if self.channels:
             self.communities = selected_communities(self.channels)
+            if self.scope_mode == "legacy":
+                self.scope_mode = "channels"
         if self.communities is not None:
             self.community = self.communities[0] if len(self.communities) == 1 else "all"
         return self
@@ -89,7 +116,7 @@ class TargetBody(BaseModel):
             raise ValueError("用户标识过长")
         return list(dict.fromkeys(v.strip() for v in values if v.strip()))
 
-    @field_validator("keywords")
+    @field_validator("keywords", "exclude_keywords")
     @classmethod
     def clean_keywords(cls, values):
         if any(len(v) > 64 for v in values):
@@ -117,6 +144,7 @@ class QueryBody(BaseModel):
 
 class ToolQuery(QueryBody):
     umo: str = Field(max_length=255)
+    actor_id: str = Field(default="", max_length=255)
 
 
 class MessageBody(BaseModel):
@@ -140,7 +168,7 @@ class ConfigurationBody(BaseModel):
 
 
 def target_view(row):
-    config = {**row.config, "communities": bot.subscribed_communities(row)}
+    config = {**row.config, "communities": bot.subscribed_communities(row) or row.config.get("communities")}
     return {**TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **config).model_dump(),
             "id": row.id, "created_at": row.created_at, "client_id": row.client_id,
             "managed_by_plugin": row.managed_by_plugin, "plugin_configured": row.config.get("_plugin_configured", True)}
@@ -181,6 +209,12 @@ async def edit_client(client_id: str, body: ClientBody, session: AsyncSession = 
     views = {row["id"]: row for row in await bot_clients.client_views(session)}
     if client_id not in views:
         raise HTTPException(404, "插件接入不存在")
+    user_client = await session.get(BotClient, client_id)
+    if user_client:
+        if body.enabled:
+            raise HTTPException(409, "用户接入由所属账号管理，请在账号中心创建或重置 Token")
+        await bot_clients.revoke_user_client(session, user_client)
+        return {"ok": True}
     clients = dict(await get_setting(session, "bot_clients") or {})
     clients[client_id] = {**clients.get(client_id, {}), "name": body.name, "enabled": body.enabled}
     if not body.enabled:
@@ -199,6 +233,8 @@ async def rotate_client(client_id: str, session: AsyncSession = Depends(get_sess
     views = {row["id"]: row for row in await bot_clients.client_views(session)}
     if client_id not in views:
         raise HTTPException(404, "插件接入不存在")
+    if await session.get(BotClient, client_id):
+        raise HTTPException(409, "请由所属用户在账号中心重置 Token")
     _, key = await bot_clients.issue_key(session, views[client_id]["name"], client_id)
     return {"id": client_id, "key": key}
 
@@ -214,6 +250,7 @@ async def save_bridge(body: BridgeBody, session: AsyncSession = Depends(get_sess
 
 @router.post("/targets")
 async def add_target(body: TargetBody, session: AsyncSession = Depends(get_session)):
+    await bot_preferences.validate_sources(session, bot_clients.LEGACY_CLIENT, [body])
     if await session.scalar(select(BotTarget.id).where(BotTarget.client_id == bot_clients.LEGACY_CLIENT, BotTarget.umo == body.umo)):
         raise HTTPException(409, "该会话已存在，请编辑已有目标")
     row = BotTarget(name=body.name, umo=body.umo, enabled=body.enabled,
@@ -237,6 +274,7 @@ async def edit_target(target_id: int, body: TargetBody, session: AsyncSession = 
 
 async def apply_target(row, body, session):
     """配置同步与聊天修改共用，只有实际策略变化才推进扫描起点。"""
+    await bot_preferences.validate_sources(session, row.client_id, [body])
     config = body.model_dump(exclude={"name", "umo", "enabled"})
     previous = TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **row.config).model_dump(exclude={"name", "umo", "enabled"})
     def comparable(value):
@@ -306,16 +344,29 @@ async def retry(delivery_id: int, session: AsyncSession = Depends(get_session)):
 async def require_tools(x_bot_key: str = Header(default=""), session: AsyncSession = Depends(get_session)):
     client_id = await bot_clients.authenticate(session, x_bot_key)
     if client_id is None:
-        raise HTTPException(401, "工具鉴权失败")
+        raise HTTPException(401, "AniSignal Token 无效、已撤销或所属账号不可用，请在账号中心检查接入")
     return client_id
+
+
+@tools_router.get("/identity")
+async def tool_identity(session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    return await bot_clients.identity(session, client_id)
+
+
+@tools_router.get("/catalog")
+async def subscription_catalog(session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    return await bot_preferences.catalog(session, client_id)
 
 
 @tools_router.get("/targets", dependencies=[Depends(require_tools)])
 async def tool_targets(session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     # 返回全部会话（含已暂停）：插件在聊天里回显注册状态需要名称与启停标记，
     # 工具可用性由插件按 enabled 自行门禁。
-    return [target_view(t) for t in await session.scalars(select(BotTarget)
-            .where(BotTarget.client_id == client_id).order_by(BotTarget.id))]
+    result = []
+    for target in await session.scalars(select(BotTarget).where(BotTarget.client_id == client_id).order_by(BotTarget.id)):
+        reason = await target_error(session, target)
+        result.append({**target_view(target), "enabled": target.enabled and not reason, "authorization_error": reason})
+    return result
 
 
 @tools_router.get("/configuration")
@@ -325,11 +376,13 @@ async def export_configuration(session: AsyncSession = Depends(get_session), cli
         # MySQL 的 JSON 布尔转换会把缺失字段变成 False，旧会话需单独包含。
         or_(BotTarget.config["_plugin_configured"].as_boolean().is_(True),
             BotTarget.config["_plugin_configured"].as_string().is_(None))).order_by(BotTarget.id))
-    return {"targets": [TargetBody(name=t.name, umo=t.umo, enabled=t.enabled, **t.config).model_dump() for t in rows]}
+    return {"targets": [TargetBody(name=t.name, umo=t.umo, enabled=t.enabled, **t.config).model_dump() for t in rows],
+            "identity": await bot_clients.identity(session, client_id), "catalog": await bot_preferences.catalog(session, client_id)}
 
 
 @tools_router.post("/configuration")
 async def sync_configuration(body: ConfigurationBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    await bot_preferences.validate_sources(session, client_id, body.targets)
     rows = {row.umo: row for row in await session.scalars(select(BotTarget)
             .where(BotTarget.client_id == client_id).with_for_update())}
     for target in body.targets:
@@ -355,7 +408,8 @@ async def sync_configuration(body: ConfigurationBody, session: AsyncSession = De
             row.managed_by_plugin = True
             row.config = {**row.config, "_plugin_configured": False}
     await session.commit()
-    return {"targets": [target_view(row) for row in configured]}
+    return {"targets": [target_view(row) for row in configured], "identity": await bot_clients.identity(session, client_id),
+            "catalog": await bot_preferences.catalog(session, client_id)}
 
 
 @tools_router.post("/query", dependencies=[Depends(require_tools)])
@@ -364,4 +418,11 @@ async def tool_query(body: ToolQuery, session: AsyncSession = Depends(get_sessio
         BotTarget.umo == body.umo, BotTarget.enabled.is_(True)))
     if not target or body.tool not in target.config.get("tools", []):
         raise HTTPException(403, "此会话尚未启用该查询工具")
+    if reason := await target_error(session, target):
+        raise HTTPException(403, reason)
+    # 旧插件查询未传 actor_id；既有可信接入兼容，新接入必须由真实消息携带。
+    if not body.actor_id and (client_id != bot_clients.LEGACY_CLIENT or await session.get(BotClient, client_id)):
+        raise HTTPException(403, "查询缺少真实操作者标识，请更新插件")
+    if body.actor_id and (reason := actor_error(body.umo, body.actor_id)):
+        raise HTTPException(403, reason)
     return await bot.query_target(session, target, body.tool, body.query)

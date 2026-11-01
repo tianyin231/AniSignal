@@ -7,7 +7,7 @@ useSeoMeta({ title: '机器人通知 · AniSignal' })
 const { api } = useAdminApi()
 const toast = useAdminToast()
 interface Target {
-  id: number; name: string; umo: string; enabled: boolean; communities: string[]; community: string; keywords: string[]; channels: string[]
+  id: number; name: string; umo: string; enabled: boolean; communities: string[]; community: string; keywords: string[]; exclude_keywords: string[]; channels: string[]
   client_id: string; client_name: string; managed_by_plugin: boolean; plugin_configured: boolean; last_activity?: string
   daily_enabled: boolean; daily_time: string; updates_enabled: boolean; min_push_interval_minutes: number
   calendar_enabled: boolean; calendar_time: string; tools: string[]; delivery_mode: string
@@ -189,6 +189,7 @@ function cancelReminder(row: Reminder) {
           <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? '动态推送开启' : '动态推送关闭' }}</p>
           <p v-if="target.updates_enabled" class="mt-1 text-xs text-muted">自动消息间隔 {{ target.min_push_interval_minutes }} 分钟 · {{ target.calendar_enabled ? `收尾提醒 ${target.calendar_time}` : '收尾提醒关闭' }}</p>
           <p class="mt-2 text-sm text-muted">{{ target.keywords.length ? target.keywords.join(' / ') : '不限关键词' }}</p>
+          <p v-if="target.exclude_keywords?.length" class="mt-2 text-sm text-muted">排除：{{ target.exclude_keywords.join(' / ') }}</p>
           <p class="mt-2 text-sm text-muted">查询工具：{{ target.tools.map(t => toolNames[t]).join('、') || '全部关闭' }}</p>
           <p class="mt-3 text-xs text-faint">{{ target.managed_by_plugin ? '配置来源：AstrBot 插件' : target.delivery_mode === 'astrbot' ? '等待插件接管已有配置' : '旧版直发通道' }} · 最近活跃 {{ relTime(target.last_activity) }}</p>
         </article>

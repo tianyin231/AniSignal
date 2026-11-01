@@ -68,6 +68,8 @@ app.include_router(ai_news_router)
 app.include_router(admin_aihot_router)
 app.include_router(auth_router)
 app.include_router(account_router)
+from app.api.account_bot import router as account_bot_router
+app.include_router(account_bot_router)
 app.include_router(admin_settings_router)
 app.include_router(admin_proxies_router)
 app.include_router(proxy_internal_router)

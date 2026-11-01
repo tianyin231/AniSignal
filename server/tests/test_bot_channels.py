@@ -159,7 +159,7 @@ async def test_chat_channel_changes_are_validated_and_labeled(client, session):
     await session.commit()
     await set_setting(session, "bot_bridge", {"tools_key": "test-channel-key"})
     response = await client.post("/api/bot/subscription", headers={"X-Bot-Key": "test-channel-key"},
-        json={"umo": row.umo, "actor_id": "self", "action": "channels", "value": "鸣潮_官方_YB,鸣潮_商品"})
+        json={"umo": row.umo, "actor_id": row.umo.split(":", 2)[2], "action": "channels", "value": "鸣潮_官方_YB,鸣潮_商品"})
     assert response.status_code == 200
     assert response.json()["channels"] == ["wuwa:official:youtube", "wuwa:product"]
     assert response.json()["channel_labels"] == ["鸣潮_官方_YB", "鸣潮_商品"]

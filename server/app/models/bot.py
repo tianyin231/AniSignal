@@ -9,6 +9,22 @@ from app.clock import utcnow
 from app.models.base import Base
 
 
+class BotClient(Base):
+    """用户授予单个 AstrBot 接入的凭据；轮换保留 client_id 和投递历史。"""
+
+    __tablename__ = "bot_clients"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    token_hash: Mapped[str] = mapped_column(String(64))
+    token_tail: Mapped[str] = mapped_column(String(4))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class BotTarget(Base):
     __tablename__ = "bot_targets"
     __table_args__ = (UniqueConstraint("client_id", "umo", name="uq_bot_targets_client_umo"),)

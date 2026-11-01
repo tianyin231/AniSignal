@@ -536,8 +536,8 @@ async def my_custom_feeds(
 @router.get("/custom-quota")
 async def custom_quota(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
     from app.services.custom_policy import user_quota
-    return {**(await user_quota(session, user.id)), "notification_channels": ["email"],
-            "planned_channels": ["astrbot"], "astrbot_requires_authorized_binding": True}
+    return {**(await user_quota(session, user.id)), "notification_channels": ["email", "astrbot"],
+            "planned_channels": [], "astrbot_requires_authorized_binding": True}
 
 
 @router.post("/custom-feeds", status_code=status.HTTP_201_CREATED)

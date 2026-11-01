@@ -228,21 +228,18 @@ async def load_candidates(
                 continue
             normalized = version.normalized_json or {}
             media = normalized.get("media") if isinstance(normalized, dict) else []
-            image = next(
-                (
-                    safe
-                    for value in (media if isinstance(media, list) else [])
-                    if isinstance(value, str) and (safe := _bot_image_url(value))
-                ),
-                None,
-            )
+            images = [
+                safe for value in (media if isinstance(media, list) else [])
+                if isinstance(value, str) and (safe := _bot_image_url(value))
+            ]
             candidate = {
                 "id": raw.id,
                 "community": raw.community,
                 "title": title,
                 "text": (translated or text)[:text_limit],
                 "url": _safe_url(raw.url),
-                "image": image,
+                "image": images[0] if images else None,
+                "media": images,
                 "platform": raw.platform,
                 "content_type": raw.content_type,
                 "source": source.name if source else None,
@@ -297,6 +294,7 @@ async def group_candidates(session: AsyncSession, candidates: list[dict], *, use
                 existing["ai_summary"] = item["ai_summary"]
             if item.get("image") and not existing.get("image"):
                 existing["image"] = item["image"]
+                existing["media"] = item.get("media") or []
             continue
         grouped[key] = {
             **item,

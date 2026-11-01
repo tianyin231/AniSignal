@@ -183,13 +183,20 @@ async def _push_to_targets(
     from app.services.bot import create_delivery
     from app.services.bot import matches_target_scope
     from app.services.bot_channels import annotate_candidates
+    from app.services.bot_preferences import resolve_target
 
     delivered = 0
+    from app.services.bot_access import target_error
     if brief:
         sources = [source for item in brief.get("items", []) for source in (item.get("sources") or [item])]
         await annotate_candidates(session, sources)
     for target in await _targets_for_community(session, community):
-        if target.config.get("channels") and (not brief or not all(matches_target_scope(target, item) for item in brief.get("items", []))):
+        if await target_error(session, target):
+            continue
+        target = await resolve_target(session, target, "updates")
+        if brief and not all(matches_target_scope(target, item) for item in brief.get("items", [])):
+            continue
+        if not brief and any(target.config.get(key) for key in ("channels", "keywords", "exclude_keywords")):
             continue
         await create_delivery(session, target, kind, text, f"{dedupe_key}:target:{target.id}", brief=brief)
         delivered += 1

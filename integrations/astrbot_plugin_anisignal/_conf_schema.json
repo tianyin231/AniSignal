@@ -5,17 +5,17 @@
     "default": "http://anisignal.xyz"
   },
   "tools_key": {
-    "description": "AniSignal 专用插件密钥",
+    "description": "AniSignal 用户 Token",
     "type": "string",
     "default": "",
-    "hint": "在 AniSignal 管理端的机器人接入中获取；每个 AstrBot 实例使用自己的密钥，不要填写管理员 Token。",
+    "hint": "登录 AniSignal → 账号中心 → 机器人接入，创建专用 Token 并填入。保存后发送 /情报会话 确认绑定账号，再勾选本实例各会话的内容与推送。每个 AstrBot 实例使用独立 Token。",
     "secret": true
   },
   "targets": {
-    "description": "会话订阅",
+    "description": "会话与通知定制",
     "type": "template_list",
     "default": [],
-    "hint": "每个群聊或私聊单独配置。保存后自动同步，移除的会话会暂停，历史投递记录保留。",
+    "hint": "每个群聊或私聊分别配置。先选来源，再分别设置早报、即时动态、日历和展示模板。",
     "templates": {
       "session": {
         "name": "群聊或私聊",
@@ -38,9 +38,299 @@
             "default": false
           },
           "subscription": {
-            "description": "订阅范围",
+            "description": "内容来源（分区 / 身份 / 平台）",
             "type": "object",
             "items": {
+              "scope_mode": {
+                "description": "来源选择方式",
+                "type": "string",
+                "default": "channels",
+                "options": [
+                  "channels",
+                  "legacy",
+                  "custom"
+                ],
+                "labels": [
+                  "按下方分区逐项勾选来源",
+                  "所选分区的全部平台",
+                  "仅定制信息源与监控"
+                ],
+                "hint": "勾选模式下，未选择任何频道就不接收公共分区内容。"
+              },
+              "inherit_preferences": {
+                "description": "继承账号分区偏好与排除词",
+                "type": "bool",
+                "default": true,
+                "hint": "账号中心修改后自动生效；分区取交集，排除词合并。"
+              },
+              "inherit_keywords": {
+                "description": "合并账号已启用的关注词",
+                "type": "bool",
+                "default": false,
+                "hint": "与本会话关注词合并，命中任一词即可；全部留空则不限关键词。"
+              },
+              "communities": {
+                "description": "分区（全部平台模式）",
+                "type": "list",
+                "default": [
+                  "wuwa",
+                  "blhx",
+                  "hsr",
+                  "arknights",
+                  "genshin",
+                  "endfield",
+                  "ai"
+                ],
+                "options": [
+                  "wuwa",
+                  "blhx",
+                  "hsr",
+                  "arknights",
+                  "genshin",
+                  "endfield",
+                  "ai"
+                ],
+                "labels": [
+                  "鸣潮",
+                  "碧蓝航线",
+                  "崩坏星穹铁道",
+                  "明日方舟",
+                  "原神",
+                  "终末地",
+                  "AI"
+                ]
+              },
+              "channel_wuwa": {
+                "description": "鸣潮 · 来源勾选",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "wuwa:official:bilibili",
+                  "wuwa:official:youtube",
+                  "wuwa:official:x",
+                  "wuwa:official:web",
+                  "wuwa:official:miyoushe",
+                  "wuwa:community:bilibili",
+                  "wuwa:community:youtube",
+                  "wuwa:community:x",
+                  "wuwa:community:web",
+                  "wuwa:community:miyoushe",
+                  "wuwa:product"
+                ],
+                "labels": [
+                  "官方 · B站",
+                  "官方 · YouTube",
+                  "官方 · X",
+                  "官方 · 官网",
+                  "官方 · 米游社",
+                  "社区 · B站",
+                  "社区 · YouTube",
+                  "社区 · X",
+                  "社区 · 官网",
+                  "社区 · 米游社",
+                  "商品"
+                ],
+                "render_type": "checkbox"
+              },
+              "channel_blhx": {
+                "description": "碧蓝航线 · 来源勾选",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "blhx:official:bilibili",
+                  "blhx:official:youtube",
+                  "blhx:official:x",
+                  "blhx:official:web",
+                  "blhx:official:miyoushe",
+                  "blhx:community:bilibili",
+                  "blhx:community:youtube",
+                  "blhx:community:x",
+                  "blhx:community:web",
+                  "blhx:community:miyoushe",
+                  "blhx:product"
+                ],
+                "labels": [
+                  "官方 · B站",
+                  "官方 · YouTube",
+                  "官方 · X",
+                  "官方 · 官网",
+                  "官方 · 米游社",
+                  "社区 · B站",
+                  "社区 · YouTube",
+                  "社区 · X",
+                  "社区 · 官网",
+                  "社区 · 米游社",
+                  "商品"
+                ],
+                "render_type": "checkbox"
+              },
+              "channel_hsr": {
+                "description": "崩坏星穹铁道 · 来源勾选",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "hsr:official:bilibili",
+                  "hsr:official:youtube",
+                  "hsr:official:x",
+                  "hsr:official:web",
+                  "hsr:official:miyoushe",
+                  "hsr:community:bilibili",
+                  "hsr:community:youtube",
+                  "hsr:community:x",
+                  "hsr:community:web",
+                  "hsr:community:miyoushe",
+                  "hsr:product"
+                ],
+                "labels": [
+                  "官方 · B站",
+                  "官方 · YouTube",
+                  "官方 · X",
+                  "官方 · 官网",
+                  "官方 · 米游社",
+                  "社区 · B站",
+                  "社区 · YouTube",
+                  "社区 · X",
+                  "社区 · 官网",
+                  "社区 · 米游社",
+                  "商品"
+                ],
+                "render_type": "checkbox"
+              },
+              "channel_arknights": {
+                "description": "明日方舟 · 来源勾选",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "arknights:official:bilibili",
+                  "arknights:official:youtube",
+                  "arknights:official:x",
+                  "arknights:official:web",
+                  "arknights:official:miyoushe",
+                  "arknights:community:bilibili",
+                  "arknights:community:youtube",
+                  "arknights:community:x",
+                  "arknights:community:web",
+                  "arknights:community:miyoushe",
+                  "arknights:product"
+                ],
+                "labels": [
+                  "官方 · B站",
+                  "官方 · YouTube",
+                  "官方 · X",
+                  "官方 · 官网",
+                  "官方 · 米游社",
+                  "社区 · B站",
+                  "社区 · YouTube",
+                  "社区 · X",
+                  "社区 · 官网",
+                  "社区 · 米游社",
+                  "商品"
+                ],
+                "render_type": "checkbox"
+              },
+              "channel_genshin": {
+                "description": "原神 · 来源勾选",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "genshin:official:bilibili",
+                  "genshin:official:youtube",
+                  "genshin:official:x",
+                  "genshin:official:web",
+                  "genshin:official:miyoushe",
+                  "genshin:community:bilibili",
+                  "genshin:community:youtube",
+                  "genshin:community:x",
+                  "genshin:community:web",
+                  "genshin:community:miyoushe",
+                  "genshin:product"
+                ],
+                "labels": [
+                  "官方 · B站",
+                  "官方 · YouTube",
+                  "官方 · X",
+                  "官方 · 官网",
+                  "官方 · 米游社",
+                  "社区 · B站",
+                  "社区 · YouTube",
+                  "社区 · X",
+                  "社区 · 官网",
+                  "社区 · 米游社",
+                  "商品"
+                ],
+                "render_type": "checkbox"
+              },
+              "channel_endfield": {
+                "description": "终末地 · 来源勾选",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "endfield:official:bilibili",
+                  "endfield:official:youtube",
+                  "endfield:official:x",
+                  "endfield:official:web",
+                  "endfield:official:miyoushe",
+                  "endfield:community:bilibili",
+                  "endfield:community:youtube",
+                  "endfield:community:x",
+                  "endfield:community:web",
+                  "endfield:community:miyoushe",
+                  "endfield:product"
+                ],
+                "labels": [
+                  "官方 · B站",
+                  "官方 · YouTube",
+                  "官方 · X",
+                  "官方 · 官网",
+                  "官方 · 米游社",
+                  "社区 · B站",
+                  "社区 · YouTube",
+                  "社区 · X",
+                  "社区 · 官网",
+                  "社区 · 米游社",
+                  "商品"
+                ],
+                "render_type": "checkbox"
+              },
+              "channel_ai": {
+                "description": "AI · 来源勾选",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "ai:news"
+                ],
+                "labels": [
+                  "快讯"
+                ],
+                "render_type": "checkbox"
+              },
+              "custom_feeds": {
+                "description": "定制信息源",
+                "type": "list",
+                "default": [],
+                "options": [
+                  "nikke_global",
+                  "nikke_youtube",
+                  "nikke_x"
+                ],
+                "labels": [
+                  "NIKKE 国际服_官方_官网",
+                  "NIKKE 国际服_官方_YB",
+                  "NIKKE 国际服_官方_X"
+                ]
+              },
+              "keywords": {
+                "description": "关注关键词",
+                "type": "list",
+                "default": [],
+                "hint": "留空关注所选分区的全部情报，最多 20 个关键词。"
+              },
+              "exclude_keywords": {
+                "description": "排除关键词",
+                "type": "list",
+                "default": [],
+                "hint": "标题或正文命中任一排除词即跳过，优先于关注词，最多 20 个。"
+              },
               "channels": {
                 "description": "订阅频道",
                 "type": "list",
@@ -183,59 +473,16 @@
                   "终末地_商品",
                   "AI_快讯"
                 ],
-                "hint": "可多选；选定后按频道订阅。留空沿用下方分区；商品频道包含公告与已采纳履约变化。"
+                "hint": "可多选；选定后按频道订阅。留空沿用下方分区；商品频道包含公告与已采纳履约变化。",
+                "invisible": true
               },
-              "communities": {
-                "description": "订阅分区",
-                "type": "list",
-                "default": [
-                  "wuwa",
-                  "blhx",
-                  "hsr",
-                  "arknights",
-                  "genshin",
-                  "endfield",
-                  "ai"
-                ],
-                "options": [
-                  "wuwa",
-                  "blhx",
-                  "hsr",
-                  "arknights",
-                  "genshin",
-                  "endfield",
-                  "ai"
-                ],
-                "labels": [
-                  "鸣潮",
-                  "碧蓝航线",
-                  "崩坏星穹铁道",
-                  "明日方舟",
-                  "原神",
-                  "终末地",
-                  "AI"
-                ]
-              },
-              "keywords": {
-                "description": "关注关键词",
+              "custom_feed_ids": {
+                "description": "我的监控与公共监控",
                 "type": "list",
                 "default": [],
-                "hint": "留空关注所选分区的全部情报，最多 20 个关键词。"
-              },
-              "custom_feeds": {
-                "description": "定制信息源",
-                "type": "list",
-                "default": [],
-                "options": [
-                  "nikke_global",
-                  "nikke_youtube",
-                  "nikke_x"
-                ],
-                "labels": [
-                  "NIKKE 国际服_官方_官网",
-                  "NIKKE 国际服_官方_YB",
-                  "NIKKE 国际服_官方_X"
-                ]
+                "options": [],
+                "labels": [],
+                "hint": "填写用户 Token 并保存后重新打开设置，加载本人有权访问的监控；可将本人私有监控推送到此会话。"
               }
             }
           },
@@ -248,6 +495,14 @@
                 "type": "bool",
                 "default": true
               },
+              "daily_sources": {
+                "description": "早报来源（可单独收窄）",
+                "type": "list",
+                "default": [],
+                "options": [],
+                "labels": [],
+                "hint": "留空沿用会话来源；勾选后仅接收这些来源与会话订阅的交集，不能扩大订阅。"
+              },
               "daily_time": {
                 "description": "早报时间（北京时间）",
                 "type": "string",
@@ -259,11 +514,43 @@
                 "type": "bool",
                 "default": false
               },
+              "updates_sources": {
+                "description": "即时动态来源（可单独收窄）",
+                "type": "list",
+                "default": [],
+                "options": [],
+                "labels": [],
+                "hint": "留空沿用会话来源；勾选后仅接收这些来源与会话订阅的交集，不能扩大订阅。"
+              },
               "calendar_enabled": {
                 "description": "活动收尾提醒",
                 "type": "bool",
                 "default": true,
                 "hint": "需同时开启动态推送；汇总未来 24 小时的活动截止和维护，每天最多一条。"
+              },
+              "calendar_kinds": {
+                "description": "日历提醒类型",
+                "type": "list",
+                "default": [
+                  "activity",
+                  "pool",
+                  "maintenance",
+                  "deadline"
+                ],
+                "options": [
+                  "activity",
+                  "pool",
+                  "maintenance",
+                  "deadline"
+                ],
+                "labels": [
+                  "活动结束",
+                  "卡池结束",
+                  "维护开始",
+                  "报名 / 兑换截止"
+                ],
+                "hint": "可多选，全部取消则不发送日历提醒。",
+                "render_type": "checkbox"
               },
               "calendar_time": {
                 "description": "收尾提醒时间（北京时间）",

@@ -494,6 +494,32 @@ def _sanitize_html(text: str) -> str | None:
     return bleach.clean(text, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
 
 
+@router.get("/contents/{content_id}/notification-image.jpg")
+async def content_notification_image(content_id: int, session: AsyncSession = Depends(get_session)):
+    from fastapi.responses import RedirectResponse
+
+    from app.services.bot_media import bilibili_images, render_notification_image
+
+    normalized = await session.scalar(select(ContentVersion.normalized_json).join(
+        RawContent, RawContent.id == ContentVersion.raw_content_id).where(
+        RawContent.id == content_id, RawContent.hidden.is_(False),
+        RawContent.platform == "bilibili", RawContent.content_type == "dynamic"
+    ).order_by(ContentVersion.version.desc()).limit(1))
+    images = bilibili_images((normalized or {}).get("media") or [])
+    if not images:
+        raise HTTPException(status_code=404, detail="图片不存在")
+    if len(images) < 3:
+        return RedirectResponse(images[0])
+    try:
+        content = await render_notification_image(images)
+    except (httpx.HTTPError, OSError, ValueError, TimeoutError) as exc:
+        logging.getLogger(__name__).warning("Bot image unavailable content=%s (%s)", content_id, type(exc).__name__)
+        return RedirectResponse(images[0], headers={"Cache-Control": "no-store"})
+    if content is None:
+        return RedirectResponse(images[0], headers={"Cache-Control": "public, max-age=3600"})
+    return Response(content=content, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+
+
 @router.get("/contents/{content_id}", response_model=ContentDetailOut)
 async def get_content_detail(content_id: int, session: AsyncSession = Depends(get_session)):
     """站内内容详情：解析后的正文/媒体/指标历史/关联事件；外链仅作参考出处。"""
