@@ -2,6 +2,7 @@
 import { Flame } from 'lucide-vue-next'
 import type { RawItem } from '~/utils/data'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
+import { imageUrl } from '~/utils/image'
 
 // 24 小时飙升：窗口内播放增量最高的内容（快照增量，非绝对播放量）
 const props = defineProps<{ items: RawItem[], deltas: Map<string, number>, moreTo: Record<string, unknown> }>()
@@ -39,10 +40,11 @@ const failed = ref<string[]>([])
           <span class="num text-center text-lg font-bold" :class="row.rank <= 3 ? 'text-ink' : 'text-faint'">{{ row.rank }}</span>
           <img
             v-if="row.item.cover && !failed.includes(row.item.id)"
-            :src="row.item.cover"
+            :src="imageUrl(row.item.cover, 160)"
             alt=""
             referrerpolicy="no-referrer"
             loading="lazy"
+            decoding="async"
             class="aspect-video w-16 rounded-md object-cover"
             @error="failed.push(row.item.id)"
           >

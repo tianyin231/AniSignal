@@ -52,7 +52,7 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
       加载中…
     </section>
     <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">商品暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
-    <div v-else-if="visibleProducts.length" class="grid auto-rows-fr grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div v-else-if="visibleProducts.length" class="grid grid-cols-1 gap-5 sm:auto-rows-fr sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       <NuxtLink
         v-for="p in visibleProducts"
         :key="p.slug"
@@ -72,16 +72,17 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
               >{{ communityChip(p.community)!.label }}</span>
               <span class="ml-auto inline-flex items-center gap-1.5"><span class="size-1.5 rounded-full" :class="p.monitor_status === 'archived' ? 'bg-faint' : 'bg-ok'" />{{ p.monitor_status === 'archived' ? '已归档' : '追踪中' }}</span>
             </div>
-            <h2 class="line-clamp-2 min-h-12 text-lg font-bold leading-6 text-ink group-hover:text-brand-ink">
+            <h2 class="line-clamp-2 text-lg font-bold leading-6 text-ink group-hover:text-brand-ink sm:min-h-12">
               {{ p.name }}
             </h2>
-            <p class="num mt-2 line-clamp-2 min-h-12 text-base font-semibold leading-6 text-ink-2" :title="p.price_note || undefined">{{ p.price_note }}</p>
-            <p class="mt-1 min-h-4 truncate text-xs text-muted">
+            <p v-if="p.price_note" class="num mt-2 line-clamp-2 text-base font-semibold leading-6 text-ink-2 sm:min-h-12" :title="p.price_note">{{ p.price_note }}</p>
+            <p v-else class="mt-2 hidden min-h-12 sm:block" aria-hidden="true" />
+            <p class="mt-1 truncate text-xs text-muted sm:min-h-4">
               {{ [p.publisher, p.skus.join(' / ')].filter(Boolean).join(' · ') }}
             </p>
           </div>
         </div>
-        <p class="mt-2 min-h-4 truncate text-xs text-muted">{{ briefLine(p) }}</p>
+        <p class="mb-3 mt-2 min-h-4 truncate text-xs text-muted">{{ briefLine(p) }}</p>
         <div class="mt-auto flex items-center justify-between gap-2 border-t border-line-soft pt-2.5 text-xs"><span class="mono text-faint">{{ p.fulfillment.updated_at ? fmtTime(p.fulfillment.updated_at) : '' }}</span><span class="shrink-0 font-medium text-brand-ink">查看进展 →</span></div>
         </div>
       </NuxtLink>

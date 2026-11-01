@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RefreshCw } from 'lucide-vue-next'
-import type { ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto, PublicSource } from '~/composables/usePublicApi'
+import type { ApiEventBrief, ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto, PublicSource } from '~/composables/usePublicApi'
 import { toRawItem, utcTimestamp } from '~/utils/public-utils'
 import { ongoingActivities, upNextItems } from '~/utils/schedule'
 
@@ -83,9 +83,23 @@ const feedRequest = useLazyAsyncData(
   },
   { watch: [homeCommunity, page, feedTab] },
 )
+// 侧栏卡片只用到标题、时间与来源平台；完整事件（证据链、事实、冲突）留给详情页，
+// 避免整份数据进入 SSR payload。
 const eventsRequest = useLazyAsyncData(
   () => `home-events-${homeCommunity.value}`,
-  (_app, { signal }) => api<ApiEventList>('/api/events', { signal, query: { community: homeCommunity.value, limit: 6 } }),
+  async (_app, { signal }): Promise<{ items: ApiEventBrief[] }> => {
+    const res = await api<ApiEventList>('/api/events', { signal, query: { community: homeCommunity.value, limit: 6 } })
+    return {
+      items: res.items.map(e => ({
+        id: e.id,
+        title: e.title,
+        community: e.community,
+        latest_evidence_at: e.latest_evidence_at,
+        first_seen_at: e.first_seen_at,
+        sources: e.sources.map(s => ({ platform: s.platform })),
+      })),
+    }
+  },
   { watch: [homeCommunity] },
 )
 const highlightsRequest = useLazyAsyncData(
@@ -116,7 +130,15 @@ const pulseRequest = useLazyAsyncData(
 )
 const sourcesRequest = useLazyAsyncData(
   () => `home-sources-${homeCommunity.value}`,
-  (_app, { signal }) => api<{ items: PublicSource[] }>('/api/sources', { query: { community: homeCommunity.value }, signal }),
+  async (_app, { signal }) => {
+    const res = await api<{ items: PublicSource[] }>('/api/sources', { query: { community: homeCommunity.value }, signal })
+    // 首页只统计启用中的来源健康度
+    return {
+      items: res.items
+        .filter(s => s.enabled)
+        .map(({ name, community, platform, enabled, consecutive_failures }) => ({ name, community, platform, enabled, consecutive_failures })),
+    }
+  },
   { watch: [homeCommunity] },
 )
 
@@ -160,6 +182,13 @@ const latestEvent = computed(() => {
   const event = eventsData.value?.items[0]
   return event ? { title: event.title, to: `/events/${event.id}` } : null
 })
+
+// 精选大图在桌面端按 16:9 定高，右栏不再把它撑高：
+// 即将到来条目多时右栏只放它（最多 6 条，与大图等高），履约追踪移到下方侧栏顶部；
+// 条目少时两张卡仍并排放在右栏，总高与大图相当。手机端顺序不变。
+const UP_NEXT_INLINE_MAX = 3
+const statusInline = computed(() => upcomingCount.value <= UP_NEXT_INLINE_MAX)
+const upNextLimit = computed(() => (statusInline.value ? UP_NEXT_INLINE_MAX : 6))
 
 const refreshing = ref(false)
 const homeError = computed(() => requests.some(request => request.error.value))
@@ -303,17 +332,25 @@ onBeforeUnmount(() => {
       部分内容暂时加载失败。<button type="button" class="ml-1 underline" :disabled="refreshing" @click="refreshHome">重新加载</button>
     </section>
 
-    <!-- 履约卡自身限高，精选大图与右栏保持等高。 -->
+    <!-- 精选大图 16:9 定高，右栏最后一张卡吸收余量保持底边对齐 -->
     <div v-if="featuredHighlights.length" class="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <FeaturedHero :items="featuredHighlights" :show-community="aggregate" />
       <div class="flex min-w-0 flex-col gap-5">
-        <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" />
-        <StatusCard embedded />
+        <UpNextCard
+          class="lg:flex-1"
+          :calendar="calendarData"
+          :codes="codesData"
+          :now="referenceTime"
+          :calendar-scope="homeCommunity"
+          :limit="upNextLimit"
+          :footer="statusInline ? 'auto' : 'always'"
+        />
+        <StatusCard embedded :class="{ 'lg:hidden': !statusInline }" />
       </div>
     </div>
     <!-- 精选加载中：低干扰骨架，避免先闪"暂无"再替换 -->
     <div v-else-if="highlightsStatus === 'pending' && !highlightsData" class="grid items-start gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" aria-hidden="true">
-      <div class="panel min-h-[300px] animate-pulse sm:min-h-[400px]" />
+      <div class="panel min-h-[300px] w-full animate-pulse sm:min-h-[400px] lg:aspect-video" />
       <div class="panel min-h-[140px] animate-pulse" />
     </div>
     <!-- 精选缺位（无数据/加载失败）：不放大空框，右栏卡片双列补位 -->
@@ -367,6 +404,8 @@ onBeforeUnmount(() => {
       </section>
 
       <aside class="flex min-w-0 flex-col gap-5" aria-label="首页侧栏">
+        <!-- 桌面端右栏放不下时，履约追踪排在侧栏第一位 -->
+        <StatusCard v-if="featuredHighlights.length && !statusInline" embedded class="hidden lg:block" />
         <TrendingCard :items="trendingList" :deltas="trendingDelta" :more-to="{ path: '/contents', query: { ...sectionQuery, tab: 'trending' } }" />
         <EventsCard :events="eventsData?.items ?? []" :show-community="aggregate" :more-to="{ path: '/events', query: sectionQuery }" />
         <CodesCard :codes="codesData?.items ?? []" :show-community="aggregate" />

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Images, Play } from 'lucide-vue-next'
 import { platformMeta, type RawItem } from '~/utils/data'
+import { imageSrcset, imageUrl } from '~/utils/image'
 
 const props = defineProps<{ item: RawItem }>()
 const coverFailed = ref(false)
@@ -18,10 +19,13 @@ watch(() => props.item.cover, () => (coverFailed.value = false))
     <div class="relative aspect-video overflow-hidden bg-slate-100 dark:bg-zinc-900">
       <img
         v-if="item.cover && !coverFailed"
-        :src="item.cover"
+        :src="imageUrl(item.cover, 640)"
+        :srcset="imageSrcset(item.cover, [320, 640])"
+        sizes="(min-width: 1024px) 320px, 50vw"
         :alt="`${item.title} 封面`"
         referrerpolicy="no-referrer"
         loading="lazy"
+        decoding="async"
         class="size-full object-cover transition-opacity duration-200 group-hover:opacity-90"
         @error="coverFailed = true"
       >

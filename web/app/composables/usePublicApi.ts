@@ -189,6 +189,11 @@ export interface ApiEventList {
   total: number
 }
 
+/** 列表卡片用的精简事件：只含标题、时间与来源平台。 */
+export type ApiEventBrief = Pick<ApiEvent, 'id' | 'title' | 'community' | 'latest_evidence_at' | 'first_seen_at'> & {
+  sources: Pick<ApiEventSource, 'platform'>[]
+}
+
 export interface ApiProductStage {
   label: string
   state: 'done' | 'current' | 'pending'

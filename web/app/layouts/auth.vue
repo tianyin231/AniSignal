@@ -29,7 +29,7 @@ const events = computed(() => (eventsData.value?.items ?? []).map(toAppEvent))
     <header class="glass sticky top-0 z-40">
       <div class="mx-auto flex h-16 max-w-5xl items-center justify-between px-4 sm:px-6">
         <NuxtLink to="/" class="flex items-center gap-2">
-          <img src="/icon.png" alt="" class="size-8 shrink-0 rounded-[9px]">
+          <img src="/icon-64.webp" alt="" width="32" height="32" class="size-8 shrink-0 rounded-[9px]">
           <span class="num text-[19px] font-bold tracking-tight text-ink">AniSignal</span>
           <span class="ml-1 hidden rounded-md bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-ink sm:inline">游戏事件雷达</span>
         </NuxtLink>

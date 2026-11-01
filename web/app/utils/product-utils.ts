@@ -1,9 +1,11 @@
-import type { ApiProduct, ApiProductSignal } from '~/composables/usePublicApi'
+import type { ApiProduct, ApiProductSignal, FulfillmentSnapshot } from '~/composables/usePublicApi'
+
+type SortableProduct = Pick<ApiProduct, 'id' | 'monitor_status'> & { fulfillment: Pick<FulfillmentSnapshot, 'updated_at'> }
 
 /** 履约信号的新变化优先；没有信号的商品放在后面。 */
-export function sortProductsBySignal(items: ApiProduct[]) {
-  const time = (product: ApiProduct) => Date.parse(product.fulfillment.updated_at || '') || 0
-  const rank = (product: ApiProduct) => product.monitor_status === 'archived' ? 1 : 0
+export function sortProductsBySignal<T extends SortableProduct>(items: T[]): T[] {
+  const time = (product: T) => Date.parse(product.fulfillment.updated_at || '') || 0
+  const rank = (product: T) => product.monitor_status === 'archived' ? 1 : 0
   return [...items].sort((left, right) => rank(left) - rank(right) || time(right) - time(left) || right.id - left.id)
 }
 

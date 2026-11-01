@@ -3,6 +3,7 @@ import { ArrowUpRight, BadgeCheck, ImageIcon } from 'lucide-vue-next'
 import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { imageSrcset, imageUrl } from '~/utils/image'
+import { isRedundantExcerpt } from '~/utils/text'
 
 const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean; deltaView?: number | null }>()
 const { mediaMode } = useSiteConfig()
@@ -41,14 +42,18 @@ const keywords = computed(() => {
   const skip = new Set([communityMeta(props.item.community)?.label, props.item.account])
   return (props.item.keywords ?? []).filter(k => !skip.has(k)).slice(0, 2)
 })
-// 有封面时摘要让位给标题；纯文字内容（动态 / X / 公告）保留两行摘要
-const excerpt = computed(() => (showCover.value ? '' : props.item.excerpt?.replace(/\s+/g, ' ').trim() ?? ''))
+// 有封面时摘要让位给标题；纯文字内容（动态 / X / 公告）保留两行摘要，与标题重复时不再显示
+const excerpt = computed(() => {
+  if (showCover.value) return ''
+  const text = props.item.excerpt?.replace(/\s+/g, ' ').trim() ?? ''
+  return isRedundantExcerpt(props.item.title, text) ? '' : text
+})
 </script>
 
 <template>
   <article class="flex border-b border-line-soft last:border-0">
     <NuxtLink :to="detailTo" class="group flex min-w-0 flex-1 gap-4 px-4 py-3.5 transition-colors hover:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-5">
-      <div v-if="showCover" class="relative aspect-video w-28 shrink-0 overflow-hidden rounded-[10px] bg-chip sm:w-40">
+      <div v-if="showCover" class="relative aspect-video w-28 shrink-0 self-start overflow-hidden rounded-[10px] bg-chip sm:w-40">
         <img
           :src="imageUrl(item.cover, 320)"
           :srcset="imageSrcset(item.cover, [160, 320])"
@@ -83,7 +88,7 @@ const excerpt = computed(() => (showCover.value ? '' : props.item.excerpt?.repla
           <span v-if="deltaLabel" class="num rounded-full bg-hot/10 px-1.5 py-0.5 text-[11px] font-bold text-hot">{{ deltaLabel }} / 24h</span>
           <span v-if="item.translated" class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>
           <span v-if="item.mergedInto" class="text-brand-ink">已并入事件</span>
-          <span v-for="k in keywords" :key="k" class="rounded-md bg-chip px-1.5 py-0.5 text-[11px] text-ink-2">{{ k }}</span>
+          <span v-for="k in keywords" :key="k" class="rounded-md bg-chip px-1.5 py-0.5 text-[11px] text-ink-2 max-sm:hidden">{{ k }}</span>
         </div>
       </div>
       <div v-if="viewLabel" class="hidden w-16 shrink-0 pt-0.5 text-right sm:block">

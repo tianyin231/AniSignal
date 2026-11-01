@@ -63,20 +63,44 @@ COMMUNITY_AGGREGATE_QUERY = Query(
 )
 
 
+HIGHLIGHTS_CACHE_SECONDS = 60
+
+
 @router.get("/highlights", response_model=PublicContentList)
 async def list_highlights(
+    request: Request,
     limit: int = Query(default=5, ge=1, le=8),
     community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
-    """首页精选：官方实质动态与高热度社区内容混排。"""
+    """首页精选：官方实质动态与高热度社区内容混排。
+
+    候选要扫描近 200 条内容并补指标与事件分组（实测 0.6–0.7s），是首页首屏最慢的一步；
+    结果按分区短期缓存，精选本身按小时级变化，60 秒延迟可以接受。
+    """
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = f"highlights:v1:{community}:{limit}"
+    if cache is not None:
+        try:
+            cached = await cache.get(cache_key)
+            if cached:
+                return PublicContentList.model_validate_json(cached)
+        except Exception:  # noqa: BLE001 - Redis 不可用时直接现算
+            pass
+
     from app.services.curation import select_highlights
 
     items = [
         PublicContentItem(**item)
         for item in await select_highlights(session, limit, community=community)
     ]
-    return PublicContentList(items=items, total=len(items))
+    result = PublicContentList(items=items, total=len(items))
+    if cache is not None:
+        try:
+            await cache.set(cache_key, result.model_dump_json(), ex=HIGHLIGHTS_CACHE_SECONDS)
+        except Exception:  # noqa: BLE001
+            pass
+    return result
 
 
 @router.get("/trending", response_model=PublicContentList)

@@ -16,3 +16,21 @@ export function decodeEntities(value: string): string {
   }
   return out
 }
+
+function comparable(value: string): string {
+  return value.replace(/\s+/g, '').replace(/(…|\.{3})$/, '').toLowerCase()
+}
+
+/**
+ * 摘要是否只是在重复标题：X / 动态类内容的标题常取自正文开头，
+ * 两者并排展示时同一句话会出现两遍。
+ */
+export function isRedundantExcerpt(title: string | undefined, excerpt: string | undefined): boolean {
+  if (!title || !excerpt) return false
+  const t = comparable(title)
+  const e = comparable(excerpt)
+  if (!t || !e) return false
+  if (e === t || t.startsWith(e)) return true
+  // 标题只是正文开头的几个字时，摘要仍有补充信息，保留
+  return e.startsWith(t) && t.length >= Math.max(8, e.length * 0.5)
+}

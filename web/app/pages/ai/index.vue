@@ -54,32 +54,49 @@ const filters = computed(() => ({
   selected: route.query.mode === 'selected',
 }))
 const request = computed(() => ({ ...filters.value, limit: 20, offset: (page.value - 1) * 20 }))
-const { data, status, error, refresh } = await useLazyAsyncData(
+// 互不依赖的首屏数据并行请求；逐个 await 会让服务端渲染串行等待（实测首字节 2s+）。
+const newsRequest = useLazyAsyncData(
   () => `ai-news-${JSON.stringify(request.value)}`,
   (_app, { signal }) => api<NewsList>('/api/ai-news/events', { query: request.value, signal }),
 )
-const { data: edition } = await useLazyAsyncData('ai-news-edition',
+const editionRequest = useLazyAsyncData('ai-news-edition',
   (_app, { signal }) => api<{ day: string | null; items: NewsItem[] }>('/api/ai-news/edition', { signal }))
-const { data: pulse } = await useLazyAsyncData('ai-news-pulse', async (_app, { signal }) => {
+const pulseRequest = useLazyAsyncData('ai-news-pulse', async (_app, { signal }) => {
   const [day, week] = await Promise.all([
     api<NewsList>('/api/ai-news/events', { query: { hours: 24, limit: 1 }, signal }),
     api<NewsList>('/api/ai-news/events', { query: { hours: 168, limit: 1 }, signal }),
   ])
   return { day: day.total, week: week.total }
 })
-const { data: coverList } = await useLazyAsyncData(
-  'ai-news-covers',
-  (_app, { signal }) => api<{ items: { id: number, cover: string | null }[] }>('/api/contents', {
-    query: { community: 'ai', limit: 100 },
-    signal,
-  }),
+await Promise.all([newsRequest, editionRequest, pulseRequest])
+const { data, status, error, refresh } = newsRequest
+const { data: edition } = editionRequest
+const { data: pulse } = pulseRequest
+
+// 旧版快讯 id 与内容库相同，可借内容库封面补图；新引擎（aihot:content-…）自带 image，
+// 无需再拉 100 条内容（约 80KB、1s）。
+function numericId(id: number | string | undefined) {
+  if (typeof id === 'number') return id
+  return id && /^\d+$/.test(id) ? Number(id) : null
+}
+const needsCoverFallback = computed(() => (data.value?.items ?? []).some(i => !i.image && numericId(i.id) !== null))
+const coversRequest = useLazyAsyncData(
+  () => `ai-news-covers-${needsCoverFallback.value ? 'legacy' : 'none'}`,
+  async (_app, { signal }) => {
+    if (!needsCoverFallback.value) return { items: [] }
+    const res = await api<{ items: { id: number, cover: string | null }[] }>('/api/contents', {
+      query: { community: 'ai', limit: 100 },
+      signal,
+    })
+    return { items: res.items.filter(i => i.cover).map(({ id, cover }) => ({ id, cover })) }
+  },
 )
-// 快讯接口没有封面。代表内容的 id 与内容库相同，头图再补一次详情里的首张图。
-const { data: leadShot } = await useLazyAsyncData(
+// 旧版快讯接口没有封面，头图再补一次详情里的首张图。
+const leadShotRequest = useLazyAsyncData(
   () => `ai-lead-media-${page.value === 1 ? (data.value?.items[0]?.id ?? 0) : 0}`,
   async (_app, { signal }) => {
-    const id = page.value === 1 ? data.value?.items[0]?.id : 0
-    if (!id || typeof id === 'string') return { id: 0, url: '' }
+    const id = page.value === 1 ? numericId(data.value?.items[0]?.id) : null
+    if (!id) return { id: 0, url: '' }
     try {
       const detail = await api<{ media?: string[] }>(`/api/contents/${id}`, { signal })
       return { id, url: detail.media?.[0] || '' }
@@ -88,6 +105,9 @@ const { data: leadShot } = await useLazyAsyncData(
     }
   },
 )
+await Promise.all([coversRequest, leadShotRequest])
+const { data: coverList } = coversRequest
+const { data: leadShot } = leadShotRequest
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total || 0) / 20)))
 const hasFilters = computed(() => !!(filters.value.q || filters.value.topic || filters.value.kind !== 'all' || filters.value.selected || filters.value.sort === 'hot'))
 const pendingNew = ref(false)
@@ -119,8 +139,8 @@ const sourcesOk = computed(() => sourceCells.value.filter(s => s.status === 'act
 const delayedSources = computed(() => sourceCells.value.filter(s => s.status !== 'active'))
 const leadCover = computed(() => {
   if (!lead.value) return ''
-  if (leadShot.value?.id === lead.value.id && leadShot.value.url) return leadShot.value.url
-  return lead.value.image || covers.value.get(Number(lead.value.id)) || ''
+  if (leadShot.value?.id && leadShot.value.id === numericId(lead.value.id) && leadShot.value.url) return leadShot.value.url
+  return lead.value.image || covers.value.get(numericId(lead.value.id) ?? -1) || ''
 })
 const leadCoverFailed = ref(false)
 watch(leadCover, () => { leadCoverFailed.value = false })
@@ -137,7 +157,7 @@ function platformMark(platform: string) {
 }
 function rowCover(id: number | string) {
   if (failedCovers.value.includes(id)) return ''
-  return data.value?.items.find(i => i.id === id)?.image || covers.value.get(Number(id)) || ''
+  return data.value?.items.find(i => i.id === id)?.image || covers.value.get(numericId(id) ?? -1) || ''
 }
 function markCoverFailed(id: number | string) {
   if (!failedCovers.value.includes(id)) failedCovers.value = [...failedCovers.value, id]
