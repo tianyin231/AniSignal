@@ -1,65 +1,37 @@
 <script setup lang="ts">
+import { apiErrorDetail } from '~/utils/api-errors'
+
 definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '注册 · AniSignal' })
 
+const flash = useAuthFlash()
 const step = ref<'form' | 'code'>('form')
-const email = ref('')
+const email = ref(flash.value?.email ?? '')
+flash.value = null
 const password = ref('')
 const confirm = ref('')
-const code = ref('')
 const error = ref('')
-const info = ref('')
 const busy = ref(false)
-const { login, fetchMe } = useAuth()
+const attempted = ref(false)
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const emailInvalid = computed(() => attempted.value && !EMAIL_PATTERN.test(email.value.trim()))
+const passwordInvalid = computed(() => attempted.value && password.value.length < 8)
+// 确认框还没输完时不提示，提交后或长度追上密码后再判断
+const confirmInvalid = computed(() => confirm.value !== password.value
+  && (attempted.value || (confirm.value.length > 0 && confirm.value.length >= password.value.length)))
 
 async function submit() {
   if (busy.value) return
-  if (password.value !== confirm.value) {
-    error.value = '两次输入的密码不一致'
-    return
-  }
-  busy.value = true
+  attempted.value = true
   error.value = ''
+  if (emailInvalid.value || passwordInvalid.value || confirm.value !== password.value) return
+  busy.value = true
   try {
-    await $fetch('/api/auth/register', {
-      method: 'POST',
-      body: { email: email.value.trim(), password: password.value },
-    })
-    info.value = '验证码已发送，请查收邮箱（含垃圾邮件箱）'
+    await $fetch('/api/auth/register', { method: 'POST', body: { email: email.value.trim(), password: password.value } })
     step.value = 'code'
-  } catch (exc: any) {
-    error.value = exc?.data?.detail ?? '注册失败，请稍后再试'
-  } finally {
-    busy.value = false
-  }
-}
-
-async function resend() {
-  busy.value = true
-  error.value = ''
-  try {
-    await $fetch('/api/auth/resend', { method: 'POST', body: { email: email.value.trim() } })
-    info.value = '已重新发送验证码'
-  } catch (exc: any) {
-    error.value = exc?.data?.detail ?? '发送失败'
-  } finally {
-    busy.value = false
-  }
-}
-
-async function verify() {
-  if (busy.value || code.value.trim().length !== 6) return
-  busy.value = true
-  error.value = ''
-  try {
-    await $fetch('/api/auth/verify', {
-      method: 'POST',
-      body: { email: email.value.trim(), code: code.value.trim() },
-    })
-    await fetchMe()
-    navigateTo('/account')
-  } catch (exc: any) {
-    error.value = exc?.data?.detail ?? '验证失败'
+  } catch (exc) {
+    error.value = apiErrorDetail(exc, '注册失败，请稍后再试')
   } finally {
     busy.value = false
   }
@@ -67,53 +39,60 @@ async function verify() {
 </script>
 
 <template>
-  <div class="w-full">
-    <form v-if="step === 'form'" class="panel p-6" @submit.prevent="submit">
-      <h1 class="text-lg font-semibold">注册</h1>
-      <p class="mt-1 text-sm text-slate-500 dark:text-zinc-400">注册免费，用于订阅与通知；全站内容不登录也可浏览。</p>
+  <AuthVerifyEmail v-if="step === 'code'" :email="email.trim()" @back="step = 'form'">
+    <p class="mt-2 text-xs leading-relaxed text-faint">如果这个邮箱已经注册过，不会再收到验证码，请直接登录或找回密码。</p>
+  </AuthVerifyEmail>
+  <form v-else novalidate @submit.prevent="submit">
+    <AuthModeSwitch active="register" :email="email" />
+    <h1 class="mt-7 text-2xl font-bold text-ink">创建账号</h1>
+    <p class="mt-1.5 text-sm text-muted">免费注册，用来保存关注词与通知方式。</p>
 
-      <label class="mt-5 block text-sm font-medium" for="email">邮箱</label>
-      <input id="email" v-model="email" type="email" autocomplete="email" class="input mt-1.5 w-full px-3 py-2 text-sm">
+    <div class="mt-6 space-y-3">
+      <div>
+        <label for="email" class="text-sm font-medium text-ink-2">邮箱</label>
+        <input
+          id="email"
+          v-model="email"
+          type="email"
+          inputmode="email"
+          autocomplete="email"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="you@example.com"
+          :aria-invalid="emailInvalid || undefined"
+          aria-describedby="email-hint"
+          class="input mt-1.5 h-11 w-full"
+          :class="emailInvalid ? 'border-hot!' : ''"
+        >
+        <p id="email-hint" class="mt-1.5 min-h-4 text-xs" :class="emailInvalid ? 'text-hot' : 'text-faint'">
+          {{ emailInvalid ? '请输入有效的邮箱地址' : '验证码会发到这个邮箱' }}
+        </p>
+      </div>
+      <AuthPasswordField
+        id="password"
+        v-model="password"
+        label="密码"
+        autocomplete="new-password"
+        :invalid="passwordInvalid"
+        :hint="passwordInvalid ? '密码至少 8 位' : '至少 8 位'"
+      />
+      <AuthPasswordField
+        id="confirm"
+        v-model="confirm"
+        label="确认密码"
+        autocomplete="new-password"
+        :invalid="confirmInvalid"
+        :hint="confirmInvalid ? '两次输入的密码不一致' : ''"
+      />
+    </div>
 
-      <label class="mt-4 block text-sm font-medium" for="password">密码（至少 8 位）</label>
-      <input id="password" v-model="password" type="password" autocomplete="new-password" class="input mt-1.5 w-full px-3 py-2 text-sm">
+    <UiNotice v-if="error" tone="error" class="mt-1">{{ error }}</UiNotice>
 
-      <label class="mt-4 block text-sm font-medium" for="confirm">确认密码</label>
-      <input id="confirm" v-model="confirm" type="password" autocomplete="new-password" class="input mt-1.5 w-full px-3 py-2 text-sm">
-
-      <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-
-      <button type="submit" class="btn-primary mt-6 w-full px-4 py-2" :disabled="busy || !email.trim() || !password">
-        {{ busy ? '提交中…' : '发送验证码' }}
-      </button>
-
-      <p class="mt-4 text-center text-xs">
-        已有账号？<NuxtLink to="/login" class="link">直接登录</NuxtLink>
-      </p>
-    </form>
-
-    <form v-else class="panel p-6" @submit.prevent="verify">
-      <h1 class="text-lg font-semibold">验证邮箱</h1>
-      <p class="mt-1 text-sm leading-relaxed text-slate-500 dark:text-zinc-400">
-        {{ info }}<br>验证码已发至 <span class="mono">{{ email }}</span>，15 分钟内有效。
-      </p>
-
-      <input
-        v-model="code"
-        inputmode="numeric"
-        maxlength="6"
-        placeholder="6 位验证码"
-        class="input mono mt-5 w-full px-3 py-2 text-center text-lg tracking-[0.4em]"
-      >
-
-      <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-
-      <button type="submit" class="btn-primary mt-5 w-full px-4 py-2" :disabled="busy || code.trim().length !== 6">
-        {{ busy ? '验证中…' : '完成验证并登录' }}
-      </button>
-      <button type="button" class="mt-2 w-full px-4 py-2 text-xs text-slate-400 hover:underline dark:text-zinc-500" :disabled="busy" @click="resend">
-        没收到？重新发送
-      </button>
-    </form>
-  </div>
+    <button type="submit" class="btn-primary mt-5 h-11 w-full" :disabled="busy">
+      {{ busy ? '提交中…' : '发送验证码' }}
+    </button>
+    <p class="mt-4 text-center text-xs leading-relaxed text-faint">
+      注册即表示同意<NuxtLink to="/terms" class="link">用户条款</NuxtLink>与<NuxtLink to="/privacy" class="link">隐私政策</NuxtLink>
+    </p>
+  </form>
 </template>

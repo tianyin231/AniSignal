@@ -293,3 +293,22 @@ async def test_full_locked_table_rejects_new_keys_and_recovers(client, monkeypat
         assert len(auth_module._login_failures) == 1
     finally:
         _reset_state()
+
+
+async def test_session_cookie_is_secure_only_over_https(client, session):
+    from app.services.auth import hash_password
+
+    session.add(User(email="secure@example.com", password_hash=hash_password("password123"), is_verified=True))
+    await session.commit()
+    body = {"email": "secure@example.com", "password": "password123"}
+
+    plain = await client.post("/api/auth/login", json=body)
+    assert plain.status_code == 200
+    assert "secure" not in plain.headers["set-cookie"].lower()
+
+    client.base_url = "https://test"
+    secure = await client.post("/api/auth/login", json=body)
+    assert secure.status_code == 200
+    assert "; secure" in secure.headers["set-cookie"].lower()
+    logout = await client.post("/api/auth/logout")
+    assert "; secure" in logout.headers["set-cookie"].lower()

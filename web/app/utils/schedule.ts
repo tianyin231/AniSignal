@@ -48,6 +48,17 @@ export function fmtShort(ts: number): string {
   return `${pad(p.month)}/${pad(p.day)} ${p.hm}`
 }
 
+/** 相对时间：刚刚 / 12 分钟前 / 3 小时前 / 5 天前；超过 30 天回到 MM/DD。 */
+export function relativeTime(ts: number, now: number): string {
+  if (!Number.isFinite(ts)) return ''
+  const diff = now - ts
+  if (diff < MINUTE) return '刚刚'
+  if (diff < HOUR) return `${Math.floor(diff / MINUTE)} 分钟前`
+  if (diff < DAY) return `${Math.floor(diff / HOUR)} 小时前`
+  if (diff < 30 * DAY) return `${Math.floor(diff / DAY)} 天前`
+  return fmtShort(ts).slice(0, 5)
+}
+
 /** 剩余时长：3天9时 / 5时20分 / 12分 / 已结束 */
 export function fmtRemaining(ms: number): string {
   if (ms <= 0) return '已结束'

@@ -67,7 +67,7 @@ async def register(body: dict, session: AsyncSession = Depends(get_session)):
 
 
 @router.post("/verify")
-async def verify(body: dict, response: Response, session: AsyncSession = Depends(get_session)):
+async def verify(body: dict, request: Request, response: Response, session: AsyncSession = Depends(get_session)):
     email = str(body.get("email", "")).strip().lower()
     code = str(body.get("code", ""))
     user = await session.scalar(select(User).where(User.email == email))
@@ -80,7 +80,7 @@ async def verify(body: dict, response: Response, session: AsyncSession = Depends
     user.is_verified = True
     user.last_login_at = utcnow()
     token = await create_session(session, user)
-    _set_session_cookie(response, token)
+    _set_session_cookie(request, response, token)
     return {"message": "验证成功，已登录", "email": user.email}
 
 
@@ -100,7 +100,7 @@ async def resend(body: dict, session: AsyncSession = Depends(get_session)):
 
 
 @router.post("/login")
-async def login(body: dict, response: Response, session: AsyncSession = Depends(get_session)):
+async def login(body: dict, request: Request, response: Response, session: AsyncSession = Depends(get_session)):
     email = str(body.get("email", "")).strip().lower()
     password = str(body.get("password", ""))
     try:
@@ -122,7 +122,7 @@ async def login(body: dict, response: Response, session: AsyncSession = Depends(
     clear_login_failures(email)
     user.last_login_at = utcnow()
     token = await create_session(session, user)
-    _set_session_cookie(response, token)
+    _set_session_cookie(request, response, token)
     return {"message": "登录成功", "email": user.email}
 
 
@@ -131,7 +131,7 @@ async def logout(request: Request, response: Response, session: AsyncSession = D
     token = request.cookies.get(SESSION_COOKIE)
     if token:
         await revoke_current_session(session, token)
-    response.delete_cookie(SESSION_COOKIE)
+    response.delete_cookie(SESSION_COOKIE, secure=_secure_request(request), httponly=True, samesite="lax")
     return {"message": "已退出"}
 
 
@@ -200,7 +200,7 @@ async def change_password(
     user.password_hash = hash_password(new)
     await revoke_all_sessions(session, user.id)  # 改密后全部会话失效
     token = await create_session(session, user)
-    _set_session_cookie(response, token)  # 当前设备免重登
+    _set_session_cookie(request, response, token)  # 当前设备免重登
     return {"message": "密码已修改"}
 
 
@@ -239,7 +239,13 @@ async def reset(body: dict, session: AsyncSession = Depends(get_session)):
     return {"message": "密码已重置，请用新密码登录"}
 
 
-def _set_session_cookie(response: Response, token: str) -> None:
+def _secure_request(request: Request) -> bool:
+    """经 HTTPS 访问时（uvicorn 按本机代理转发的 X-Forwarded-Proto 还原 scheme）才标 Secure；
+    纯 HTTP 入口（IP 直连、备用域名）仍能登录。"""
+    return request.url.scheme == "https"
+
+
+def _set_session_cookie(request: Request, response: Response, token: str) -> None:
     settings = get_settings()
     response.set_cookie(
         SESSION_COOKIE,
@@ -247,7 +253,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
         max_age=settings.session_days * 24 * 3600,
         httponly=True,
         samesite="lax",
-        # 上 HTTPS 后建议开启 secure
+        secure=_secure_request(request),
     )
 
 

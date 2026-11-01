@@ -347,3 +347,26 @@ async def test_custom_send_rechecks_current_mail_switch(session, fake_mail, kind
     result = await send_admin_email(session, delivery.id)
     assert result["status"] == expected and delivery.status == expected
     assert fake_mail.await_count == (1 if expected == "sent" else 0)
+
+
+async def test_public_directory_previews_latest_items(client, session):
+    user = User(email="preview@anisignal.dev", password_hash="x", is_verified=True)
+    session.add(user)
+    await session.flush()
+    feeds = [CustomFeed(user_id=user.id, name=f"公开 {i}", kind="keyword", target_value=f"词{i}", is_public=True)
+             for i in range(2)]
+    session.add_all(feeds)
+    await session.flush()
+    now = utcnow()
+    session.add_all([
+        CustomFeedItem(feed_id=feeds[0].id, platform="bilibili", external_id=f"preview-{i}", title=f"条目 {i}",
+                       url=f"https://www.bilibili.com/video/BVpreview{i}", published_at=now - timedelta(hours=i))
+        for i in (2, 0, 3, 1)
+    ])
+    await session.commit()
+    items = {feed["name"]: feed for feed in (await client.get("/api/custom/feeds")).json()["items"]}
+    busy, empty = items["公开 0"], items["公开 1"]
+    assert [item["title"] for item in busy["latest_items"]] == ["条目 0", "条目 1"]
+    assert busy["latest_items"][0]["url"] == "https://www.bilibili.com/video/BVpreview0"
+    assert busy["latest_at"] is not None and busy["item_count"] == 4
+    assert empty["latest_items"] == [] and empty["latest_at"] is None

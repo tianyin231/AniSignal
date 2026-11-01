@@ -133,8 +133,9 @@ export function useActiveChannel() {
   const active = computed<string | null>(() => {
     if (route.path === '/ai' || route.path.startsWith('/ai/')) return 'ai'
     if (route.path.startsWith('/custom')) return 'custom'
-    // 全站工具页不属于游戏分区，不能回退到上次浏览的分区记忆。
-    if (['/sources', '/stats', '/watch'].includes(route.path)) return 'home'
+    // 全站工具页不属于游戏分区，不能回退到上次浏览的分区记忆；个人页面不高亮任何频道。
+    if (['/sources', '/stats'].includes(route.path)) return 'home'
+    if (['/account', '/watch'].includes(route.path)) return null
     const query = String(route.query.community || '')
     const queryKey = VALID_KEYS.has(query as GameCommunityKey) ? query : null
     if (route.path === '/') return queryKey ?? 'home'

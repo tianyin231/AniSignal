@@ -1,54 +1,91 @@
 <script setup lang="ts">
-import { safeRedirect } from '~/utils/safe-redirect'
+import { apiErrorDetail, apiErrorStatus } from '~/utils/api-errors'
 
 definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '登录 · AniSignal' })
 
-const email = ref('')
+// 登录成功后由 auth 布局跳回来源页（?redirect=），这里只负责表单本身。
+const { login } = useAuth()
+const { withRedirect } = useAuthRedirect()
+const flash = useAuthFlash()
+const email = ref(flash.value?.email ?? '')
+const notice = ref(flash.value?.message ?? '')
+flash.value = null
+
 const password = ref('')
 const error = ref('')
 const busy = ref(false)
-const { login } = useAuth()
-const route = useRoute()
-const redirectTarget = () => safeRedirect(route.query.redirect, window.location.origin)
+const unverified = ref(false)
+const verifying = ref(false)
 
 async function submit() {
-  if (!email.value.trim() || busy.value) return
+  const address = email.value.trim()
+  if (busy.value || !address || !password.value) return
   busy.value = true
-  error.value = ''
+  error.value = notice.value = ''
+  unverified.value = false
   try {
-    await login(email.value.trim(), password.value)
-    navigateTo(redirectTarget())
-  } catch (exc: any) {
-    error.value = exc?.data?.detail ?? '登录失败，请稍后再试'
-  } finally {
+    await login(address, password.value)
+  } catch (exc) {
+    const detail = apiErrorDetail(exc, '登录失败，请稍后再试')
+    unverified.value = apiErrorStatus(exc) === 403 && detail.includes('未验证')
+    error.value = unverified.value ? '这个邮箱还没有完成验证，验证后即可登录。' : detail
     busy.value = false
   }
+}
+
+function rememberEmail() {
+  if (email.value.trim()) flash.value = { email: email.value.trim() }
 }
 </script>
 
 <template>
-  <div class="w-full">
-    <form class="panel p-6" @submit.prevent="submit">
-      <h1 class="text-lg font-semibold">登录</h1>
-      <p class="mt-1 text-sm text-slate-500 dark:text-zinc-400">全站内容免费浏览；登录用于管理订阅与通知。</p>
+  <AuthVerifyEmail
+    v-if="verifying"
+    :email="email.trim()"
+    auto-send
+    heading="验证邮箱后继续"
+    @back="verifying = false"
+  />
+  <form v-else novalidate @submit.prevent="submit">
+    <AuthModeSwitch active="login" :email="email" />
+    <h1 class="mt-7 text-2xl font-bold text-ink">欢迎回来</h1>
+    <p class="mt-1.5 text-sm text-muted">登录后管理关注、通知与定制监控。</p>
 
-      <label class="mt-5 block text-sm font-medium" for="email">邮箱</label>
-      <input id="email" v-model="email" type="email" autocomplete="email" class="input mt-1.5 w-full px-3 py-2 text-sm">
+    <UiNotice v-if="notice" tone="ok" class="mt-5">{{ notice }}</UiNotice>
 
-      <label class="mt-4 block text-sm font-medium" for="password">密码</label>
-      <input id="password" v-model="password" type="password" autocomplete="current-password" class="input mt-1.5 w-full px-3 py-2 text-sm">
-
-      <p v-if="error" class="mt-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
-
-      <button type="submit" class="btn-primary mt-6 w-full px-4 py-2" :disabled="busy || !password">
-        {{ busy ? '登录中…' : '登录' }}
-      </button>
-
-      <div class="mt-4 flex justify-between text-xs">
-        <NuxtLink to="/register" class="link">注册新账号</NuxtLink>
-        <NuxtLink to="/forgot" class="link">忘记密码？</NuxtLink>
+    <div class="mt-6 space-y-3">
+      <div>
+        <label for="email" class="text-sm font-medium text-ink-2">邮箱</label>
+        <input
+          id="email"
+          v-model="email"
+          type="email"
+          inputmode="email"
+          autocomplete="email"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="you@example.com"
+          class="input mt-1.5 h-11 w-full"
+        >
       </div>
-    </form>
-  </div>
+      <AuthPasswordField id="password" v-model="password" label="密码" autocomplete="current-password">
+        <template #aside>
+          <NuxtLink :to="withRedirect('/forgot')" class="link text-xs" @click="rememberEmail">忘记密码？</NuxtLink>
+        </template>
+      </AuthPasswordField>
+    </div>
+
+    <UiNotice v-if="error" tone="error" class="mt-1">
+      {{ error }}
+      <button v-if="unverified" type="button" class="mt-1 block font-semibold underline underline-offset-2" @click="verifying = true">
+        发送验证码，完成验证
+      </button>
+    </UiNotice>
+
+    <button type="submit" class="btn-primary mt-5 h-11 w-full" :disabled="busy || !email.trim() || !password">
+      {{ busy ? '登录中…' : '登录' }}
+    </button>
+    <p class="mt-5 text-center text-xs text-faint">浏览全站内容无需登录</p>
+  </form>
 </template>

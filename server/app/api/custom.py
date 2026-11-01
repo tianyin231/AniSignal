@@ -17,6 +17,8 @@ SESSION_COOKIE = "anisignal_session"
 # 公开端点无鉴权：page 不封顶时深分页就是免费的「全表扫」入口。上界按偏移量算，
 # 这样和 page_size 的取值无关（页大时页数上限自然更小）。
 MAX_PAGE_OFFSET = 10_000
+# 目录卡片上预览的最新条目数
+LATEST_PREVIEW = 2
 
 
 def _check_page_depth(page: int, page_size: int) -> None:
@@ -94,11 +96,46 @@ async def public_feeds(
         .limit(page_size)
         .offset((page - 1) * page_size)
     )
-    items = []
-    for feed, owner, cnt, _latest in rows:
-        out = _feed_out(feed, owner, cnt)
-        items.append(out)
+    rows = rows.all()
+    previews = await _latest_previews(session, [feed.id for feed, *_ in rows])
+    items = [
+        {**_feed_out(feed, owner, cnt), "latest_at": latest, "latest_items": previews.get(feed.id, [])}
+        for feed, owner, cnt, latest in rows
+    ]
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+async def _latest_previews(session: AsyncSession, feed_ids: list[int]) -> dict[int, list[dict]]:
+    """每个监控最新的几条（窗口函数一次取完，避免逐个监控查询）。"""
+    if not feed_ids:
+        return {}
+    ranked = (
+        select(
+            CustomFeedItem.feed_id,
+            CustomFeedItem.title,
+            CustomFeedItem.url,
+            CustomFeedItem.published_at,
+            func.row_number()
+            .over(
+                partition_by=CustomFeedItem.feed_id,
+                order_by=(CustomFeedItem.published_at.desc(), CustomFeedItem.id.desc()),
+            )
+            .label("rank"),
+        )
+        .where(CustomFeedItem.feed_id.in_(feed_ids))
+        .subquery()
+    )
+    previews: dict[int, list[dict]] = {}
+    result = await session.execute(
+        select(ranked.c.feed_id, ranked.c.title, ranked.c.url, ranked.c.published_at)
+        .where(ranked.c.rank <= LATEST_PREVIEW)
+        .order_by(ranked.c.feed_id, ranked.c.rank)
+    )
+    for feed_id, title, url, published_at in result:
+        previews.setdefault(feed_id, []).append(
+            {"title": title, "url": safe_link(url), "published_at": published_at}
+        )
+    return previews
 
 
 @router.get("/feeds/{feed_id}")

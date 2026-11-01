@@ -30,3 +30,11 @@ export function safeRedirect(target: unknown, origin: string, fallback = '/accou
 		return fallback
 	}
 }
+
+const AUTH_PAGES = new Set(['/login', '/register', '/forgot'])
+
+/** 去登录页并记住来源页：登录 / 注册完成后回到这里（首页与认证页本身不必记）。 */
+export function loginRoute(from?: string): { path: string, query?: { redirect: string } } {
+	const path = from?.split(/[?#]/)[0] ?? ''
+	return from && path !== '/' && !AUTH_PAGES.has(path) ? { path: '/login', query: { redirect: from } } : { path: '/login' }
+}
