@@ -49,9 +49,9 @@ function statusLabel(status: string) {
 
 function statusClass(status: string) {
   if (status === 'running') return 'bg-blue-500/10 text-blue-700 dark:text-blue-300'
-  if (status === 'failed') return 'bg-red-500/10 text-red-600 dark:text-red-400'
+  if (status === 'failed') return 'bg-red-500/10 text-hot'
   if (status === 'partial') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
-  if (status === 'skipped') return 'bg-slate-500/10 text-slate-600 dark:text-zinc-400'
+  if (status === 'skipped') return 'bg-chip text-muted'
   return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
 }
 
@@ -220,21 +220,21 @@ useSeoMeta({ title: '数据统计' })
 
 <template>
   <div class="space-y-5">
-    <header class="flex flex-col gap-4 px-1 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-ink">数据统计</h1>
-        <p v-if="data?.totals.latest_collection_at" class="mono mt-1 text-xs text-slate-500 dark:text-zinc-400">
-          最近采集 {{ fmtTime(data.totals.latest_collection_at) }}
+    <header class="flex flex-wrap items-end justify-between gap-4">
+      <div class="wall-heading">
+        <p class="mono mb-1.5 text-xs tracking-wide text-muted">
+          {{ data?.totals.latest_collection_at ? `最近采集 ${fmtTime(data.totals.latest_collection_at)}` : '每日入库与采集趋势' }}
         </p>
+        <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">数据统计</h1>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <div class="flex rounded-lg border border-slate-200 bg-white/60 p-1 dark:border-zinc-700 dark:bg-white/5" aria-label="统计时间范围">
+        <div class="wall-surface flex gap-1 rounded-xl bg-chip p-1" role="group" aria-label="统计时间范围">
           <button
             v-for="item in ranges"
             :key="item.value"
             type="button"
-            class="min-h-9 rounded-md px-3 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-blue-500"
-            :class="range === item.value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-900/[0.06] dark:text-zinc-300 dark:hover:bg-white/10'"
+            class="h-8 rounded-[9px] px-3 text-[13px] transition-colors"
+            :class="range === item.value ? 'bg-card font-semibold text-ink shadow-card' : 'text-muted hover:text-ink'"
             :aria-pressed="range === item.value"
             @click="range = item.value"
           >
@@ -244,7 +244,7 @@ useSeoMeta({ title: '数据统计' })
         <button
           type="button"
           :disabled="refreshing"
-          class="grid size-11 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-500/10 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:text-blue-300"
+          class="grid size-10 place-items-center rounded-[10px] text-muted transition-colors hover:bg-chip hover:text-ink"
           aria-label="刷新统计"
           @click="refresh"
         >
@@ -253,45 +253,45 @@ useSeoMeta({ title: '数据统计' })
       </div>
     </header>
 
-    <section v-if="status === 'pending' && !data" class="panel px-5 py-20 text-center text-sm text-slate-500 dark:text-zinc-400">
+    <section v-if="status === 'pending' && !data" class="panel px-5 py-20 text-center text-sm text-muted">
       正在汇总统计…
     </section>
-    <section v-else-if="error" class="panel px-5 py-16 text-center text-sm text-red-600 dark:text-red-400">
+    <section v-else-if="error" class="panel px-5 py-16 text-center text-sm text-hot">
       统计加载失败。<button type="button" class="ml-1 underline" @click="refresh">重新加载</button>
     </section>
 
     <template v-else-if="data">
       <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="统计概览">
         <article class="panel p-4">
-          <div class="flex items-center justify-between text-slate-500 dark:text-zinc-400">
+          <div class="flex items-center justify-between text-muted">
             <span class="text-xs">累计入库</span><Database :size="16" aria-hidden="true" />
           </div>
-          <p class="mono mt-2 text-2xl font-semibold text-slate-900 dark:text-zinc-50">{{ data.totals.total_contents.toLocaleString() }}</p>
-          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">本期新增 {{ data.totals.period_new.toLocaleString() }}</p>
+          <p class="num mt-2 text-2xl font-bold text-ink">{{ data.totals.total_contents.toLocaleString() }}</p>
+          <p class="mt-1 text-xs text-muted">本期新增 {{ data.totals.period_new.toLocaleString() }}</p>
         </article>
         <article class="panel p-4">
-          <div class="flex items-center justify-between text-slate-500 dark:text-zinc-400">
+          <div class="flex items-center justify-between text-muted">
             <span class="text-xs">官方 / 社区</span><ShieldCheck :size="16" aria-hidden="true" />
           </div>
-          <p class="mono mt-2 text-2xl font-semibold text-slate-900 dark:text-zinc-50">
-            {{ data.totals.official_contents.toLocaleString() }} <span class="text-sm font-normal text-slate-400">/</span> {{ data.totals.community_contents.toLocaleString() }}
+          <p class="num mt-2 text-2xl font-bold text-ink">
+            {{ data.totals.official_contents.toLocaleString() }} <span class="text-sm font-normal text-faint">/</span> {{ data.totals.community_contents.toLocaleString() }}
           </p>
-          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">累计内容构成</p>
+          <p class="mt-1 text-xs text-muted">累计内容构成</p>
         </article>
         <article class="panel p-4">
-          <div class="flex items-center justify-between text-slate-500 dark:text-zinc-400">
+          <div class="flex items-center justify-between text-muted">
             <span class="text-xs">完整成功率</span><Activity :size="16" aria-hidden="true" />
           </div>
-          <p class="mono mt-2 text-2xl font-semibold text-slate-900 dark:text-zinc-50">{{ percent(data.totals.success_rate) }}</p>
-          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">{{ data.totals.collection_runs }} 次 · 失败 {{ data.totals.failed_runs }} 次</p>
-          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">仅完整成功计入；部分成功计入总次数，冷却跳过不计入。</p>
+          <p class="num mt-2 text-2xl font-bold text-ink">{{ percent(data.totals.success_rate) }}</p>
+          <p class="mt-1 text-xs text-muted">{{ data.totals.collection_runs }} 次 · 失败 {{ data.totals.failed_runs }} 次</p>
+          <p class="mt-1 text-xs text-muted">仅完整成功计入；部分成功计入总次数，冷却跳过不计入。</p>
         </article>
         <article class="panel p-4">
-          <div class="flex items-center justify-between text-slate-500 dark:text-zinc-400">
+          <div class="flex items-center justify-between text-muted">
             <span class="text-xs">入库转化率</span><Gauge :size="16" aria-hidden="true" />
           </div>
-          <p class="mono mt-2 text-2xl font-semibold text-slate-900 dark:text-zinc-50">{{ percent(data.totals.yield_rate) }}</p>
-          <p class="mt-1 text-xs text-slate-500 dark:text-zinc-400">命中 {{ compact(data.totals.items_found) }} · 新增 {{ compact(data.totals.items_new) }}</p>
+          <p class="num mt-2 text-2xl font-bold text-ink">{{ percent(data.totals.yield_rate) }}</p>
+          <p class="mt-1 text-xs text-muted">命中 {{ compact(data.totals.items_found) }} · 新增 {{ compact(data.totals.items_new) }}</p>
         </article>
       </section>
 
@@ -337,18 +337,18 @@ useSeoMeta({ title: '数据统计' })
             <StatisticsChart :option="keywordOption" aria-label="内容关键词入库排行图" />
             <template #fallback><div class="h-72" aria-hidden="true" /></template>
           </ClientOnly>
-          <div v-else class="grid h-72 place-items-center text-sm text-slate-400">本期暂无关键词记录</div>
+          <div v-else class="grid h-72 place-items-center text-sm text-faint">本期暂无关键词记录</div>
         </article>
       </section>
 
       <section class="panel overflow-hidden">
-        <header class="flex items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3 dark:border-zinc-800">
+        <header class="flex items-center justify-between gap-3 border-b border-line-soft px-4 py-3">
           <h2 class="text-base font-bold text-ink">最近采集</h2>
-          <span v-if="data.details_since" class="mono text-[11px] text-slate-400">明细始于 {{ fmtTime(data.details_since) }}</span>
+          <span v-if="data.details_since" class="mono text-[11px] text-faint">明细始于 {{ fmtTime(data.details_since) }}</span>
         </header>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[760px] text-left text-xs">
-            <thead class="bg-slate-500/5 text-slate-500 dark:text-zinc-400">
+            <thead class="bg-chip/60 text-muted">
               <tr>
                 <th class="px-4 py-2.5 font-medium">时间</th>
                 <th class="px-3 py-2.5 font-medium">目标</th>
@@ -361,11 +361,11 @@ useSeoMeta({ title: '数据统计' })
                 <th class="px-4 py-2.5 text-right font-medium">耗时</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-200/70 dark:divide-zinc-800">
-              <tr v-for="run in data.recent_runs" :key="run.id" class="transition-colors hover:bg-slate-500/5">
-                <td class="mono whitespace-nowrap px-4 py-2.5 text-slate-500 dark:text-zinc-400">{{ fmtTime(run.finished_at || run.started_at) }}</td>
-                <td class="max-w-52 truncate px-3 py-2.5 font-medium text-slate-800 dark:text-zinc-200">{{ run.target }}</td>
-                <td class="whitespace-nowrap px-3 py-2.5 text-slate-600 dark:text-zinc-300">{{ platformLabel(run.platform) }}</td>
+            <tbody class="divide-y divide-line-soft">
+              <tr v-for="run in data.recent_runs" :key="run.id" class="transition-colors hover:bg-chip/60">
+                <td class="mono whitespace-nowrap px-4 py-2.5 text-muted">{{ fmtTime(run.finished_at || run.started_at) }}</td>
+                <td class="max-w-52 truncate px-3 py-2.5 font-medium text-ink">{{ run.target }}</td>
+                <td class="whitespace-nowrap px-3 py-2.5 text-ink-2">{{ platformLabel(run.platform) }}</td>
                 <td class="px-3 py-2.5">
                   <span class="rounded px-1.5 py-0.5" :class="statusClass(run.status)">
                     {{ statusLabel(run.status) }}
@@ -375,7 +375,7 @@ useSeoMeta({ title: '数据统计' })
                 <td class="mono px-3 py-2.5 text-right">{{ run.items_filtered ?? '—' }}</td>
                 <td class="mono px-3 py-2.5 text-right">{{ run.items_found }}</td>
                 <td class="mono px-3 py-2.5 text-right text-blue-700 dark:text-blue-300">{{ run.items_new }}</td>
-                <td class="mono whitespace-nowrap px-4 py-2.5 text-right text-slate-500 dark:text-zinc-400">{{ duration(run.duration_ms) }}</td>
+                <td class="mono whitespace-nowrap px-4 py-2.5 text-right text-muted">{{ duration(run.duration_ms) }}</td>
               </tr>
             </tbody>
           </table>
@@ -383,16 +383,16 @@ useSeoMeta({ title: '数据统计' })
       </section>
 
       <details class="panel group overflow-hidden">
-        <summary class="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 dark:text-zinc-200">
+        <summary class="flex min-h-11 cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium text-ink-2">
           精确数据
-          <Clock3 :size="15" class="text-slate-400 transition-transform group-open:rotate-90" aria-hidden="true" />
+          <Clock3 :size="15" class="text-faint transition-transform group-open:rotate-90" aria-hidden="true" />
         </summary>
-        <div class="overflow-x-auto border-t border-slate-200/80 dark:border-zinc-800">
+        <div class="overflow-x-auto border-t border-line-soft">
           <table class="w-full min-w-[560px] text-left text-xs">
-            <thead class="bg-slate-500/5 text-slate-500 dark:text-zinc-400">
+            <thead class="bg-chip/60 text-muted">
               <tr><th class="px-4 py-2 font-medium">平台</th><th class="px-3 py-2 text-right font-medium">官方</th><th class="px-3 py-2 text-right font-medium">社区</th><th class="px-3 py-2 text-right font-medium">合计</th><th class="px-4 py-2 text-right font-medium">占比</th></tr>
             </thead>
-            <tbody class="divide-y divide-slate-200/70 dark:divide-zinc-800">
+            <tbody class="divide-y divide-line-soft">
               <tr v-for="item in data.platforms" :key="item.platform">
                 <td class="px-4 py-2.5 font-medium">{{ platformLabel(item.platform) }}</td>
                 <td class="mono px-3 py-2.5 text-right">{{ item.official.toLocaleString() }}</td>

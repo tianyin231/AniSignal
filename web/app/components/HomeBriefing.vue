@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { beijingParts } from '~/utils/schedule'
 
-// 聚合首页页头：日期 + "今日信号" + 三个核心数字（24h 新内容 / 进行中活动 / 来源健康）
+// 聚合首页页头：日期 + "今日信号" + 三个核心数字（24h 新内容 → 数据统计 / 进行中活动 / 来源健康 → 来源页）
 const props = defineProps<{
   now: number
   newCount: number | null
@@ -25,10 +25,10 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
       <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">今日信号</h1>
     </div>
     <div class="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:gap-2.5">
-      <div :class="pill">
+      <NuxtLink to="/stats" :class="[pill, 'transition-colors hover:border-faint/60']" title="查看每日入库统计">
         <span class="num text-xl font-bold text-ink sm:text-[22px]">{{ newCount ?? '—' }}</span>
         <span class="text-xs text-muted sm:text-[13px]">条新内容 · 24h</span>
-      </div>
+      </NuxtLink>
       <div :class="pill">
         <span class="num text-xl font-bold text-ink sm:text-[22px]">{{ ongoing }}</span>
         <span class="text-xs text-muted sm:text-[13px]">个活动进行中</span>
