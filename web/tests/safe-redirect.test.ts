@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { safeRedirect } from '../app/utils/safe-redirect.ts'
+import { loginRoute, safeRedirect } from '../app/utils/safe-redirect.ts'
 
 const origin = 'https://anisignal.example'
 
@@ -21,4 +21,13 @@ test('登录回跳拒绝站外地址及反斜杠、控制符和点段归一化�
     assert.equal(safeRedirect(path, origin), '/account', String(path))
   }
   assert.equal(safeRedirect('/events', ''), '/account')
+})
+
+test('去登录页时记住来源页，首页和认证页本身不记', () => {
+	assert.deepEqual(loginRoute('/custom/3?page=2'), { path: '/login', query: { redirect: '/custom/3?page=2' } })
+	assert.deepEqual(loginRoute('/account?tab=notify'), { path: '/login', query: { redirect: '/account?tab=notify' } })
+	assert.deepEqual(loginRoute('/'), { path: '/login' })
+	assert.deepEqual(loginRoute('/login?redirect=%2Fwatch'), { path: '/login' })
+	assert.deepEqual(loginRoute('/register'), { path: '/login' })
+	assert.deepEqual(loginRoute(), { path: '/login' })
 })

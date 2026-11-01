@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { avatarGradient, displayName } from '~/utils/avatars'
+import { loginRoute } from '~/utils/safe-redirect'
 import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 
 const route = useRoute()
@@ -90,7 +91,7 @@ async function handleLogout() {
         <ThemeToggle />
         <NuxtLink
           v-if="!user"
-          to="/login"
+          :to="loginRoute(route.fullPath)"
           class="btn-primary ml-1 hidden h-9 items-center px-4 sm:inline-flex"
         >
           登录
@@ -105,9 +106,13 @@ async function handleLogout() {
             <span class="grid size-7 place-items-center rounded-full bg-gradient-to-b text-xs font-semibold text-white" :class="avatarGradient(user.avatar)">
               {{ displayName(user)[0]!.toUpperCase() }}
             </span>
-            <span class="hidden max-w-32 truncate text-[13px] text-ink-2 sm:block">{{ displayName(user) }}</span>
+            <span class="hidden max-w-32 truncate text-[13px] text-ink-2 sm:block md:hidden 2xl:block">{{ displayName(user) }}</span>
           </button>
-          <div v-if="menuOpen" class="popover absolute right-0 top-full z-50 mt-1.5 w-44 p-1.5" role="menu">
+          <div v-if="menuOpen" class="popover absolute right-0 top-full z-50 mt-1.5 w-56 p-1.5" role="menu">
+            <div class="mb-1 border-b border-line-soft px-3 pb-2.5 pt-2">
+              <p class="truncate text-sm font-semibold text-ink">{{ displayName(user) }}</p>
+              <p class="truncate text-xs text-muted">{{ user.email }}</p>
+            </div>
             <NuxtLink to="/account" class="block rounded-lg px-3 py-2 text-sm text-ink-2 hover:bg-chip" role="menuitem" @click="menuOpen = false">
               账号中心
             </NuxtLink>

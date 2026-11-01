@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { beijingParts, fmtRemaining, ongoingActivities, relativeDay, toTimestamp, upNextItems } from '../app/utils/schedule.ts'
+import { beijingParts, fmtRemaining, ongoingActivities, relativeDay, relativeTime, toTimestamp, upNextItems } from '../app/utils/schedule.ts'
 import type { CalendarEntry } from '../app/composables/usePublicApi'
 
 function entry(id: number, start_at: string | null, end_at: string | null, extra: Partial<CalendarEntry> = {}): CalendarEntry {
@@ -58,4 +58,15 @@ test('即将到来合并日程与兑换码，跳过已过去的项目并按时�
   )
   assert.deepEqual(items.map(item => item.title), ['兑换码 WUWA2026', '标准寻访更新'])
   assert.equal(items[1]!.kind, '活动开始')
+})
+
+test('相对时间按分钟、小时、天递进，超过 30 天回到日期', () => {
+  const now = Date.parse('2026-11-01T12:00:00Z')
+  assert.equal(relativeTime(now - 20_000, now), '刚刚')
+  assert.equal(relativeTime(now + 60_000, now), '刚刚')
+  assert.equal(relativeTime(now - 12 * 60_000, now), '12 分钟前')
+  assert.equal(relativeTime(now - 3 * 3600_000, now), '3 小时前')
+  assert.equal(relativeTime(now - 5 * 86400_000, now), '5 天前')
+  assert.equal(relativeTime(Date.parse('2026-09-01T12:00:00Z'), now), '09/01')
+  assert.equal(relativeTime(Number.NaN, now), '')
 })

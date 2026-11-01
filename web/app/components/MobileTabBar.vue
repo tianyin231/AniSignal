@@ -22,7 +22,7 @@ const tabs = computed(() => [
   { key: 'calendar', label: '日历', icon: CalendarDays, to: { path: '/calendar', query: { community: scope.value } }, active: route.path === '/calendar' },
   { key: 'events', label: '事件', icon: Layers, to: { path: '/events', query: { community: scope.value } }, active: route.path.startsWith('/events') },
   { key: 'products', label: '商品', icon: Package, to: { path: '/products', query: { community: scope.value } }, active: route.path.startsWith('/products') },
-  { key: 'me', label: '我的', icon: UserRound, to: { path: user.value ? '/account' : '/login' }, active: route.path === '/account' || route.path === '/login' },
+  { key: 'me', label: '我的', icon: UserRound, to: { path: user.value ? '/account' : '/login' }, active: ['/account', '/watch', '/login', '/register', '/forgot'].includes(route.path) },
 ])
 </script>
 
