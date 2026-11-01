@@ -20,3 +20,7 @@ backups/
 *.pfx
 server/local.db
 .zcode/
+
+# 本地产物：截图 / 宣传片渲染输出、WorkBuddy 工作区
+/output/
+/.workbuddy/
