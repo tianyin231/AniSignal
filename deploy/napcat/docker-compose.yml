@@ -15,7 +15,9 @@ services:
     volumes:
       - ${APP_PATH}/qq:/app/.config/QQ
       - ${APP_PATH}/napcat:/app/napcat/config
-    mem_limit: ${MEMORY_LIMIT:-768m}
+    mem_limit: ${MEMORY_LIMIT:-2g}
+    mem_reservation: ${MEMORY_RESERVATION:-512m}
+    oom_score_adj: -300
     cpus: ${CPUS:-1.0}
     labels:
       createdBy: "bt_apps"
