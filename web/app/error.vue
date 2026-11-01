@@ -31,7 +31,7 @@ function goHome() {
 
     <header class="mx-auto flex w-full max-w-3xl items-center justify-between px-6 pt-6">
       <NuxtLink to="/" class="flex items-center gap-2 text-sm font-medium text-slate-800 dark:text-zinc-100">
-        <img src="/icon.png" alt="" class="size-7 rounded-lg" />
+        <img src="/icon-64.webp" alt="" width="28" height="28" class="size-7 rounded-lg" />
         AniSignal
       </NuxtLink>
       <span class="mono text-xs text-slate-400 dark:text-zinc-500">HTTP {{ status }}</span>

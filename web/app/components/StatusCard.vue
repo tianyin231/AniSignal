@@ -1,11 +1,28 @@
 <script setup lang="ts">
 import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
-import type { ApiProductList } from '~/composables/usePublicApi'
+import type { ApiProduct, ApiProductList, FulfillmentSnapshot } from '~/composables/usePublicApi'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { fmtTime } from '~/utils/admin-types'
 import { sortProductsBySignal } from '~/utils/product-utils'
 
 const props = defineProps<{ mobile?: boolean, embedded?: boolean }>()
+
+// 卡片只预览一件商品的摘要：完整商品列表（含证据、阶段、信号）每页可达 100KB+，
+// 只保留展示与排序用到的字段，避免整份数据进入 SSR payload 与客户端缓存。
+type StatusProduct = Pick<ApiProduct, 'id' | 'slug' | 'name' | 'community' | 'brief' | 'monitor_status'> & {
+  fulfillment: Pick<FulfillmentSnapshot, 'automated_count' | 'updated_at'>
+}
+function slimProduct(p: ApiProduct): StatusProduct {
+  return {
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    community: p.community,
+    brief: p.brief,
+    monitor_status: p.monitor_status,
+    fulfillment: { automated_count: p.fulfillment?.automated_count, updated_at: p.fulfillment?.updated_at ?? null },
+  }
+}
 const { api } = usePublicApi()
 const route = useRoute()
 const { community } = useGameSection()
@@ -24,7 +41,7 @@ const { data, error, status, refresh } = await useLazyAsyncData(
     const key = `status-product-${scope.value}`
     const result = await api<ApiProductList>('/api/products', { query: { community: scope.value }, signal })
     fetchedAt.value[key] = Date.now()
-    return result
+    return { items: result.items.map(slimProduct) }
   },
   {
     dedupe: 'defer',

@@ -3,17 +3,23 @@ import type { CalendarDto, CodesDto } from '~/composables/usePublicApi'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { beijingParts, relativeDay, upNextItems } from '~/utils/schedule'
 
-// 即将到来：未开始的日程、截止事项与兑换码到期，按时间排前 5 条；倒计时 ≤ 2 天标红
-const props = defineProps<{
+// 即将到来：未开始的日程、截止事项与兑换码到期，按时间排前 limit 条；倒计时 ≤ 2 天标红。
+// footer：卡片被拉伸到与精选大图等高时，用底栏收尾（总数 + 月历入口），不留一截空白。
+//   always = 总是显示；auto = 仅当卡片独占所在栏（同栏的履约卡因无商品未渲染）时显示。
+const props = withDefaults(defineProps<{
   calendar: CalendarDto | null | undefined
   codes: CodesDto | null | undefined
   now: number
   calendarScope: string
-}>()
+  limit?: number
+  footer?: 'always' | 'auto'
+}>(), { limit: 5, footer: undefined })
 
 const DAY = 86_400_000
+const total = computed(() => upNextItems(props.calendar, props.codes?.items, props.now, 99).length)
+const calendarTo = computed(() => ({ path: '/calendar', query: { community: props.calendarScope } }))
 const items = computed(() =>
-  upNextItems(props.calendar, props.codes?.items, props.now, 5).map((item) => {
+  upNextItems(props.calendar, props.codes?.items, props.now, props.limit).map((item) => {
     const parts = beijingParts(item.at)
     const meta = communityMeta(item.community)
     return {
@@ -31,12 +37,12 @@ const items = computed(() =>
 </script>
 
 <template>
-  <section class="panel px-5 pb-2 pt-4" aria-labelledby="up-next-title">
+  <section class="up-next panel flex flex-col px-5 pb-2 pt-4" :data-footer="footer" aria-labelledby="up-next-title">
     <header class="flex items-center justify-between">
       <h2 id="up-next-title" class="text-base font-bold text-ink">即将到来</h2>
-      <NuxtLink :to="{ path: '/calendar', query: { community: calendarScope } }" class="link text-[13px]">月历</NuxtLink>
+      <NuxtLink :to="calendarTo" class="link text-[13px]">月历</NuxtLink>
     </header>
-    <ol v-if="items.length" class="mt-2">
+    <ol v-if="items.length" class="mt-2 flex-1">
       <li v-for="item in items" :key="item.key" class="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-t border-line-soft py-2.5">
         <div class="text-center leading-tight">
           <div class="num text-lg font-bold text-ink">{{ item.day }}</div>
@@ -58,6 +64,16 @@ const items = computed(() =>
         >{{ item.relative }}</span>
       </li>
     </ol>
-    <p v-else class="border-t border-line-soft py-6 text-center text-sm text-muted">近期没有待开始的日程。</p>
+    <p v-else class="flex-1 border-t border-line-soft py-6 text-center text-sm text-muted">近期没有待开始的日程。</p>
+    <footer v-if="footer && items.length" class="up-next-footer items-center justify-between gap-2 border-t border-line-soft py-2.5 text-xs text-muted">
+      <span>共 <span class="num text-[13px] font-semibold text-ink-2">{{ total }}</span> 项待开始</span>
+      <NuxtLink :to="calendarTo" class="link text-[13px]">查看月历</NuxtLink>
+    </footer>
   </section>
 </template>
+
+<style scoped>
+.up-next-footer { display: none; }
+.up-next[data-footer='always'] .up-next-footer,
+.up-next[data-footer='auto']:only-child .up-next-footer { display: flex; }
+</style>

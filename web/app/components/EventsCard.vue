@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { ApiEvent } from '~/composables/usePublicApi'
+import type { ApiEventBrief } from '~/composables/usePublicApi'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { platformMeta, type Platform } from '~/utils/data'
 import { fmtShort, toTimestamp } from '~/utils/schedule'
 import { decodeEntities } from '~/utils/text'
 
 // 聚合事件速览：多来源归并后的结论，按最新证据时间排序；详情页可看证据链
-const props = defineProps<{ events: ApiEvent[], showCommunity?: boolean, moreTo: Record<string, unknown> }>()
+const props = defineProps<{ events: ApiEventBrief[], showCommunity?: boolean, moreTo: Record<string, unknown> }>()
 
 const rows = computed(() =>
   props.events.slice(0, 5).map((event) => {

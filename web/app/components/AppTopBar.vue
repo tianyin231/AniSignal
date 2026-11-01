@@ -65,7 +65,7 @@ async function handleLogout() {
     <!-- 手机端两行：品牌 + 工具一行，频道独占一行横滑；md 起合并为一行 -->
     <div class="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-3 px-4 md:h-16 md:flex-nowrap lg:gap-6 lg:px-8">
       <NuxtLink to="/" class="flex h-14 shrink-0 items-center gap-2.5 md:h-auto" aria-label="AniSignal 首页">
-        <img src="/icon.png" alt="" class="size-8 shrink-0 rounded-[9px]">
+        <img src="/icon-64.webp" alt="" width="32" height="32" class="size-8 shrink-0 rounded-[9px]">
         <span class="num text-[19px] font-bold tracking-tight text-ink">AniSignal</span>
       </NuxtLink>
       <nav

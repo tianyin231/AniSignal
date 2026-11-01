@@ -41,7 +41,7 @@ onBeforeUnmount(() => dispose?.())
 <a class="as-skip" href="#as-main">跳到主要内容</a>
 <header class="as-header">
  <div class="as-nav as-wrap">
-  <a href="/intro" class="as-brand" aria-label="AniSignal 产品介绍"><span class="as-brand-mark"><img src="/icon.png" alt=""></span>AniSignal<span class="as-brand-label">产品介绍</span></a>
+  <a href="/intro" class="as-brand" aria-label="AniSignal 产品介绍"><span class="as-brand-mark"><img src="/icon-64.webp" alt="" width="32" height="32"></span>AniSignal<span class="as-brand-label">产品介绍</span></a>
   <nav class="as-nav-links" aria-label="产品导航"><a href="#capabilities">核心能力</a><a href="#workflow">关键词定制</a><a href="#delivery">消息送达</a></nav>
   <div class="as-nav-actions"><button type="button" class="as-motion" data-motion-toggle aria-pressed="false" aria-label="暂停页面动效" hidden><svg class="as-icon " aria-hidden="true"><use href="#as-i-pause" /></svg><span>动效开启</span></button><a href="/" class="as-button as-button-small">进入工作台 <svg class="as-icon " aria-hidden="true"><use href="#as-i-arrow" /></svg></a></div>
  </div><div class="as-reading-progress" aria-hidden="true"><i></i></div>
@@ -175,7 +175,7 @@ onBeforeUnmount(() => dispose?.())
 </section>
 <section class="as-final as-wrap" data-reveal><div class="as-final-orbits" aria-hidden="true"></div><span class="as-overline">LESS NOISE. MORE SIGNAL.</span><h2>把注意力，<br>留给真正关心的变化。</h2><p>从一个关键词开始，找到适合自己的信息路径。</p><div><a href="/" class="as-button">进入信息工作台 <svg class="as-icon " aria-hidden="true"><use href="#as-i-arrow" /></svg></a><a href="/account" class="as-button as-button-quiet">建立我的关注 <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></div></section>
 </main>
-<footer class="as-footer as-wrap"><div><a href="/intro" class="as-brand"><span class="as-brand-mark"><img src="/icon.png" alt=""></span>AniSignal</a><p>自托管信号台，让重要的变化找到你。</p></div><nav aria-label="页脚导航"><a href="/about">关于与边界</a><a href="/sources">来源健康</a><a href="/legal">条款与隐私</a><a href="/bot-rules">机器人守则</a><a href="https://github.com/tianyin231/AniSignal" target="_blank" rel="noopener noreferrer">GitHub <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></nav><span class="as-footer-note">产品试运行 · 功能以当前部署为准</span></footer>
+<footer class="as-footer as-wrap"><div><a href="/intro" class="as-brand"><span class="as-brand-mark"><img src="/icon-64.webp" alt="" width="32" height="32"></span>AniSignal</a><p>自托管信号台，让重要的变化找到你。</p></div><nav aria-label="页脚导航"><a href="/about">关于与边界</a><a href="/sources">来源健康</a><a href="/legal">条款与隐私</a><a href="/bot-rules">机器人守则</a><a href="https://github.com/tianyin231/AniSignal" target="_blank" rel="noopener noreferrer">GitHub <svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a></nav><span class="as-footer-note">产品试运行 · 功能以当前部署为准</span></footer>
 </div>
 </template>
 

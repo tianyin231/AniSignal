@@ -6,6 +6,7 @@ import type { ContentDetail } from '~/composables/usePublicApi'
 import { contentTypeLabels } from '~/utils/admin-types'
 import { fmtTime } from '~/utils/admin-types'
 import { categoryMeta } from '~/utils/public-utils'
+import { imageSrcset, imageUrl } from '~/utils/image'
 import { identityMeta, platformMeta, type Identity, type Platform } from '~/utils/data'
 
 const route = useRoute()
@@ -149,7 +150,7 @@ useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内�
           <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
             <template v-for="m in d.media" :key="m">
               <button v-if="imageMode === 'show'" type="button" class="group relative overflow-hidden rounded-lg border border-slate-900/5 dark:border-white/10" @click="lightbox = m">
-                <img :src="m" referrerpolicy="no-referrer" loading="lazy" class="aspect-video w-full object-cover transition-opacity group-hover:opacity-90" >
+                <img :src="imageUrl(m, 640)" :srcset="imageSrcset(m, [320, 640])" sizes="(min-width: 640px) 33vw, 50vw" alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="aspect-video w-full object-cover transition-opacity group-hover:opacity-90">
               </button>
               <a v-else :href="m" target="_blank" rel="noopener noreferrer" class="block truncate rounded-lg border border-slate-900/5 px-3 py-2 text-xs text-slate-500 hover:text-blue-700 dark:border-white/10 dark:text-zinc-400">图片链接：{{ m }}</a>
             </template>

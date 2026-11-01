@@ -3,6 +3,7 @@ import { BadgeCheck, Flame, ImageIcon } from 'lucide-vue-next'
 import { platformMeta, type RawItem } from '~/utils/data'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { imageSrcset, imageUrl } from '~/utils/image'
+import { isRedundantExcerpt } from '~/utils/text'
 
 /**
  * 首页精选大图：整卡封面 + 底部压暗标题，右下角缩略图切换（手机端为圆点）。
@@ -10,6 +11,8 @@ import { imageSrcset, imageUrl } from '~/utils/image'
  */
 const props = defineProps<{ items: RawItem[]; showCommunity?: boolean }>()
 const active = ref(0)
+// 上一张保持不透明垫在下面，新图在其上淡入：交叉淡化时不会两张同时半透明、透出深色底
+const outgoing = ref(-1)
 const paused = ref(false)
 const reducedMotion = ref(false)
 const pageHidden = ref(false)
@@ -22,7 +25,10 @@ let timer: ReturnType<typeof setInterval> | undefined
 const current = computed(() => props.items[active.value])
 const hasMultiple = computed(() => props.items.length > 1)
 const currentCommunity = computed(() => (props.showCommunity ? communityMeta(current.value?.community) : undefined))
-const excerptLine = computed(() => current.value?.excerpt?.replace(/\s+/g, ' ').trim() ?? '')
+const excerptLine = computed(() => {
+  const text = current.value?.excerpt?.replace(/\s+/g, ' ').trim() ?? ''
+  return isRedundantExcerpt(current.value?.title, text) ? '' : text
+})
 
 function formatViews(value: number) {
   if (value >= 10_000) return `${(value / 10_000).toFixed(value >= 100_000 ? 0 : 1)} 万播放`
@@ -39,7 +45,9 @@ const meta = computed(() => {
 
 function goTo(index: number) {
   if (!props.items.length) return
-  active.value = (index + props.items.length) % props.items.length
+  const target = (index + props.items.length) % props.items.length
+  if (target !== active.value) outgoing.value = active.value
+  active.value = target
   for (const offset of [0, 1]) {
     requestedCoverIds.value.add(props.items[(active.value + offset) % props.items.length]!.id)
   }
@@ -80,6 +88,7 @@ function markCoverFailed(id: string) {
 
 watch(() => props.items.map(item => item.id).join(','), () => {
   active.value = 0
+  outgoing.value = -1
   failedCoverIds.value = []
   requestedCoverIds.value = new Set(props.items.slice(0, 2).map(item => item.id))
   restartTimer()
@@ -100,7 +109,7 @@ onBeforeUnmount(() => {
 <template>
   <section
     v-if="current"
-    class="relative isolate min-h-[300px] overflow-hidden rounded-[20px] bg-[#0b0f17] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:min-h-[400px]"
+    class="relative isolate min-h-[300px] overflow-hidden rounded-[20px] bg-[#0b0f17] shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand sm:min-h-[400px] lg:aspect-video lg:w-full lg:self-stretch"
     role="region"
     aria-roledescription="轮播"
     aria-label="精选动态"
@@ -119,8 +128,10 @@ onBeforeUnmount(() => {
       :key="item.id"
       :to="`/contents/${item.id}`"
       prefetch-on="interaction"
-      class="absolute inset-0 transition-opacity duration-500 ease-out motion-reduce:transition-none"
-      :class="index === active ? 'z-[1] opacity-100' : 'pointer-events-none opacity-0'"
+      class="absolute inset-0"
+      :class="index === active
+        ? 'z-[1] opacity-100 transition-opacity duration-500 ease-out motion-reduce:transition-none'
+        : index === outgoing ? 'pointer-events-none opacity-100' : 'pointer-events-none opacity-0'"
       :tabindex="index === active ? undefined : -1"
       :aria-hidden="index !== active"
       :aria-label="item.title"
