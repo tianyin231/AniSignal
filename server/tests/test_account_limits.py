@@ -37,7 +37,7 @@ async def test_one_token_and_three_enabled_sessions_are_enforced_server_side(cli
     assert len((await client.get('/api/bot/targets', headers=key)).json()) == 3
     quota = (await client.get('/api/account/bot-clients/quota', headers=cookie)).json()
     assert quota['bot_clients_used'] == 1 and quota['bot_targets_used'] == 3
-    assert quota['daily_notifications'] == 20
+    assert quota['daily_notifications'] == 200
     assert (await client.delete(f"/api/account/bot-clients/{data['id']}", headers=cookie)).status_code == 200
     await issue(client, cookie, '替换接入')
 
@@ -62,7 +62,7 @@ async def test_bot_identity_and_configuration_return_current_account_quota(clien
 async def test_admin_can_increase_all_limits_and_tokens_share_session_allowance(client, session, admin_headers):
     user, cookie = await account(session)
     override = {'max_feeds': 10, 'min_interval_minutes': 30, 'max_bot_clients': 2,
-                'max_bot_targets': 3, 'daily_notifications': 100}
+                'max_bot_targets': 3, 'daily_notifications': 400}
     response = await client.put('/api/admin/custom-feeds/policy', headers=admin_headers,
                                json={'user_overrides': {str(user.id): override}})
     assert response.status_code == 200
@@ -76,7 +76,7 @@ async def test_admin_can_increase_all_limits_and_tokens_share_session_allowance(
     assert (await client.post('/api/bot/configuration', headers=keys[0], json={'targets': two})).status_code == 200
     assert (await client.post('/api/bot/configuration', headers=keys[1], json={'targets': two})).status_code == 409
     assert (await client.get('/api/account/custom-quota', headers=cookie)).json()['max_feeds'] == 10
-    assert (await client.get('/api/account/bot-clients/quota', headers=cookie)).json()['daily_notifications'] == 100
+    assert (await client.get('/api/account/bot-clients/quota', headers=cookie)).json()['daily_notifications'] == 400
 
 
 async def test_mail_and_bot_share_daily_budget_and_failures_count(client, session, monkeypatch):

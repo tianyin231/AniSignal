@@ -15,7 +15,7 @@ DEFAULT_POLICY = {
     "max_feeds_per_user": 3, "min_interval_minutes": 60, "max_active_sources": 60,
     "custom_hourly_budget": 120, "platform_hourly_budget": 360,
     "max_bot_clients_per_user": 1, "max_bot_targets_per_user": 3,
-    "daily_notifications_per_user": 20,
+    "daily_notifications_per_user": 200,
 }
 
 

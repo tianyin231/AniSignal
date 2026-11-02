@@ -42,7 +42,7 @@ class CustomPolicyBody(BaseModel):
     platform_hourly_budget: int = Field(default=360, ge=1, le=10000)
     max_bot_clients_per_user: int = Field(default=1, ge=1, le=100)
     max_bot_targets_per_user: int = Field(default=3, ge=1, le=1000)
-    daily_notifications_per_user: int = Field(default=20, ge=1, le=10000)
+    daily_notifications_per_user: int = Field(default=200, ge=1, le=10000)
 
 
 @router.get("/capacity")

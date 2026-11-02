@@ -53,7 +53,7 @@ const capacityInfo = ref<CapacityInfo | null>(null)
 const policyDraft = ref<BetaPolicy | null>(null)
 const allowedUsers = ref('')
 const policyBusy = ref(false)
-const quotaUser = reactive({ id: '', max_feeds: 10, min_interval_minutes: 30, max_bot_clients: 1, max_bot_targets: 3, daily_notifications: 20 })
+const quotaUser = reactive({ id: '', max_feeds: 10, min_interval_minutes: 30, max_bot_clients: 1, max_bot_targets: 3, daily_notifications: 200 })
 const policyFields = [
   ['max_feeds_per_user', '默认每人监控数'], ['min_interval_minutes', '新监控最短周期（分钟）'],
   ['max_active_sources', '最多独立目标'], ['custom_hourly_budget', '定制任务预算/小时'],
