@@ -174,6 +174,46 @@ async def test_account_catalog_populates_choices_and_grouped_platform_selection_
     assert '我的账号' in plugin.config.schema['tools_key']['hint']
 
 
+async def test_plugin_displays_server_quota_and_successful_sync(plugin):
+    path = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal/_conf_schema.json'
+    plugin.config.schema = json.loads(path.read_text(encoding='utf-8'))
+    plugin.config.update(configuration_imported=True, targets=[])
+    plugin.api.return_value = {'targets': [], 'identity': {'client_id': 'mine',
+        'user': {'id': 5, 'display_name': '测试账号'}, 'quota': {
+            'custom_feeds_used': 1, 'max_feeds': 3, 'min_interval_minutes': 60,
+            'bot_clients_used': 1, 'max_bot_clients': 1, 'bot_targets_used': 2, 'max_bot_targets': 3,
+            'notifications_used': 8, 'daily_notifications': 20}}}
+    await plugin.synchronize_configuration()
+    assert '今日通知 8/20' in plugin.config.schema['tools_key']['description']
+    assert '启用会话 2/3' in plugin.config.schema['tools_key']['hint']
+    assert '已同步' in plugin.config.schema['targets']['description']
+    assert plugin.last_synced_at and not plugin.sync_error
+    current = SimpleNamespace(unified_msg_origin='qq:FriendMessage:self', get_sender_id=lambda: 'self', plain_result=lambda text: text)
+    result = [reply async for reply in plugin.session_info(current)]
+    assert '自建监控 1/3' in result[0] and '今日通知 8/20' in result[0] and '上次同步' in result[0]
+
+
+async def test_rejected_configuration_displays_error_and_last_accepted_server_state(plugin, monkeypatch):
+    mod = sys.modules[plugin.__class__.__module__]
+    path = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal/_conf_schema.json'
+    plugin.config.schema = json.loads(path.read_text(encoding='utf-8'))
+    plugin.config.update(configuration_imported=True, targets=[])
+    row = {'name': '已接受会话', 'umo': 'qq:GroupMessage:existing', 'enabled': True}
+    identity = {'client_id': 'mine', 'user': {'id': 5, 'display_name': '测试账号'}}
+    plugin.api.side_effect = [ValueError('当前账号最多启用 3 个 Bot 会话'), {'targets': [row], 'identity': identity}]
+    async def stop(_seconds):
+        raise asyncio.CancelledError()
+    monkeypatch.setattr(mod.asyncio, 'sleep', stop)
+    with pytest.raises(asyncio.CancelledError):
+        await plugin.refresh_targets()
+    assert not plugin.configuration_ready
+    assert plugin.targets[row['umo']]['name'] == '已接受会话'
+    assert plugin.identity == identity
+    assert '同步失败' in plugin.config.schema['targets']['description']
+    assert '最多启用 3 个' in plugin.config.schema['targets']['hint']
+    assert plugin.api.await_args_list[-1].args == ('/configuration',)
+
+
 async def test_chat_subscription_changes_are_persisted_back_to_plugin_settings(plugin):
     mod = sys.modules[plugin.__class__.__module__]
     umo = 'telegram:GroupMessage:real'
@@ -209,7 +249,7 @@ def test_new_install_defaults_are_portable_and_mask_the_access_key():
     path = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal/_conf_schema.json'
     schema = json.loads(path.read_text(encoding='utf-8'))
     assert schema['tools_key']['secret'] is True
-    assert schema['base_url']['default'] == 'http://anisignal.xyz'
+    assert schema['base_url']['default'] == 'https://anisignal.xyz'
     assert not any(key.startswith('cat_') or key == 'legacy_cat_behavior' for key in schema)
     assert 'card_font_path' in schema
     session=schema['targets']['templates']['session']['items']

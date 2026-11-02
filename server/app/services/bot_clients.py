@@ -76,9 +76,11 @@ async def revoke_user_client(session, row: BotClient):
 async def identity(session, client_id: str) -> dict:
     row = await session.get(BotClient, client_id)
     if row:
+        from app.services.account_limits import quota_view
         user = await session.get(User, row.user_id)
         return {"client_id": row.id, "name": row.name, "user": {"id": user.id,
-            "display_name": user.display_name or user.email.split("@", 1)[0]}, "legacy": False}
+            "display_name": user.display_name or user.email.split("@", 1)[0]}, "legacy": False,
+            "quota": await quota_view(session, row.user_id)}
     config = (await get_setting(session, "bot_clients") or {}).get(client_id, {})
     return {"client_id": client_id, "name": config.get("name", "现有 AstrBot"), "user": None, "legacy": True}
 

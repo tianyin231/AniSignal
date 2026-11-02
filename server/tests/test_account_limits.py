@@ -42,6 +42,23 @@ async def test_one_token_and_three_enabled_sessions_are_enforced_server_side(cli
     await issue(client, cookie, '替换接入')
 
 
+async def test_bot_identity_and_configuration_return_current_account_quota(client, session):
+    user, cookie = await account(session)
+    _, key = await issue(client, cookie)
+    identity = (await client.get('/api/bot/identity', headers=key)).json()
+    assert identity['quota']['max_feeds'] == 3 and identity['quota']['notifications_used'] == 0
+    settings_body = settings()
+    response = await client.post('/api/bot/configuration', headers=key, json={'targets': [settings_body]})
+    assert response.status_code == 200
+    quota = response.json()['identity']['quota']
+    assert quota['bot_targets_used'] == 1 and quota['max_bot_targets'] == 3
+    assert await claim_notification(session, user.id)
+    await session.commit()
+    snapshot = (await client.get('/api/bot/configuration', headers=key)).json()
+    assert snapshot['identity']['quota']['notifications_used'] == 1
+    assert 'max_feeds_per_user' not in snapshot['identity']['quota']
+
+
 async def test_admin_can_increase_all_limits_and_tokens_share_session_allowance(client, session, admin_headers):
     user, cookie = await account(session)
     override = {'max_feeds': 10, 'min_interval_minutes': 30, 'max_bot_clients': 2,
