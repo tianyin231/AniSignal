@@ -17,11 +17,11 @@ from astrbot.api.message_components import Plain
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
-from .configuration import apply_subscription, cleanup_legacy_configuration, to_plugin_target, to_server_target, update_catalog, upgrade_subscriptions
+from .configuration import apply_subscription, cleanup_legacy_configuration, quota_summary, to_plugin_target, to_server_target, update_catalog, upgrade_subscriptions
 from .notification_template import details_hint, render_notification
 
 
-VERSION = "1.12.0"
+VERSION = "1.13.0"
 
 
 def _strip_meme_control_blocks(text: str) -> str:
@@ -66,6 +66,8 @@ class AniSignalPlugin(Star):
         self.last_briefs = {}
         self.configuration_lock = asyncio.Lock()
         self.configuration_ready = False
+        self.sync_error = ""
+        self.last_synced_at = ""
         self.configuration_dirty = cleanup_legacy_configuration(config)
 
     async def initialize(self):
@@ -108,7 +110,9 @@ class AniSignalPlugin(Star):
             if getattr(self, "identity", {}).get("client_id") != identity.get("client_id"):
                 self.last_briefs = {}
             self.identity = identity
-            update_catalog(self.config, result.get("catalog", {}), identity)
+            self.sync_error = ""
+            self.last_synced_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y/%m/%d %H:%M:%S")
+            update_catalog(self.config, result.get("catalog", {}), identity, synced_at=self.last_synced_at)
             self.targets = {row["umo"]: row for row in result["targets"]}
             self.configuration_ready = True
 
@@ -355,10 +359,19 @@ class AniSignalPlugin(Star):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.targets = {}
-                self.identity = {}
+                # 配置被拒绝时重新读取主节点状态，让用户能看到真实额度和上次已生效配置。
+                previous = {}
+                try:
+                    previous = await self.api("/configuration")
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    pass
+                self.targets = {row["umo"]: row for row in previous.get("targets", [])}
+                self.identity = previous.get("identity", {})
                 self.last_briefs = {}
-                update_catalog(self.config, {}, {})
+                self.sync_error = str(exc) if isinstance(exc, ValueError) else "主节点连接暂不可用"
+                update_catalog(self.config, previous.get("catalog", {}), self.identity, sync_error=self.sync_error)
                 self.configuration_ready = False
                 if isinstance(exc, ValueError):
                     logger.warning("AniSignal 插件配置未同步：%s", exc)
@@ -481,7 +494,11 @@ class AniSignalPlugin(Star):
         connection = f"AniSignal 账号：{owner['display_name']}（#{owner['id']}）" if owner else (
             "AniSignal：旧版插件接入，可在账号中心创建用户 Token" if identity else
             "AniSignal 尚未鉴权，请在账号中心创建用户 Token，填入插件配置后保存")
-        yield event.plain_result(f"{connection}\n{status}\n本会话标识：\n{umo}\n你的管理标识：{event.get_sender_id()}\n发送 /帮助 查看当前可用功能。")
+        quota = quota_summary(identity)
+        sync = (f"配置未同步：{self.sync_error}" if getattr(self, "sync_error", "") else
+                f"上次同步：{self.last_synced_at}（北京时间）" if getattr(self, "last_synced_at", "") else "")
+        details = "".join(f"\n{line}" for line in (quota, sync) if line)
+        yield event.plain_result(f"{connection}{details}\n{status}\n本会话标识：\n{umo}\n你的管理标识：{event.get_sender_id()}\n发送 /帮助 查看当前可用功能。")
 
     @filter.command("情报订阅")
     async def subscriptions(self, event: AstrMessageEvent):

@@ -43,7 +43,17 @@ def upgrade_subscriptions(config):
     return changed
 
 
-def update_catalog(config, catalog, identity):
+def quota_summary(identity):
+    quota = identity.get("quota")
+    if not quota:
+        return ""
+    return (f"自建监控 {quota['custom_feeds_used']}/{quota['max_feeds']}，采集间隔至少 {quota['min_interval_minutes']} 分钟；"
+            f"Bot 接入 {quota['bot_clients_used']}/{quota['max_bot_clients']}，启用会话 {quota['bot_targets_used']}/{quota['max_bot_targets']}；"
+            f"今日通知 {quota['notifications_used']}/{quota['daily_notifications']} 次。"
+            "通知额度由邮件与 Bot 共用，失败的发送尝试也计入，北京时间零点重置。")
+
+
+def update_catalog(config, catalog, identity, *, synced_at="", sync_error=""):
     """AstrBot 直接从 config.schema 读取面板，鉴权后刷新本人可用选项。"""
     schema = getattr(config, "schema", None)
     if not schema:
@@ -69,6 +79,22 @@ def update_catalog(config, catalog, identity):
     owner = identity.get("user")
     schema["tools_key"]["hint"] = (f"已连接 {owner['display_name']}（#{owner['id']}）。个人监控选项已按该账号权限加载。" if owner else
                                    "在 AniSignal 账号中心创建用户 Token，填入并保存后重新打开设置，加载账号可用来源。")
+    quota = identity.get("quota")
+    schema["tools_key"]["description"] = "AniSignal 用户 Token" + (
+        f" · 今日通知 {quota['notifications_used']}/{quota['daily_notifications']}" if quota else "")
+    if summary := quota_summary(identity):
+        schema["tools_key"]["hint"] += "\n" + summary
+    if sync_error:
+        state = "同步失败"
+        message = f"未确认本次配置同步成功：{sync_error}。请修正后保存，再重新打开设置查看状态。"
+    elif identity:
+        state = "已同步"
+        message = f"上次同步成功：{synced_at}（北京时间）。" if synced_at else "已连接主节点。"
+        message += "保存配置后即发起同步，后台每 30 秒校验一次。"
+    else:
+        state, message = "待连接", "填入用户 Token 并保存后，自动加载额度并同步会话配置。"
+    schema["targets"]["description"] = f"会话与通知定制 · {state}"
+    schema["targets"]["hint"] = message + ("\n" + quota_summary(identity) if quota else "")
 
 
 def to_plugin_target(target):

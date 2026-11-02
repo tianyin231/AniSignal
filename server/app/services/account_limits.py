@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.clock import utcnow
-from app.models import BotClient, BotTarget, NotificationDelivery, SiteSetting, User
+from app.models import BotClient, BotTarget, CustomFeed, NotificationDelivery, SiteSetting, User
 from app.services.custom_policy import insert_ignoring_duplicate, user_limits
 
 QUOTA_EXHAUSTED = "今日通知额度已用完，明日恢复（北京时间）"
@@ -23,6 +23,8 @@ async def quota_view(session, user_id, *, now=None):
     clients = select(BotClient.id).where(BotClient.user_id == user_id, BotClient.enabled.is_(True))
     return {
         **await user_limits(session, user_id),
+        "custom_feeds_used": await session.scalar(select(func.count()).select_from(CustomFeed).where(
+            CustomFeed.user_id == user_id)),
         "bot_clients_used": await session.scalar(select(func.count()).select_from(BotClient).where(
             BotClient.user_id == user_id, BotClient.enabled.is_(True))),
         "bot_targets_used": await session.scalar(select(func.count()).select_from(BotTarget).where(
