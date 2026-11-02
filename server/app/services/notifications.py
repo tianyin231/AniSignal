@@ -28,6 +28,7 @@ from app.models import (
 from app.services.classify import HIDDEN_CATEGORIES
 from app.services.email_templates import document, notice_email
 from app.services.mailer import send_email
+from app.services.account_limits import reserve_email
 
 logger = logging.getLogger(__name__)
 
@@ -646,6 +647,8 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
                 snapshot.body,
                 preheader="今日早报重发",
             )
+            if not await reserve_email(session, delivery):
+                return {"status": "skipped", "reason": "daily_quota_or_already_claimed"}
             sent = await send_email(
                 user.email,
                 snapshot.subject,
@@ -719,6 +722,8 @@ async def process_delivery(session: AsyncSession, delivery_id: int) -> dict:
     subject, body, html_body = render_email(
         delivery.kind, delivery.period_date, keywords, items
     )
+    if not await reserve_email(session, delivery):
+        return {"status": "skipped", "reason": "daily_quota_or_already_claimed"}
     sent = await send_email(
         user.email,
         subject,
@@ -818,6 +823,8 @@ async def send_admin_email(session: AsyncSession, delivery_id: int) -> dict:
     subject = (delivery.subject or "AniSignal 通知").strip()
     body = delivery.body or ""
     html_body = delivery.html_body or notice_email(subject, body)
+    if not await reserve_email(session, delivery, charge=delivery.kind == "custom"):
+        return {"status": "skipped", "reason": "daily_quota_or_already_claimed"}
     sent = await send_email(
         user.email,
         subject,

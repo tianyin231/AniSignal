@@ -2,13 +2,15 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.db import get_session
 from app.models import BotClient, User
 from app.services import bot_clients
+from app.services.account_limits import quota_view
+from app.services.custom_policy import user_limits
 
 router = APIRouter(prefix="/api/account/bot-clients", dependencies=[Depends(get_current_user)])
 
@@ -36,11 +38,19 @@ async def list_clients(user: User = Depends(get_current_user), session: AsyncSes
     return await bot_clients.user_client_views(session, user.id)
 
 
+@router.get("/quota")
+async def client_quota(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    return await quota_view(session, user.id)
+
+
 @router.post("")
 async def create_client(body: ClientBody, response: Response, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
     await session.scalar(select(User).where(User.id == user.id).with_for_update())
-    if await session.scalar(select(func.count()).select_from(BotClient).where(BotClient.user_id == user.id, BotClient.enabled.is_(True))) >= 10:
-        raise HTTPException(409, "最多保留 10 个有效接入，请先撤销不用的 Token")
+    limit = (await user_limits(session, user.id))["max_bot_clients"]
+    active = list(await session.scalars(select(BotClient.id).where(
+        BotClient.user_id == user.id, BotClient.enabled.is_(True)).with_for_update()))
+    if len(active) >= limit:
+        raise HTTPException(409, f"当前账号最多保留 {limit} 个有效接入，请先撤销不用的 Token")
     row, token = await bot_clients.create_user_client(session, user, body.name)
     response.headers["Cache-Control"] = "no-store"
     return {"id": row.id, "name": row.name, "token": token}

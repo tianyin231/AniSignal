@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import BotDelivery, BotTarget
+from app.models import BotClient, BotDelivery, BotTarget
+from app.services.account_limits import QUOTA_EXHAUSTED, claim_notification
 
 AUTOMATIC_KINDS = {"daily", "updates", "calendar", "critical"}
 _target_locks = defaultdict(asyncio.Lock)
@@ -57,6 +58,11 @@ async def reserve_delivery(session, target, row, *, now=None, receipt=None, forc
             if (limit and sum(stamp >= now - timedelta(hours=1) for stamp in recent) >= limit) or (gap and recent and max(recent) > now - timedelta(minutes=gap)):
                 await session.commit()
                 return False
+        client = await session.get(BotClient, target.client_id)
+        if client and not await claim_notification(session, client.user_id, now=now):
+            row.status, row.receipt, row.error, row.updated_at = "cancelled", None, QUOTA_EXHAUSTED, now
+            await session.commit()
+            return False
         row.status, row.receipt = "sending", receipt
         row.attempts += 1
         row.updated_at = now

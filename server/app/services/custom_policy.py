@@ -11,14 +11,28 @@ from app.models import CustomFeed, CustomFeedSource, SiteSetting, User
 from app.services.settings import get_setting
 
 DEFAULT_POLICY = {
-    "open_beta": False, "allowed_user_ids": [], "user_overrides": {},
-    "max_feeds_per_user": 10, "min_interval_minutes": 30, "max_active_sources": 60,
+    "open_beta": True, "allowed_user_ids": [], "user_overrides": {},
+    "max_feeds_per_user": 3, "min_interval_minutes": 60, "max_active_sources": 60,
     "custom_hourly_budget": 120, "platform_hourly_budget": 360,
+    "max_bot_clients_per_user": 1, "max_bot_targets_per_user": 3,
+    "daily_notifications_per_user": 20,
 }
 
 
 async def get_policy(session):
     return {**DEFAULT_POLICY, **(await get_setting(session, "custom_feed_policy") or {})}
+
+
+async def user_limits(session, user_id):
+    policy = await get_policy(session)
+    return {
+        "max_feeds": policy["max_feeds_per_user"],
+        "min_interval_minutes": policy["min_interval_minutes"],
+        "max_bot_clients": policy["max_bot_clients_per_user"],
+        "max_bot_targets": policy["max_bot_targets_per_user"],
+        "daily_notifications": policy["daily_notifications_per_user"],
+        **policy["user_overrides"].get(str(user_id), {}),
+    }
 
 
 async def user_quota(session, user_id, *, lock=False):
@@ -27,14 +41,14 @@ async def user_quota(session, user_id, *, lock=False):
     if lock:
         query = query.with_for_update()
     count = len(list(await session.scalars(query)))
-    overrides = policy["user_overrides"].get(str(user_id), {})
+    limits = await user_limits(session, user_id)
     user = await session.get(User, user_id)
     return {
         "admitted": bool(user and user.status == "active" and user.is_verified and
                          (policy["open_beta"] or user_id in policy["allowed_user_ids"] or count > 0)),
         "used": count,
-        "max_feeds": max(count, overrides.get("max_feeds", policy["max_feeds_per_user"])),
-        "min_interval_minutes": overrides.get("min_interval_minutes", policy["min_interval_minutes"]),
+        "max_feeds": max(count, limits["max_feeds"]),
+        "min_interval_minutes": limits["min_interval_minutes"],
     }
 
 

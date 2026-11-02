@@ -546,13 +546,13 @@ async def create_custom_feed(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """新建定制监控；免费额度 10 个。"""
+    """新建定制监控；额度与最短周期由账号公测配置决定。"""
     payload = _validate_custom_payload(body)
     if not payload["name"] or not payload["kind"] or not payload["target_value"]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "名称、监控类型与目标均不能为空")
     from app.services.custom_policy import check_admission, shared_source, user_quota, request_interval
     quota = await user_quota(session, user.id)
-    interval = payload["interval_minutes"] or max(30, quota["min_interval_minutes"])
+    interval = payload["interval_minutes"] or quota["min_interval_minutes"]
     await check_admission(session, user.id, payload["platform"], payload["kind"], payload["target_value"], interval)
     source = await shared_source(session, payload["platform"], payload["kind"], payload["target_value"])
     request_interval(source, interval)

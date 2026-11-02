@@ -32,12 +32,15 @@ interface CustomFeedAdminRow {
 interface BetaPolicy {
   open_beta: boolean
   allowed_user_ids: number[]
-  user_overrides: Record<string, { max_feeds?: number, min_interval_minutes?: number }>
+  user_overrides: Record<string, { max_feeds?: number, min_interval_minutes?: number, max_bot_clients?: number, max_bot_targets?: number, daily_notifications?: number }>
   max_feeds_per_user: number
   min_interval_minutes: number
   max_active_sources: number
   custom_hourly_budget: number
   platform_hourly_budget: number
+  max_bot_clients_per_user: number
+  max_bot_targets_per_user: number
+  daily_notifications_per_user: number
 }
 interface CapacityInfo {
   policy: BetaPolicy
@@ -50,11 +53,13 @@ const capacityInfo = ref<CapacityInfo | null>(null)
 const policyDraft = ref<BetaPolicy | null>(null)
 const allowedUsers = ref('')
 const policyBusy = ref(false)
-const quotaUser = reactive({ id: '', max_feeds: 10, min_interval_minutes: 30 })
+const quotaUser = reactive({ id: '', max_feeds: 10, min_interval_minutes: 30, max_bot_clients: 1, max_bot_targets: 3, daily_notifications: 20 })
 const policyFields = [
   ['max_feeds_per_user', '默认每人监控数'], ['min_interval_minutes', '新监控最短周期（分钟）'],
   ['max_active_sources', '最多独立目标'], ['custom_hourly_budget', '定制任务预算/小时'],
   ['platform_hourly_budget', 'B站全平台任务预算/小时'],
+  ['max_bot_clients_per_user', '默认每人 Bot 接入数'], ['max_bot_targets_per_user', '默认每人启用会话数'],
+  ['daily_notifications_per_user', '默认每人每日通知次数'],
 ] as const
 
 async function refreshCapacity() {
@@ -75,7 +80,8 @@ async function savePolicy(grantUser = false) {
       const id = Number(quotaUser.id)
       if (!Number.isInteger(id) || id < 1) throw new Error('请填写用户 ID')
       body.allowed_user_ids = [...new Set([...body.allowed_user_ids, id])]
-      body.user_overrides[String(id)] = { max_feeds: quotaUser.max_feeds, min_interval_minutes: quotaUser.min_interval_minutes }
+      const { id: _id, ...limits } = quotaUser
+      body.user_overrides[String(id)] = { ...body.user_overrides[String(id)], ...limits }
     }
     await api('/api/admin/custom-feeds/policy', { method: 'PUT', body })
     await refreshCapacity()
@@ -200,16 +206,19 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <label class="text-xs text-muted">公测用户 ID（逗号分隔）<input v-model="allowedUsers" class="input mt-1 w-full px-3 py-2 text-sm"></label>
           <div class="flex flex-wrap items-center gap-3 sm:col-span-2 lg:col-span-3">
             <label class="inline-flex items-center gap-2 text-sm text-muted"><input v-model="policyDraft.open_beta" type="checkbox" class="checkbox">向所有已验证用户开放</label>
-            <button type="submit" class="btn-primary ml-auto px-4 py-2 text-sm" :disabled="policyBusy">保存公测配置</button>
+            <button type="submit" class="btn-primary ml-auto px-4 py-2 text-sm" :disabled="policyBusy">{{ policyBusy ? '保存中…' : '保存公测配置' }}</button>
           </div>
         </form>
         <form class="flex flex-wrap items-end gap-3 border-t border-line-soft pt-3" @submit.prevent="savePolicy(true)">
           <label class="text-xs text-muted">用户 ID<input v-model="quotaUser.id" type="number" min="1" required class="input mt-1 block w-28 px-3 py-2 text-sm"></label>
           <label class="text-xs text-muted">个人监控额度<input v-model.number="quotaUser.max_feeds" type="number" min="1" max="100" required class="input mt-1 block w-28 px-3 py-2 text-sm"></label>
           <label class="text-xs text-muted">最短周期（分钟）<input v-model.number="quotaUser.min_interval_minutes" type="number" min="5" max="1440" required class="input mt-1 block w-32 px-3 py-2 text-sm"></label>
-          <button type="submit" class="btn px-3 py-2 text-sm" :disabled="policyBusy">保存个人配额并开通</button>
+          <label class="text-xs text-muted">Bot 接入数<input v-model.number="quotaUser.max_bot_clients" type="number" min="1" max="100" required class="input mt-1 block w-28 px-3 py-2 text-sm"></label>
+          <label class="text-xs text-muted">启用会话数<input v-model.number="quotaUser.max_bot_targets" type="number" min="1" max="1000" required class="input mt-1 block w-28 px-3 py-2 text-sm"></label>
+          <label class="text-xs text-muted">每日通知次数<input v-model.number="quotaUser.daily_notifications" type="number" min="1" max="10000" required class="input mt-1 block w-28 px-3 py-2 text-sm"></label>
+          <button type="submit" class="btn px-3 py-2 text-sm" :disabled="policyBusy">{{ policyBusy ? '保存中…' : '保存个人配额并开通' }}</button>
         </form>
-        <p class="text-xs text-faint">额度与周期配置仅约束新增或加速操作，不修改已有监控。邮件已接入共用通知输入；AstrBot 定制推送待完成用户与会话的授权绑定。</p>
+        <p class="text-xs text-faint">监控额度与周期约束新增或加速操作。每日通知按北京时间重置，邮件与 Bot 共用额度，失败的发送尝试也计入；验证码和管理员邮件不占用。</p>
         <div class="flex flex-wrap gap-3 text-xs text-muted">
           <span v-for="row in capacityInfo.usage_24h" :key="row.status">近 24 小时 {{ row.status }}：{{ row.tasks }} 个任务，取得 {{ row.fetched_items }} 条，分发 {{ row.distributed_items }} 条</span>
         </div>

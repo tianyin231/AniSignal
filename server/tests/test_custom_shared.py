@@ -136,13 +136,14 @@ async def test_uid_pipeline_uses_one_shared_dynamics_fetch(session,monkeypatch):
 
 
 async def test_controlled_admission_capacity_and_legacy_frequency(client,session,admin_headers):
+    await set_setting(session, "custom_feed_policy", {"open_beta": False})
     a,_=await users(session);await session.commit()
     from app.services.auth import create_session
     client.cookies.set("anisignal_session",await create_session(session,a))
     body={"name":"目标","kind":"keyword","target_value":"关键词"}
     assert (await client.post("/api/account/custom-feeds",json=body)).status_code==403
     assert (await client.get("/api/account/custom-quota")).json()["admitted"] is False
-    policy={"allowed_user_ids":[a.id],"max_feeds_per_user":1,"max_active_sources":1}
+    policy={"open_beta":False,"allowed_user_ids":[a.id],"max_feeds_per_user":1,"max_active_sources":1}
     assert (await client.put("/api/admin/custom-feeds/policy",headers=admin_headers,json=policy)).status_code==200
     response=await client.post("/api/account/custom-feeds",json=body);assert response.status_code==201
     assert (await client.post("/api/account/custom-feeds",json={**body,"target_value":"另一个"})).status_code==400

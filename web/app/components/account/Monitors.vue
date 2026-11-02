@@ -9,7 +9,7 @@ const { customFeeds, customQuota, customBusy, customError, customMessage, loadin
 const now = ref(Date.now())
 const creating = ref(false)
 
-const blank = () => ({ name: '', kind: 'keyword' as 'keyword' | 'uid', target_value: '', min_views: 0, interval_minutes: 30, includeText: '', excludeText: '', push_enabled: false, is_public: false })
+const blank = () => ({ name: '', kind: 'keyword' as 'keyword' | 'uid', target_value: '', min_views: 0, interval_minutes: 60, includeText: '', excludeText: '', push_enabled: false, is_public: false })
 const form = reactive(blank())
 const editing = ref<number | null>(null)
 const draft = reactive({ name: '', target_value: '', min_views: 0, interval_minutes: 30, includeText: '', excludeText: '' })
@@ -35,7 +35,7 @@ async function create() {
     filters: { include: words(includeText), exclude: words(excludeText) },
   })
   if (ok) {
-    Object.assign(form, blank(), { interval_minutes: Math.max(30, customQuota.value.min_interval_minutes) })
+    Object.assign(form, blank(), { interval_minutes: customQuota.value.min_interval_minutes })
     creating.value = false
   }
 }
