@@ -71,7 +71,7 @@ export function createAccountCenter() {
   const keywords = ref<AccountKeyword[]>([])
   const notifications = ref<NotificationStatus | null>(null)
   const customFeeds = ref<CustomFeedRow[]>([])
-  const customQuota = ref<CustomQuota>({ admitted: false, used: 0, max_feeds: 10, min_interval_minutes: 30 })
+  const customQuota = ref<CustomQuota>({ admitted: false, used: 0, max_feeds: 3, min_interval_minutes: 60 })
   const loading = reactive<Record<Section, boolean>>({ overview: true, keywords: true, feed: true, notifications: true, custom: true })
   const errors = reactive<Record<Section, string>>({ overview: '', keywords: '', feed: '', notifications: '', custom: '' })
   let active = true

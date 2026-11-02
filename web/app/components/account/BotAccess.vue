@@ -8,8 +8,13 @@ interface BotAccess {
   id: string; name: string; enabled: boolean; token_tail: string
   created_at: string; last_seen: string | null; online: boolean; version: string; target_count: number
 }
+interface BotQuota {
+  max_bot_clients: number; max_bot_targets: number; daily_notifications: number
+  bot_clients_used: number; bot_targets_used: number; notifications_used: number
+}
 const { user } = useAuth()
 const clients = ref<BotAccess[]>([])
+const quota = ref<BotQuota | null>(null)
 const name = ref('我的 AstrBot')
 const loading = ref(true)
 const busy = ref('')
@@ -31,7 +36,10 @@ async function refresh() {
   loading.value = true
   error.value = ''
   try {
-    clients.value = await $fetch<BotAccess[]>('/api/account/bot-clients')
+    [clients.value, quota.value] = await Promise.all([
+      $fetch<BotAccess[]>('/api/account/bot-clients'),
+      $fetch<BotQuota>('/api/account/bot-clients/quota'),
+    ])
     now.value = Date.now()
   } catch (exc) {
     error.value = failure(exc, '机器人接入暂时加载失败，请重试。')
@@ -122,6 +130,11 @@ async function copyToken() {
       {{ error }}<button v-if="!clients.length && !loading" type="button" class="ml-2 font-semibold underline" @click="refresh()">重试</button>
     </UiNotice>
     <UiNotice v-if="message" tone="ok" class="mt-4">{{ message }}</UiNotice>
+    <div v-if="quota" class="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+      <span>接入 {{ quota.bot_clients_used }}/{{ quota.max_bot_clients }}</span>
+      <span>启用会话 {{ quota.bot_targets_used }}/{{ quota.max_bot_targets }}</span>
+      <span>今日通知 {{ quota.notifications_used }}/{{ quota.daily_notifications }} 次</span>
+    </div>
 
     <p v-if="loading && !clients.length" role="status" class="mt-4 text-sm text-faint">正在加载接入…</p>
     <ul v-else-if="clients.length" class="mt-4 divide-y divide-line-soft border-y border-line-soft">
@@ -149,7 +162,7 @@ async function copyToken() {
 
     <form class="mt-4 flex gap-2" @submit.prevent="issue()">
       <input v-model.trim="name" required maxlength="100" aria-label="接入名称" placeholder="接入名称，例如：我的 AstrBot" class="input h-10 min-w-0 flex-1">
-      <button type="submit" class="btn-primary inline-flex h-10 shrink-0 items-center gap-1 px-3.5" :disabled="!!busy || !name">
+      <button type="submit" class="btn-primary inline-flex h-10 shrink-0 items-center gap-1 px-3.5" :disabled="!!busy || !name || !quota || quota.bot_clients_used >= quota.max_bot_clients">
         <Plus :size="15" />{{ busy === 'create' ? '生成中…' : '新建 Token' }}
       </button>
     </form>

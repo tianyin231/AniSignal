@@ -272,9 +272,14 @@ async def edit_target(target_id: int, body: TargetBody, session: AsyncSession = 
     return target_view(row)
 
 
-async def apply_target(row, body, session):
+async def apply_target(row, body, session, *, check_quota=True):
     """配置同步与聊天修改共用，只有实际策略变化才推进扫描起点。"""
     await bot_preferences.validate_sources(session, row.client_id, [body])
+    if check_quota and body.enabled and not row.enabled:
+        from app.services.account_limits import check_bot_targets
+        active = list(await session.scalars(select(BotTarget.umo).where(
+            BotTarget.client_id == row.client_id, BotTarget.enabled.is_(True))))
+        await check_bot_targets(session, row.client_id, [*active, body.umo])
     config = body.model_dump(exclude={"name", "umo", "enabled"})
     previous = TargetBody(name=row.name, umo=row.umo, enabled=row.enabled, **row.config).model_dump(exclude={"name", "umo", "enabled"})
     def comparable(value):
@@ -382,6 +387,8 @@ async def export_configuration(session: AsyncSession = Depends(get_session), cli
 
 @tools_router.post("/configuration")
 async def sync_configuration(body: ConfigurationBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
+    from app.services.account_limits import check_bot_targets
+    await check_bot_targets(session, client_id, [target.umo for target in body.targets if target.enabled])
     await bot_preferences.validate_sources(session, client_id, body.targets)
     rows = {row.umo: row for row in await session.scalars(select(BotTarget)
             .where(BotTarget.client_id == client_id).with_for_update())}
@@ -398,7 +405,7 @@ async def sync_configuration(body: ConfigurationBody, session: AsyncSession = De
                             config=target.model_dump(exclude={"name", "umo", "enabled"}))
             session.add(row)
         else:
-            await apply_target(row, target, session)
+            await apply_target(row, target, session, check_quota=False)
         row.managed_by_plugin = True
         configured.append(row)
     selected = {target.umo for target in body.targets}

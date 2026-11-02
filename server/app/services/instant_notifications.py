@@ -161,11 +161,8 @@ async def send_instant_notification(session: AsyncSession, delivery_id: int) -> 
         return {"status": "skipped"}
     subject, body, html = payload["subject"], payload["body"], payload["html"]
     # SMTP 结果不明时不自动重发，避免 worker 重启后重复投递。
-    claimed = await session.execute(update(NotificationDelivery).where(
-        NotificationDelivery.id == delivery.id, NotificationDelivery.status == "pending",
-    ).values(status="sending"))
-    await session.commit()
-    if not claimed.rowcount:
+    from app.services.account_limits import reserve_email
+    if not await reserve_email(session, delivery):
         return {"status": "skipped"}
     try:
         sent = await asyncio.wait_for(send_email(

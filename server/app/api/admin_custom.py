@@ -25,18 +25,24 @@ class UserQuotaOverride(BaseModel):
     model_config = ConfigDict(extra="forbid")
     max_feeds: int | None = Field(default=None, ge=1, le=100)
     min_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
+    max_bot_clients: int | None = Field(default=None, ge=1, le=100)
+    max_bot_targets: int | None = Field(default=None, ge=1, le=1000)
+    daily_notifications: int | None = Field(default=None, ge=1, le=10000)
 
 
 class CustomPolicyBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    open_beta: bool = False
+    open_beta: bool = True
     allowed_user_ids: list[PositiveInt] = Field(default_factory=list, max_length=1000)
     user_overrides: dict[str, UserQuotaOverride] = Field(default_factory=dict)
-    max_feeds_per_user: int = Field(default=10, ge=1, le=100)
-    min_interval_minutes: int = Field(default=30, ge=5, le=1440)
+    max_feeds_per_user: int = Field(default=3, ge=1, le=100)
+    min_interval_minutes: int = Field(default=60, ge=5, le=1440)
     max_active_sources: int = Field(default=60, ge=1, le=5000)
     custom_hourly_budget: int = Field(default=120, ge=1, le=10000)
     platform_hourly_budget: int = Field(default=360, ge=1, le=10000)
+    max_bot_clients_per_user: int = Field(default=1, ge=1, le=100)
+    max_bot_targets_per_user: int = Field(default=3, ge=1, le=1000)
+    daily_notifications_per_user: int = Field(default=20, ge=1, le=10000)
 
 
 @router.get("/capacity")
@@ -54,7 +60,7 @@ async def custom_capacity(session: AsyncSession = Depends(get_session)):
         "sources": [{"id": s.id, "platform": s.platform, "kind": s.kind, "target_value": s.target_value,
                      "last_success_at": s.last_success_at, "next_run_at": s.next_run_at,
                      "consecutive_failures": s.consecutive_failures, "last_error": s.last_error} for s in sources],
-        "notification_channels": ["email"], "planned_channels": ["astrbot"], "astrbot_requires_authorized_binding": True}
+        "notification_channels": ["email", "astrbot"], "planned_channels": [], "astrbot_requires_authorized_binding": True}
 
 
 @router.put("/policy")
