@@ -2,7 +2,7 @@
   "base_url": {
     "description": "AniSignal 服务地址",
     "type": "string",
-    "default": "http://anisignal.xyz"
+    "default": "https://anisignal.xyz"
   },
   "tools_key": {
     "description": "AniSignal 用户 Token",
