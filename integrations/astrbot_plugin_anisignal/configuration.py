@@ -12,6 +12,10 @@ def cleanup_legacy_configuration(config):
     for key in obsolete:
         config.pop(key)
     changed = bool(obsolete)
+    if str(config.get("base_url", "")).rstrip("/") in {
+            "http://anisignal.xyz", "http://www.anisignal.xyz", "http://anisignal.nanamiyako.cn"}:
+        config["base_url"] = "https://anisignal.xyz"
+        changed = True
     for target in config.get("targets", []):
         interaction = target.get("interaction", {})
         for key in ("ai_prompt", "ai_provider_id"):

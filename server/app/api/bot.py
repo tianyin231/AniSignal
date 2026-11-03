@@ -5,6 +5,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,7 @@ from app.clock import utcnow
 from app.communities import COMMUNITIES, community_query_pattern
 from app.custom_presets import CUSTOM_PRESETS
 from app.db import get_session
-from app.models import BotClient, BotDelivery, BotReminder, BotTarget
+from app.models import BotClient, BotDelivery, BotReminder, BotTarget, SiteSetting
 from app.services import bot
 from app.services import bot_clients
 from app.services import bot_preferences
@@ -290,6 +291,7 @@ async def apply_target(row, body, session, *, check_quota=True):
     if body.enabled and (not row.enabled or changed):
         row.last_scan_at = utcnow()
     if changed or (row.enabled and not body.enabled):
+        await session.execute(delete(SiteSetting).where(SiteSetting.key == f"bot_query_{row.id}"))
         await session.execute(delete(BotDelivery).where(BotDelivery.target_id == row.id, BotDelivery.status == "pending", BotDelivery.kind != "reminder"))
         # 已失败的旧范围消息保留审计，但不再自动重试。
         await session.execute(update(BotDelivery).where(BotDelivery.target_id == row.id, BotDelivery.status == "failed", BotDelivery.kind != "reminder").values(attempts=3))
@@ -432,4 +434,16 @@ async def tool_query(body: ToolQuery, session: AsyncSession = Depends(get_sessio
         raise HTTPException(403, "查询缺少真实操作者标识，请更新插件")
     if body.actor_id and (reason := actor_error(body.umo, body.actor_id)):
         raise HTTPException(403, reason)
-    return await bot.query_target(session, target, body.tool, body.query)
+    payload = await bot.query_target(session, target, body.tool, body.query)
+    if payload.get("brief"):
+        from app.services.custom_policy import insert_ignoring_duplicate
+
+        query_id = secrets.token_hex(16)
+        key = f"bot_query_{target.id}"
+        value = {"id": query_id, "created_at": utcnow().isoformat(), "brief": jsonable_encoder(payload["brief"])}
+        # 每个会话只保留最近一次清单，详情读取时再核对当前权限。
+        await insert_ignoring_duplicate(session, SiteSetting, key=key, value={})
+        await session.execute(update(SiteSetting).where(SiteSetting.key == key).values(value=value))
+        await session.commit()
+        payload["query_id"] = query_id
+    return payload

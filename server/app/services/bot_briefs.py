@@ -271,7 +271,7 @@ def single_item_brief(item: dict) -> dict:
     return {"mode": "single", "items": [{**source, "summary": item.get("summary") or "", "sources": [source]}]}
 
 
-def fallback_items(items: list[dict], limit: int = MAX_ITEMS) -> list[dict]:
+def fallback_items(items: list[dict], limit: int = MAX_ITEMS, *, require_chinese=True) -> list[dict]:
     selected = []
     for item in items:
         source = _source(item)
@@ -291,13 +291,13 @@ def fallback_items(items: list[dict], limit: int = MAX_ITEMS) -> list[dict]:
         if grounded is None:
             continue
         title, summary = grounded
-        if not re.search(r"[\u4e00-\u9fff]", title):
+        if require_chinese and not re.search(r"[\u4e00-\u9fff]", title):
             # 有翻译正文时取完整中文句；模型不可用且全为外文时不发半截外文。
             title = _complete_text(summary, 80)
             summary = ""
             if not re.search(r"[\u4e00-\u9fff]", title):
                 continue
-        elif summary and not re.search(r"[\u4e00-\u9fff]", summary):
+        elif require_chinese and summary and not re.search(r"[\u4e00-\u9fff]", summary):
             summary = ""
         selected.append({**source, "title": title, "summary": summary, "sources": [source]})
         if len(selected) >= limit:
@@ -340,7 +340,7 @@ def _compatible_sources(refs: list[dict]) -> bool:
     return bool(set.intersection(*versions))
 
 
-async def select_brief_items(session, items: list[dict], now: datetime, *, limit: int = MAX_ITEMS) -> list[dict]:
+async def select_brief_items(session, items: list[dict], now: datetime, *, limit: int = MAX_ITEMS, use_ai=True) -> list[dict]:
     if any(item.get("news") for item in items):
         # 快讯已完成编辑筛选，直接保留审核摘要、传闻标记和来源，不再套游戏播报提示词。
         selected = []
@@ -355,14 +355,16 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
                              "share_text": share, "sources": [source]})
         game_items = [item for item in items if not item.get("news")]
         if game_items:
-            selected += await select_brief_items(session, game_items, now, limit=limit)
+            selected += await select_brief_items(session, game_items, now, limit=limit, use_ai=use_ai)
         return sorted(selected, key=lambda item: _published(item.get("published_at")) or datetime.min, reverse=True)[:limit]
     candidates = [i for i in items if not is_empty_dynamic_item(i)
                   and ((i.get("title") or "").strip() not in ("动态", "未命名动态") or i.get("image"))
                   and not _is_low_signal_notification(i)][:30]
-    fallback = fallback_items(candidates, limit)
+    fallback = fallback_items(candidates, limit, require_chinese=use_ai)
+    if not use_ai or not candidates:
+        return fallback
     config = await get_ai_config(session)
-    if not candidates or not ai_available(config):
+    if not ai_available(config):
         return fallback
     sources = {i + 1: _source(item) for i, item in enumerate(candidates)}
     payload = [{"index": i, **{key: s[key] for key in ("title", "community", "identity", "published_at", "is_supplement", "is_followup")},
@@ -512,9 +514,9 @@ def format_brief(brief: dict) -> str:
     return "\n".join(lines)
 
 
-async def build_brief(session, items: list[dict], now=None, *, mode="updates") -> dict:
+async def build_brief(session, items: list[dict], now=None, *, mode="updates", use_ai=True) -> dict:
     now = now or utcnow()
-    selected = await select_brief_items(session, items, now, limit=MAX_ITEMS if mode == "daily" else UPDATE_ITEMS)
+    selected = await select_brief_items(session, items, now, limit=MAX_ITEMS if mode == "daily" else UPDATE_ITEMS, use_ai=use_ai)
     for item in selected:
         item["published_label"] = publication_label(item)
         if item.get("is_supplement"):

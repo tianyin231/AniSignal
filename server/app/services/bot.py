@@ -334,8 +334,10 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if not items:
             lines.append("当前范围内没有匹配的新资讯。")
         if not collected_after:
-            editor = build_shared_brief if shared_copy else build_brief
-            brief = await editor(session, items, now, mode="daily" if tool == "digest" else "updates")
+            mode = "daily" if tool == "digest" else "updates"
+            # 手动查询交给用户的 AstrBot 模型呈现，站点不为每次查询重复调用 AI。
+            brief = (await build_shared_brief(session, items, now, mode=mode) if shared_copy else
+                     await build_brief(session, items, now, mode=mode, use_ai=False))
             items = brief["items"]
             lines = [format_brief(brief)]
     return {"text": "\n".join(lines), "items": items,

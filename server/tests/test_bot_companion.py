@@ -253,6 +253,8 @@ async def test_brief_detail_is_bound_to_original_delivery_and_target(client, ses
     raw.hidden = True
     await session.commit()
     assert (await client.post('/api/bot/detail', headers=HEADERS, json=body)).status_code == 404
+    context = await client.post('/api/bot/context', headers=HEADERS, json={'umo': row.umo, 'actor_id': 'member'})
+    assert context.json()['recent_notifications'] == []
 
 
 async def test_claim_cancels_empty_dynamic_and_rebuilds_mixed_brief(client, session):

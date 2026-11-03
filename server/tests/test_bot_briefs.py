@@ -25,6 +25,16 @@ def test_relative_dates_are_anchored_to_source_and_brief_is_bounded():
     assert 'https://example.com/0' in briefs.format_detail(items[0])
 
 
+async def test_manual_brief_keeps_foreign_sources_for_users_own_model(session, monkeypatch):
+    model = AsyncMock(side_effect=AssertionError('手动查询不能调用站点模型'))
+    monkeypatch.setattr(briefs, 'chat', model)
+    source = content(1, title='Official update', text='New streaming support is available.')
+    result = await briefs.build_brief(session, [source], use_ai=False)
+    assert result['items'][0]['sources'][0]['title'] == 'Official update'
+    assert result['items'][0]['sources'][0]['text'] == source['text']
+    model.assert_not_awaited()
+
+
 def test_relative_dates_preserve_game_names_and_use_beijing_day():
     assert briefs.dated_text('《明日方舟》今日更新，明日晚播出。', datetime(2026, 10, 8, 18)) == '《明日方舟》10月9日更新，10月10日晚播出。'
     assert briefs.dated_text('明日方舟新EP', datetime(2026, 10, 9)) == '明日方舟新EP'
