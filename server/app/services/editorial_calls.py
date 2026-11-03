@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.clock import utcnow
 from app.models import AiUsage, EditorialReceipt, SiteSetting
-from app.services.ai import ai_available, chat, get_ai_config
+from app.services.ai import AiPoolCoolingDown, ai_available, chat, get_ai_config
 from app.services.settings import get_setting
 
 POLICY_KEY = "news_editorial"
@@ -68,6 +68,12 @@ async def call_json(session, *, task: str, ref_id: int, system: str, payload: di
     now = utcnow()
     await _budget_row(session)
     receipt = await session.scalar(select(EditorialReceipt).where(EditorialReceipt.request_key == request_key).with_for_update())
+    if receipt and receipt.status == "unknown" and receipt.error == "AiPoolCoolingDown":
+        # 旧记录的本地冷却没有发出请求，按正常调度恢复，不释放结果不明的网络请求。
+        receipt.status, receipt.attempts = "deferred", max(0, receipt.attempts - 1)
+        usage = await session.get(AiUsage, receipt.usage_id) if receipt.usage_id else None
+        if usage:
+            usage.status = "deferred"
     if receipt and receipt.status == "received":
         await session.commit()
         return await _validated(session, receipt, validate)
@@ -79,13 +85,14 @@ async def call_json(session, *, task: str, ref_id: int, system: str, payload: di
                 usage.status = "unknown"
         await session.commit()
         raise EditorialDeferred(f"请求等待处理：{receipt.status}")
-    if receipt and (receipt.attempts >= 3 or receipt.updated_at > now - timedelta(minutes=10)):
+    cooldown = timedelta(minutes=1 if receipt and receipt.status == "deferred" else 10)
+    if receipt and (receipt.attempts >= 3 or receipt.updated_at > now - cooldown):
         await session.commit()
         raise EditorialDeferred("请求处于失败冷却期")
     windows = () if policy.get("calls_unlimited") else (("minute", timedelta(minutes=1)), ("hour", timedelta(hours=1)), ("day", timedelta(days=1)))
     for name, window in windows:
         used = await session.scalar(select(func.count(AiUsage.id)).where(
-            AiUsage.task.in_(TASKS), AiUsage.created_at > now - window)) or 0
+            AiUsage.task.in_(TASKS), AiUsage.status != "deferred", AiUsage.created_at > now - window)) or 0
         if used >= policy[f"calls_per_{name}"]:
             await session.commit()
             raise EditorialDeferred(f"资讯编辑请求额度已用完：{name}")
@@ -106,7 +113,11 @@ async def call_json(session, *, task: str, ref_id: int, system: str, payload: di
         response, tokens = await chat(config, system, json.dumps(payload, ensure_ascii=False, default=str), json_mode=True)
     except Exception as exc:
         # HTTP 明确拒绝可退避重试；传输中断可能已计费，不自动重发。
-        receipt.status = "failed" if isinstance(exc, httpx.HTTPStatusError) else "unknown"
+        if isinstance(exc, AiPoolCoolingDown):
+            receipt.status = "deferred"
+            receipt.attempts = max(0, receipt.attempts - 1)
+        else:
+            receipt.status = "failed" if isinstance(exc, httpx.HTTPStatusError) else "unknown"
         receipt.error, receipt.updated_at = type(exc).__name__, utcnow()
         usage.status, usage.duration_ms = receipt.status, int((time.monotonic() - started) * 1000)
         await session.commit()

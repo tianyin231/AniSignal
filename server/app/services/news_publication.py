@@ -218,12 +218,18 @@ async def read_news_edition(session, *, day=None):
         return {"day": None, "items": []}
     records = await visible_records(session, days=max(30, (utcnow().date() - issue.day).days + 31))
     versions = {str(r.raw.id): [r.raw.content_hash, r.version.version, fingerprint(news_review_identity(r.news))] for r in records}
+    current_events = {r.raw.id: r.grouping.event_id for r in records if r.current and r.grouping.event_id}
     items = []
+    seen = set()
     for item in issue.content["items"]:
         refs = item["source_versions"]
         valid = {rid for rid, version in refs.items() if versions.get(rid) == version}
         if str(item["id"]) not in valid:
             continue  # 主稿撤回或修订时，同步撤回依赖它的刊期文案。
+        key = current_events.get(item["id"]) or -item["id"]
+        if key in seen:
+            continue
+        seen.add(key)
         items.append({k: v for k, v in item.items() if k != "source_versions"}
             | {"sources": [source for source in item["sources"] if str(source["id"]) in valid]})
     return {"day": issue.day, "created_at": issue.created_at, "items": items}

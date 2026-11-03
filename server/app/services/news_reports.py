@@ -49,6 +49,9 @@ async def citation(session, value):
         if not versions and alias and alias.payload.get("content_hash") != row.raw.content_hash:
             raise HTTPException(404)
         item["available"] = True
+        fact = (row.news.get("imported_publication") or {}).get("fact_id")
+        item["factId"] = (f"imported:{fact}" if fact is not None else
+                          f"event:{row.grouping.event_id}" if row.current and row.grouping.event_id else None)
         if not isinstance(value, dict):
             item.update(title=row.news["headline"], summary=row.news["summary"],
                 sourceName=row.source.name if row.source else "来源未署名", sourceUrl=row.raw.url)
@@ -59,6 +62,17 @@ async def citation(session, value):
     return item
 
 
+def _distinct_citations(items):
+    seen, selected = set(), []
+    for item in items:
+        key = item.get("factId") or item["itemId"]
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(item)
+    return selected
+
+
 async def report(session, kind, key):
     available = await issues(session, kind)
     keys = sorted(available)
@@ -66,7 +80,7 @@ async def report(session, kind, key):
         raise HTTPException(404, "本期尚未发布")
     row = available[key]
     content = deepcopy(row["content"])
-    sections = [{**section, "items": [await citation(session, item) for item in section.get("items", [])]}
+    sections = [{**section, "items": _distinct_citations([await citation(session, item) for item in section.get("items", [])])}
         for section in content.get("sections", [])]
     for section in sections:
         if any(not item["available"] for item in section["items"]):
@@ -78,8 +92,8 @@ async def report(session, kind, key):
     label = {"daily": "日报", "weekly": "周报", "monthly": "月报"}[kind]
     return {"kind": kind, "key": key, "title": f"AI {label} · {key}", "issueNumber": index + 1,
         "generatedAt": row.get("generated_at") or row.get("created_at"), "lead": lead,
-        "overview": content.get("overview"), "highlights": [await citation(session, v) for v in content.get("highlights", [])],
-        "sections": sections, "flashes": [await citation(session, v) for v in content.get("flashes", [])],
+        "overview": content.get("overview"), "highlights": _distinct_citations([await citation(session, v) for v in content.get("highlights", [])]),
+        "sections": sections, "flashes": _distinct_citations([await citation(session, v) for v in content.get("flashes", [])]),
         "prev": keys[index - 1] if index else None, "next": keys[index + 1] if index + 1 < len(keys) else None}
 
 

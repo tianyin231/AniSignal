@@ -33,6 +33,7 @@ class MatchContent:
     text: str
     category: str | None
     community: str = DEFAULT_COMMUNITY
+    source_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,7 @@ async def _load_recent_official(session: AsyncSession) -> list[MatchContent]:
             text=_plain(version.text or "")[:800],
             category=version.category,
             community=getattr(raw, "community", None) or DEFAULT_COMMUNITY,
+            source_id=raw.source_id,
         )
         for raw, version in result
     ]
@@ -180,7 +182,9 @@ def _candidate_pairs(
     pairs: list[tuple[timedelta, MatchPair]] = []
     for index, left in enumerate(rows):
         for right in rows[index + 1 :]:
-            if left.platform == right.platform:
+            if left.platform == right.platform and (
+                not left.source_id or not right.source_id or left.source_id == right.source_id
+            ):
                 continue
             # 跨分区（鸣潮/碧蓝航线）的官方内容永不配对
             if left.community != right.community:
@@ -210,6 +214,7 @@ def _candidate_pairs(
 
 _MATCH_SYSTEM_PROMPT = """你是跨平台官方内容核对器。判断两条官方内容是否是同一次发布的同一公告、同一视频或同一素材。
 同角色、同版本、同活动但内容不同，必须判定为 false。只有标题翻译、文案翻译或平台转发形式不同，核心发布物一致时才判定为 true。
+国服与国际服仅翻译不同可判定为 true；若上线时间、奖励、价格、开放范围或兑换码有实质差别，必须判定为 false。
 只能依据给出的标题、正文和发布时间判断，不得补充外部事实。返回 JSON：
 {"matches":[{"left_id":1,"right_id":2,"same_event":true,"confidence":0.96,"reason":"简短证据"}]}
 必须逐项返回所有候选，confidence 为 0 到 1。"""

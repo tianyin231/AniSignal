@@ -127,6 +127,11 @@ def parse_relation(value: dict, candidates: list[NewsRecord]) -> dict:
     relation = value.get("relation")
     if relation not in {"SAME_OCCURRENCE", "SAME_STORY", "UNRELATED", "ROUNDUP"}:
         raise ValueError("归组关系无效")
+    if relation == "UNRELATED" and re.search(
+        r"(?<!不)应(?:当|该)?(?:归为|判为)\s*[：:\"“*]*SAME_OCCURREN(?:CE|ANCE)",
+        str(value.get("reason") or ""), re.IGNORECASE,
+    ):
+        raise ValueError("归组结论与理由矛盾，保留已有事件关系")
     allowed = {row.raw.id for row in candidates}
     candidate_id = value.get("candidate_id")
     confidence = value.get("confidence")
