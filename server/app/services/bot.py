@@ -187,8 +187,8 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
     if tool == "trending":
         from app.services.curation import select_trending
 
-        items = await select_trending(session, 5, community=community, hours=24)
-        items = [item for item in items if matches_target_scope(target, item)]
+        items = await select_trending(session, 5, community=community, hours=24,
+                                      item_filter=lambda item: matches_target_scope(target, item))
         lines = [
             f"{scope} · 热度飙升（24 小时播放增量）",
             (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）"),
@@ -240,26 +240,31 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         conditions.append(RedeemCode.community.in_(selected))
         if config.get("channels"):
             conditions.append(bot_channels.channel_condition(config["channels"]))
-        rows = await session.execute(
+        rows = await session.stream(
             select(RedeemCode, RawContent.url, ContentVersion.title, ContentVersion.text)
             .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
             .outerjoin(ContentVersion, (ContentVersion.raw_content_id == RawContent.id) & (ContentVersion.id ==
                 select(func.max(ContentVersion.id)).where(ContentVersion.raw_content_id == RawContent.id).correlate(RawContent).scalar_subquery()))
             .outerjoin(Source, Source.id == RawContent.source_id)
             .where(*conditions)
-            .order_by(RedeemCode.created_at.desc())
-            .limit(8)
+            .order_by(RedeemCode.created_at.desc(), RedeemCode.id.desc())
+            .execution_options(yield_per=100)
         )
         lines = [f"{scope} · 可用兑换码", (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）")]
         found = 0
-        for code, url, title, text in rows:
-            if not matches_keywords(config, {"title": title, "text": text}):
-                continue
-            expiry = f"（{_fmt_bj(code.expires_at)} 前）" if code.expires_at else ""
-            lines.append(f"\n{code.code}{expiry}")
-            if url:
-                lines.append(url)
-            found += 1
+        try:
+            async for code, url, title, text in rows:
+                if not matches_keywords(config, {"title": title, "text": text}):
+                    continue
+                expiry = f"（{_fmt_bj(code.expires_at)} 前）" if code.expires_at else ""
+                lines.append(f"\n{code.code}{expiry}")
+                if url:
+                    lines.append(url)
+                found += 1
+                if found == 8:
+                    break
+        finally:
+            await rows.close()
         if not found:
             lines.append("当前没有可用的兑换码。")
     elif tool == "products":
@@ -793,7 +798,12 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     items = payload.get("items") or []
                     style = config.get("daily_style", "compact")
                     covers = collect_images(items, max_images)
-                    if style == "split" and items:
+                    parts = min(len(items), 2)
+                    gap = int(config.get("min_push_interval_minutes", 20) or 0)
+                    split_minutes = max(parts * gap, (parts // hourly_limit) * 60 if hourly_limit else 0)
+                    remaining_minutes = (due + timedelta(hours=2) - now).total_seconds() / 60
+                    # 限频下发不完的拆条改为一条完整早报，不让最后的重点过期丢失。
+                    if style == "split" and items and split_minutes < remaining_minutes:
                         head = payload["text"].split("\n", 2)[0]
                         lifespan = {"scheduled_at": due.isoformat(), "expires_at": (due + timedelta(hours=2)).isoformat()}
                         await create_delivery(session, target, "daily", f"{head}\n共 {len(items)} 条重点，详情如下", key, media=covers,
