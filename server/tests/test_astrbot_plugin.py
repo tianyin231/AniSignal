@@ -713,25 +713,59 @@ async def test_expand_uses_sent_delivery_and_real_session_identity(plugin):
     assert 'error' in await plugin.detail(event(umo), 2)
 
 
-@pytest.mark.parametrize('published,expected', [
-    ('2026-10-09T06:00:00', '发布：10/09 14:00'),
-    ('2026-10-09T14:00:00+08:00', '发布：10/09 14:00'),
-    (None, ''),
-])
-async def test_local_expansion_uses_publication_time_without_collection_fallback(plugin, published, expected):
+@pytest.mark.parametrize('denied', [False, True])
+async def test_query_expansion_always_checks_server_permissions(plugin, denied):
     umo = 'qq:GroupMessage:real'
     plugin.targets = {umo: {'enabled': True, 'tools': ['news']}}
-    plugin.last_briefs[umo] = {'brief': {'items': [{'title': '原始动态', 'sources': [
-        {'title': '原始动态', 'source': '官方账号', 'published_at': published,
-         'collected_at': '2026-10-09T07:40:00'},
-    ]}]}}
-    text = (await plugin.detail(event(umo)))['text']
-    assert '15:40' not in text and '22:00' not in text
-    if expected:
-        assert expected in text
+    query_id = 'a' * 32
+    plugin.last_briefs[umo] = {'query_id': query_id, 'brief': {'items': [{'title': '旧私有资料'}]}}
+    if denied:
+        plugin.api.side_effect = ValueError('此资料已不在订阅范围')
     else:
-        assert '发布：' not in text
+        plugin.api.return_value = {'text': '经过重新校验的原文'}
+    result = await plugin.detail(event(umo))
+    assert plugin.api.call_args.args == ('/detail', {'umo': umo, 'actor_id': 'user', 'number': 1, 'query_id': query_id})
+    assert '旧私有资料' not in str(result)
+    assert ('error' in result) == denied
+
+
+async def test_legacy_cached_query_is_not_expanded_without_server_reference(plugin):
+    umo = 'qq:GroupMessage:real'
+    plugin.targets = {umo: {'enabled': True, 'tools': ['news']}}
+    plugin.last_briefs[umo] = {'brief': {'items': [{'title': '旧私有资料'}]}}
+    result = await plugin.detail(event(umo))
+    assert 'error' in result and '旧私有资料' not in str(result)
     plugin.api.assert_not_awaited()
+
+
+@pytest.mark.parametrize('original,expected', [
+    ('http://anisignal.xyz/', 'https://anisignal.xyz'),
+    ('http://www.anisignal.xyz', 'https://anisignal.xyz'),
+    ('http://anisignal.nanamiyako.cn', 'https://anisignal.xyz'),
+    ('http://127.0.0.1:8090', 'http://127.0.0.1:8090'),
+])
+async def test_existing_public_http_configuration_is_upgraded_before_first_request(plugin, original, expected):
+    plugin.config.update(base_url=original, configuration_imported=True, targets=[])
+    async def verify_url(*args):
+        assert plugin.config['base_url'] == expected
+        return {'targets': []}
+    plugin.api.side_effect = verify_url
+    await plugin.synchronize_configuration()
+    if original != expected:
+        assert plugin.config.saved['base_url'] == expected
+
+
+@pytest.mark.parametrize('changed', [False, True])
+async def test_sync_only_keeps_query_references_for_unchanged_sessions(plugin, changed):
+    umo = 'qq:GroupMessage:real'
+    target = {'name': '测试', 'umo': umo, 'enabled': True, 'custom_feed_ids': [42]}
+    plugin.identity = {'client_id': 'same-client'}
+    plugin.targets = {umo: target}
+    plugin.last_briefs[umo] = {'query_id': 'a' * 32}
+    plugin.config.update(configuration_imported=True, targets=[])
+    plugin.api.return_value = {'targets': [{**target, 'custom_feed_ids': []}] if changed else [target], 'identity': plugin.identity}
+    await plugin.synchronize_configuration()
+    assert (umo in plugin.last_briefs) != changed
 
 
 async def test_delivery_uses_at_most_one_image(plugin):

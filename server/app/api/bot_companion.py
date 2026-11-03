@@ -188,8 +188,14 @@ async def snapshot_accessible(session, target, item):
     from app.services.bot_custom import valid_item
     if not matches_target_scope(target, item):
         return False
-    for source in item.get("sources") or [item]:
+    sources = item.get("sources") or [item]
+    for source in sources:
         if source.get("custom_feed") and not await valid_item(session, source, target):
+            return False
+    ids = {i for source in sources for i in source.get("content_ids", []) if isinstance(i, int)}
+    if ids:
+        visible = set(await session.scalars(select(RawContent.id).where(RawContent.id.in_(ids), RawContent.hidden.is_(False))))
+        if visible != ids:
             return False
     return True
 
@@ -197,6 +203,7 @@ async def snapshot_accessible(session, target, item):
 class DetailBody(Actor):
     number: int = Field(default=1, ge=1, le=3)
     delivery_id: int | None = None
+    query_id: str | None = Field(default=None, min_length=32, max_length=32)
 
 
 @router.post("/detail")
@@ -204,24 +211,28 @@ async def brief_detail(body: DetailBody, session: AsyncSession = Depends(get_ses
     target = await actor_target(body, session, client_id)
     if not set(target.config.get("tools", [])).intersection({"digest", "news"}):
         raise HTTPException(403, "此会话未开放资讯查询")
-    stmt = select(BotDelivery).where(BotDelivery.target_id == target.id, BotDelivery.status == "accepted",
-                                    BotDelivery.created_at >= utcnow() - timedelta(days=7))
-    if body.delivery_id is not None:
-        stmt = stmt.where(BotDelivery.id == body.delivery_id)
-    rows = await session.scalars(stmt.order_by(BotDelivery.id.desc()).limit(20))
-    row = next((r for r in rows if r.brief and r.brief.get("items")), None)
-    if not row or body.number > len(row.brief["items"]):
+    row = None
+    if body.query_id:
+        snapshot = await get_setting(session, f"bot_query_{target.id}") or {}
+        if (snapshot.get("id") != body.query_id or
+                datetime.fromisoformat(snapshot["created_at"]) <= utcnow() - timedelta(days=7)):
+            raise HTTPException(404, "查询清单已更新或过期，请重新查询。")
+        brief = snapshot["brief"]
+    else:
+        stmt = select(BotDelivery).where(BotDelivery.target_id == target.id, BotDelivery.status == "accepted",
+                                        BotDelivery.created_at >= utcnow() - timedelta(days=7))
+        if body.delivery_id is not None:
+            stmt = stmt.where(BotDelivery.id == body.delivery_id)
+        rows = await session.scalars(stmt.order_by(BotDelivery.id.desc()).limit(20))
+        row = next((r for r in rows if r.brief and r.brief.get("items")), None)
+        brief = row.brief if row else {}
+    if body.number > len(brief.get("items", [])):
         raise HTTPException(404, "没找到这条编号，先发 /早报 看一下最新清单吧。")
-    item = row.brief["items"][body.number - 1]
+    item = brief["items"][body.number - 1]
     effective = await resolve_target(session, target)
     if not await snapshot_accessible(session, effective, item):
         raise HTTPException(404, "此资料已不在当前账号的订阅或可访问范围，请重新查询。")
-    ids = {i for s in item.get("sources", []) for i in s.get("content_ids", [])}
-    if ids:
-        visible = set(await session.scalars(select(RawContent.id).where(RawContent.id.in_(ids), RawContent.hidden.is_(False))))
-        if visible != ids:
-            raise HTTPException(404, "这条资料已更新或下架，请重新查询。")
-    return {"text": format_detail(item), "item": item, "delivery_id": row.id,
+    return {"text": format_detail(item), "item": item, "delivery_id": row.id if row else None, "query_id": body.query_id,
             "grounding": "这是原播报的资料快照。时间以来源标注为准，不能当作刚刚发生的新消息。"}
 
 
@@ -259,26 +270,33 @@ async def report_activity(body: ActivityBody, session: AsyncSession = Depends(ge
 async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     now = utcnow()
     await set_setting(session, setting_key("bot_runtime", client_id), {"last_seen": now.isoformat(), "version": body.version})
-    rows = (await session.execute(select(BotDelivery, BotTarget).join(BotTarget, BotTarget.id == BotDelivery.target_id)
+    stmt = (select(BotDelivery, BotTarget).join(BotTarget, BotTarget.id == BotDelivery.target_id)
         .where(or_(BotDelivery.status == "pending", (BotDelivery.status == "failed") & (BotDelivery.updated_at <= now - timedelta(minutes=5))),
             BotDelivery.attempts < 3, BotTarget.client_id == client_id,
             BotTarget.config["delivery_mode"].as_string() == "astrbot",
             or_(BotTarget.config["_plugin_configured"].as_boolean().is_(True),
                 BotTarget.config["_plugin_configured"].as_string().is_(None)),
-            or_(BotTarget.enabled.is_(True), BotDelivery.kind == "manual"))
-        .order_by(BotDelivery.id).limit(100))).all()
-    for row, target in rows:
-        if target.config.get("delivery_mode") != "astrbot" or (not target.enabled and row.kind != "manual"):
-            continue
-        if row.status == "failed" and row.updated_at > now - timedelta(minutes=5):
-            continue
-        max_images = image_limit(target.config)
-        receipt = secrets.token_hex(24)
-        if await reserve_delivery(session, target, row, now=now, receipt=receipt):
-            return {"delivery": {"id": row.id, "receipt": receipt, "umo": target.umo, "body": row.body,
-                    "kind": row.kind, "images": (row.media or [])[:max_images], "max_images": max_images,
-                    "brief": row.brief}}
-    return {"delivery": None}
+            or_(BotTarget.enabled.is_(True), BotDelivery.kind == "manual"),
+            or_(BotDelivery.kind != "reminder", BotTarget.config["reminders_enabled"].as_boolean().is_(True)))
+        .order_by(BotDelivery.id))
+    after_id = 0
+    while True:
+        # 不可发送的旧消息不占死首批名额；按主键继续扫描后面的会话。
+        rows = (await session.execute(stmt.where(BotDelivery.id > after_id).limit(100))).all()
+        if not rows:
+            return {"delivery": None}
+        for row, target in rows:
+            after_id = row.id
+            if target.config.get("delivery_mode") != "astrbot" or (not target.enabled and row.kind != "manual"):
+                continue
+            if row.status == "failed" and row.updated_at > now - timedelta(minutes=5):
+                continue
+            receipt = secrets.token_hex(24)
+            if await reserve_delivery(session, target, row, now=now, receipt=receipt):
+                max_images = image_limit(target.config)
+                return {"delivery": {"id": row.id, "receipt": receipt, "umo": target.umo, "body": row.body,
+                        "kind": row.kind, "images": (row.media or [])[:max_images], "max_images": max_images,
+                        "brief": row.brief}}
 
 
 class ReceiptBody(BaseModel):

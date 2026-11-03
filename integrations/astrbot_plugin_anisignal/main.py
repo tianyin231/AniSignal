@@ -21,7 +21,7 @@ from .configuration import apply_subscription, cleanup_legacy_configuration, quo
 from .notification_template import details_hint, render_notification
 
 
-VERSION = "1.13.0"
+VERSION = "1.13.1"
 
 
 def _strip_meme_control_blocks(text: str) -> str:
@@ -93,6 +93,8 @@ class AniSignalPlugin(Star):
 
     async def synchronize_configuration(self):
         async with self.configuration_lock:
+            if cleanup_legacy_configuration(self.config):
+                self.configuration_dirty = True
             if not self.config.get("configuration_imported", False):
                 if not self.config.get("targets"):
                     previous = await self.api("/configuration")
@@ -107,13 +109,17 @@ class AniSignalPlugin(Star):
             result = await self.api("/configuration", {"version": VERSION,
                 "targets": [to_server_target(target) for target in self.config.get("targets", [])]})
             identity = result.get("identity", {})
+            targets = {row["umo"]: row for row in result["targets"]}
             if getattr(self, "identity", {}).get("client_id") != identity.get("client_id"):
                 self.last_briefs = {}
+            else:
+                self.last_briefs = {umo: previous for umo, previous in self.last_briefs.items()
+                                    if umo in targets and self.targets.get(umo) == targets[umo]}
             self.identity = identity
             self.sync_error = ""
             self.last_synced_at = datetime.now(timezone(timedelta(hours=8))).strftime("%Y/%m/%d %H:%M:%S")
             update_catalog(self.config, result.get("catalog", {}), identity, synced_at=self.last_synced_at)
-            self.targets = {row["umo"]: row for row in result["targets"]}
+            self.targets = targets
             self.configuration_ready = True
 
     async def consume_outbox(self):
@@ -415,7 +421,8 @@ class AniSignalPlugin(Star):
                 if preference:
                     result["reply_format"] = preference
                 if result.get("brief"):
-                    self.last_briefs[event.unified_msg_origin] = {"brief": result["brief"], "delivery_id": None}
+                    self.last_briefs[event.unified_msg_origin] = {"brief": result["brief"], "delivery_id": None,
+                                                                 "query_id": result.get("query_id")}
                 return result
         except (aiohttp.ClientError, asyncio.TimeoutError):
             return {"text": "情报查询暂时不可用，请稍后再试；当前无法确认最新消息。"}
@@ -631,21 +638,9 @@ class AniSignalPlugin(Star):
         delivery_id = delivery_id or previous.get("delivery_id")
         if delivery_id or not previous:
             return await self.actor_api(event, "/detail", number=number, delivery_id=delivery_id)
-        items = previous.get("brief", {}).get("items", [])
-        if number > len(items):
-            return {"error": "刚才的清单里没有这条，换个编号吧。"}
-        item = items[number - 1]
-        lines = [item["title"], item.get("summary", "")]
-        for source in (item.get("sources") or [item])[:4]:
-            published = source.get("published_at")
-            when = ""
-            if published:
-                value = datetime.fromisoformat(published)
-                value = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-                when = value.astimezone(timezone(timedelta(hours=8))).strftime("发布：%m/%d %H:%M")
-            lines.extend(["", source.get("title", ""), (source.get("text") or "")[:240],
-                          f"来源：{source.get('source') or '原文'}" + (f" · {when}" if when else ""), source.get("url", "")])
-        return {"text": "\n".join(lines), "item": item, "grounding": "按原资料回答，不补充来源外的事实。"}
+        if query_id := previous.get("query_id"):
+            return await self.actor_api(event, "/detail", number=number, query_id=query_id)
+        return {"error": "这份查询清单缺少校验标识，请更新服务端后重新查询。"}
 
     @filter.command("展开")
     async def expand(self, event: AstrMessageEvent, number: int = 1):
