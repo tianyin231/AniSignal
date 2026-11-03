@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { avatarGradient, displayName } from '~/utils/avatars'
 import { loginRoute } from '~/utils/safe-redirect'
+import { PROJECT_GITHUB_URL } from '~/utils/project'
 import type { RouteLocationRaw } from 'vue-router'
 import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 
@@ -128,9 +129,9 @@ async function handleLogout() {
   <header class="glass sticky top-0 z-40">
     <!-- 手机端两行：品牌 + 工具一行，频道独占一行横滑；md 起合并为一行 -->
     <div class="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-3 px-4 md:h-16 md:flex-nowrap lg:gap-6 lg:px-8">
-      <NuxtLink to="/" class="flex h-14 shrink-0 items-center gap-2.5 md:h-auto" aria-label="AniSignal 首页">
+      <NuxtLink to="/" class="flex h-14 min-w-0 flex-1 items-center gap-2.5 md:h-auto md:flex-none md:shrink-0" aria-label="AniSignal 首页">
         <img src="/icon-64.webp" alt="" width="32" height="32" class="size-8 shrink-0 rounded-[9px]">
-        <span class="num text-[19px] font-bold tracking-tight text-ink">AniSignal</span>
+        <span class="num truncate text-[19px] font-bold tracking-tight text-ink">AniSignal</span>
       </NuxtLink>
       <nav
         ref="channelBar"
@@ -161,6 +162,16 @@ async function handleLogout() {
         </div>
       </nav>
       <div class="ml-auto flex shrink-0 items-center gap-1 md:ml-0">
+        <a
+          :href="PROJECT_GITHUB_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="在 GitHub 查看 AniSignal 项目"
+          title="GitHub 仓库"
+          class="grid size-10 place-items-center rounded-[10px] text-muted transition-colors hover:bg-chip hover:text-ink"
+        >
+          <GitHubMark :size="19" />
+        </a>
         <SearchBox />
         <WallpaperToggle />
         <ThemeToggle />
