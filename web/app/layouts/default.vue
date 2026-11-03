@@ -19,7 +19,7 @@ import AppShell from '~/components/AppShell.vue'
 const route = useRoute()
 // 首页自带侧栏区块；统计 / 日历 / 内容详情 / AI 快讯 / 订阅中心 / 定制化需要整宽（后两者有自己的侧栏）
 const showRail = computed(() =>
-  !['/', '/ai', '/stats', '/calendar', '/watch'].includes(route.path)
+  !['/', '/ai', '/stats', '/calendar', '/watch', '/project'].includes(route.path)
   && !['/ai/', '/products', '/custom'].some(prefix => route.path.startsWith(prefix))
   && !/^\/contents\/[^/]+$/.test(route.path),
 )

@@ -27,7 +27,7 @@ watch(() => [route.path, route.query.community], rememberRouteCommunity)
 
 const { active } = useActiveChannel()
 // 全站工具页沿用首页主题色，但顶栏高亮的是"更多"而不是"首页"
-const TOOL_PATHS = ['/stats', '/sources', '/watch']
+const TOOL_PATHS = ['/stats', '/sources', '/watch', '/project']
 const activeChannel = computed(() => (TOOL_PATHS.includes(route.path) ? null : active.value))
 
 // ---------- 频道按宽度收纳（md 起）----------

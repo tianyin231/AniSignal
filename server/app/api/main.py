@@ -17,6 +17,7 @@ from app.api.admin_settings import router as admin_settings_router
 from app.api.admin_proxies import router as admin_proxies_router, internal_router as proxy_internal_router
 from app.api.auth import router as auth_router
 from app.api.public import router as public_router
+from app.api.project import router as project_router
 from app.api.ai_news import router as ai_news_router
 from app.api.admin_aihot import router as admin_aihot_router
 from app.config import get_settings
@@ -64,6 +65,7 @@ app.add_middleware(
 
 app.include_router(admin_router)
 app.include_router(public_router)
+app.include_router(project_router)
 app.include_router(ai_news_router)
 app.include_router(admin_aihot_router)
 app.include_router(auth_router)
