@@ -133,9 +133,10 @@ async def edition(day=None):
     seen, items = set(), []
     for citation in citations:
         cid = citation.get("id") or citation.get("itemId")
-        if not cid or cid in seen or not citation.get("available", True):
+        fact = citation.get("factId") or cid
+        if not cid or fact in seen or not citation.get("available", True):
             continue
-        seen.add(cid)
+        seen.add(fact)
         items.append({"id": "aihot:"+cid, "path": "/ai/items/"+cid, "headline": citation["title"],
             "summary": citation.get("summary") or "", "sources": [{"source_name": citation.get("sourceName"), "url": citation.get("sourceUrl")}],
             "topics": [], "score": None})

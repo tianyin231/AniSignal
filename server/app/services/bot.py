@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import utcnow
 from app.communities import COMMUNITIES
 from app.models.enums import COMMUNITY_LABELS
-from app.models import BotDelivery, BotReminder, BotTarget, ContentSchedule, ContentVersion, Event, Evidence, Product, RawContent, RedeemCode, Source
+from app.models import BotDelivery, BotReminder, BotTarget, ContentMatch, ContentSchedule, ContentVersion, Event, Evidence, Product, RawContent, RedeemCode, Source
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
 from app.services.bot_briefs import (_source, build_brief, build_shared_brief, changed_points, fallback_items, format_brief,
                                     is_recent_item, news_points, point_key, prune_shared_copies, publication_label, single_item_brief)
@@ -310,6 +310,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         items = await group_candidates(session, [item for item in candidates if not item.get("news") and not item.get("fulfillment_revision") and not item.get("custom_feed")],
                                        use_event_summary=not bool(config.get("channels")))
         items += [item for item in candidates if item.get("news") or item.get("fulfillment_revision") or item.get("custom_feed")]
+        items = await _collapse_releases(session, items)
         if collected_after:
             community_channels = {key for key in config.get("channels", []) if ":community:" in key}
             items = [i for i in items if is_recent_item(i, now) and (
@@ -379,8 +380,37 @@ async def create_delivery(session, target, kind, text, key, media=None, brief=No
     return row
 
 
+async def _with_release_keys(session, items: list[dict]) -> list[dict]:
+    """复用已核对的同一官方发布物；不靠语言、标题或整个事件 ID 猜测重复。"""
+    from app.services.similarity import MATCH_CONFIDENCE
+
+    ids = {item["id"] for item in items if isinstance(item.get("id"), int)
+           and item.get("identity") == "official" and not item.get("news") and not item.get("fulfillment_revision")}
+    pairs = list(await session.scalars(select(ContentMatch).where(
+        ContentMatch.is_same_event.is_(True), ContentMatch.confidence >= MATCH_CONFIDENCE,
+        or_(ContentMatch.left_raw_id.in_(ids), ContentMatch.right_raw_id.in_(ids))))) if ids else []
+    linked_ids = {cid for pair in pairs for cid in (pair.left_raw_id, pair.right_raw_id)}
+    metadata = {rid: (community, parsed) for rid, community, parsed in (await session.execute(
+        select(RawContent.id, RawContent.community, func.max(ContentVersion.parsed_at))
+        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+        .join(Source, Source.id == RawContent.source_id).where(RawContent.id.in_(linked_ids), Source.identity == "official")
+        .group_by(RawContent.id, RawContent.community))).all()} if linked_ids else {}
+    keys = {}
+    for pair in pairs:
+        left, right = metadata.get(pair.left_raw_id), metadata.get(pair.right_raw_id)
+        # 来源修订后须重新匹配；旧结论不能吞掉新奖励、价格或延期通知。
+        if not left or not right or left[0] != right[0] or max(left[1], right[1]) > pair.updated_at:
+            continue
+        shared = {f"release:{left[0]}:{cid}" for cid in (pair.left_raw_id, pair.right_raw_id)}
+        for cid in (pair.left_raw_id, pair.right_raw_id):
+            keys.setdefault(cid, set()).update(shared)
+    return [{**item, "same_release_keys": sorted(keys.get(item.get("id"), set()))}
+            if item.get("id") in ids else item for item in items]
+
+
 async def _with_repost_keys(session, items: list[dict]) -> list[dict]:
     """按 B 站原帖关联官方动态；旧投递快照也能直接使用已保存的 orig_id。"""
+    items = await _with_release_keys(session, items)
     ids = {item["id"] for item in items if isinstance(item.get("id"), int)
            and item.get("identity") == "official" and not item.get("repost_key")
            and not item.get("news") and not item.get("fulfillment_revision")}
@@ -397,6 +427,23 @@ async def _with_repost_keys(session, items: list[dict]) -> list[dict]:
             else item for item in items]
 
 
+async def _collapse_releases(session, items: list[dict]) -> list[dict]:
+    """同一批早报或查询只展示一次已确认的发布物，来源条目仍留在内容库。"""
+    selected, seen = [], {}
+    for item in await _with_release_keys(session, items):
+        keys = item.get("same_release_keys") or []
+        previous = next((seen[key] for key in keys if key in seen), None)
+        if previous is None:
+            selected.append(item)
+            previous = item
+        else:
+            previous["content_ids"] = list(dict.fromkeys(
+                (previous.get("content_ids") or [previous["id"]]) + (item.get("content_ids") or [item["id"]])))
+        for key in keys:
+            seen[key] = previous
+    return selected
+
+
 async def known_notification_keys(session, target_id: int, now=None, *, before_delivery_id=None) -> set[str]:
     now = now or utcnow()
     rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.target_id == target_id,
@@ -408,6 +455,7 @@ async def known_notification_keys(session, target_id: int, now=None, *, before_d
     sources = [source for row in rows if row.created_at >= now - timedelta(days=7)
                for item in (row.brief or {}).get("items", []) for source in (item.get("sources") or [item])]
     for source in await _with_repost_keys(session, sources):
+        keys.update(source.get("same_release_keys") or [])
         if source.get("repost_key"):
             keys.add((await identify_item(session, source))["dedupe"])
     legacy_content_ids = set()
@@ -468,7 +516,7 @@ def notification_topic(item: dict) -> str | None:
 
 
 def item_was_notified(item: dict, known: set[str]) -> bool:
-    return (item.get("dedupe") in known or (not item.get("is_followup") and (
+    return (bool(set(item.get("same_release_keys") or []) & known) or item.get("dedupe") in known or (not item.get("is_followup") and (
             item.get("topic_key") in known or notification_topic(item) in known
             or (item.get("event_id") and f"legacy-event:{item['event_id']}" in known))))
 
@@ -522,6 +570,7 @@ async def prepare_update_items(session, target_id: int, items: list[dict], now: 
         if not item_was_notified(item, seen):
             prepared.append(item)
             seen.add(item["dedupe"])
+            seen.update(item.get("same_release_keys") or [])
     return prepared
 
 
@@ -656,14 +705,16 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
     # 早报拆条和兑换码各自有有效期；普通即时消息不能用刚入队的时间续命。
     if row.kind in {"updates", "critical"} and not brief.get("scheduled_at") and brief.get("mode") != "notice":
         usable = [item for item in usable if is_recent_item(item, now)]
+    usable = await _collapse_releases(session, usable)
     duplicate_reposts = False
     if row.kind in {"updates", "critical"} and not brief.get("scheduled_at"):
         sources = [source for item in usable for source in (item.get("sources") or [item])]
         linked = await _with_repost_keys(session, sources)
-        if any(source.get("repost_key") for source in linked):
+        if any(source.get("repost_key") or source.get("same_release_keys") for source in linked):
             known = await known_notification_keys(session, target.id, now, before_delivery_id=row.id)
             duplicates = {id(source) for source, enriched in zip(sources, linked)
-                          if enriched.get("repost_key") and (await identify_item(session, enriched))["dedupe"] in known}
+                          if (enriched.get("repost_key") or enriched.get("same_release_keys"))
+                          and item_was_notified(await identify_item(session, enriched), known)}
             filtered = [item for item in usable if not all(id(source) in duplicates for source in (item.get("sources") or [item]))]
             duplicate_reposts = len(filtered) < len(usable)
             usable = filtered
@@ -690,7 +741,7 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
         values = {"brief": brief, "body": body, "media": collect_images(usable, image_limit(config)) or None}
     else:
         values = {"status": "cancelled", "receipt": None, "updated_at": now,
-                  "error": "同一原帖的相同事实已推送或已排队，取消重复转发" if duplicate_reposts else
+                  "error": "同一原帖或同一官方发布物已推送或已排队，取消重复转发" if duplicate_reposts else
                            "消息已不符合此会话订阅范围或审核结果" if invalid_review or len(scoped) < len(items) else
                            "来源动态正文和图片均为空，已取消本次推送" if empty_sources else "来源发布时间未知或已超过 24 小时，不再作为新动态推送"}
     for key, value in values.items():
