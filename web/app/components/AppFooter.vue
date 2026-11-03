@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { PROJECT_GITHUB_URL } from '~/utils/project'
 const { t } = useSiteConfig()
 // 原左侧栏的工具页（数据统计 / 来源健康 / 订阅中心）收进页脚第一组
 const tools = [
@@ -9,6 +10,7 @@ const tools = [
 const about = [
   { to: '/intro', label: '产品介绍' },
   { to: '/about', label: '关于' },
+  { to: '/project', label: '开源与更新' },
   { to: '/legal', label: '条款与隐私' },
   { to: '/bot-rules', label: '机器人守则' },
 ]
@@ -17,9 +19,12 @@ const about = [
 <template>
   <footer class="mt-8 border-t border-line bg-card/80">
     <div class="mx-auto flex max-w-[1280px] flex-col gap-4 px-4 py-6 text-[13px] text-muted lg:flex-row lg:items-center lg:justify-between lg:px-8">
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-3">
         <span class="num text-[15px] font-bold text-ink-2">AniSignal</span>
         <span class="text-faint">{{ t('footer_note') }}</span>
+        <a :href="PROJECT_GITHUB_URL" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 items-center gap-1.5 text-ink-2 transition-colors hover:text-ink" aria-label="在 GitHub 查看 AniSignal 项目">
+          <GitHubMark :size="17" /> <span>GitHub</span>
+        </a>
       </div>
       <nav class="flex flex-wrap gap-x-5 gap-y-2" aria-label="页脚">
         <NuxtLink v-for="l in tools" :key="l.to" :to="l.to" :prefetch-on="l.to === '/stats' ? 'interaction' : 'visibility'" class="transition-colors hover:text-ink">{{ l.label }}</NuxtLink>
