@@ -7,7 +7,7 @@
 import logging
 from datetime import timedelta
 
-from sqlalchemy import delete, exists, func, or_, select, tuple_, update
+from sqlalchemy import delete, func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
@@ -75,22 +75,28 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
 
 async def distribute_custom_feed(session: AsyncSession, feed: CustomFeed) -> int:
     """从共享公开缓存按个人条件分发；不再次访问平台，不进入主公共内容库。"""
-    rows = await session.scalars(select(CustomSourceItem).where(CustomSourceItem.source_id == feed.source_id,
-        ~exists(select(CustomFeedItem.id).where(CustomFeedItem.feed_id == feed.id,
-            CustomFeedItem.external_id == CustomSourceItem.external_id))))
+    rows = await session.scalars(select(CustomSourceItem).where(CustomSourceItem.source_id == feed.source_id))
     normalized_list = [NormalizedContent.model_validate(row.normalized) for row in rows]
-    existing = set(
-        (
-            await session.execute(
-                select(CustomFeedItem.external_id).where(CustomFeedItem.feed_id == feed.id)
-            )
-        ).scalars()
-    )
+    existing = {item.external_id: item for item in await session.scalars(
+        select(CustomFeedItem).where(CustomFeedItem.feed_id == feed.id))}
     new_count = 0
     for n in normalized_list:
-        if n.external_id in existing:
-            continue
         view = int(n.metrics.get("view") or 0)
+        values = {
+            "platform": n.platform.value,
+            "content_type": n.content_type.value,
+            "title": (n.title or n.external_id)[:255],
+            "url": n.url,
+            "cover": n.media[0] if n.media else None,
+            "author_name": n.author.name if n.author else None,
+            "view": view,
+            "published_at": to_naive_utc(n.published_at) if n.published_at else None,
+        }
+        if item := existing.get(n.external_id):
+            # 同步更正与指标，不改变首次采集时间，也不重复计入新内容推送。
+            for key, value in values.items():
+                setattr(item, key, value)
+            continue
         if feed.kind == "keyword" and feed.min_views > 0 and view < feed.min_views:
             continue
         text = f"{n.title or ''}\n{n.text or ''}".casefold()
@@ -99,21 +105,9 @@ async def distribute_custom_feed(session: AsyncSession, feed: CustomFeed) -> int
             continue
         if any(term.casefold() in text for term in filters.get("exclude", [])):
             continue
-        session.add(
-            CustomFeedItem(
-                feed_id=feed.id,
-                platform=n.platform.value,
-                content_type=n.content_type.value,
-                external_id=n.external_id,
-                title=(n.title or n.external_id)[:255],
-                url=n.url,
-                cover=n.media[0] if n.media else None,
-                author_name=(n.author.name if n.author else None),
-                view=view,
-                published_at=to_naive_utc(n.published_at) if n.published_at else None,
-            )
-        )
-        existing.add(n.external_id)
+        item = CustomFeedItem(feed_id=feed.id, external_id=n.external_id, **values)
+        session.add(item)
+        existing[n.external_id] = item
         new_count += 1
     feed.last_collected_at = utcnow()
     feed.next_run_at = feed.last_collected_at + timedelta(minutes=feed.interval_minutes)

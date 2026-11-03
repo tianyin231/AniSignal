@@ -9,6 +9,7 @@ import math
 import re
 import time
 import httpx
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -339,7 +340,8 @@ async def review_recent_contents(
 
 
 async def select_trending(
-    session: AsyncSession, limit: int = 10, community: str = DEFAULT_COMMUNITY, hours: int = 24
+    session: AsyncSession, limit: int = 10, community: str = DEFAULT_COMMUNITY, hours: int = 24,
+    *, item_filter: Callable[[dict], bool] | None = None,
 ) -> list[dict]:
     """热度飙升：窗口内播放增量最高的内容（≥2 个快照才可参与）。
 
@@ -379,44 +381,38 @@ async def select_trending(
     first_view = func.coalesce(cast(first_snapshot.metrics["view"].as_string(), BigInteger), 0)
     last_view = func.coalesce(cast(last_snapshot.metrics["view"].as_string(), BigInteger), 0)
     delta = last_view - first_view
-    rows = list(
-        await session.execute(
-            select(
-                delta.label("delta_view"),
-                last_snapshot.metrics,
-                RawContent,
-                Source.name,
-                Source.identity,
-                ContentVersion,
-            )
-            .options(defer(RawContent.raw_json))
-            .select_from(snap_sq)
-            .join(first_snapshot, first_snapshot.id == snap_sq.c.first_id)
-            .join(last_snapshot, last_snapshot.id == snap_sq.c.last_id)
-            .join(RawContent, RawContent.id == snap_sq.c.rid)
-            .join(latest, latest.c.rid == RawContent.id)
-            .join(
-                ContentVersion,
-                (ContentVersion.raw_content_id == latest.c.rid)
-                & (ContentVersion.version == latest.c.version),
-            )
-            .join(Source, RawContent.source_id == Source.id, isouter=True)
-            .where(*conditions, delta > 0)
-            .order_by(delta.desc(), RawContent.id.desc())
-            .limit(limit)
+    query = (
+        select(delta.label("delta_view"), last_snapshot.metrics, RawContent,
+               Source.name, Source.identity, ContentVersion)
+        .options(defer(RawContent.raw_json))
+        .select_from(snap_sq)
+        .join(first_snapshot, first_snapshot.id == snap_sq.c.first_id)
+        .join(last_snapshot, last_snapshot.id == snap_sq.c.last_id)
+        .join(RawContent, RawContent.id == snap_sq.c.rid)
+        .join(latest, latest.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest.c.rid)
+            & (ContentVersion.version == latest.c.version),
         )
+        .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .where(*conditions, delta > 0)
+        .order_by(delta.desc(), RawContent.id.desc())
     )
-
+    if item_filter is None:
+        query = query.limit(limit)
+    # 按热度顺序分批过滤，取够符合订阅的条目再停止，避免先取榜首而漏掉结果。
+    rows = await session.stream(query.execution_options(yield_per=100))
     items: list[dict] = []
-    for delta_view, metrics, raw, source_name, source_identity, version in rows:
-        normalized = version.normalized_json if version else None
-        media = (normalized or {}).get("media") or []
-        text = (version.text if version else None) or str((normalized or {}).get("text") or "")
-        excerpt = text.strip()
-        if "<" in excerpt and ">" in excerpt:
-            excerpt = re.sub(r"<[^>]+>", "", unescape(excerpt))
-        items.append(
-            {
+    try:
+        async for delta_view, metrics, raw, source_name, source_identity, version in rows:
+            normalized = version.normalized_json if version else None
+            media = (normalized or {}).get("media") or []
+            text = (version.text if version else None) or str((normalized or {}).get("text") or "")
+            excerpt = text.strip()
+            if "<" in excerpt and ">" in excerpt:
+                excerpt = re.sub(r"<[^>]+>", "", unescape(excerpt))
+            item = {
                 "id": raw.id,
                 "platform": raw.platform,
                 "content_type": raw.content_type,
@@ -438,7 +434,12 @@ async def select_trending(
                 "community": (raw.community or DEFAULT_COMMUNITY),
                 "delta_view": delta_view,
             }
-        )
+            if item_filter is None or item_filter({**item, "text": text}):
+                items.append(item)
+                if len(items) == limit:
+                    break
+    finally:
+        await rows.close()
     return items
 
 
