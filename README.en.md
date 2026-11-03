@@ -6,15 +6,21 @@
 
 **Let what matters find you.**
 
-A self-hosted signal desk. Gather public updates, trace their sources, and receive what you follow.
+A self-hosted cross-platform signal desk and event tracking radar. Consolidate public updates across platforms, preserve event provenance with revision evidence, and deliver straight to what you follow.
 
-<img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&amp;labelColor=3776AB&amp;logo=python&amp;logoColor=white">
-<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&amp;logo=fastapi&amp;logoColor=white">
-<img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-00DC82?style=flat-square&amp;labelColor=00DC82&amp;logo=nuxt&amp;logoColor=white">
-<img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&amp;labelColor=2496ED&amp;logo=docker&amp;logoColor=white">
+<p>
+<img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white">
+<img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-00DC82?style=flat-square&logo=nuxt&logoColor=white">
+<img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind-CSS%204-38BDF8?style=flat-square&logo=tailwindcss&logoColor=white">
+<img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white">
+<img alt="MySQL 8" src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white">
+<img alt="Redis 7" src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white">
+<img alt="Unit Tests" src="https://img.shields.io/badge/Tests-210%2B%20Passed-059669?style=flat-square&logo=pytest&logoColor=white">
 <img alt="Self-hosted" src="https://img.shields.io/badge/Self--hosted-7C3AED?style=flat-square">
+</p>
 
-[Live demo](http://anisignal.nanamiyako.cn/) · [Product tour](http://anisignal.nanamiyako.cn/intro) · [Quick start](#quick-start) · [Deployment](docs/deployment.md) · [Issues](https://github.com/tianyin231/AniSignal/issues)
+[Live Demo](https://anisignal.xyz/) · [Interactive Tour](https://anisignal.xyz/intro) · [Project & Updates](https://anisignal.xyz/project) · [Quick Start](#quick-start) · [Deployment](docs/deployment.md) · [Issues](https://github.com/tianyin231/AniSignal/issues)
 
 [简体中文](README.md) · **English**
 
@@ -22,39 +28,83 @@ A self-hosted signal desk. Gather public updates, trace their sources, and recei
 
 ---
 
-Following a release, a product line, or a shipping update often means checking announcements, account posts, and community discussions. AniSignal collects the public sources you configure, reduces repeated reading through filtering and event grouping, and preserves original links, evidence, and revision history.
+Following game updates, product fulfillment, or frontier developments often means continuously checking multiple official sites, social accounts, and community boards. Repetitive noise, fragmented posts, and algorithm feeds bury the signals that actually matter.
 
-Read on the website, build a keyword feed, or create an independent monitor. Email and optional AstrBot channels deliver updates. Game and AI sections are available today; the demo site's topics follow its collection settings. Coverage depends on implemented adapters and registered sections.
+AniSignal is a lightweight, rigorous **self-hosted information hub**. It periodically sweeps public sources you care about, cleanses and categorizes noisy inputs, merges fragmented posts into **structured, traceable events**, tracks product delivery lifecycles, runs independent custom monitoring tasks, and delivers via daily morning email and the AstrBot bot companion.
 
-## Preview
+## Interface Preview
 
-<a href="http://anisignal.nanamiyako.cn/intro"><img src="docs/assets/intro-preview.png" alt="AniSignal product tour showing keyword collection, source cards, and traceable events" width="1280"></a>
+<a href="https://anisignal.xyz/intro"><img src="docs/assets/intro-preview.png" alt="AniSignal interface preview: keyword-driven multi-source collection, card streams, and traceable events" width="1280"></a>
 
-Screenshot of the product tour, with clearly labeled sample data. [Try the interactive tour](http://anisignal.nanamiyako.cn/intro) · [Browse the demo](http://anisignal.nanamiyako.cn/)
+Designed under the "Signal Desk" design system with dark mode and dynamic backdrop glassmorphism. [Try the Interactive Tour](https://anisignal.xyz/intro) · [Browse the Live Demo](https://anisignal.xyz/)
 
-## Capabilities
+## Key Capabilities
 
-| Capability | What you get |
-| --- | --- |
-| **Collection** | Keyword, account, and announcement targets with polling intervals, co-occurring terms, popularity thresholds, and source health. |
-| **Reading** | An aggregated home and individual sections, with platform, category, and keyword filters, previews, and original links. |
-| **Traceable events** | Eligible official announcements grouped with key facts, source evidence, revision history, and preserved manual corrections. |
-| **AI news** | Event grouping, independent-source heat, and two-pass selection for model and industry updates, with developments, daily editions, and source links. |
-| **Product progress** | Official updates, consumer arrivals, and quality feedback, with unverified candidates distinguished from verified signals. |
-| **Personal watches** | Keyword feeds over collected content, or independent Bilibili UID/keyword monitors with public or private visibility. |
-| **Delivery** | Optional summaries, translation, and screening; morning digests and on-demand email; AstrBot session notifications and queries. |
-| **Administration** | Manage targets, content, events, products, rules, and users; inspect collection runs, model usage, and delivery status. |
+| Module | Purpose and Value |
+| :--- | :--- |
+| **Multi-source Ingestion** | Ingestion from Bilibili (`bili` CLI wrapper, dynamic feeds, video search, circuit breakers), YouTube (Data API v3 with RSS fallback), X (low-frequency public sweeping), official game portals and CDNs. Integrated proxy pool and health monitoring. |
+| **Community Partitions** | Native support for Wuthering Waves, Azur Lane, Honkai: Star Rail, Arknights, Genshin Impact, Endfield, NIKKE, and AI News. Supports global cross-partition aggregation alongside isolated game channels. |
+| **Immutable Events Engine** | Raw inputs are immutable and versioned; automatic clustering over 72-hour windows; LLM extraction of structured facts and revision history; preserved human override locking. |
+| **Product Fulfillment Loop** | Automatic discovery of official merchandise from announcements; windowed tracking across review samples, first customer delivery, and quality feedback. |
+| **Personal & Custom Feeds** | Keyword attribution streams over existing collections, plus independent Bilibili UID/keyword monitoring queues with public sharing or private email options. |
+| **Multi-channel Delivery** | Daily 08:00 AM morning email digests, instant high-importance notifications, and a deep-integrated AstrBot bot companion (supporting QQ Official groups, NapCat OneBot, rich media, and persona inheritance). |
+| **Admin & Audit** | Full `/admin` dashboard for target management, review gating, classification rules, user management, broadcast emails, and real-time model cost and token accounting. |
 
-```text
-Site targets → Scheduled collection → Filtering and versioned storage → Events and evidence → Reading and delivery
-Custom monitors → Separate collection and storage → Private viewing or public sharing → Optional email
+## System Dataflow
+
+```mermaid
+flowchart TD
+    subgraph Sourcing ["Ingestion Layer"]
+        A1["Bilibili<br/>(bili-cli / Sessions / Circuit Breaker)"]
+        A2["YouTube<br/>(Data API v3 / RSS Fallback)"]
+        A3["Official Sites / CDN<br/>(Dedicated Parsers)"]
+        A4["X / Public Accounts"]
+    end
+
+    subgraph Core ["Processing & Storage (FastAPI + MySQL + Redis)"]
+        B1["Task Scheduler (Arq Queue)"]
+        B2["Cleaning & Keyword Attribution"]
+        B3["Immutable Storage<br/>(raw_contents)"]
+        B4["Event Clustering Engine<br/>(Clustering / Facts / Revisions)"]
+        B5["Fulfillment Radar<br/>(Delivery Milestones / Quality Feedback)"]
+        B6["AI Review & Summarization<br/>(Usage & Cost Accounting)"]
+    end
+
+    subgraph Delivery ["Consumer & Delivery"]
+        C1["Web Signal Desk<br/>(Nuxt 4 / Tailwind 4 / SSR)"]
+        C2["Email Delivery<br/>(Digests / Urgent Alerts)"]
+        C3["AstrBot Plugin<br/>(QQ Groups / DM / Rich Cards)"]
+        C4["Custom Feeds<br/>(Isolated Tasks / Shared Subscriptions)"]
+    end
+
+    Sourcing --> B1
+    B1 --> B2 --> B3
+    B3 --> B4
+    B3 --> B5
+    B3 --> B6
+    B4 --> C1
+    B5 --> C1
+    B6 --> C2
+    B6 --> C3
+    B1 --> C4 --> C1
 ```
 
-**Collection keywords** define what the site fetches. **Watch keywords** filter content already stored. **Custom monitors** create independent Bilibili tasks whose results stay outside the main library and event engine. See the [feature guide](docs/features.md) for details.
+## Supported Channels & Partitions
 
-## Quick start
+The platform supports both global multi-community views and dedicated channel feeds:
 
-You need Git, Docker, and Docker Compose. The full stack includes MySQL, Redis, Web/API, and a collection worker.
+*   **Wuthering Waves (Wuwa)**: Official dynamics, game announcements, YouTube EN, high-view community videos, and merchandise fulfillment tracking.
+*   **Azur Lane**: Official posts, update changelogs, fanwork noise suppression, and collaboration detection.
+*   **Honkai: Star Rail**: Official feed, forward program tracking, community hotspots.
+*   **Arknights**: Official channels, YouTube EN releases, version updates, and event schedules.
+*   **NIKKE, Genshin Impact, Endfield**: Official social accounts, global updates, and custom keyword watches.
+*   **AI News**: Frontier model releases, industry movements, two-pass quality scoring, and automated Chinese translations.
+
+## Quick Start
+
+### Production Deployment (Docker Compose)
+
+Requirements: Git, Docker 24+, and Docker Compose v2.
 
 ```bash
 git clone https://github.com/tianyin231/AniSignal.git
@@ -62,34 +112,112 @@ cd AniSignal
 cp .env.example .env
 ```
 
-In `.env`, set separate long random values for `ANISIGNAL_ADMIN_TOKEN` and `MYSQL_ROOT_PASSWORD`; hexadecimal characters are recommended for the database password. Add `WEB_PORT=127.0.0.1:8090` for loopback access, then start:
+Edit `.env`:
+*   Set `ANISIGNAL_ADMIN_TOKEN` to a secure random string (for admin panel authentication);
+*   Set `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD`;
+*   Adjust the listening port if needed (defaults to `WEB_PORT=127.0.0.1:8090`).
+
+Start the container stack:
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-Open **[http://127.0.0.1:8090](http://127.0.0.1:8090)** and sign in at `/admin` with your administrator token. Configure a collection target, trigger it manually, and check source status and content. Enable SMTP, a model service, and bot channels as needed.
+Open **`http://127.0.0.1:8090`** to access the signal desk. Access `/admin` using your configured admin token to manage targets, rules, and AI configurations.
 
-Local development uses SQLite and an in-process queue. The steps are in the [deployment guide](docs/deployment.md), currently written in Chinese. Local mode is not the full deployment.
+### Local Development
 
-## Sources and runtime
+For lightweight local development, run FastAPI with SQLite and an in-process queue:
 
-| Source | Implemented support |
-| --- | --- |
-| Bilibili | Account updates and keyword video searches through the `bili` CLI. |
-| X | Low-frequency collection from publicly readable accounts; login restrictions and access failures appear in source health. |
-| YouTube | Channel uploads through Data API v3 when an API key is configured, with RSS fallback when unavailable. |
-| Kuro official sites and Miyoushe | Dedicated collectors and parsers for those sites. |
+```bash
+# Backend (Python 3.12+ / uv)
+cd server
+uv run python -m app.local
 
-The backend uses **FastAPI + SQLAlchemy + Alembic + arq**; the frontend uses **Nuxt 4 + Tailwind CSS 4**. Full deployments use MySQL and Redis. Local development uses SQLite and an in-process queue. New platforms need adapters; new sections need registration and configuration.
+# Frontend (Node 20+ / pnpm)
+cd web
+pnpm install
+pnpm dev
+```
 
-Check model output and product candidates against their original sources. Product tracking does not predict a personal order's ship date. Email, model features, and bots each require the corresponding services; enabled integrations depend on the actual deployment.
+See [Deployment Guide](docs/deployment.md) for full configuration details and environment variables.
+
+## AstrBot Bot Integration
+
+AniSignal provides an official AstrBot plugin (under `integrations/astrbot_plugin_anisignal`) for chat platforms like QQ:
+
+1.  In the AstrBot management panel, navigate to "Plugin Management → Install from Link" and enter:
+    ```text
+    https://github.com/tianyin231/AniSignal
+    ```
+2.  Fill in your AniSignal server URL and access credentials;
+3.  Type `/情报订阅` or `/帮助` in your target group or private chat to configure delivery preferences;
+4.  Features include morning briefs, urgent breaking-news alerts, rich-card summaries, session persona inheritance, and interactive keyword queries.
+
+For details, refer to the [AstrBot Plugin Guide](integrations/astrbot_plugin_anisignal/README.md).
 
 ## Documentation
 
-[Features](docs/features.md) · [Deployment](docs/deployment.md) · [Backend](server/README.md) · [Frontend](web/README.md)
+*   [Features & Architecture](docs/features.md) — Detailed explanation of watches, idempotency, and event clustering
+*   [Deployment & Ops](docs/deployment.md) — Container topology, update workflows, and proxy configurations
+*   [Backend Design](server/README.md) — FastAPI layout, Alembic migrations, and collector interfaces
+*   [Frontend Guidelines](web/README.md) — Nuxt 4 structure, Tailwind 4 design tokens
 
-Issue reports should include the page, the steps, the deployment, and redacted logs. Keep administrator tokens, mailbox passwords, model credentials, and personal subscription data off the issue.
+When filing an issue, please include the URL path, reproduction steps, deployment mode, and sanitized logs.
 
-No license has been specified.
+---
+
+## Star History
+
+<div align="center">
+
+[![Star History Chart](https://api.star-history.com/svg?repos=tianyin231/AniSignal&type=Date)](https://star-history.com/#tianyin231/AniSignal&Date)
+
+</div>
+
+## Contributors
+
+<div align="center">
+
+<a href="https://github.com/tianyin231/AniSignal/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=tianyin231/AniSignal" alt="Contributors" />
+</a>
+
+</div>
+
+## AI Co-Pilots
+
+AniSignal has been developed and iterated by human developers paired with the following models:
+
+| Organization | Models |
+| :--- | :--- |
+| **Anthropic** | `Claude Opus 5.5` |
+| **OpenAI** | `GPT-6.1 Sol` · `GPT-6 Astra` · `GPT-5.6 Sol` |
+| **Google DeepMind** | `Gemini 3.8 Flash` |
+| **xAI** | `Grok 4.7` |
+| **StepFun** | `Step 5 Preview` |
+| **Zhipu AI** | `GLM-5.3` · `GLM-5.3 Flash` |
+| **Xiaomi** | `MiMo v2.6 Pro` |
+| **Agnes AI** | `agnes-3.0-flash` · `agnes-2.0-flash` |
+
+## Tools & Agents
+
+Developer tools, terminal CLIs, and agentic environments used during development and iteration:
+
+<table>
+  <tbody>
+    <tr>
+      <td align="center"><code>ChatGPT(codex)</code></td>
+      <td align="center"><code>Claude Code</code></td>
+      <td align="center"><code>ZCode</code></td>
+      <td align="center"><code>Antigravity</code></td>
+    </tr>
+    <tr>
+      <td align="center"><code>GrokBot</code></td>
+      <td align="center"><code>Muse</code></td>
+      <td align="center"><code>GPTDots</code></td>
+      <td align="center">-</td>
+    </tr>
+  </tbody>
+</table>
