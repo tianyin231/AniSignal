@@ -3,12 +3,13 @@
 流程契约（见项目 skill"数据解析层"）：
 - 每条原始 item 经 parser 得到 NormalizedContent；
 - (platform, external_id) 已存在 → 不覆盖 raw_json，只更新 last_seen；
-- 内容指纹变化 → 追加新 ContentVersion（可全量重算）；
-- 指标每次采集都记 MetricSnapshot（用于"首次越过阈值"判断）。
+- 内容指纹变化 → 比对正文，确有更新才追加新 ContentVersion（可全量重算）；
+- 指标变化时记 MetricSnapshot，未变时隔几小时留一条心跳（用于热度榜增量）。
 """
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,12 +31,14 @@ from app.parsers.rss import PARSER_VERSION as RSS_PARSER_VERSION, parse_item as 
 from app.parsers.game_official import PARSER_VERSION as GAME_OFFICIAL_PARSER_VERSION, parse_notice as parse_game_notice
 from app.schemas.content import NormalizedContent
 from app.services.classify import classify_content, load_rules
-from app.services.fingerprint import content_fingerprint
+from app.services.fingerprint import content_body, content_fingerprint
 
 logger = logging.getLogger(__name__)
 
 # 抖动判定回看的版本数，需覆盖一篇文章轮播的全部正文变体。
 FLAP_WINDOW = 30
+# 比热度榜最短的 6 小时窗口更密，窗口内总能找到起点。
+SNAPSHOT_HEARTBEAT = timedelta(hours=3)
 
 # fetch_kind → (解析函数, parser 版本)；新平台接入时在这里注册
 PARSERS: dict[str, tuple] = {
@@ -184,7 +187,13 @@ async def _ingest_one(
             .order_by(ContentVersion.version.desc())
             .limit(1)
         )
-        if _would_drop_dynamic_content(normalized, latest) or await _is_flapping(session, existing.id, normalized):
+        incoming = content_body(normalized.title, normalized.text, normalized.media, normalized.extra)
+        recent = await _recent_bodies(session, existing.id)
+        if _would_drop_dynamic_content(normalized, latest) or _is_flapping(incoming, recent):
+            changed = False
+        elif recent and incoming == recent[0]:
+            # 昵称、链接、CDN 分片这类字段变了，内容本身没变：记下新指纹，不算内容更新。
+            existing.content_hash = fingerprint
             changed = False
         else:
             _add_version(
@@ -192,23 +201,25 @@ async def _ingest_one(
                 normalized, parser_version, rules,
             )
             existing.content_hash = fingerprint
-    _add_snapshot(session, existing, normalized)
+    await _add_changed_snapshot(session, existing, normalized)
     return False, changed, existing.id, str(identity)
 
 
-async def _is_flapping(session: AsyncSession, content_id: int, normalized: NormalizedContent) -> bool:
-    """来源在几份正文之间来回切换时不算内容变化（RSS 随机推广位、动态详情时有时无）。
+async def _recent_bodies(session: AsyncSession, content_id: int) -> list[tuple]:
+    rows = await session.execute(
+        select(ContentVersion.title, ContentVersion.text, ContentVersion.normalized_json)
+        .where(ContentVersion.raw_content_id == content_id)
+        .order_by(ContentVersion.version.desc()).limit(FLAP_WINDOW)
+    )
+    return [content_body(title, text, (data or {}).get("media"), (data or {}).get("extra")) for title, text, data in rows]
+
+
+def _is_flapping(incoming: tuple, recent: list[tuple]) -> bool:
+    """来源在几份正文之间来回切换时不算内容变化（动态详情时有时无、转发包装）。
 
     抖动的代价不只是版本行：快讯每出一个新版本就被隐藏并重新送审，半天能烧掉上百次模型调用。
     只有近期版本里已经出现过重复，才判定为抖动，这样来源单次改回旧文仍能如实更新。
     """
-    rows = (await session.execute(
-        select(ContentVersion.title, ContentVersion.text, ContentVersion.normalized_json)
-        .where(ContentVersion.raw_content_id == content_id)
-        .order_by(ContentVersion.version.desc()).limit(FLAP_WINDOW)
-    )).all()
-    recent = [(title, text or "", tuple((data or {}).get("media") or [])) for title, text, data in rows]
-    incoming = (normalized.title, normalized.text or "", tuple(normalized.media or []))
     return incoming in recent[1:] and len(set(recent)) < len(recent)
 
 
@@ -308,6 +319,27 @@ def _add_version(
             ),
         )
     )
+
+
+async def _add_changed_snapshot(
+    session: AsyncSession, content: RawContent, normalized: NormalizedContent
+) -> None:
+    """指标没变就不重复记录，线上约三分之一的快照与上一条相同。
+
+    隔一段时间仍留一条心跳：热度榜按窗口内首尾快照算增量，长期不变的内容需要窗口内的起点。
+    """
+    if not normalized.metrics:
+        return
+    latest = await session.scalar(
+        select(MetricSnapshot)
+        .where(MetricSnapshot.raw_content_id == content.id)
+        .order_by(MetricSnapshot.id.desc())
+        .limit(1)
+    )
+    if (latest is not None and latest.metrics == normalized.metrics
+            and latest.captured_at > utcnow() - SNAPSHOT_HEARTBEAT):
+        return
+    _add_snapshot(session, content, normalized)
 
 
 def _add_snapshot(

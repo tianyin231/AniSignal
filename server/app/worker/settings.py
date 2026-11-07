@@ -176,6 +176,17 @@ async def product_monitor_sweep(ctx) -> dict:
         )
 
 
+async def retention_sweep(ctx) -> dict:
+    """每天折叠重复版本、抽稀旧指标快照。"""
+    from app.db import SessionLocal
+    from app.services.retention import run_retention
+
+    async with SessionLocal() as session:
+        result = await run_retention(session)
+    logger.info("retention_sweep -> %s", result)
+    return result
+
+
 async def extract_entities_sweep(ctx) -> dict:
     """官方内容实体抽取轮询：日程与兑换码（每轮限量）。"""
     from app.db import SessionLocal
@@ -271,6 +282,7 @@ class WorkerSettings:
         collect_custom_feeds,
         extract_entities_sweep,
         product_monitor_sweep,
+        func(retention_sweep, keep_result=0),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4

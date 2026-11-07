@@ -1,13 +1,14 @@
 """ingest 幂等性单测：同内容重复采集不产生重复记录，变化才产生新版本。"""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import func, select
 
+from app.clock import utcnow
 from app.models import ContentDailyStat, ContentVersion, MetricSnapshot, RawContent, Source
 from app.schemas.content import FetchResult  # noqa: F401
-from app.services.ingest import ingest_items
+from app.services.ingest import SNAPSHOT_HEARTBEAT, ingest_items
 
 from tests.test_parsers_bilibili import DYNAMIC_RAW, VIDEO_RAW
 
@@ -56,9 +57,9 @@ async def test_ingest_repeated_is_idempotent(session):
     assert stats.items_updated == 0
 
     assert await session.scalar(select(func.count(RawContent.id))) == 1
-    # 指标未变也记快照（时间序列），但版本不增加
+    # 内容和指标都没变：版本不增加，快照也不重复记录
     assert await session.scalar(select(func.count(ContentVersion.id))) == 1
-    assert await session.scalar(select(func.count(MetricSnapshot.id))) == 2
+    assert await session.scalar(select(func.count(MetricSnapshot.id))) == 1
 
 
 async def test_ingest_updates_daily_statistics_without_double_counting(session):
@@ -314,3 +315,51 @@ async def test_ingest_keeps_a_single_genuine_revert(session):
         await ingest_items(session, "bilibili_dynamics", [dict(base, text=text)])
     versions = list(await session.scalars(select(ContentVersion).order_by(ContentVersion.version)))
     assert [row.text for row in versions] == ["原文", "误发的修改", "原文"]
+
+
+async def test_ingest_ignores_bilibili_cdn_shard_and_scheme_changes(session):
+    """同一张图换 CDN 分片或协议不是内容更新；指纹要跟上，否则每轮都要重新比对。"""
+    base = dict(DYNAMIC_RAW, text="正文", pics=["http://i0.hdslb.com/bfs/new_dyn/a.jpg"])
+    await ingest_items(session, "bilibili_dynamics", [base])
+    content = await session.scalar(select(RawContent))
+    before = content.content_hash
+
+    stats = await ingest_items(session, "bilibili_dynamics", [dict(base, pics=["https://i2.hdslb.com/bfs/new_dyn/a.jpg"])])
+
+    assert stats.items_updated == 0
+    assert await session.scalar(select(func.count()).select_from(ContentVersion)) == 1
+    assert content.content_hash != before
+
+
+async def test_ingest_still_versions_a_genuinely_different_image(session):
+    base = dict(DYNAMIC_RAW, text="正文", pics=["https://i0.hdslb.com/bfs/new_dyn/a.jpg"])
+    await ingest_items(session, "bilibili_dynamics", [base])
+    stats = await ingest_items(session, "bilibili_dynamics", [dict(base, pics=["https://i0.hdslb.com/bfs/new_dyn/b.jpg"])])
+    assert stats.items_updated == 1
+    assert await session.scalar(select(func.count()).select_from(ContentVersion)) == 2
+
+
+async def test_truncation_state_still_creates_a_version_for_rereview():
+    """X 正文补全要重新审核，比较键不能把截断差异吞掉。"""
+    from app.services.fingerprint import content_body
+
+    assert content_body("t", "正文", [], {"truncated": True}) != content_body("t", "正文", [], {})
+
+
+async def test_identical_metrics_are_recorded_once_until_the_heartbeat(session):
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    assert await session.scalar(select(func.count()).select_from(MetricSnapshot)) == 1
+
+    snapshot = await session.scalar(select(MetricSnapshot))
+    snapshot.captured_at = utcnow() - SNAPSHOT_HEARTBEAT - timedelta(minutes=1)
+    await session.commit()
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    assert await session.scalar(select(func.count()).select_from(MetricSnapshot)) == 2
+
+
+async def test_changed_metrics_are_always_recorded(session):
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, view_count=9999)])
+    snapshots = list(await session.scalars(select(MetricSnapshot).order_by(MetricSnapshot.id)))
+    assert len(snapshots) == 2 and snapshots[-1].metrics["view"] == 9999
