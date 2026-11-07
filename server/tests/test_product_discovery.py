@@ -1,4 +1,4 @@
-"""周边发现、接受跟踪、安静归档，以及公开页的三件事。"""
+"""周边发现、接受跟踪、到货归档，以及公开页的三件事。"""
 
 from datetime import datetime, timedelta
 import json
@@ -14,10 +14,10 @@ from app.services.curation import _load_tracked_products
 from app.services.product_discovery_ai import parse_merch_response
 from app.services.product_matching import matches_product_text, product_search_text, product_terms
 from app.services.product_discovery import (
-    archive_quiet_products,
     build_search_keyword,
     build_watch_terms,
     discover_merch_candidates,
+    settle_product_monitors,
     public_brief,
 )
 
@@ -138,7 +138,7 @@ async def test_ignore_and_archive_leave_the_page_but_stop_the_search(session, cl
     session.add(ProductSignalEvidence(signal_id=signal.id, raw_content_id=raw.id, independent_source_key="official"))
     await session.commit()
 
-    result = await archive_quiet_products(session)
+    result = await settle_product_monitors(session)
     assert result["archived"] == 1
     await session.refresh(product)
     await session.refresh(target)

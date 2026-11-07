@@ -40,6 +40,7 @@ class CustomPolicyBody(BaseModel):
     max_active_sources: int = Field(default=60, ge=1, le=5000)
     custom_hourly_budget: int = Field(default=120, ge=1, le=10000)
     platform_hourly_budget: int = Field(default=360, ge=1, le=10000)
+    platform_hourly_requests: int = Field(default=1200, ge=1, le=100000)
     max_bot_clients_per_user: int = Field(default=1, ge=1, le=100)
     max_bot_targets_per_user: int = Field(default=3, ge=1, le=1000)
     daily_notifications_per_user: int = Field(default=200, ge=1, le=10000)
@@ -53,7 +54,7 @@ async def custom_capacity(session: AsyncSession = Depends(get_session)):
     sources = list(await session.scalars(select(CustomFeedSource).order_by(CustomFeedSource.id.desc()).limit(100)))
     budget = await get_setting(session, "collector_budget_bilibili") or {}
     if budget.get("hour") != utcnow().replace(minute=0, second=0, microsecond=0).isoformat():
-        budget = {"total": 0, "custom": 0}
+        budget = {"total": 0, "custom": 0, "requests": 0}
     return {"policy": await get_policy(session), "capacity": await capacity(session), "budget": budget,
         "usage_24h": [{"status": status, "tasks": count, "fetched_items": found or 0, "distributed_items": delivered or 0}
                       for status, count, found, delivered in runs],

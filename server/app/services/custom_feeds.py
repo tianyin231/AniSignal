@@ -65,6 +65,10 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
                 return await collector.user_dynamics(source.target_value, 20)
             return await collector.search_videos(source.target_value, 30)
     raw_items = await fetch_with_fallback(collector, session, source.platform, fetch)
+    if session is not None:
+        from app.services.custom_policy import record_collection_requests
+
+        await record_collection_requests(session, source.platform, getattr(collector, "request_count", 0))
     if preset:
         parse = {"game_official": parse_notice, "youtube": parse_rss_item, "x": parse_post}[source.platform]
         items = [parse(item) for item in raw_items.items]

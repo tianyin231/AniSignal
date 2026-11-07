@@ -13,10 +13,14 @@ from app.services.settings import get_setting
 DEFAULT_POLICY = {
     "open_beta": True, "allowed_user_ids": [], "user_overrides": {},
     "max_feeds_per_user": 3, "min_interval_minutes": 60, "max_active_sources": 60,
-    "custom_hourly_budget": 120, "platform_hourly_budget": 360,
+    "custom_hourly_budget": 120, "platform_hourly_budget": 360, "platform_hourly_requests": 1200,
     "max_bot_clients_per_user": 1, "max_bot_targets_per_user": 3,
     "daily_notifications_per_user": 200,
 }
+
+
+# 周边专属搜索只能用到预算的七成，余量留给官方账号和游戏关键词。
+LOW_PRIORITY_BUDGET_SHARE = 0.7
 
 
 async def get_policy(session):
@@ -125,19 +129,37 @@ def request_interval(source, interval):
         source.next_run_at = min(source.next_run_at, source.last_success_at + timedelta(minutes=interval))
 
 
-async def claim_collection_budget(session, platform, *, custom=False):
-    """计量单位为一次目标采集任务，包含失败尝试，不把详情 HTTP 次数说成任务数。"""
-    if platform != "bilibili":
-        return
-    policy = await get_policy(session)
-    now = utcnow(); hour = now.replace(minute=0, second=0, microsecond=0)
+async def _locked_budget(session):
+    hour = utcnow().replace(minute=0, second=0, microsecond=0)
     key = "collector_budget_bilibili"
     await insert_ignoring_duplicate(session, SiteSetting, key=key, value={})
     row = await session.scalar(select(SiteSetting).where(SiteSetting.key == key).with_for_update().execution_options(populate_existing=True))
-    value = dict(row.value) if row.value.get("hour") == hour.isoformat() else {"hour": hour.isoformat(), "total": 0, "custom": 0}
-    if value["total"] >= policy["platform_hourly_budget"] or (custom and value["custom"] >= policy["custom_hourly_budget"]):
+    fresh = {"hour": hour.isoformat(), "total": 0, "custom": 0, "requests": 0}
+    return row, ({**fresh, **row.value} if row.value.get("hour") == hour.isoformat() else fresh), hour
+
+
+async def claim_collection_budget(session, platform, *, custom=False, low_priority=False):
+    """任务数在开始前占用；真实请求数在结束后累计，超过时本小时不再开始新任务。"""
+    if platform != "bilibili":
+        return
+    policy = await get_policy(session)
+    row, value, hour = await _locked_budget(session)
+    share = LOW_PRIORITY_BUDGET_SHARE if low_priority else 1
+    if (value["total"] >= policy["platform_hourly_budget"] * share
+            or value["requests"] >= policy["platform_hourly_requests"] * share
+            or (custom and value["custom"] >= policy["custom_hourly_budget"])):
         await session.commit()
         raise CollectorDeferred("B站采集任务预算已用完，下个小时恢复", retry_at=hour + timedelta(hours=1))
     value["total"] += 1; value["custom"] += int(custom)
     row.value = value
     await session.commit()  # 原子占用预算后立即释放行锁，不跨网络持锁。
+
+
+async def record_collection_requests(session, platform, count):
+    """一次任务可能发出几十个请求，只数任务会把真实压力低估一个量级。"""
+    if platform != "bilibili" or count <= 0:
+        return
+    row, value, _ = await _locked_budget(session)
+    value["requests"] += count
+    row.value = value
+    await session.commit()

@@ -195,12 +195,12 @@ async def test_presale_without_delivery_is_not_archived_just_because_it_is_quiet
                       created_at=utcnow() - timedelta(days=100), original_ship_at="明年发货")
     session.add(product)
     await session.commit()
-    assert (await discovery.archive_quiet_products(session))["archived"] == 0
+    assert (await discovery.settle_product_monitors(session))["archived"] == 0
     assert product.monitor_status == "watching"
 
 
 @pytest.mark.parametrize("protection", ["future_shipping", "quality", "delayed", "resumed", None])
-async def test_archive_only_after_delivery_and_the_entire_tracking_window_is_quiet(session, protection):
+async def test_archive_only_after_delivery_confirmed_for_two_weeks(session, protection):
     now = utcnow()
     product = Product(slug="delivered", name="菲比手办", watch_terms=["菲比手办"],
                       created_at=now - timedelta(days=80), monitor_started_at=now - timedelta(days=80))
@@ -225,7 +225,9 @@ async def test_archive_only_after_delivery_and_the_entire_tracking_window_is_qui
         await session.flush()
         session.add(ProductSignalEvidence(signal_id=extra.id, raw_content_id=raw.id, independent_source_key="official"))
     await session.commit()
-    assert (await discovery.archive_quiet_products(session, now=now))["archived"] == int(protection is None)
+    # 到货后才出现的质量反馈不阻止结束：归档只停专属搜索，新事实仍能恢复。
+    archived = (await discovery.settle_product_monitors(session, now=now))["archived"]
+    assert archived == int(protection in {None, "quality"})
 
 
 async def _archived_quality(session, *, published_at=None):
