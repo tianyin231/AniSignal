@@ -5,7 +5,7 @@ import socket
 import pytest
 
 from app.collectors.base import CollectorError
-from app.collectors.rss import parse_feed, public_feed_url
+from app.collectors.rss import strip_rotating_blocks, parse_feed, public_feed_url
 from app.parsers.rss import parse_item
 from app.services.ai_news import constrain_news
 
@@ -65,3 +65,24 @@ async def test_teaser_body_is_reused_without_redownload_or_new_version(session, 
         await ingest_items(session, "rss_feed", rows, community="ai")
     assert len(calls) == 1
     assert await session.scalar(select(func.count(ContentVersion.id))) == 1
+
+
+PROMO_XML = """<rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><item>
+<title>Research</title><link>https://example.org/paper</link>
+<content:encoded><![CDATA[<p>Before.</p>
+<div class="border-bottom msr-promo text-center" data-bi-aN="promo"><p class="msr-promo__label"><span>%s</span></p>
+<div class="row"><div class="msr-promo__media"><a href="https://example.org/x">Link</a></div></div></div>
+<p>After.</p>]]></content:encoded></item></channel></rss>"""
+
+
+def test_rotating_promo_block_does_not_change_the_article_text():
+    first = parse_feed((PROMO_XML % "PODCAST SERIES").encode(), "https://example.org/feed")[0]
+    second = parse_feed((PROMO_XML % "ACADEMIC CONFERENCE").encode(), "https://example.org/feed")[0]
+    assert first["text"] == second["text"]
+    assert "Before." in first["text"] and "After." in first["text"]
+    assert "PODCAST" not in first["text"] and "Link" not in first["text"]
+
+
+def test_unclosed_promo_block_keeps_the_article():
+    html = '<p>Before.</p><div class="msr-promo"><p>Promo</p><p>After.</p>'
+    assert strip_rotating_blocks(html) == html

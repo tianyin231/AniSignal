@@ -128,6 +128,20 @@ async def _enqueue_morning_if_due(redis, now: datetime) -> None:
     logger.info("enqueued morning notifications for %s job=%s", day, getattr(job, "job_id", None))
 
 
+async def _enqueue_retention_if_due(redis, now: datetime) -> None:
+    """北京时间凌晨 3～6 点跑一次数据保留，错过当天的窗口就等下一天。"""
+    local = now.replace(tzinfo=timezone.utc).astimezone(_SHANGHAI)
+    if not 3 <= local.hour < 6:
+        return
+    day = local.date().isoformat()
+    key = f"anisignal:retention-enqueued:{day}"
+    if await redis.get(key):
+        return
+    await redis.enqueue_job("retention_sweep", _job_id=f"retention:{day}")
+    await redis.set(key, "1", nx=True, px=36 * 60 * 60 * 1000)
+    logger.info("enqueued retention sweep for %s", day)
+
+
 async def main() -> None:
     settings = get_settings()
     logging.basicConfig(
@@ -161,6 +175,7 @@ async def main() -> None:
                             target.next_run_at,
                         )
                     await _enqueue_morning_if_due(redis, now)
+                    await _enqueue_retention_if_due(redis, now)
                     # 半小时检测一次授权状态；固定桶 ID 在任务结果保留期内去重。
                     await redis.enqueue_job("check_bilibili_session", _job_id=f"bili-session:{int(now.timestamp() // 1800)}")
                     await redis.enqueue_job("send_bot_notifications", _job_id=f"bot-sweep:{int(now.timestamp() // 60)}")

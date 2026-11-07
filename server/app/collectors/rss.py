@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import ipaddress
+import re
 import socket
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -36,6 +37,25 @@ def child(element, *names):
 def text(element, *names) -> str:
     value = child(element, *names)
     return "".join(value.itertext()).strip() if value is not None else ""
+
+
+# 微软研究院的 RSS 全文里嵌着站内推广块，每次抓取随机换一段，同一篇文章因此不断变成新版本。
+_ROTATING_BLOCK = re.compile(r'<div\b[^>]*\bmsr-promo\b[^>]*>', re.IGNORECASE)
+_DIV_TAG = re.compile(r"<(/?)div\b[^>]*>", re.IGNORECASE)
+
+
+def strip_rotating_blocks(html: str) -> str:
+    """去掉随机轮换的推广块；块没有闭合时原样保留，宁可多留也不吞正文。"""
+    while (block := _ROTATING_BLOCK.search(html)) is not None:
+        depth = 0
+        for tag in _DIV_TAG.finditer(html, block.start()):
+            depth += -1 if tag.group(1) else 1
+            if depth == 0:
+                html = html[:block.start()] + html[tag.end():]
+                break
+        else:
+            return html
+    return html
 
 
 def plain(value: str) -> str:
@@ -107,7 +127,7 @@ def parse_feed(body: bytes, feed_url: str, *, config=None, limit=20) -> list[dic
                 if candidate and (tag(e) == "thumbnail" or mime.startswith("image/") or e.get("medium") == "image"):
                     media.append(urljoin(url, candidate))
         rows.append({"id": rss_id(url), "url": url, "title": plain(text(entry, "title")),
-            "text": plain(html), "html": html, "published": date.isoformat() if date else None,
+            "text": plain(strip_rotating_blocks(html)), "html": html, "published": date.isoformat() if date else None,
             "feed_url": config.get("feed_url") or feed_url, "source_name": source_name, "author": plain(author_name),
             "first_party": bool(config.get("first_party")), "owner_key": config.get("owner_key"),
             "participation_mode": config.get("participation_mode", "editorial"), "tier": config.get("tier", "T2"),
