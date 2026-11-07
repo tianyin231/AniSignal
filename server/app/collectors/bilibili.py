@@ -128,6 +128,9 @@ class BilibiliCollector:
             # 不中断公开匿名链路；管理端及定期状态检测会提示重新授权。
             self._cookies = {}
         self.newest_first = False
+        self.search_by_date = False
+        self.detail_filter = None
+        self.request_count = 0
 
     async def _run(self, *args: str) -> object:
         """执行 bili 命令并解析 stdout JSON，带指数退避重试。
@@ -160,6 +163,7 @@ class BilibiliCollector:
         raise CollectorError(f"bili command failed after retries: {last_error}")
 
     async def _run_once(self, *args: str) -> object:
+        self.request_count += 1
         env = os.environ.copy()
         # 通过子进程环境传递，代理密码不出现在 argv / 命令日志中。
         for name in ("BILI_COOKIE", "BILI_COOKIE_FILE", "BILI_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
@@ -226,7 +230,7 @@ class BilibiliCollector:
         keyword = _external_arg(keyword, "搜索词")
         results = await self._run_nonempty(
             "search", keyword, "--type", "video", "-n", str(limit), "-o", "json", "--no-cache",
-            *(["--order", "pubdate"] if self.newest_first else []),
+            *(["--order", "pubdate"] if self.newest_first or self.search_by_date else []),
         )
         if self.newest_first:
             # 快讯首屏已含发布时间和简介；不逐条请求易受限的详情接口。
@@ -235,6 +239,10 @@ class BilibiliCollector:
         for item in results[:limit]:
             bvid = item.get("bvid")
             if not bvid:
+                continue
+            if self.detail_filter is not None and not self.detail_filter(item):
+                # 搜索结果已有标题、简介和播放量，这条随后会被同样的规则滤掉，不花详情请求。
+                details.append(item)
                 continue
             if _circuit_open(self._circuit_key("video")):
                 # 熔断期间不触碰详情端点；搜索结果自带 view/reply 等核心指标，直接兜底
@@ -315,6 +323,7 @@ class BilibiliCollector:
         }
         if self._cookies:
             headers["Cookie"] = cookie_header(self._cookies)
+        self.request_count += 1
         async with httpx.AsyncClient(timeout=self._timeout, headers=headers, **http_proxy_kwargs(self)) as client:
             response = await client.get(
                 _DYNAMIC_DETAIL_URL,

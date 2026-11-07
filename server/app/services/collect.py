@@ -292,19 +292,27 @@ async def run_collection(redis, target_id: int) -> dict:
         items_fetched = 0
         items_filtered = 0
         proxy_url = None
+        collector = None
         try:
             collector_factory = _COLLECTORS.get(target.platform)
             if collector_factory is None:
                 raise CollectError(f"no collector for platform {target.platform}")
             collector = collector_factory()
             from app.services.custom_policy import claim_collection_budget
-            await claim_collection_budget(session, target.platform)
+            product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))
+            await claim_collection_budget(session, target.platform, low_priority=product is not None)
             if isinstance(collector, RssCollector):
                 collector.source_config = {**(target.config or {}), "name": target.display_name, "feed_url": target.target_value}
-            product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))
             is_news = get_community(target.community).domain == "news"
-            if is_news and isinstance(collector, BilibiliCollector):
-                collector.newest_first = True
+            if isinstance(collector, BilibiliCollector):
+                if is_news:
+                    collector.newest_first = True
+                elif target.target_type == "keyword_search":
+                    # 周边要找的是新出现的开箱，默认排序每次都拿回同一批老视频。
+                    collector.search_by_date = product is not None
+                    watch_terms = product.watch_terms if product is not None else None
+                    collector.detail_filter = lambda item: bool(
+                        filter_relevant([dict(item)], target, product_watch_terms=watch_terms)[0])
             if isinstance(collector, XCollector):
                 collector.redis = redis
             async def fetch():
@@ -389,6 +397,8 @@ async def run_collection(redis, target_id: int) -> dict:
                 # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
                 from app.services.events import run_aggregation
 
+                # 先结束旧事务：可重复读下，取到聚合锁后仍读旧快照，看不到上一轮刚写入的证据。
+                await session.commit()
                 agg = await run_aggregation(session)
                 await session.commit()
                 logger.info(
@@ -420,6 +430,16 @@ async def run_collection(redis, target_id: int) -> dict:
             await session.rollback()
             target = await session.get(CollectTarget, target_id)
             run = await session.get(CollectRun, run_id)
+        if collector is not None:
+            from app.services.custom_policy import record_collection_requests
+
+            try:
+                await record_collection_requests(session, target.platform, getattr(collector, "request_count", 0))
+            except Exception:  # noqa: BLE001 - 计数失败不能挡住本轮的健康记录
+                logger.warning("collection request accounting failed", exc_info=True)
+                await session.rollback()
+                target = await session.get(CollectTarget, target_id)
+                run = await session.get(CollectRun, run_id)
         now = utcnow()
         target.last_run_at = now
         run.finished_at = now

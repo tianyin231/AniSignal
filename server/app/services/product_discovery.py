@@ -28,10 +28,9 @@ logger = logging.getLogger(__name__)
 
 GOODS_NOUNS = (
     "机械键盘", "鼠标垫", "亚克力", "键盘", "键帽", "手办", "立牌", "徽章",
-    "色纸", "耳机", "挂件", "海报", "卫衣", "吧唧",
+    "色纸", "耳机", "挂件", "海报", "卫衣", "吧唧", "粘土人", "毛绒玩偶", "摆件",
 )
 _GOODS_SORTED = tuple(sorted(GOODS_NOUNS, key=len, reverse=True))
-QUIET_DAYS = 30
 LOOKBACK_DAYS = 45
 SCAN_LIMIT = 20
 # 模型回 {} 或坏 JSON 时不能当"没有商品"：线上有 6 条内容失败 4～10 次后才识别出真实商品。
@@ -467,34 +466,25 @@ async def archive_product(session: AsyncSession, product: Product, *, now: datet
             target.enabled = False
 
 
-async def archive_quiet_products(session: AsyncSession, *, now: datetime | None = None) -> dict:
-    """已有交付证据，且最近一次进展与本轮跟踪都安静 30 天，才结束专属搜索。"""
+async def settle_product_monitors(session: AsyncSession, *, now: datetime | None = None) -> dict:
+    """确认到货后两周内结束专属搜索，其余商品按交付阶段调整搜索频率。"""
+    from app.services.fulfillment import _active_signal_rows
+    from app.services.product_monitoring import (
+        DELIVERY_GRACE, apply_monitor_interval, delivery_confirmed_at, monitor_interval_minutes,
+    )
+
     now = now or utcnow()
     # 判断阶段不加锁：逐件查询信号期间锁住全部在跟商品，会让采集聚合等到超时。
     products = list(await session.scalars(
         select(Product).where(Product.monitor_status == "watching").order_by(Product.id)
     ))
-    archived = 0
-    deadline = now - timedelta(days=QUIET_DAYS)
+    archived = retimed = 0
     for product in products:
-        from app.services.fulfillment import _active_signal_rows
-
-        rows = [(signal, evidence.acquisition_type) for signal, evidence, _, _ in await _active_signal_rows(session, product.id)
-                if signal.review_status == "verified"]
-        delivery_times = [signal.occurred_at for signal, acquisition in rows if signal.occurred_at and (
-            (signal.signal_type == "shipping_started" and signal.actor_type == "official")
-            or (signal.signal_type == "consumer_received" and acquisition != "seeded" and signal.actor_type != "seeded")
-        )]
-        if not delivery_times or (product.expected_ship_at and product.expected_ship_at > now):
-            continue
-        delivery_at = max(delivery_times)
-        # 新一轮预售、补款或延期意味着仍在等交付，不能把早期样品/旧批次当作完成。
-        if any(signal.actor_type == "official" and signal.signal_type in {"presale_open", "balance_open", "delayed"}
-               and signal.occurred_at and signal.occurred_at > delivery_at for signal, _ in rows):
-            continue
-        times = [signal.occurred_at for signal, _ in rows if signal.occurred_at]
-        baseline = max([*times, product.monitor_started_at or product.created_at])
-        if baseline is not None and baseline <= deadline:
+        rows = [(signal, evidence) for signal, evidence, _, _ in await _active_signal_rows(session, product.id)]
+        confirmed_at = delivery_confirmed_at(rows, product.expected_ship_at, now)
+        # 恢复跟踪的商品要给一段观察期，否则旧到货记录会让它下一轮又被归档。
+        started_at = product.monitor_started_at or product.created_at
+        if confirmed_at and max(confirmed_at, started_at) + DELIVERY_GRACE <= now:
             current = await session.scalar(select(Product).where(
                 Product.id == product.id, Product.monitor_status == "watching",
             ).with_for_update().execution_options(populate_existing=True))
@@ -502,8 +492,13 @@ async def archive_quiet_products(session: AsyncSession, *, now: datetime | None 
                 await archive_product(session, current, now=now)
                 archived += 1
                 await session.commit()
+            continue
+        minutes = monitor_interval_minutes(rows, product.expected_ship_at, confirmed_at, now)
+        if await apply_monitor_interval(session, product, minutes, now):
+            retimed += 1
+            await session.commit()
     await session.commit()
-    return {"checked": len(products), "archived": archived}
+    return {"checked": len(products), "archived": archived, "retimed": retimed}
 
 
 def public_brief(product: Product, fulfillment: dict, signals: list[dict]) -> dict:
@@ -580,5 +575,5 @@ async def run_product_monitor_loop(session: AsyncSession, *, now: datetime | Non
 
     discovered = await discover_merch_candidates(session, now=now)
     images = await backfill_product_images(session, now=now)
-    archived = await archive_quiet_products(session, now=now)
+    archived = await settle_product_monitors(session, now=now)
     return {"discover": discovered, "images": images, "archive": archived}

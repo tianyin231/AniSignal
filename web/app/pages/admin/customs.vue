@@ -38,6 +38,7 @@ interface BetaPolicy {
   max_active_sources: number
   custom_hourly_budget: number
   platform_hourly_budget: number
+  platform_hourly_requests: number
   max_bot_clients_per_user: number
   max_bot_targets_per_user: number
   daily_notifications_per_user: number
@@ -45,7 +46,7 @@ interface BetaPolicy {
 interface CapacityInfo {
   policy: BetaPolicy
   capacity: { active_sources: number, estimated_tasks_per_hour: number }
-  budget: { total: number, custom: number }
+  budget: { total: number, custom: number, requests?: number }
   usage_24h: { status: string, tasks: number, fetched_items: number, distributed_items: number }[]
   sources: { id: number, target_value: string, kind: string, next_run_at: string | null, consecutive_failures: number, last_error: string | null }[]
 }
@@ -57,7 +58,7 @@ const quotaUser = reactive({ id: '', max_feeds: 10, min_interval_minutes: 30, ma
 const policyFields = [
   ['max_feeds_per_user', '默认每人监控数'], ['min_interval_minutes', '新监控最短周期（分钟）'],
   ['max_active_sources', '最多独立目标'], ['custom_hourly_budget', '定制任务预算/小时'],
-  ['platform_hourly_budget', 'B站全平台任务预算/小时'],
+  ['platform_hourly_budget', 'B站全平台任务预算/小时'], ['platform_hourly_requests', 'B站真实请求预算/小时'],
   ['max_bot_clients_per_user', '默认每人 Bot 接入数'], ['max_bot_targets_per_user', '默认每人启用会话数'],
   ['daily_notifications_per_user', '默认每人每日通知次数'],
 ] as const
@@ -195,7 +196,8 @@ async function removeFeed(feed: CustomFeedAdminRow) {
         <button type="button" class="link text-xs" @click="refreshCapacity().catch(exc => toast.err(exc.message))">刷新容量</button>
       </div>
       <template v-if="capacityInfo && policyDraft">
-        <div class="grid gap-2 text-sm text-muted sm:grid-cols-3">
+        <div class="grid gap-2 text-sm text-muted sm:grid-cols-2 lg:grid-cols-4">
+          <p>本小时 B站请求 <strong class="mono text-ink">{{ capacityInfo.budget.requests ?? 0 }}/{{ capacityInfo.policy.platform_hourly_requests }}</strong></p>
           <p>独立目标 <strong class="mono text-ink">{{ capacityInfo.capacity.active_sources }}/{{ capacityInfo.policy.max_active_sources }}</strong></p>
           <p>预计 <strong class="mono text-ink">{{ capacityInfo.capacity.estimated_tasks_per_hour }}</strong> 任务/小时</p>
           <p>本小时定制 <strong class="mono text-ink">{{ capacityInfo.budget.custom }}/{{ capacityInfo.policy.custom_hourly_budget }}</strong> · 平台 {{ capacityInfo.budget.total }}/{{ capacityInfo.policy.platform_hourly_budget }}</p>

@@ -6,6 +6,7 @@ import json
 import math
 import re
 from collections.abc import Iterable
+from datetime import datetime, timedelta
 
 from app.services.product_matching import detect_product_signal_types, quality_claim_conflicts
 
@@ -27,6 +28,12 @@ _AXIS_BASIS = {
     "consumer_received": r"到货|收到|收货|拿到|到手|开箱|拆箱|实物|实拍|到了|received|arrived|unbox|in hand",
     "quality_issue": r"质量|品控|做工|故障|瑕疵|问题|差|坏|无法|没[有]?反应|失灵|断连|漏光|连击|掉漆|不亮|不灵|断触|变形|开裂|咔擦声|异响|阻力|defect|broken|quality|fault|fail|not working",
 }
+
+
+# 标题里出现这些词的视频说的不是正品到货。只看标题：简介里常有“支持正版、拒绝盗版”这类声明。
+_NOT_GENUINE_TITLE = re.compile(r"翻模|盗版|高仿|仿品|祖国版|国产原创|预定卡|预约卡")
+# 预计出货按月底记录，大货偶尔提前；再早的多半是样品、旧款或同名商品。
+EARLY_RECEIPT_MARGIN = timedelta(days=60)
 
 
 def _has_axis_basis(signal_type: str, quote: str, *, context: str = "") -> bool:
@@ -152,6 +159,7 @@ def _explicit_acquisition(quote: str, acquisition: str) -> str:
 def decide_signal_automation(
     *, signal_type: str, product_id: int, actor_type: str, title: str, text: str,
     review_fulfillment: dict | None, content_version: int,
+    occurred_at: datetime | None = None, expected_ship_at: datetime | None = None,
 ) -> dict:
     """只认证本商品、本轴和本版本；未知购买方式不妨碍确认实物展示。"""
     actor = actor_type if actor_type in _ACTORS else "unknown"
@@ -217,6 +225,12 @@ def decide_signal_automation(
                         result["actor_type"] = "user"
                     if signal_type not in {"consumer_received", "quality_issue"} and actor != "official":
                         result.update(review_status="candidate", reason="社区转述官方进展，继续自动跟踪")
+    if result["review_status"] == "verified" and signal_type in {"consumer_received", "quality_issue"}:
+        if _NOT_GENUINE_TITLE.search(_quote_plain(title)):
+            result.update(review_status="candidate", reason="内容涉及盗版、翻模或预定凭证，不代表正品到货")
+        elif (signal_type == "consumer_received" and occurred_at and expected_ship_at
+              and occurred_at < expected_ship_at - EARLY_RECEIPT_MARGIN):
+            result.update(review_status="candidate", reason="早于预计出货时间，可能是样品、旧款或同名商品")
     result["signature"] = hashlib.sha256(json.dumps({
         "product_id": product_id, "signal_type": signal_type, "content_version": content_version,
         "title": title, "text": text, "decision": result,

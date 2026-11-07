@@ -248,7 +248,8 @@ async def sync_product_signals(
             decision = decide_signal_automation(
                 signal_type=signal_type, product_id=product_id, actor_type=actor,
                 title=version.title, text=version.text, content_version=version.version,
-                review_fulfillment=review,
+                review_fulfillment=review, occurred_at=raw.published_at or raw.collected_at,
+                expected_ship_at=product.expected_ship_at,
             )
             # 已确认官方身份的明确公告仍可由规则采纳；AI 明确反证时可自动纠正。
             if is_official and decision["review_status"] == "candidate" and decision["method"] == "rule":

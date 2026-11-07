@@ -379,6 +379,38 @@ async def test_postprocessing_failure_preserves_ingestion_and_records_partial(
     assert await session.scalar(select(func.count()).select_from(RawContent)) == 1
 
 
+async def test_aggregation_starts_in_a_fresh_transaction(session, patched_collect, monkeypatch):
+    """可重复读下，沿用旧事务的快照读不到上一轮刚写入的证据，会重复插入。"""
+    from app.services import events
+
+    target = await _make_target(session)
+    seen = []
+
+    async def record(collect_session):
+        seen.append(collect_session.in_transaction())
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(events, "run_aggregation", record)
+    await collect_module.run_collection(_FakeRedis(), target.id)
+    assert seen == [False]
+
+
+async def test_request_accounting_failure_keeps_the_health_record(session, patched_collect, monkeypatch):
+    from app.services import custom_policy
+
+    target = await _make_target(session)
+
+    async def fail(*args):
+        raise RuntimeError("budget row unavailable")
+
+    monkeypatch.setattr(custom_policy, "record_collection_requests", fail)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    run = await session.get(CollectRun, result["run_id"])
+    assert run.status == "success"
+    await session.refresh(target)
+    assert target.last_success_at is not None
+
+
 async def test_statistics_excludes_skips_and_counts_only_full_success(session):
     from app.services.statistics import build_statistics, record_collection_stat
 
