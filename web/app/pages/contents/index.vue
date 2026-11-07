@@ -74,6 +74,7 @@ function applyQuery(patch: Record<string, string | undefined>) {
 
 <template>
   <div>
+    <h1 class="sr-only">内容库</h1>
     <SectionNav />
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
       <form v-if="tab !== 'trending'" class="flex items-center gap-2" role="search" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">

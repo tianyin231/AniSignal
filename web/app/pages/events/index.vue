@@ -27,7 +27,7 @@ const page = computed(() => Math.min(MAX_PAGE, Math.max(1, Number(route.query.pa
 
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐行标注分区
-const { scope, isAll } = useCommunityScope()
+const { scope, isAll } = useCommunityScope({ gameOnly: true })
 const { data, status, error, refresh } = await useLazyAsyncData(
   () => `events-${scope.value}-${tab.value}-${page.value}`,
   (_app, { signal }) =>
@@ -55,6 +55,7 @@ useSeoMeta({ title: '事件库' })
 
 <template>
   <div>
+    <h1 class="sr-only">事件库</h1>
     <SectionNav />
     <TabNav v-model="tab" :tabs="tabs" />
 

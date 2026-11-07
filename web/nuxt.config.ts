@@ -16,6 +16,8 @@ export default defineNuxtConfig({
     public: {
       // 浏览器端走同源（默认空串），由 Nitro 代理到 FastAPI，不再暴露 API 端口
       apiBase: '',
+      // 规范地址和分享卡片用的公开域名，可用 NUXT_PUBLIC_SITE_URL 覆盖
+      siteUrl: 'https://anisignal.xyz',
     },
   },
   routeRules: {
@@ -24,6 +26,7 @@ export default defineNuxtConfig({
     '/api/**': { proxy: `${apiProxy}/api/**` },
     // RSS 订阅源：后端生成 XML，这里映射到站点根路径
     '/rss.xml': { proxy: `${apiProxy}/api/rss.xml` },
+    '/sitemap.xml': { proxy: `${apiProxy}/api/sitemap.xml` },
   },
   vite: {
     plugins: [tailwindcss()],

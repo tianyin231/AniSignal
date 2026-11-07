@@ -27,10 +27,10 @@ const links = computed(() => [
   ...[
     { path: '/official', label: '官方动态' },
     { path: '/calendar', label: '活动日历' },
-    { path: '/events', label: '事件' },
-    { path: '/products', label: '商品追踪' },
+    { path: '/events', label: '事件', gameOnly: true },
+    { path: '/products', label: '商品追踪', gameOnly: true },
     { path: '/contents', label: '内容库' },
-  ].map(item => ({
+  ].filter(item => !(item.gameOnly && scope.value === 'ai')).map(item => ({
     key: item.path,
     label: item.label,
     to: { path: item.path, query: { community: scope.value } },

@@ -5,7 +5,7 @@ useSeoMeta({
 })
 
 const crawlerRules = `# AniSignal robots.txt
-# https://anisignal.nanamiyako.cn/robots.txt
+# https://anisignal.xyz/robots.txt
 
 User-agent: *
 Allow: /
@@ -35,7 +35,7 @@ Disallow: /forgot
 
 Crawl-delay: 10
 
-Sitemap: https://anisignal.nanamiyako.cn/rss.xml`
+Sitemap: https://anisignal.xyz/sitemap.xml`
 
 const messageBotRules = `# ── 消息机器人（QQ / 邮件等通道）──
 # 本段不是 HTTP robots.txt 语法，供人阅读；不供爬虫解析。
@@ -70,8 +70,8 @@ Add-To-Group: free
 # 添加本身不收费；增值服务以站内说明为准
 
 # 守则全文
-Policy: https://anisignal.nanamiyako.cn/bot-rules
-Terms:  https://anisignal.nanamiyako.cn/terms`
+Policy: https://anisignal.xyz/bot-rules
+Terms:  https://anisignal.xyz/terms`
 
 const lines = computed(() => [
   ...crawlerRules.split('\n'),

@@ -29,7 +29,10 @@ const conflictSources = computed(() =>
   toAppEvent({ ...detail.value, sources: detail.value.conflicts }).sources,
 )
 
-useSeoMeta({ title: () => `${event.value.title} · 事件` })
+useSeoMeta({
+  title: () => `${event.value.title} · 事件`,
+  description: () => (detail.value.summary || event.value.conclusion || '').replace(/\s+/g, ' ').slice(0, 120) || undefined,
+})
 </script>
 
 <template>

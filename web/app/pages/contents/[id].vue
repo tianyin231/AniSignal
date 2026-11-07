@@ -60,7 +60,10 @@ const metricRows = computed(() =>
   })),
 )
 
-useSeoMeta({ title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内详情` })
+useSeoMeta({
+  title: () => `${d.value.title?.slice(0, 40) ?? '内容'} · 站内详情`,
+  description: () => (d.value.news?.summary || d.value.text || '').replace(/\s+/g, ' ').slice(0, 120) || undefined,
+})
 </script>
 
 <template>
