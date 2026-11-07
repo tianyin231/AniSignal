@@ -1,15 +1,18 @@
 """周边发现、接受跟踪、安静归档，以及公开页的三件事。"""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import json
 from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow
 from app.models import CollectTarget, ContentVersion, MerchScan, Product, ProductCandidate, ProductSignal, ProductSignalEvidence, RawContent, Source
 from app.services import product_discovery
 from app.services.curation import _load_tracked_products
+from app.services.product_discovery_ai import parse_merch_response
+from app.services.product_matching import matches_product_text, product_search_text, product_terms
 from app.services.product_discovery import (
     archive_quiet_products,
     build_search_keyword,
@@ -212,3 +215,42 @@ async def test_rebuild_terms_merges_the_casual_form_for_existing_products(sessio
     terms = response.json()["watch_terms"]
     assert "鸣潮茶歇时光系列Q版手办长离" in terms
     assert "长离手办" in terms
+
+
+def test_empty_model_object_stays_a_retryable_failure():
+    """{} 不等于"没有商品"：真实商品曾在多次 {} 之后才被识别出来，必须走重试。"""
+    with pytest.raises(ValueError):
+        parse_merch_response("{}", title="版本公告", text="正文", published_at=datetime(2026, 11, 7))
+
+
+async def test_failed_scan_gives_up_after_cap_and_retries_on_new_version(session, monkeypatch):
+    monkeypatch.setattr(product_discovery, "get_ai_config", AsyncMock(return_value={
+        "base_url": "https://example.com", "api_key": "test", "model": "test"}))
+    chat = AsyncMock(return_value=("not json", None))
+    monkeypatch.setattr(product_discovery, "chat", chat)
+    raw = await _official(session, title="新品公告", text="正文")
+
+    now = utcnow()
+    for attempt in range(product_discovery.MAX_SCAN_FAILURES + 2):
+        await product_discovery.discover_merch_candidates(session, now=now + timedelta(minutes=11 * (attempt + 1)))
+    assert chat.await_count == product_discovery.MAX_SCAN_FAILURES
+    scan = await session.get(MerchScan, raw.id, populate_existing=True)
+    assert scan.content_version == 1
+    assert scan.result["failure"] == {"version": 1, "count": product_discovery.MAX_SCAN_FAILURES}
+
+    session.add(ContentVersion(raw_content_id=raw.id, version=2, title="新品公告", text="修订后的正文"))
+    await session.commit()
+    await product_discovery.discover_merch_candidates(session, now=now + timedelta(hours=6))
+    assert chat.await_count == product_discovery.MAX_SCAN_FAILURES + 1
+    scan = await session.get(MerchScan, raw.id, populate_existing=True)
+    assert scan.result["failure"] == {"version": 2, "count": 1} and scan.content_version == 1
+
+
+def test_precomputed_product_matching_never_joins_across_sentences():
+    """批量匹配用预处理文本，语义必须与逐句匹配一致：忽略排版，但不跨标题、正文或句子拼词。"""
+    terms = product_terms(["爱弥斯 键盘", "ＥＭ-01键盘"])
+    search_text = product_search_text("爱弥斯！新版本", "键盘将于下周开售。")
+    assert not any(term in search_text for term in terms)
+    assert not matches_product_text("爱弥斯！新版本", "键盘将于下周开售。", ["爱弥斯 键盘"])
+    assert matches_product_text("开箱：爱弥斯键盘", "", ["爱弥斯 键盘"])
+    assert matches_product_text("", "em01 键盘到手", ["ＥＭ-01键盘"])

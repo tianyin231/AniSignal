@@ -36,6 +36,14 @@ _DRAW_DETAIL_CACHE_LIMIT = 256
 _DRAW_DETAIL_RETRY_AT: dict[str, datetime] = {}
 _RICH_DYNAMIC_TYPES = {"DYNAMIC_TYPE_DRAW", "DYNAMIC_TYPE_ARTICLE", "DYNAMIC_TYPE_FORWARD"}
 
+
+def merge_detail_text(original: str | None, detail: str | None, *, forwarded: bool) -> str:
+    """转发动态保留转发语并追加原动态正文；两条补全路径必须得到同一结果，否则版本会来回抖动。"""
+    original, detail = (original or "").strip(), (detail or "").strip()
+    if forwarded and original:
+        return original if not detail or detail in original else f"{original}\n\n{detail}"
+    return detail or original
+
 # 进程级熔断：同一 bili 命令连续被风控拒绝时暂停一段时间，避免对已门禁端点
 # 持续硬打（collector 每个采集任务新建实例，状态必须放模块级才能跨任务生效）。
 _CIRCUIT_OPEN_AFTER = 2
@@ -286,10 +294,7 @@ class BilibiliCollector:
                     logger.warning("DRAW detail failed for %s: %s", dynamic_id, redact(redact_proxy(str(exc), getattr(self, "proxy_url", None)), self._cookies))
                     continue
             if (rich.get("text") or "").strip() or rich.get("pics"):
-                original_text = (item.get("text") or "").strip()
-                detail_text = (rich.get("text") or "").strip()
-                item["text"] = (original_text + "\n\n" + detail_text if forwarded and original_text
-                                and detail_text and detail_text not in original_text else detail_text or original_text)
+                item["text"] = merge_detail_text(item.get("text"), rich.get("text"), forwarded=bool(forwarded))
                 item["pics"] = list(rich.get("pics") or item.get("pics") or [])
                 enriched += 1
         if enriched:

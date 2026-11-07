@@ -293,3 +293,24 @@ async def test_reparse_upgrades_versions(session):
     assert await session.scalar(
         select(func.count(ContentVersion.id)).where(ContentVersion.raw_content_id == raw.id)
     ) == 2
+
+
+async def test_ingest_stops_versioning_when_source_flips_between_bodies(session):
+    """RSS 推广位轮播、动态详情时有时无：循环的正文不再产生新版本，也不重新隐藏已发布内容。"""
+    base = dict(DYNAMIC_RAW, pics=[])
+    for text in ("正文 A", "正文 B", "正文 A", "正文 B", "正文 A", "正文 B"):
+        await ingest_items(session, "bilibili_dynamics", [dict(base, text=text)])
+    versions = list(await session.scalars(select(ContentVersion).order_by(ContentVersion.version)))
+    assert [row.text for row in versions] == ["正文 A", "正文 B", "正文 A"]
+
+    stats = await ingest_items(session, "bilibili_dynamics", [dict(base, text="正文 C")])
+    assert stats.items_updated == 1
+
+
+async def test_ingest_keeps_a_single_genuine_revert(session):
+    """来源改完又改回只发生一次时仍如实记录，防抖不能吞掉真实修订。"""
+    base = dict(DYNAMIC_RAW, pics=[])
+    for text in ("原文", "误发的修改", "原文"):
+        await ingest_items(session, "bilibili_dynamics", [dict(base, text=text)])
+    versions = list(await session.scalars(select(ContentVersion).order_by(ContentVersion.version)))
+    assert [row.text for row in versions] == ["原文", "误发的修改", "原文"]

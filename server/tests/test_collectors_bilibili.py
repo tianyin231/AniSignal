@@ -7,7 +7,7 @@ import httpx
 
 from app.collectors import bilibili as bili_module
 from app.collectors.base import CollectorDeferred, CollectorError
-from app.collectors.bilibili import BiliRiskControlError, BilibiliCollector
+from app.collectors.bilibili import BiliRiskControlError, BilibiliCollector, merge_detail_text
 
 
 @pytest.fixture(autouse=True)
@@ -457,3 +457,17 @@ async def test_http_detail_uses_same_session_and_new_auth_escapes_old_cooldown(m
     assert (await logged_in._fetch_draw_detail("123"))["text"] == "公开正文"
     assert requests[-1].headers["cookie"] == "SESSDATA=secret%2Csession; bili_jct=secret-csrf"
     assert not bili_module._circuit_open(logged_in._circuit_key("dynamics"))
+
+
+@pytest.mark.parametrize("original, detail, forwarded, expected", [
+    ("转发语", "原动态正文", True, "转发语\n\n原动态正文"),
+    # 回填路径读到的是已合并的正文：不能重复追加，也不能退回只剩原动态，否则版本来回抖动。
+    ("转发语\n\n原动态正文", "原动态正文", True, "转发语\n\n原动态正文"),
+    ("转发语", "", True, "转发语"),
+    ("", "原动态正文", True, "原动态正文"),
+    ("列表摘要", "详情全文", False, "详情全文"),
+    ("列表摘要", "", False, "列表摘要"),
+])
+def test_merge_detail_text_is_stable_across_both_enrichment_paths(original, detail, forwarded, expected):
+    assert merge_detail_text(original, detail, forwarded=forwarded) == expected
+    assert merge_detail_text(expected, detail, forwarded=forwarded) == (expected if forwarded else detail or expected)
