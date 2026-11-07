@@ -12,6 +12,13 @@ from app.models import BotDelivery, BotTarget, CustomFeed, CustomFeedItem, Custo
 from app.services import bot, bot_briefs
 
 
+@pytest.fixture(autouse=True)
+def unpromoted_presets(monkeypatch):
+    # 本文件验证通用定制通知；NIKKE 升级后的行为另见 test_nikke_community。
+    for key, preset in list(CUSTOM_PRESETS.items()):
+        monkeypatch.setitem(CUSTOM_PRESETS, key, {k: v for k, v in preset.items() if k != "community"})
+
+
 async def seed(session, key, *, age=1, public=True):
     preset = CUSTOM_PRESETS[key]
     source = CustomFeedSource(platform=preset['platform'], kind=preset['kind'], target_value=preset['target_value'])

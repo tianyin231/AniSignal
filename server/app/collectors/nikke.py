@@ -23,7 +23,7 @@ class NikkeCollector:
 
     async def fetch(self, target_type: str, target_value: str, limit: int) -> FetchResult:
         if (target_type, target_value) != ("notices", "nikke_global"):
-            raise CollectorError("NIKKE 定制源只支持国际服官方公告")
+            raise CollectorError("NIKKE 来源只支持国际服官方公告")
         settings = get_settings()
         headers = {"User-Agent": USER_AGENT, "X-GameId": "16", "X-AreaId": "na",
                    "X-Source": "pc_web", "X-Language": "en", "Referer": "https://nikke-en.com/"}

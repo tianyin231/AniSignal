@@ -79,7 +79,7 @@ watch(() => form.platform, () => {
 })
 watch([() => form.target_type, () => form.community, supportsViews], () => { form.min_views = defaultMinViews() })
 watch([() => form.platform, () => form.community], () => {
-  if (!editingId.value && form.platform === 'game_official' && ['genshin', 'endfield'].includes(form.community)) {
+  if (!editingId.value && form.platform === 'game_official' && ['genshin', 'endfield', 'nikke'].includes(form.community)) {
     form.target_value = form.community
   }
 })

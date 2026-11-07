@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 
 from app.communities import COMMUNITIES
-from app.custom_presets import CUSTOM_PRESETS
+from app.custom_presets import CUSTOM_PRESETS, promote_subscriptions
 from app.models import BotClient, CustomFeed, User, UserKeyword
 from app.services.bot_channels import channel_options, selected_communities
 
@@ -33,7 +33,7 @@ async def catalog(session, client_id):
     return {
         "communities": {key: meta.label for key, meta in COMMUNITIES.items()},
         "channels": channel_options(),
-        "custom_presets": {key: p["name"] for key, p in CUSTOM_PRESETS.items()},
+        "custom_presets": {key: p["name"] for key, p in CUSTOM_PRESETS.items() if not p.get("community")},
         "custom_feeds": [{"id": f.id, "name": f.name, "platform": f.platform,
                           "owned": bool(user and f.user_id == user.id), "public": f.is_public} for f in feeds],
         "preferences": {"communities": preferences.get("communities", []),
@@ -63,7 +63,7 @@ class ScopedTarget:
 
 async def resolve_target(session, target, notification=None):
     """不改插件原始配置；账号偏好改变后，查询和发送前立即按新设置收敛。"""
-    config = dict(target.config)
+    config = promote_subscriptions(target.config)
     channels = config.get("channels", [])
     mode = config.get("scope_mode", "legacy")
     if mode == "custom":

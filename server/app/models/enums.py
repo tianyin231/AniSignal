@@ -35,6 +35,8 @@ class Community(StrEnum):
     ROCO = "roco"
     PROMILIA = "promilia"
     NTE = "nte"
+    NIKKE = "nikke"
+    INFINITYNIKKI = "infinitynikki"
     AI = "ai"
 
 

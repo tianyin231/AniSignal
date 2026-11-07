@@ -7,6 +7,7 @@ import httpx
 
 from app.clock import utcnow
 from app.collectors.base import CollectorError, USER_AGENT, get_json
+from app.collectors.nikke import NikkeCollector
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
@@ -21,8 +22,12 @@ class GameOfficialCollector:
     platform = Platform.GAME_OFFICIAL
 
     async def fetch(self, target_type: str, target_value: str, limit: int) -> FetchResult:
-        if target_type != "notices" or target_value not in {"genshin", "endfield"}:
-            raise CollectorError("游戏官网公告仅支持 genshin / endfield notices")
+        if target_type != "notices" or target_value not in {"genshin", "endfield", "nikke"}:
+            raise CollectorError("游戏官网公告仅支持 genshin / endfield / nikke notices")
+        if target_value == "nikke":
+            collector = NikkeCollector()
+            collector.proxy_url = getattr(self, "proxy_url", None)
+            return await collector.fetch("notices", "nikke_global", limit)
         settings = get_settings()
         async with httpx.AsyncClient(timeout=settings.http_timeout_seconds, headers={"User-Agent": USER_AGENT}, **http_proxy_kwargs(self)) as client:
             async def request(url, params):

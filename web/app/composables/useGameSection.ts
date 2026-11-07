@@ -13,7 +13,7 @@
 
 export interface GameCommunity {
   key: 'wuwa' | 'blhx' | 'hsr' | 'arknights' | 'genshin' | 'endfield'
-    | 'zzz' | 'petitplanet' | 'hna' | 'roco' | 'promilia' | 'nte' | 'ai'
+    | 'zzz' | 'petitplanet' | 'hna' | 'roco' | 'promilia' | 'nte' | 'nikke' | 'infinitynikki' | 'ai'
   label: string
   /** 频道头图上的英文名 */
   en: string
@@ -35,6 +35,8 @@ export const GAME_COMMUNITIES: GameCommunity[] = [
   { key: 'roco', label: '洛克王国：世界', en: 'Roco Kingdom', color: 'sky' },
   { key: 'promilia', label: '蓝色星原：旅谣', en: 'Azur Promilia', color: 'cyan' },
   { key: 'nte', label: '异环', en: 'Neverness to Everness', color: 'yellow' },
+  { key: 'nikke', label: 'NIKKE', en: 'Goddess of Victory: NIKKE', color: 'orange' },
+  { key: 'infinitynikki', label: '无限暖暖', en: 'Infinity Nikki', color: 'violet' },
   { key: 'ai', label: 'AI', en: 'AI News', color: 'teal' },
 ]
 
@@ -91,6 +93,8 @@ export const PLATFORMS_BY_COMMUNITY: Record<GameCommunityKey, string[]> = {
   roco: ['bilibili'],
   promilia: ['bilibili'],
   nte: ['bilibili'],
+  nikke: ['game_official', 'youtube', 'x'],
+  infinitynikki: ['bilibili'],
   ai: ['bilibili', 'x', 'rss'],
 }
 

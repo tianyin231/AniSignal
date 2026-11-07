@@ -408,7 +408,9 @@ async def run_collection(redis, target_id: int) -> dict:
                 if agg.touched_event_ids and hasattr(redis, "enqueue_job"):
                     for event_id in agg.touched_event_ids:
                         await redis.enqueue_job("summarize_event", event_id)
-                if target.platform in ("youtube", "kuro_global", "x") and hasattr(redis, "enqueue_job"):
+                foreign = target.platform in ("youtube", "kuro_global", "x") or (
+                    target.platform == "game_official" and get_community(target.community).official_notice_region == "global")
+                if foreign and hasattr(redis, "enqueue_job"):
                     for content_id in stats.touched_content_ids:
                         await redis.enqueue_job("translate_content", content_id)
                 if not is_news and stats.touched_content_ids and hasattr(redis, "enqueue_job"):

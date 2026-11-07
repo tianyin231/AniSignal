@@ -51,6 +51,7 @@ def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None =
         "status": feed.status,
         "owner_name": owner_name if feed.user_id is not None else "AniSignal · 站点维护",
         "site_managed": feed.user_id is None,
+        "community": preset.get("community"),
         "target_label": preset.get("target_label", feed.target_value),
         "description": preset.get("description", ""),
         "source_url": preset.get("source_url"),

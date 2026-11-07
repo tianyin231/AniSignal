@@ -117,6 +117,8 @@
 .ch-roco { --sd-accent: var(--sd-blhx); --sd-accent-ink: var(--sd-blhx-ink); --sd-accent-soft: var(--sd-blhx-soft); }
 .ch-promilia { --sd-accent: var(--sd-genshin); --sd-accent-ink: var(--sd-genshin-ink); --sd-accent-soft: var(--sd-genshin-soft); }
 .ch-nte { --sd-accent: var(--sd-wuwa); --sd-accent-ink: var(--sd-wuwa-ink); --sd-accent-soft: var(--sd-wuwa-soft); }
+.ch-nikke { --sd-accent: var(--sd-arknights); --sd-accent-ink: var(--sd-arknights-ink); --sd-accent-soft: var(--sd-arknights-soft); }
+.ch-infinitynikki { --sd-accent: var(--sd-hsr); --sd-accent-ink: var(--sd-hsr-ink); --sd-accent-soft: var(--sd-hsr-soft); }
 .ch-ai { --sd-accent: var(--sd-ai); --sd-accent-ink: var(--sd-ai-ink); --sd-accent-soft: var(--sd-ai-soft); }
 
 @theme inline {

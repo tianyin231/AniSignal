@@ -16,6 +16,8 @@ export const ADMIN_COMMUNITIES = [
   { key: 'roco', label: '洛克王国：世界', short: '洛克世界' },
   { key: 'promilia', label: '蓝色星原：旅谣', short: '蓝色星原' },
   { key: 'nte', label: '异环', short: '异环' },
+  { key: 'nikke', label: 'NIKKE', short: 'NIKKE' },
+  { key: 'infinitynikki', label: '无限暖暖', short: '暖暖' },
   { key: 'ai', label: 'AI', short: 'AI' },
 ] as const
 
@@ -41,5 +43,7 @@ export const ADMIN_COMMUNITY_BADGE: Record<string, string> = {
   roco: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
   promilia: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300',
   nte: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-300',
+  nikke: 'bg-orange-500/10 text-orange-700 dark:text-orange-300',
+  infinitynikki: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
   ai: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
 }

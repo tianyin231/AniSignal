@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.clock import format_beijing, to_naive_utc, utcnow
-from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, game_name_boilerplate
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, game_name_boilerplate, get_community
 from app.services.product_matching import product_search_text, product_terms
 from app.models import (
     ANNOUNCE_CATEGORIES,
@@ -857,7 +857,8 @@ def _add_revision(session: AsyncSession, event: Event, stats: AggStats, note: st
 
 
 def _regions_of(rows: list[ContentRow]) -> set[str]:
-    return {_REGION_OF_PLATFORM.get(row.platform, "cn") for row in rows}
+    return {get_community(row.community).official_notice_region if row.platform == "game_official"
+            else _REGION_OF_PLATFORM.get(row.platform, "cn") for row in rows}
 
 
 def _refresh_manual_event(event: Event, rows: list[ContentRow], product=None) -> None:

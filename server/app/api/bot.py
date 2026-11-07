@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_admin
 from app.clock import utcnow
 from app.communities import COMMUNITIES, community_query_pattern
-from app.custom_presets import CUSTOM_PRESETS
+from app.custom_presets import CUSTOM_PRESETS, promote_subscriptions
 from app.db import get_session
 from app.models import BotClient, BotDelivery, BotReminder, BotTarget, SiteSetting
 from app.services import bot
@@ -102,6 +102,9 @@ class TargetBody(BaseModel):
 
     @model_validator(mode="after")
     def sync_legacy_community(self):
+        promoted = promote_subscriptions(self.model_dump())
+        for field in ("custom_feeds", "channels", "communities", "community", "scope_mode", "daily_sources", "updates_sources"):
+            setattr(self, field, promoted[field])
         if self.channels:
             self.communities = selected_communities(self.channels)
             if self.scope_mode == "legacy":

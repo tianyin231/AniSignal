@@ -27,6 +27,7 @@ def migration_module():
     ("roco", "洛克王国：世界赛季更新"),
     ("promilia", "蓝色星原：旅谣测试公告"),
     ("nte", "Neverness to Everness Version Preview"),
+    ("infinitynikki", "无限暖暖新版本公告"),
 ])
 async def test_new_game_official_content_is_visible_in_its_own_channel(session, client, community, title):
     meta = COMMUNITIES[community]

@@ -29,6 +29,7 @@ from app.parsers.youtube import parse_rss_item
 from app.parsers.x import PARSER_VERSION as X_PARSER_VERSION, parse_post as parse_x_post
 from app.parsers.rss import PARSER_VERSION as RSS_PARSER_VERSION, parse_item as parse_feed_item
 from app.parsers.game_official import PARSER_VERSION as GAME_OFFICIAL_PARSER_VERSION, parse_notice as parse_game_notice
+from app.collectors.nikke import parse_notice as parse_nikke_notice
 from app.schemas.content import NormalizedContent
 from app.services.classify import classify_content, load_rules
 from app.services.fingerprint import content_body, content_fingerprint
@@ -41,6 +42,11 @@ FLAP_WINDOW = 30
 SNAPSHOT_HEARTBEAT = timedelta(hours=3)
 
 # fetch_kind → (解析函数, parser 版本)；新平台接入时在这里注册
+def parse_custom_archive(raw: dict) -> NormalizedContent:
+    # 旧定制库只保存标准化快照；保留其来源标记，不将快照冒充平台原始响应。
+    return NormalizedContent.model_validate(raw["normalized"])
+
+
 PARSERS: dict[str, tuple] = {
     "bilibili_search": (parse_video, BILIBILI_PARSER_VERSION),
     "bilibili_user_videos": (parse_video, BILIBILI_PARSER_VERSION),
@@ -51,6 +57,8 @@ PARSERS: dict[str, tuple] = {
     "x_posts": (parse_x_post, X_PARSER_VERSION),
     "rss_feed": (parse_feed_item, RSS_PARSER_VERSION),
     "game_official_notices": (parse_game_notice, GAME_OFFICIAL_PARSER_VERSION),
+    "nikke_notices": (parse_nikke_notice, "1"),
+    "custom_source_archive": (parse_custom_archive, "1"),
 }
 
 
@@ -388,6 +396,10 @@ async def reparse_contents(
     checked = updated = failed = 0
     for content in rows:
         kind = {"x": "x_posts", "rss": "rss_feed"}.get(content.platform) or _REPARSE_KIND.get(content.content_type)
+        if (content.raw_json or {}).get("archive_source") == "custom_source_items":
+            kind = "custom_source_archive"
+        elif content.platform == "game_official":
+            kind = "nikke_notices" if content.external_id.startswith("nikke_global:") else "game_official_notices"
         if kind is None or not content.raw_json:
             continue
         parse, parser_version = PARSERS[kind]

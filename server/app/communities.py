@@ -31,6 +31,7 @@ class CommunityMeta:
     source_exclusions: tuple[str, ...] = ()  # 含同系列名称的独立游戏，不能借简称入本分区
     # 已核验认证的周边专号；共享品牌账号只采集明确属于本游戏的内容。
     official_merch_bili_sources: tuple[tuple[str, str], ...] = ()
+    official_notice_region: str = "cn"
 
     @property
     def game_names(self) -> tuple[str, ...]:
@@ -151,6 +152,21 @@ COMMUNITIES: dict[str, CommunityMeta] = {
         other_games_examples="（如幻塔、无限大、绝区零、鸣潮等）",
         color="yellow", bili_mid_setting="neverness_bili_mid", official_bili_mid_default="3546636978489848",
         extra_names=("異環",), source_aliases=("Neverness to Everness", "NTE"),
+    ),
+    "nikke": CommunityMeta(
+        key="nikke", label="NIKKE", game_name="SHIFT UP《胜利女神：NIKKE》国际服", bare_name="胜利女神：NIKKE",
+        game_note="沿用 NIKKE 国际服来源；不要混入国服《胜利女神：新的希望》的版本、活动和维护时间；",
+        other_games_examples="（如胜利女神：新的希望、碧蓝航线、无限暖暖、鸣潮等）",
+        color="orange", bili_mid_setting=None, official_bili_mid_default=None,
+        extra_names=("胜利女神NIKKE", "勝利女神：NIKKE", "妮姬"),
+        source_aliases=("NIKKE", "Goddess of Victory: NIKKE"), official_notice_region="global",
+    ),
+    "infinitynikki": CommunityMeta(
+        key="infinitynikki", label="无限暖暖", game_name="叠纸游戏《无限暖暖》", bare_name="无限暖暖",
+        game_note="《无限暖暖》是开放世界换装冒险游戏，不混入奇迹暖暖、闪耀暖暖等系列作品的更新；",
+        other_games_examples="（如奇迹暖暖、闪耀暖暖、星布谷地、原神等）",
+        color="violet", bili_mid_setting="infinity_nikki_bili_mid", official_bili_mid_default="3461576715667734",
+        extra_names=("無限暖暖",), source_aliases=("Infinity Nikki",),
     ),
     "ai": CommunityMeta(
         key="ai", label="AI", game_name="人工智能", bare_name="AI",

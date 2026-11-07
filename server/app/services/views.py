@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
-from app.communities import DEFAULT_COMMUNITY
+from app.communities import DEFAULT_COMMUNITY, get_community
 from app.models import (
     CollectTarget,
     ContentVersion,
@@ -90,7 +90,8 @@ async def events_to_out(
             platform=raw.platform,
             account=(source.name if source else None),
             title=titles.get(raw.id),
-            region=_REGION_OF_PLATFORM.get(raw.platform, "cn"),
+            region=(get_community(raw.community).official_notice_region if raw.platform == "game_official"
+                    else _REGION_OF_PLATFORM.get(raw.platform, "cn")),
             published_at=raw.published_at,
             url=raw.url,
             content_id=raw.id,

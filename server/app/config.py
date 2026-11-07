@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     roco_bili_mid: str = "626796832"
     azur_promilia_bili_mid: str = "3546569016085336"
     neverness_bili_mid: str = "3546636978489848"
+    infinity_nikki_bili_mid: str = "3461576715667734"
 
     # YouTube 官方频道白名单："频道ID:名称" 逗号分隔（分区归属由采集目标的 community 决定）
     official_youtube_channels: str = (

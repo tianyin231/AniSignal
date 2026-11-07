@@ -28,6 +28,7 @@ interface CustomFeedDetail {
   is_public: boolean
   owner_name: string | null
   site_managed: boolean
+  community?: string | null
   item_count: number | null
   total: number
   enabled: boolean
@@ -60,6 +61,11 @@ const { error, data, status, refresh } = await useLazyAsyncData(
 )
 const { data: others } = useLazyAsyncData('custom-feeds-sidebar', (_app, { signal }) =>
   api<{ items: FeedCard[] }>('/api/custom/feeds', { signal, query: { page: 1, page_size: 8 } }))
+
+if (data.value?.community) await navigateTo({ path: '/', query: { community: data.value.community } }, { redirectCode: 301 })
+watch(() => data.value?.community, (community) => {
+  if (community) navigateTo({ path: '/', query: { community } }, { replace: true })
+})
 
 useSeoMeta({ title: () => `${data.value?.name ?? '定制监控'} · 定制化 · AniSignal` })
 
