@@ -223,15 +223,6 @@ async def list_contents(
 ):
     from app.services.classify import HIDDEN_CATEGORIES
 
-    # 只关联"最新版本"，保证过滤与展示都基于当前分类
-    latest_sq = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("v"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     conditions: list = [] if is_all_community(community) else [RawContent.community == community]
     if platform:
         conditions.append(
@@ -263,31 +254,24 @@ async def list_contents(
         conditions.append(ContentVersion.title.like(f"%{q}%"))
 
     # 分两步取：先只按条件定位这一页的 id，再读正文和 JSON。宽字段跟着一起排序时，不限时间窗要 5 秒以上。
-    # NOT EXISTS 和按 published_at 排序都是为了走发布时间索引、够一页就停；
-    # 换成分组派生表或 coalesce(published_at, collected_at) 都会退回全量排序。线上 published_at 全部有值。
+    # 这里的写法都是为了走索引：NOT EXISTS 让 MySQL 选覆盖索引而不是回表读宽行，分组派生表会走唯一索引回表；
+    # 按 published_at 排序才能沿索引够一页就停，线上该字段全部有值，coalesce 只会退回全量排序。
     newer = aliased(ContentVersion)
     is_latest = ~exists().where(
         newer.raw_content_id == ContentVersion.raw_content_id, newer.version > ContentVersion.version,
     )
-    page_query = (
-        select(RawContent.id)
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-        .where(is_latest, *conditions)
-    )
-    count_query = (
-        select(func.count())
-        .select_from(RawContent)
-        .join(latest_sq, latest_sq.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest_sq.c.rid)
-            & (ContentVersion.version == latest_sq.c.v),
+
+    def matching(*columns):
+        query = (
+            select(*columns)
+            .select_from(RawContent)
+            .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+            .where(is_latest, *conditions)
         )
-        .where(*conditions)
-    )
-    if identity or exclude_identity:  # 只有身份筛选要用来源表
-        page_query = page_query.join(Source, RawContent.source_id == Source.id, isouter=True)
-        count_query = count_query.join(Source, RawContent.source_id == Source.id, isouter=True)
+        # 只有身份筛选要用来源表
+        return query.join(Source, RawContent.source_id == Source.id, isouter=True) if identity or exclude_identity else query
+
+    page_query = matching(RawContent.id)
     if sort == "hot":
         from app.models import MetricSnapshot
 
@@ -344,7 +328,7 @@ async def list_contents(
         item.metrics = metrics_map.get(item.id)
     items = candidates
 
-    total = await session.scalar(count_query) or 0
+    total = await session.scalar(matching(func.count())) or 0
     return PublicContentList(items=items, total=total)
 
 
