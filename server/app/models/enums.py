@@ -29,6 +29,12 @@ class Community(StrEnum):
     ARKNIGHTS = "arknights"  # 明日方舟
     GENSHIN = "genshin"
     ENDFIELD = "endfield"
+    ZZZ = "zzz"
+    PETITPLANET = "petitplanet"
+    HNA = "hna"
+    ROCO = "roco"
+    PROMILIA = "promilia"
+    NTE = "nte"
     AI = "ai"
 
 

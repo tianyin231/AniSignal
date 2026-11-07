@@ -10,6 +10,12 @@ export const ADMIN_COMMUNITIES = [
   { key: 'arknights', label: '明日方舟', short: '方舟' },
   { key: 'genshin', label: '原神', short: '原神' },
   { key: 'endfield', label: '终末地', short: '终末地' },
+  { key: 'zzz', label: '绝区零', short: '绝区零' },
+  { key: 'petitplanet', label: '星布谷地', short: '星布谷地' },
+  { key: 'hna', label: '崩坏：因缘精灵', short: '因缘精灵' },
+  { key: 'roco', label: '洛克王国：世界', short: '洛克世界' },
+  { key: 'promilia', label: '蓝色星原：旅谣', short: '蓝色星原' },
+  { key: 'nte', label: '异环', short: '异环' },
   { key: 'ai', label: 'AI', short: 'AI' },
 ] as const
 
@@ -29,5 +35,11 @@ export const ADMIN_COMMUNITY_BADGE: Record<string, string> = {
   arknights: 'bg-orange-500/10 text-orange-700 dark:text-orange-300',
   genshin: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300',
   endfield: 'bg-lime-500/10 text-lime-700 dark:text-lime-300',
+  zzz: 'bg-orange-500/10 text-orange-700 dark:text-orange-300',
+  petitplanet: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
+  hna: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
+  roco: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+  promilia: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300',
+  nte: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-300',
   ai: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
 }

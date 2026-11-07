@@ -12,7 +12,8 @@
  */
 
 export interface GameCommunity {
-  key: 'wuwa' | 'blhx' | 'hsr' | 'arknights' | 'genshin' | 'endfield' | 'ai'
+  key: 'wuwa' | 'blhx' | 'hsr' | 'arknights' | 'genshin' | 'endfield'
+    | 'zzz' | 'petitplanet' | 'hna' | 'roco' | 'promilia' | 'nte' | 'ai'
   label: string
   /** 频道头图上的英文名 */
   en: string
@@ -28,6 +29,12 @@ export const GAME_COMMUNITIES: GameCommunity[] = [
   { key: 'arknights', label: '明日方舟', en: 'Arknights', color: 'orange' },
   { key: 'genshin', label: '原神', en: 'Genshin Impact', color: 'cyan' },
   { key: 'endfield', label: '终末地', en: 'Arknights: Endfield', color: 'lime' },
+  { key: 'zzz', label: '绝区零', en: 'Zenless Zone Zero', color: 'orange' },
+  { key: 'petitplanet', label: '星布谷地', en: 'Petit Planet', color: 'teal' },
+  { key: 'hna', label: '崩坏：因缘精灵', en: 'Honkai: Nexus Anima', color: 'violet' },
+  { key: 'roco', label: '洛克王国：世界', en: 'Roco Kingdom', color: 'sky' },
+  { key: 'promilia', label: '蓝色星原：旅谣', en: 'Azur Promilia', color: 'cyan' },
+  { key: 'nte', label: '异环', en: 'Neverness to Everness', color: 'yellow' },
   { key: 'ai', label: 'AI', en: 'AI News', color: 'teal' },
 ]
 
@@ -78,6 +85,12 @@ export const PLATFORMS_BY_COMMUNITY: Record<GameCommunityKey, string[]> = {
   arknights: ['bilibili', 'youtube'],
   genshin: ['bilibili', 'youtube', 'game_official', 'x', 'miyoushe'],
   endfield: ['bilibili', 'youtube', 'game_official', 'x'],
+  zzz: ['bilibili'],
+  petitplanet: ['bilibili'],
+  hna: ['bilibili'],
+  roco: ['bilibili'],
+  promilia: ['bilibili'],
+  nte: ['bilibili'],
   ai: ['bilibili', 'x', 'rss'],
 }
 

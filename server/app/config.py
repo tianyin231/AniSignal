@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     arknights_bili_mid: str = "161775300"
     genshin_bili_mid: str = "401742377"
     endfield_bili_mid: str = "1265652806"
+    # 2026-11-07 逐个核对 B站企业认证。
+    zenless_bili_mid: str = "1636034895"
+    petit_planet_bili_mid: str = "3546622923377024"
+    nexus_anima_bili_mid: str = "3546886017387331"
+    roco_bili_mid: str = "626796832"
+    azur_promilia_bili_mid: str = "3546569016085336"
+    neverness_bili_mid: str = "3546636978489848"
 
     # YouTube 官方频道白名单："频道ID:名称" 逗号分隔（分区归属由采集目标的 community 决定）
     official_youtube_channels: str = (
