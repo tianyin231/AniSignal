@@ -70,6 +70,7 @@ class ContentVersion(Base):
     __tablename__ = "content_versions"
     __table_args__ = (
         UniqueConstraint("raw_content_id", "version", name="uq_content_version"),
+        Index("ix_content_versions_latest_category", "raw_content_id", "version", "category"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

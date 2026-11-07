@@ -113,8 +113,8 @@ async def test_contents_page_and_total_follow_the_latest_version(client, session
     assert [item["title"] for item in body["items"]] == ["新标题"]
 
 
-async def test_hot_without_window_only_ranks_recent_month(client, session):
-    await add_content(session, "old-viral", age=31 * 24 * 60, views=10_000_000)
+async def test_hot_without_window_only_ranks_recent_week(client, session):
+    await add_content(session, "old-viral", age=8 * 24 * 60, views=10_000_000)
     await add_content(session, "recent", age=60, views=10)
     await session.commit()
 
