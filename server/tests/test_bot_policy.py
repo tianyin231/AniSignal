@@ -7,12 +7,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from app.clock import utcnow
 from app.models import BotDelivery, BotTarget, ContentSchedule, Event, Evidence, RawContent, RedeemCode
 from app.services import bot
 from app.services.bot_calendar import calendar_brief, upcoming_entries
-from app.services.bot_policy import reserve_delivery
+from app.services.bot_policy import delivery_congested, reserve_delivery
 from app.services.extract import _push_to_targets
 from app.services.settings import set_setting
 
@@ -253,6 +254,95 @@ async def test_concurrent_claims_reserve_only_one_auto_message(session, session_
     assert sorted(r.status for r in rows) == ["pending", "sending"]
 
 
+def news_item(index, published_at):
+    news = {"newsworthy": True, "headline": f"资讯{index}", "summary": f"资讯{index}的摘要。", "kind": "report", "topics": ["行业动态"]}
+    return {"id": index, "content_ids": [index], "community": "ai", "identity": "official", "news": news,
+            "title": f"资讯{index}", "text": f"资讯{index}的摘要。", "source": "来源", "platform": "rss",
+            "published_at": published_at, "url": f"https://example.com/{index}"}
+
+
+async def test_quiet_night_keeps_updates_in_buffer_and_morning_sends_latest_batch(session, monkeypatch):
+    # 北京时间 02:00 起产生 6 条：夜里不入队，早上一个名额合并最新的，不各排一小时。
+    night = utcnow().replace(hour=18, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    row = await target(session, night - timedelta(hours=1), community="ai")
+    items = [news_item(index, night + timedelta(minutes=index)) for index in range(1, 7)]
+    remaining = list(items)
+
+    async def query(*args, **kwargs):
+        batch = list(remaining)
+        remaining.clear()
+        return {"items": batch}
+
+    monkeypatch.setattr(bot, "query_target", query)
+    await bot.run_bot_notifications(session, night + timedelta(minutes=10))
+    assert list(await session.scalars(select(BotDelivery))) == []
+    assert len((await bot.load_merge_buffer(session, row.id))["items"]) == 6
+
+    morning = night + timedelta(hours=6, minutes=5)  # 北京时间 08:05
+    await bot.run_bot_notifications(session, morning)
+    rows = list(await session.scalars(select(BotDelivery)))
+    assert len(rows) == 1 and rows[0].kind == "updates"
+    assert [item["id"] for item in rows[0].brief["items"]] == [6, 5]
+    left = (await bot.load_merge_buffer(session, row.id))["items"]
+    assert sorted(item["id"] for item in left) == [1, 2, 3, 4]
+
+    # 上一批还没发出时不再追加排队，保证下一批取到的仍是当时最新的。
+    await bot.run_bot_notifications(session, morning + timedelta(minutes=6))
+    assert len(list(await session.scalars(select(BotDelivery)))) == 1
+
+
+async def test_budget_exhausted_holds_new_update_until_next_slot(session, monkeypatch):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now)
+    sent = await bot.create_delivery(session, row, "updates", "刚发过", "sent")
+    sent.status, sent.updated_at = "accepted", now - timedelta(minutes=5)
+    await session.commit()
+    pool = [{"id": 1, "content_ids": [1], "title": "新的活动公告", "text": "新的活动将于10月15日开启。", "identity": "official",
+             "community": "wuwa", "published_at": now, "url": "https://example.com/1"}]
+
+    async def query(*args, **kwargs):
+        batch = list(pool)
+        pool.clear()
+        return {"items": batch}
+
+    monkeypatch.setattr(bot, "query_target", query)
+    await bot.run_bot_notifications(session, now)
+    assert len(list(await session.scalars(select(BotDelivery)))) == 1
+    assert len((await bot.load_merge_buffer(session, row.id))["items"]) == 1
+    await bot.run_bot_notifications(session, now + timedelta(minutes=16))
+    rows = list(await session.scalars(select(BotDelivery).order_by(BotDelivery.id)))
+    assert len(rows) == 2 and rows[-1].status == "pending"
+    assert (await bot.load_merge_buffer(session, row.id))["items"] == []
+
+
+async def test_expired_failed_row_does_not_block_the_queue_forever(session):
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now, min_push_interval_minutes=0)
+    stale = await bot.create_delivery(session, row, "updates", "九月的失败消息", "stale")
+    stale.status, stale.created_at, stale.updated_at = "failed", now - timedelta(days=30), now - timedelta(days=30)
+    await session.commit()
+    assert await delivery_congested(session, row, now) is False
+    await bot.create_delivery(session, row, "updates", "待发", "waiting")
+    assert await delivery_congested(session, row, now) is True
+
+
+async def test_claim_turns_lock_conflict_into_empty_poll(client, session, monkeypatch):
+    now = utcnow()
+    row = await target(session, now, hourly_limit=0, min_push_interval_minutes=0, quiet_start=0, quiet_end=0)
+    delivery = await bot.create_delivery(session, row, "manual", "内容", "conflict")
+    await set_setting(session, "bot_bridge", {"tools_key": "plugin-key"})
+
+    async def deadlock(*args, **kwargs):
+        raise OperationalError("SELECT 1", {}, Exception("Deadlock found"))
+
+    monkeypatch.setattr("app.api.bot_companion.reserve_delivery", deadlock)
+    response = await client.post("/api/bot/outbox/claim", headers={"X-Bot-Key": "plugin-key"}, json={})
+    assert response.status_code == 200 and response.json() == {"delivery": None}
+    monkeypatch.undo()
+    response = await client.post("/api/bot/outbox/claim", headers={"X-Bot-Key": "plugin-key"}, json={})
+    assert response.json()["delivery"]["id"] == delivery.id
+
+
 async def test_pending_disabled_and_expired_messages_are_cancelled_on_claim(client, session, monkeypatch):
     now = utcnow().replace(hour=12, minute=0, second=0, microsecond=0)
     monkeypatch.setattr("app.api.bot_companion.utcnow", lambda: now)
@@ -304,8 +394,11 @@ async def test_cross_window_only_source_changes_create_a_followup(session, monke
         await bot.run_bot_notifications(session, now + timedelta(minutes=minute))
     assert len(list(await session.scalars(select(BotDelivery)))) == 1
     source_text += '视频追加10月10日上线时间。'
+    # 上一条在第 7 分钟发出，20 分钟间隔内先留在缓冲，到点后才生成续报。
     for minute in (15, 17):
         await bot.run_bot_notifications(session, now + timedelta(minutes=minute))
+    assert len(list(await session.scalars(select(BotDelivery)))) == 1
+    await bot.run_bot_notifications(session, now + timedelta(minutes=28))
     rows = list(await session.scalars(select(BotDelivery).order_by(BotDelivery.id)))
     assert len(rows) == 2 and rows[-1].brief['items'][0]['is_followup']
     assert '补充' in rows[-1].body and '10月10日' in rows[-1].body
