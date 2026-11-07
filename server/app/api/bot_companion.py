@@ -1,5 +1,6 @@
 """AstrBot 插件领取播报、回传结果及按真实会话身份操作订阅。"""
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -7,6 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.bot import TargetBody, apply_target, require_tools
@@ -23,6 +25,7 @@ from app.services.bot_clients import setting_key
 from app.services.bot_access import actor_error, target_error
 from app.services.bot_preferences import resolve_target
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/bot", dependencies=[Depends(require_tools)])
 admin_router = APIRouter(prefix="/api/admin/bot", dependencies=[Depends(require_admin)])
 
@@ -292,7 +295,14 @@ async def claim(body: ClaimBody, session: AsyncSession = Depends(get_session), c
             if row.status == "failed" and row.updated_at > now - timedelta(minutes=5):
                 continue
             receipt = secrets.token_hex(24)
-            if await reserve_delivery(session, target, row, now=now, receipt=receipt):
+            try:
+                reserved = await reserve_delivery(session, target, row, now=now, receipt=receipt)
+            except OperationalError as exc:
+                # 锁冲突只代表这一轮没领到；不把 500 抛给轮询中的插件，消息状态已随事务回滚。
+                logger.warning("Bot outbox claim deferred delivery=%s: %s", after_id, type(exc.orig).__name__)
+                await session.rollback()
+                return {"delivery": None}
+            if reserved:
                 max_images = image_limit(target.config)
                 return {"delivery": {"id": row.id, "receipt": receipt, "umo": target.umo, "body": row.body,
                         "kind": row.kind, "images": (row.media or [])[:max_images], "max_images": max_images,

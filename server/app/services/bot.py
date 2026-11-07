@@ -14,12 +14,12 @@ from app.communities import COMMUNITIES
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentMatch, ContentSchedule, ContentVersion, Event, Evidence, Product, RawContent, RedeemCode, Source
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
-from app.services.bot_briefs import (_source, build_brief, build_shared_brief, changed_points, fallback_items, format_brief,
+from app.services.bot_briefs import (_published, _source, build_brief, build_shared_brief, changed_points, fallback_items, format_brief,
                                     is_recent_item, news_points, point_key, prune_shared_copies, publication_label, single_item_brief)
 from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 from app.services.bot_calendar import calendar_brief, upcoming_entries, refresh_calendar, scheduled_at, normalized_title
-from app.services.bot_policy import reserve_delivery
+from app.services.bot_policy import delivery_congested, reserve_delivery
 from app.services import bot_channels, bot_custom
 from app.services.bot_preferences import resolve_target
 from app.services.bot_access import matches_keywords, target_error
@@ -754,7 +754,7 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
 
 
 async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, quiet: bool, quiet_critical: bool,
-                              hourly_limit: int, max_images: int) -> None:
+                              hourly_limit: int, max_images: int, congested: bool = False) -> None:
     target = await resolve_target(session, target, "updates")
     known = await known_notification_keys(session, target.id, now)
     previously_known = set(known)
@@ -777,12 +777,13 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
     if now < flush_at:
         return
     can_send = True
-    if quiet:
+    if quiet or congested:
         can_send = False
     elif hourly_limit and await _hourly_updates_count(session, target.id, now) >= hourly_limit:
         can_send = False
     if can_send:
-        items = buffer["items"]
+        # 名额有限时先发最新的；较早的继续留在缓冲，超过发送窗口后自然淘汰。
+        items = sorted(buffer["items"], key=lambda item: _published(item.get("published_at")) or datetime.min, reverse=True)
         fresh_official = [item for item in items if item.get("identity") == "official" and not item.get("is_followup")]
         brief = await build_shared_brief(session, items, now)
         brief = notification_brief(brief, items)
@@ -900,14 +901,18 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     critical_items.append(item)
                 else:
                     normal_items.append(item)
-            for kind, immediate in (("critical", critical_items), ("updates", normal_items if merge_minutes <= 0 else [])):
+            # 空闲时单条立刻发；同轮多条、免打扰、额度用尽或已有待发时进缓冲，下个名额合并发最新的，
+            # 否则每条独占一个名额，夜间积压要到下午才能发完，还会让早报被判成重复。
+            hold_updates = (merge_minutes > 0 or quiet or len(normal_items) > 1 or bool(buffer.get("items"))
+                            or await delivery_congested(session, target, now))
+            for kind, immediate in (("critical", critical_items), ("updates", [] if hold_updates else normal_items)):
                 for item in immediate:
                     brief = notification_brief(await build_shared_brief(session, [item], now), [item])
                     if brief["items"]:
                         await create_delivery(session, target, kind, format_brief(brief),
                                               f"{kind}:{target.id}:{item['dedupe']}",
                                               media=collect_images(brief["items"], max_images), brief=brief)
-            if normal_items and merge_minutes > 0:
+            if normal_items and hold_updates:
                 known = {key for entry in buffer.get("items", []) for key in (entry.get("dedupe"), entry.get("topic_key") or notification_topic(entry)) if key}
                 for item in normal_items:
                     digest = item["dedupe"]
@@ -933,6 +938,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             await _flush_merge_buffer(
                 session, target, buffer, now,
                 quiet=quiet, quiet_critical=quiet_critical, hourly_limit=hourly_limit, max_images=max_images,
+                congested=await delivery_congested(session, target, now),
             )
         elif buffer.get("items"):
             await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})

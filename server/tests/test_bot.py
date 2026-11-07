@@ -190,14 +190,15 @@ async def test_short_format_and_multi_image(session, monkeypatch):
     row.config = {**row.config, 'delivery_mode': 'astrbot'}
     await session.commit()
     await bot.run_bot_notifications(session, now)
+    # 同一轮到达的多条合并成一条消息，不各占一个发送名额。
     rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.kind == 'updates').order_by(BotDelivery.id)))
-    assert len(rows) == 2
-    bodies = "\n".join(r.body for r in rows)
-    assert '短讯标题0' in bodies and '短讯标题1' in bodies
-    assert '发布：09/13 11:00' in bodies and '11:58' not in bodies and '12:00' not in bodies
-    media_lists = [r.media for r in rows]
-    assert all(m and m[0].startswith('https://img.example/') for m in media_lists)
-    assert all(r.brief['mode'] == 'updates' and r.brief['items'][0]['sources'][0]['content_ids'] for r in rows)
+    assert len(rows) == 1
+    body = rows[0].body
+    assert '短讯标题0' in body and '短讯标题1' in body
+    assert '发布：09/13 11:00' in body and '11:58' not in body and '12:00' not in body
+    assert set(rows[0].media) == {'https://img.example/0.jpg', 'https://img.example/1.jpg'}
+    assert rows[0].brief['mode'] == 'updates'
+    assert all(item['sources'][0]['content_ids'] for item in rows[0].brief['items'])
 
 
 async def test_direct_delivery_cancels_empty_dynamic_snapshot(session, monkeypatch):
