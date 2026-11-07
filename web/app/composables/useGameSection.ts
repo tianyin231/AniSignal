@@ -92,13 +92,15 @@ export function platformsForCommunity(community: string): string[] {
 /**
  * 栏目页的分区视角：URL 显式带 community=all 时为跨分区聚合（首页"首页"频道进入），
  * 否则跟随分区状态源（URL 分区 → localStorage → 默认）。
+ * gameOnly：事件和商品只在游戏分区产生，从 AI 频道进入时改看跨分区，不显示永远为空的列表。
  */
-export function useCommunityScope() {
+export function useCommunityScope({ gameOnly = false } = {}) {
   const route = useRoute()
   const { community } = useGameSection()
   const scope = computed<string>(() => {
     const query = String(route.query.community || '')
-    return query === 'all' ? 'all' : community.value
+    if (query === 'all' || (gameOnly && community.value === 'ai')) return 'all'
+    return community.value
   })
   return { scope, isAll: computed(() => scope.value === 'all') }
 }

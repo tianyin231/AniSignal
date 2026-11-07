@@ -25,7 +25,7 @@ useSeoMeta({ title: '商品总览' })
 
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐卡标注分区
-const { scope, isAll } = useCommunityScope()
+const { scope, isAll } = useCommunityScope({ gameOnly: true })
 const { data, status, error, refresh } = await useLazyAsyncData(
   () => `products-${scope.value}`,
   (_app, { signal }) => api<ApiProductList>('/api/products', { query: { community: scope.value }, signal }),

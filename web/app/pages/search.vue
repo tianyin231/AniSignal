@@ -56,6 +56,7 @@ useSeoMeta({ title: '搜索' })
 
 <template>
   <div>
+    <h1 class="sr-only">搜索</h1>
     <form class="panel flex flex-wrap items-center gap-2 p-2 pl-3.5" @submit.prevent="submit">
       <Search :size="16" class="shrink-0 text-slate-400" />
       <input

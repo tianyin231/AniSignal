@@ -11,9 +11,9 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import BigInteger, cast, func, select
+from sqlalchemy import BigInteger, cast, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import defer
+from sqlalchemy.orm import aliased, defer
 
 from app.communities import (
     COMMUNITIES,
@@ -48,6 +48,8 @@ _EXCERPT_LEN = 140
 # 公开列表的分页上界：深分页在 MySQL 里是「先扫再丢」，一个无鉴权请求就能触发
 # 数十万行扫描。10000 足够覆盖正常浏览（前端最多到 334 页 × 30），再深请用筛选。
 MAX_PUBLIC_OFFSET = 10_000
+# 热门排序要逐条取最新指标，全时段排序单次超过 5 秒；站内入口都带 7 天窗口，这里只兜住裸请求。
+HOT_DEFAULT_WINDOW_HOURS = 720
 
 # 公开分区参数：默认值与合法值集合来自 communities 注册表
 COMMUNITY_QUERY = Query(
@@ -243,6 +245,8 @@ async def list_contents(
         conditions.append(Source.identity == identity)
     if exclude_identity:
         conditions.append((Source.identity != exclude_identity) | Source.identity.is_(None))
+    if sort == "hot" and published_within_hours is None:
+        published_within_hours = HOT_DEFAULT_WINDOW_HOURS
     if published_within_hours:
         conditions.append(RawContent.published_at >= utcnow() - timedelta(hours=published_within_hours))
     conditions.append(RawContent.hidden.is_(False))
@@ -258,40 +262,58 @@ async def list_contents(
     if q:
         conditions.append(ContentVersion.title.like(f"%{q}%"))
 
-    publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
-    query = (
-        select(RawContent, Source.name, Source.identity, ContentVersion)
-        .options(defer(RawContent.raw_json))
+    # 分两步取：先只按条件定位这一页的 id，再读正文和 JSON。宽字段跟着一起排序时，不限时间窗要 5 秒以上。
+    # NOT EXISTS 和按 published_at 排序都是为了走发布时间索引、够一页就停；
+    # 换成分组派生表或 coalesce(published_at, collected_at) 都会退回全量排序。线上 published_at 全部有值。
+    newer = aliased(ContentVersion)
+    is_latest = ~exists().where(
+        newer.raw_content_id == ContentVersion.raw_content_id, newer.version > ContentVersion.version,
+    )
+    page_query = (
+        select(RawContent.id)
+        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+        .where(is_latest, *conditions)
+    )
+    count_query = (
+        select(func.count())
+        .select_from(RawContent)
         .join(latest_sq, latest_sq.c.rid == RawContent.id)
         .join(
             ContentVersion,
             (ContentVersion.raw_content_id == latest_sq.c.rid)
             & (ContentVersion.version == latest_sq.c.v),
         )
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(*conditions)
     )
+    if identity or exclude_identity:  # 只有身份筛选要用来源表
+        page_query = page_query.join(Source, RawContent.source_id == Source.id, isouter=True)
+        count_query = count_query.join(Source, RawContent.source_id == Source.id, isouter=True)
     if sort == "hot":
         from app.models import MetricSnapshot
 
-        latest_metrics = (
-            select(MetricSnapshot.raw_content_id.label("rid"), func.max(MetricSnapshot.id).label("sid"))
-            .group_by(MetricSnapshot.raw_content_id)
-            .subquery()
+        # 标量子查询按 (raw_content_id, id) 索引逐条取最新指标；写成 JOIN 关联子查询时 MySQL 用不上主键。
+        views = (
+            select(cast(MetricSnapshot.metrics["view"].as_string(), BigInteger))
+            .where(MetricSnapshot.raw_content_id == RawContent.id)
+            .order_by(MetricSnapshot.id.desc())
+            .limit(1)
+            .correlate(RawContent)
+            .scalar_subquery()
         )
-        views = func.coalesce(cast(MetricSnapshot.metrics["view"].as_string(), BigInteger), 0)
-        query = (query.outerjoin(latest_metrics, latest_metrics.c.rid == RawContent.id)
-                 .outerjoin(MetricSnapshot, MetricSnapshot.id == latest_metrics.c.sid)
-                 .order_by(views.desc()))
-    rows = await session.execute(query.order_by(
-        publication_time.desc(), RawContent.id.desc(),
-    ).limit(limit).offset(offset))
+        page_query = page_query.order_by(func.coalesce(views, 0).desc())
+    page_ids = list(await session.scalars(page_query.order_by(
+        RawContent.published_at.desc(), RawContent.id.desc(),
+    ).limit(limit).offset(offset)))
+    rows = await session.execute(
+        select(RawContent, Source.name, Source.identity, ContentVersion)
+        .options(defer(RawContent.raw_json))
+        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+        .join(Source, RawContent.source_id == Source.id, isouter=True)
+        .where(RawContent.id.in_(page_ids), is_latest)
+    ) if page_ids else []
+    page_rows = {row[0].id: row for row in rows}
     candidates: list[PublicContentItem] = []
-    seen: set[int] = set()
-    for raw, source_name, source_identity, version in rows:
-        if raw.id in seen:
-            continue
-        seen.add(raw.id)
+    for raw, source_name, source_identity, version in (page_rows[raw_id] for raw_id in page_ids):
         normalized = version.normalized_json if version else None
         text = (version.text if version else None) or str((normalized or {}).get("text") or "")
         media = (normalized or {}).get("media") or []
@@ -322,18 +344,7 @@ async def list_contents(
         item.metrics = metrics_map.get(item.id)
     items = candidates
 
-    count_sq = (
-        select(func.count(func.distinct(RawContent.id)))
-        .join(latest_sq, latest_sq.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest_sq.c.rid)
-            & (ContentVersion.version == latest_sq.c.v),
-        )
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(*conditions)
-    )
-    total = await session.scalar(count_sq) or 0
+    total = await session.scalar(count_query) or 0
     return PublicContentList(items=items, total=total)
 
 
@@ -372,6 +383,50 @@ def _excerpt(text: str) -> str | None:
 
 _RSS_CACHE: dict[str, tuple[float, str]] = {}
 _RSS_TTL_SECONDS = 300
+
+
+_SITEMAP_CACHE: dict[str, tuple[float, str]] = {}
+_SITEMAP_TTL_SECONDS = 3600
+_SITEMAP_PAGES = (
+    "/", "/ai", "/ai/reports", "/ai/sources", "/official", "/calendar", "/events", "/products", "/contents",
+    "/sources", "/stats", "/about", "/intro", "/project",
+)
+
+
+@router.get("/sitemap.xml", response_class=Response)
+async def sitemap(request: Request, session: AsyncSession = Depends(get_session)):
+    """站点地图：公开栏目、游戏频道、全部商品和进行中的事件。"""
+    from xml.sax.saxutils import escape
+
+    from app.config import get_settings
+    from app.models import Event as EventModel
+    from app.models import Product as ProductModel
+
+    base = get_settings().public_base_url.strip().rstrip("/") or str(request.base_url).rstrip("/")
+    cached = _SITEMAP_CACHE.get(base)
+    if cached and cached[0] > time.time():
+        return Response(content=cached[1], media_type="application/xml; charset=utf-8")
+
+    entries: list[tuple[str, datetime | None]] = [(path, None) for path in _SITEMAP_PAGES]
+    entries.extend((f"/?community={key}", None) for key, meta in COMMUNITIES.items() if meta.domain == "game")
+    products = await session.execute(select(ProductModel.slug, ProductModel.community, ProductModel.fulfillment_updated_at))
+    entries.extend((f"/products/{slug}?community={community}", updated) for slug, community, updated in products)
+    events = await session.execute(
+        select(EventModel.id, EventModel.last_updated_at)
+        .where(EventModel.is_active.is_(True), EventModel.category != "ai_news")
+        .order_by(EventModel.last_updated_at.desc())
+        .limit(5000)
+    )
+    entries.extend((f"/events/{event_id}", updated) for event_id, updated in events)
+
+    parts = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for path, updated in entries:
+        lastmod = f"<lastmod>{updated:%Y-%m-%d}</lastmod>" if updated else ""
+        parts.append(f"<url><loc>{escape(base + path)}</loc>{lastmod}</url>")
+    parts.append("</urlset>")
+    xml = "\n".join(parts)
+    _SITEMAP_CACHE[base] = (time.time() + _SITEMAP_TTL_SECONDS, xml)
+    return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
 @router.get("/rss.xml", response_class=Response)

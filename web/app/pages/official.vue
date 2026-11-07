@@ -47,6 +47,7 @@ useSeoMeta({ title: '官方动态' })
 
 <template>
   <div>
+    <h1 class="sr-only">官方动态</h1>
     <SectionNav />
     <TabNav v-model="tab" :tabs="visibleTabs" />
 

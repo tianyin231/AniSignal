@@ -2,8 +2,11 @@
 
 from datetime import timedelta
 
+from sqlalchemy import select
+
+from app.api import public
 from app.clock import utcnow
-from app.models import ContentVersion, Event, Evidence, MetricSnapshot, RawContent
+from app.models import ContentVersion, Event, Evidence, MetricSnapshot, Product, RawContent
 
 
 async def add_content(session, name, *, age=0, community="wuwa", hidden=False, views=None):
@@ -92,3 +95,56 @@ async def test_event_total_uses_same_visible_evidence_scope_as_page(client, sess
     last = (await client.get("/api/events", params={"offset": 1})).json()
     assert last["total"] == 1
     assert last["items"] == []
+
+
+async def test_contents_page_and_total_follow_the_latest_version(client, session):
+    """分页 id 与总数分开查询，两边都必须只看最新版本的分类。"""
+    demoted = await add_content(session, "demoted")
+    session.add(ContentVersion(raw_content_id=demoted.id, version=2, title="demoted", category="chat"))
+    promoted = await add_content(session, "promoted", age=5)
+    promoted_v1 = await session.scalar(select(ContentVersion).where(ContentVersion.raw_content_id == promoted.id))
+    promoted_v1.category = "chat"
+    session.add(ContentVersion(raw_content_id=promoted.id, version=2, title="新标题", category="official_announce"))
+    await add_content(session, "hidden", hidden=True)
+    await session.commit()
+
+    body = (await client.get("/api/contents")).json()
+    assert body["total"] == 1
+    assert [item["title"] for item in body["items"]] == ["新标题"]
+
+
+async def test_hot_without_window_only_ranks_recent_month(client, session):
+    await add_content(session, "old-viral", age=31 * 24 * 60, views=10_000_000)
+    await add_content(session, "recent", age=60, views=10)
+    await session.commit()
+
+    body = (await client.get("/api/contents", params={"sort": "hot"})).json()
+    assert body["total"] == 1
+    assert [item["external_id"] for item in body["items"]] == ["recent"]
+    wider = (await client.get("/api/contents", params={"sort": "hot", "published_within_hours": 8760})).json()
+    assert [item["external_id"] for item in wider["items"]] == ["old-viral", "recent"]
+
+
+async def test_sitemap_lists_public_pages_and_skips_inactive_or_ai_events(client, session):
+    public._SITEMAP_CACHE.clear()
+    session.add_all([
+        Product(slug="figure-a", name="手办 A", community="wuwa"),
+        Event(title="进行中", category="official_announce", community="wuwa", is_active=True),
+        Event(title="已关闭", category="official_announce", community="wuwa", is_active=False),
+        Event(title="AI 事件", category="ai_news", community="ai", is_active=True),
+    ])
+    await session.commit()
+    active = await session.scalar(select(Event).where(Event.title == "进行中"))
+    closed = await session.scalar(select(Event).where(Event.title == "已关闭"))
+    news = await session.scalar(select(Event).where(Event.title == "AI 事件"))
+
+    response = await client.get("/api/sitemap.xml")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/xml")
+    assert "/products/figure-a?community=wuwa</loc>" in response.text
+    assert "/?community=wuwa</loc>" in response.text
+    assert "/?community=ai</loc>" not in response.text
+    assert f"/events/{active.id}</loc>" in response.text
+    assert f"/events/{closed.id}</loc>" not in response.text
+    assert f"/events/{news.id}</loc>" not in response.text
+    public._SITEMAP_CACHE.clear()
