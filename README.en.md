@@ -16,7 +16,7 @@ A self-hosted cross-platform signal desk and event tracking radar. Consolidate p
 <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white">
 <img alt="MySQL 8" src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white">
 <img alt="Redis 7" src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white">
-<img alt="Unit Tests" src="https://img.shields.io/badge/Tests-1100%2B%20Passed-059669?style=flat-square&logo=pytest&logoColor=white">
+<a href="https://github.com/tianyin231/AniSignal/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
 <img alt="Self-hosted" src="https://img.shields.io/badge/Self--hosted-7C3AED?style=flat-square">
 </p>
 

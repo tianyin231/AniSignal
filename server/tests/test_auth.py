@@ -1,5 +1,6 @@
 """账号系统全流程单测：注册→验证→登录→改密→找回，含安全边界。"""
 
+import time
 from collections import deque
 
 import pytest
@@ -249,7 +250,7 @@ def test_expired_entries_are_swept():
     _reset_state()
     try:
         stale = "stale@example.com"
-        auth_module._login_failures[stale] = deque([0.0])
+        auth_module._login_failures[stale] = deque([time.monotonic() - auth_module._LOGIN_FAIL_WINDOW - 1])
         auth_module._maybe_sweep(force=True)
         assert stale not in auth_module._login_failures
     finally:
