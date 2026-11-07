@@ -44,16 +44,24 @@ def _compact(value: str) -> str:
     )
 
 
-def matches_product_text(title: str | None, text: str | None, watch_terms: Iterable[str]) -> bool:
-    """忽略排版差异匹配完整商品词；标题、正文和不同句子之间不会拼出命中。"""
+def product_search_text(title: str | None, text: str | None) -> str:
+    """预处理成可反复匹配的文本：按句换行，命中不会跨标题、正文或句子拼出来。
+
+    规范化按字符处理，开销远大于子串匹配。批量场景内容和商品词都只算一次，再逐一比对。
+    """
+    return "\n".join(_compact(sentence) for value in (title, text) for sentence in _SENTENCE_END.split(_plain(value)))
+
+
+def product_terms(watch_terms: Iterable[str]) -> set[str]:
     terms = {_compact(_plain(term)) for term in watch_terms if term}
     terms.discard("")
-    return any(
-        term in _compact(sentence)
-        for value in (title, text)
-        for sentence in _SENTENCE_END.split(_plain(value))
-        for term in terms
-    )
+    return terms
+
+
+def matches_product_text(title: str | None, text: str | None, watch_terms: Iterable[str]) -> bool:
+    """忽略排版差异匹配完整商品词；标题、正文和不同句子之间不会拼出命中。"""
+    search_text = product_search_text(title, text)
+    return any(term in search_text for term in product_terms(watch_terms))
 
 
 def _affirmed_occurrence(sentence: str, term: str) -> bool:

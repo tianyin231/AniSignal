@@ -756,11 +756,11 @@ async def refresh_content_fulfillment(
     if reaggregate and snapshots:
         from app.services.events import AggStats, _aggregate_product, load_classified_contents
 
-        contents = await load_classified_contents(session)
-        for product_id, before in snapshots.items():
-            product = await session.get(Product, product_id)
-            if product:
-                await _aggregate_product(session, product, contents, AggStats(), before=before)
+        # 此处持有商品行锁，只加载这些商品所在的分区。
+        products = [product for product_id in snapshots if (product := await session.get(Product, product_id))]
+        contents = await load_classified_contents(session, communities={product.community or DEFAULT_COMMUNITY for product in products})
+        for product in products:
+            await _aggregate_product(session, product, contents, AggStats(), before=snapshots[product.id])
         return
     for product_id, before in snapshots.items():
         await sync_product_signals(session, product_id, before=before)

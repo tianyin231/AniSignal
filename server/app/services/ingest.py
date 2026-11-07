@@ -34,6 +34,9 @@ from app.services.fingerprint import content_fingerprint
 
 logger = logging.getLogger(__name__)
 
+# 抖动判定回看的版本数，需覆盖一篇文章轮播的全部正文变体。
+FLAP_WINDOW = 30
+
 # fetch_kind → (解析函数, parser 版本)；新平台接入时在这里注册
 PARSERS: dict[str, tuple] = {
     "bilibili_search": (parse_video, BILIBILI_PARSER_VERSION),
@@ -181,7 +184,7 @@ async def _ingest_one(
             .order_by(ContentVersion.version.desc())
             .limit(1)
         )
-        if _would_drop_dynamic_content(normalized, latest):
+        if _would_drop_dynamic_content(normalized, latest) or await _is_flapping(session, existing.id, normalized):
             changed = False
         else:
             _add_version(
@@ -191,6 +194,22 @@ async def _ingest_one(
             existing.content_hash = fingerprint
     _add_snapshot(session, existing, normalized)
     return False, changed, existing.id, str(identity)
+
+
+async def _is_flapping(session: AsyncSession, content_id: int, normalized: NormalizedContent) -> bool:
+    """来源在几份正文之间来回切换时不算内容变化（RSS 随机推广位、动态详情时有时无）。
+
+    抖动的代价不只是版本行：快讯每出一个新版本就被隐藏并重新送审，半天能烧掉上百次模型调用。
+    只有近期版本里已经出现过重复，才判定为抖动，这样来源单次改回旧文仍能如实更新。
+    """
+    rows = (await session.execute(
+        select(ContentVersion.title, ContentVersion.text, ContentVersion.normalized_json)
+        .where(ContentVersion.raw_content_id == content_id)
+        .order_by(ContentVersion.version.desc()).limit(FLAP_WINDOW)
+    )).all()
+    recent = [(title, text or "", tuple((data or {}).get("media") or [])) for title, text, data in rows]
+    incoming = (normalized.title, normalized.text or "", tuple(normalized.media or []))
+    return incoming in recent[1:] and len(set(recent)) < len(recent)
 
 
 def _would_drop_dynamic_content(

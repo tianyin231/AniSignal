@@ -34,6 +34,9 @@ _GOODS_SORTED = tuple(sorted(GOODS_NOUNS, key=len, reverse=True))
 QUIET_DAYS = 30
 LOOKBACK_DAYS = 45
 SCAN_LIMIT = 20
+# 模型回 {} 或坏 JSON 时不能当"没有商品"：线上有 6 条内容失败 4～10 次后才识别出真实商品。
+# 上限只截掉重试 12 次以上的尾部，这些内容在 14 天的记录里没有产出过商品。
+MAX_SCAN_FAILURES = 12
 _TERM_FILLER = re.compile(r"联名|机械|限定|周边")
 
 
@@ -344,9 +347,23 @@ async def discover_merch_candidates(
         except Exception:
             await session.rollback()
             logger.exception("商品 AI 发现失败，稍后重试 content_id=%s", raw_id)
+            await _record_scan_failure(session, raw_id, version_number)
             await record_usage(session, task="discover_products", config=config, usage=usage,
                                duration_ms=int((time.monotonic() - started) * 1000), ref_id=raw_id, status="failed")
     return {"scanned": scanned, "created": created}
+
+
+async def _record_scan_failure(session: AsyncSession, raw_id: int, version: int) -> None:
+    """同一版本连续失败到上限就放弃，内容更新后再重新分析，不无限消耗模型额度。"""
+    scan = await session.get(MerchScan, raw_id, populate_existing=True)
+    if scan is None:
+        return
+    failure = (scan.result or {}).get("failure") or {}
+    count = int(failure.get("count") or 0) + 1 if failure.get("version") == version else 1
+    scan.result = {**(scan.result or {}), "failure": {"version": version, "count": count}}
+    if count >= MAX_SCAN_FAILURES:
+        scan.content_version = version
+    await session.commit()
 
 
 async def accept_product_candidate(session: AsyncSession, candidate_id: int) -> Product:
@@ -453,8 +470,9 @@ async def archive_product(session: AsyncSession, product: Product, *, now: datet
 async def archive_quiet_products(session: AsyncSession, *, now: datetime | None = None) -> dict:
     """已有交付证据，且最近一次进展与本轮跟踪都安静 30 天，才结束专属搜索。"""
     now = now or utcnow()
+    # 判断阶段不加锁：逐件查询信号期间锁住全部在跟商品，会让采集聚合等到超时。
     products = list(await session.scalars(
-        select(Product).where(Product.monitor_status == "watching").with_for_update()
+        select(Product).where(Product.monitor_status == "watching").order_by(Product.id)
     ))
     archived = 0
     deadline = now - timedelta(days=QUIET_DAYS)
@@ -477,8 +495,13 @@ async def archive_quiet_products(session: AsyncSession, *, now: datetime | None 
         times = [signal.occurred_at for signal, _ in rows if signal.occurred_at]
         baseline = max([*times, product.monitor_started_at or product.created_at])
         if baseline is not None and baseline <= deadline:
-            await archive_product(session, product, now=now)
-            archived += 1
+            current = await session.scalar(select(Product).where(
+                Product.id == product.id, Product.monitor_status == "watching",
+            ).with_for_update().execution_options(populate_existing=True))
+            if current is not None:
+                await archive_product(session, current, now=now)
+                archived += 1
+                await session.commit()
     await session.commit()
     return {"checked": len(products), "archived": archived}
 

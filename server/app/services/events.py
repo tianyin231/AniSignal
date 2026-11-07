@@ -21,8 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.clock import format_beijing, to_naive_utc, utcnow
-from app.communities import DEFAULT_COMMUNITY, game_name_boilerplate
-from app.services.product_matching import matches_product_text
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, game_name_boilerplate
+from app.services.product_matching import product_search_text, product_terms
 from app.models import (
     ANNOUNCE_CATEGORIES,
     Category,
@@ -73,6 +73,13 @@ class ContentRow:
     source_external_id: str | None
     community: str = DEFAULT_COMMUNITY
     content_version: int = 1
+    search_text: str | None = None  # 商品匹配用的预处理文本，首次用到时才计算
+
+    @property
+    def product_text(self) -> str:
+        if self.search_text is None:
+            self.search_text = product_search_text(self.title, self.text)
+        return self.search_text
 
 
 @dataclass
@@ -118,8 +125,8 @@ def _build_facts(category: str, cluster: list, product=None) -> list:
     return facts
 
 
-async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
-    """全部内容 + 最新版本（含分类）+ 来源身份。"""
+async def load_classified_contents(session: AsyncSession, *, communities: set[str] | None = None) -> list[ContentRow]:
+    """全部内容或指定分区 + 最新版本（含分类）+ 来源身份。"""
     excluded_ids = set(
         await session.scalars(
             select(Evidence.raw_content_id).where(Evidence.role == "excluded")
@@ -135,7 +142,7 @@ async def load_classified_contents(session: AsyncSession) -> list[ContentRow]:
         .join(latest_versions, latest_versions.c.rid == RawContent.id)
         .join(ContentVersion, (ContentVersion.raw_content_id == RawContent.id) & (ContentVersion.version == latest_versions.c.v))
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(RawContent.hidden.is_(False))
+        .where(RawContent.hidden.is_(False), *([RawContent.community.in_(communities)] if communities is not None else []))
         .execution_options(populate_existing=True)
         .order_by(RawContent.id, ContentVersion.version.desc())
     )
@@ -325,13 +332,19 @@ async def run_aggregation(session: AsyncSession, *, product_snapshots: dict | No
     await session.execute(select(SiteSetting.key).where(SiteSetting.key == key).with_for_update())
     stats = AggStats()
     await seed_defaults(session, commit=False)
-    contents = await load_classified_contents(session)
+    # 资讯分区走独立编辑链路，不参与事件和商品归并。
+    contents = await load_classified_contents(session, communities={key for key, meta in COMMUNITIES.items() if meta.domain == "game"})
 
     await _aggregate_official(session, contents, stats)
 
     products = list((await session.execute(select(Product).order_by(Product.id).with_for_update().execution_options(populate_existing=True))).scalars())
+    by_community: dict[str, list[ContentRow]] = {}
+    for row in contents:
+        by_community.setdefault(row.community, []).append(row)
+    links = await load_merch_links(session, contents)
     for product in products:
-        await _aggregate_product(session, product, contents, stats, before=(product_snapshots or {}).get(product.id))
+        await _aggregate_product(session, product, by_community.get(product.community or DEFAULT_COMMUNITY, []), stats,
+                                 before=(product_snapshots or {}).get(product.id), ai_links=links.get(product.id, {}))
     await _backfill_facts(session, stats)
     return stats
 
@@ -595,23 +608,36 @@ async def _reconcile_official_event(
     _add_revision(session, event, stats, "证据对账：" + "，".join(changes))
 
 
+async def load_merch_links(session: AsyncSession, contents: list[ContentRow]) -> dict[int, dict[int, int]]:
+    """AI 判定过的商品 → {内容 → 判定时的版本}。整轮聚合只查一次，不随商品数重复。"""
+    raw_ids = {row.raw_id for row in contents}
+    links: dict[int, dict[int, int]] = {}
+    for scan in await session.scalars(select(MerchScan)):
+        if scan.raw_content_id not in raw_ids:
+            continue
+        fulfillment = (scan.result or {}).get("fulfillment") or {}
+        for signal in fulfillment.get("signals", []):
+            if signal.get("product_id"):
+                links.setdefault(signal["product_id"], {})[scan.raw_content_id] = fulfillment.get("content_version")
+    return links
+
+
 async def _aggregate_product(
     session: AsyncSession, product: Product, contents: list[ContentRow], stats: AggStats,
-    *, before: dict | None = None,
+    *, before: dict | None = None, ai_links: dict[int, int] | None = None,
 ) -> None:
     from app.services.fulfillment import build_fulfillment_snapshot, load_fulfillment_reviews, product_signal_types, sync_product_signals
 
     if before is None:
         before = await build_fulfillment_snapshot(session, product.id)
-    scans = list(await session.scalars(select(MerchScan).where(
-        MerchScan.raw_content_id.in_([row.raw_id for row in contents])))) if contents else []
-    ai_links = {scan.raw_content_id: ((scan.result or {}).get("fulfillment") or {}).get("content_version") for scan in scans
-                if any(item.get("product_id") == product.id for item in ((scan.result or {}).get("fulfillment") or {}).get("signals", []))}
+    if ai_links is None:
+        ai_links = (await load_merch_links(session, contents)).get(product.id, {})
+    terms = product_terms(product.watch_terms or [])
     matched = [
         row
         for row in contents
         if row.community == (product.community or DEFAULT_COMMUNITY)
-        and (_matches_product(row, product) or ai_links.get(row.raw_id) == row.content_version)
+        and (any(term in row.product_text for term in terms) or ai_links.get(row.raw_id) == row.content_version)
     ]
     signal_categories = {
         "presale_open": "presale", "balance_open": "balance", "delayed": "delay",
@@ -701,10 +727,6 @@ async def _aggregate_product(
 
     # 履约 V2：事件继续负责聚合，公开商品状态只读取经审核的结构化信号。
     await sync_product_signals(session, product.id, before=before)
-
-
-def _matches_product(row: ContentRow, product: Product) -> bool:
-    return matches_product_text(row.title, row.text, product.watch_terms or [])
 
 
 def _product_confidence(category: str, items: list[ContentRow]) -> tuple[str, str]:

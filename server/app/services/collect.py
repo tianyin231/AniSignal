@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import utcnow
 from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community, official_merch_bilibili_sources
 from app.collectors.base import CollectorDeferred, CollectorError, platform_slot
-from app.collectors.bilibili import BilibiliCollector
+from app.collectors.bilibili import BilibiliCollector, merge_detail_text
 from app.collectors.kuro import KuroCollector
 from app.collectors.miyoushe import MiyousheCollector
 from app.collectors.youtube_api import YoutubeApiCollector
@@ -250,9 +250,7 @@ async def _backfill_empty_draw_dynamics(
         if not ((rich.get("text") or "").strip() or rich.get("pics")):
             continue
         item = dict(raw)
-        original_text, detail_text = (raw.get("text") or "").strip(), (rich.get("text") or "").strip()
-        body = (original_text + "\n\n" + detail_text if forwarded and original_text and detail_text
-                and detail_text not in original_text else detail_text or original_text)
+        body = merge_detail_text(raw.get("text"), rich.get("text"), forwarded=bool(forwarded))
         item.update({"id": external_id, "text": body, "pics": rich.get("pics") or []})
         enriched_by_community.setdefault(community or DEFAULT_COMMUNITY, []).append(item)
         touched.append(rid)
