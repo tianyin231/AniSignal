@@ -315,13 +315,18 @@ _CATEGORY_CONCLUSION = {
 }
 
 
-async def run_aggregation(session: AsyncSession, *, product_snapshots: dict | None = None) -> AggStats:
-    """全量扫描并维护事件（ensure 语义），调用方负责 commit。"""
-    from app.services.classify import seed_defaults
+AGGREGATION_LOCK_KEY = "event_aggregation_lock"
 
-    # 多个采集任务会同时扫描全库。用事务行锁串行对账，锁随调用方 commit/rollback 释放，
-    # 防止两轮都读到“证据不存在”再重复插入；不串行网络采集或模型调用。
-    key = "event_aggregation_lock"
+
+async def acquire_aggregation_lock(session: AsyncSession) -> None:
+    """取得事件聚合的事务行锁，随调用方 commit/rollback 释放；同一事务内重复取得无副作用。
+
+    多个采集任务会同时扫描全库，用这把锁串行对账，防止两轮都读到“证据不存在”再重复插入。
+    既要锁商品行又要聚合的事务，必须在锁商品之前先取这把锁：聚合固定按“聚合锁 → 全部商品行”加锁，
+    顺序反过来就会互相等待成死锁。可重复读的快照建立在事务里第一次普通读，
+    所以也要在普通读之前取锁，才能看到别的聚合刚提交的证据。
+    """
+    key = AGGREGATION_LOCK_KEY
     if session.get_bind().dialect.name == "mysql":
         from sqlalchemy.dialects.mysql import insert
         statement = insert(SiteSetting).values(key=key, value={})
@@ -330,6 +335,14 @@ async def run_aggregation(session: AsyncSession, *, product_snapshots: dict | No
         from sqlalchemy.dialects.sqlite import insert
         await session.execute(insert(SiteSetting).values(key=key, value={}).on_conflict_do_nothing())
     await session.execute(select(SiteSetting.key).where(SiteSetting.key == key).with_for_update())
+
+
+async def run_aggregation(session: AsyncSession, *, product_snapshots: dict | None = None) -> AggStats:
+    """全量扫描并维护事件（ensure 语义），调用方负责 commit。"""
+    from app.services.classify import seed_defaults
+
+    # 不串行网络采集或模型调用，只串行对账本身。
+    await acquire_aggregation_lock(session)
     stats = AggStats()
     await seed_defaults(session, commit=False)
     # 资讯分区走独立编辑链路，不参与事件和商品归并。

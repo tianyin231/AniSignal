@@ -295,6 +295,14 @@ async def discover_merch_candidates(
             items = parse_merch_response(response, title=title, text=text, published_at=raw.published_at or raw.collected_at,
                                          image_ids={image["id"] for image in images})
             confirmed = [item for item in items if item.confidence >= 85]
+            from app.services.fulfillment_automation import SIGNAL_TYPES
+            from app.services.product_matching import matches_product_text
+            matched_ids = {p.id for p in catalog if matches_product_text(title, text, p.watch_terms or [])}
+            if confirmed or matched_ids:
+                # 下面会锁商品行并聚合。先取聚合锁且放在本事务第一次读库之前：
+                # 加锁顺序与采集后的聚合一致才不会死锁，快照晚于锁才看得到别的聚合刚写的证据。
+                from app.services.events import acquire_aggregation_lock
+                await acquire_aggregation_lock(session)
             # 模型运行期间可能有内容修订/下架，旧版本不能落地建档。
             current = await session.scalar(select(ContentVersion.version).where(
                 ContentVersion.raw_content_id == raw_id).order_by(ContentVersion.version.desc()).limit(1))
@@ -303,10 +311,7 @@ async def discover_merch_candidates(
                 await record_usage(session, task="discover_products", config=config, usage=usage,
                                    duration_ms=int((time.monotonic() - started) * 1000), ref_id=raw_id)
                 continue
-            from app.services.fulfillment_automation import SIGNAL_TYPES
-            from app.services.product_matching import matches_product_text
             signals = {}
-            matched_ids = {p.id for p in catalog if matches_product_text(title, text, p.watch_terms or [])}
             new_count = 0
             async with session.begin_nested():
                 ignored = set(await session.scalars(select(ProductCandidate.name).where(
@@ -366,9 +371,11 @@ async def _record_scan_failure(session: AsyncSession, raw_id: int, version: int)
 
 
 async def accept_product_candidate(session: AsyncSession, candidate_id: int) -> Product:
-    from app.services.events import run_aggregation
+    from app.services.events import acquire_aggregation_lock, run_aggregation
     from app.services.product_monitoring import configure_product_monitor
 
+    # 新商品行在提交前会挡住聚合对全部商品的加锁扫描，所以先取聚合锁，保持与聚合相同的加锁顺序。
+    await acquire_aggregation_lock(session)
     candidate = await session.get(ProductCandidate, candidate_id, with_for_update=True)
     if candidate is None:
         raise ValueError("candidate_not_found")

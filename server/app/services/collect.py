@@ -5,6 +5,7 @@ collector 只拿数据，ingest 只管入库，本模块负责任务记录、
 平台礼貌间隔、健康状态与失败退避（"没抓到"必须可见）。
 """
 
+import asyncio
 import logging
 import random
 import re
@@ -36,6 +37,36 @@ from app.services.queue import enqueue_review_jobs
 from app.services.product_matching import matches_product_text
 
 logger = logging.getLogger(__name__)
+
+AGGREGATION_ATTEMPTS = 2
+
+
+def _is_deadlock(exc: BaseException) -> bool:
+    orig = getattr(exc, "orig", None)
+    args = getattr(orig, "args", None) or ()
+    return bool(args) and args[0] == 1213
+
+
+async def _aggregate_with_retry(session: AsyncSession):
+    """InnoDB 选中聚合作为死锁牺牲方时已回滚整个事务；入库在聚合前已单独提交，重跑聚合即可。
+
+    不重跑的话，这一轮新内容的事件摘要、翻译和审核任务都不会入队，后续轮次也不会补。
+    """
+    from sqlalchemy.exc import OperationalError
+
+    from app.services.events import run_aggregation
+
+    for attempt in range(1, AGGREGATION_ATTEMPTS + 1):
+        try:
+            agg = await run_aggregation(session)
+            await session.commit()
+            return agg
+        except OperationalError as exc:
+            if attempt >= AGGREGATION_ATTEMPTS or not _is_deadlock(exc):
+                raise
+            logger.warning("aggregation deadlocked, retrying (attempt %s)", attempt)
+            await session.rollback()
+            await asyncio.sleep(random.uniform(0.5, 2.0))
 
 _MERCH_UPDATE = re.compile(
     r"预售|预订|开售|发售|贩售|售卖|售价|定价|上新|新品|上架|售罄|补货|定金|尾款|补款|"
@@ -395,12 +426,12 @@ async def run_collection(redis, target_id: int) -> dict:
                     logger.exception("official content matching failed")
             if not is_news and (stats.items_new or stats.items_updated or (match_stats and match_stats.decisions)):
                 # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
-                from app.services.events import run_aggregation
-
                 # 先结束旧事务：可重复读下，取到聚合锁后仍读旧快照，看不到上一轮刚写入的证据。
                 await session.commit()
-                agg = await run_aggregation(session)
-                await session.commit()
+                agg = await _aggregate_with_retry(session)
+                # 重试前的回滚会让已加载的对象过期，异步会话里不能再懒加载。
+                target = await session.get(CollectTarget, target_id)
+                run = await session.get(CollectRun, run_id)
                 logger.info(
                     "aggregation: events_created=%s evidences=%s revisions=%s stages=%s",
                     agg.events_created, agg.evidences_added, agg.revisions_written, agg.stage_advances,

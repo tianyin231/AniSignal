@@ -31,6 +31,47 @@ async def test_ingest_new_item(session):
     assert snapshots[0].metrics["view"] == 680
 
 
+async def test_concurrent_insert_of_the_same_item_is_retried_as_an_update(session, monkeypatch):
+    """另一目标刚提交了同一条内容：撞唯一键后换新快照重试，这一条按已存在更新，不等下一轮。"""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services import ingest as ingest_module
+
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    real, calls = ingest_module._ingest_one, []
+
+    async def collide_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise IntegrityError("INSERT INTO raw_contents", {}, Exception(1062, "Duplicate entry"))
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(ingest_module, "_ingest_one", collide_once)
+    stats = await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, title="改过的标题"), dict(VIDEO_RAW, bvid="other")])
+    assert len(calls) == 3
+    assert stats.errors == []
+    assert stats.items_updated == 1 and stats.items_new == 1
+    assert await session.scalar(select(func.count()).select_from(RawContent)) == 2
+
+
+async def test_repeated_collision_fails_only_that_item(session, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services import ingest as ingest_module
+
+    real = ingest_module._ingest_one
+
+    async def collide(session_, normalized, *args, **kwargs):
+        if normalized.external_id == "stuck":
+            raise IntegrityError("INSERT INTO raw_contents", {}, Exception(1062, "Duplicate entry"))
+        return await real(session_, normalized, *args, **kwargs)
+
+    monkeypatch.setattr(ingest_module, "_ingest_one", collide)
+    stats = await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, bvid="stuck"), VIDEO_RAW])
+    assert len(stats.errors) == 1 and "IntegrityError" in stats.errors[0]
+    assert stats.items_new == 1
+
+
 async def test_reparse_can_target_only_selected_contents_and_empty_list_is_noop(session):
     from app.services.classify import seed_defaults
     from app.services.ingest import reparse_contents

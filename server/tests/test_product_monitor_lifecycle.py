@@ -297,5 +297,7 @@ async def test_duplicate_item_in_a_batch_does_not_lose_the_rest(session, monkeyp
     stats = await ingest.ingest_items(session, "bilibili_search", [
         dict(VIDEO_RAW, bvid="BVfirst", aid=1), dict(VIDEO_RAW, bvid="BVsecond", aid=2)])
 
-    assert stats.items_new == 1 and len(stats.errors) == 1
+    # 撞车的那一条换新快照重试后也能入库；一直撞车时只丢这一条，见 test_ingest.py。
+    assert stats.items_new == 2 and stats.errors == []
+    assert await session.scalar(select(RawContent).where(RawContent.external_id == "BVfirst")) is not None
     assert await session.scalar(select(RawContent).where(RawContent.external_id == "BVsecond")) is not None

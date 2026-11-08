@@ -106,6 +106,40 @@ async def test_official_notice_automatically_opens_one_search(session, client, a
     assert any(item["name"] == "菲比手办" for item in tracked)
 
 
+async def test_discovery_takes_the_aggregation_lock_before_locking_products(session, monkeypatch):
+    """聚合按“聚合锁 → 全部商品行”加锁；建档反过来先锁商品再等聚合锁，两边就会互等成死锁。
+
+    锁还要是本事务的第一条语句：可重复读的快照建立在第一次普通读，锁后才读才能看到别的聚合刚写的证据。
+    """
+    from app.services import events
+
+    monkeypatch.setattr(product_discovery, "get_ai_config", AsyncMock(return_value={
+        "base_url": "https://example.com", "api_key": "test", "model": "test"}))
+    monkeypatch.setattr(product_discovery, "chat", AsyncMock(side_effect=[('{"products":[]}', None), (json.dumps({"products": [{
+        "name": "菲比手办", "product_type": "手办", "confidence": 96, "quote": "菲比手办开启预售",
+        "facts": [{"signal_type": "presale_open", "confidence": 96, "quote": "菲比手办开启预售"}],
+    }]}, ensure_ascii=False), None)]))
+    order = []
+    real_lock, real_store = events.acquire_aggregation_lock, product_discovery._store_discovered_product
+
+    async def lock(lock_session):
+        order.append(("lock", lock_session.in_transaction()))
+        await real_lock(lock_session)
+
+    async def store(*args, **kwargs):
+        order.append(("store", None))
+        return await real_store(*args, **kwargs)
+
+    monkeypatch.setattr(events, "acquire_aggregation_lock", lock)
+    monkeypatch.setattr(product_discovery, "_store_discovered_product", store)
+    await _official(session, title="菲比手办开启预售", text="预计八月发货。")
+    # 没有周边、也没命中已有商品的内容不需要排队等聚合锁。
+    await _official(session, title="爱弥斯新衣装展示", external="n2")
+    assert await discover_merch_candidates(session) == {"scanned": 2, "created": 1}
+    assert order[:2] == [("lock", False), ("store", None)]
+    assert ("lock", False) not in order[2:]
+
+
 async def test_ignore_and_archive_leave_the_page_but_stop_the_search(session, client, admin_headers):
     raw = await _official(session, title="秧秧立牌开启预订", text="预售本周开启。", external="n3")
     candidate = ProductCandidate(community="wuwa", name="秧秧立牌", watch_terms=["秧秧立牌"],

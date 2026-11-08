@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
@@ -93,12 +94,21 @@ async def ingest_items(
             logger.warning("parse failed for %s item: %r", fetch_kind, exc)
             continue
         try:
-            # 两个目标会同时抓到同一条内容。保存点让撞车的这一条单独失败，下轮再补，
-            # 否则事务作废，同批其余内容和这轮的健康记录都写不进去。
-            async with session.begin_nested():
-                is_new, changed, content_id, identity = await _ingest_one(
-                    session, normalized, raw, parser_version, rules, community
-                )
+            try:
+                # 两个目标会同时抓到同一条内容。保存点让撞车的这一条单独回滚，
+                # 否则事务作废，同批其余内容和这轮的健康记录都写不进去。
+                async with session.begin_nested():
+                    is_new, changed, content_id, identity = await _ingest_one(
+                        session, normalized, raw, parser_version, rules, community
+                    )
+            except IntegrityError:
+                # 撞唯一键说明对方已提交。可重复读的旧快照看不到那一行，重试前先提交换新快照，
+                # 这一条就按“已存在”更新，不用等下一轮。
+                await session.commit()
+                async with session.begin_nested():
+                    is_new, changed, content_id, identity = await _ingest_one(
+                        session, normalized, raw, parser_version, rules, community
+                    )
             stats.items_new += int(is_new)
             stats.items_updated += int(changed)
             stats.official_items += int(identity == Identity.OFFICIAL)

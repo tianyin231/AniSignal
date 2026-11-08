@@ -395,6 +395,50 @@ async def test_aggregation_starts_in_a_fresh_transaction(session, patched_collec
     assert seen == [False]
 
 
+async def test_aggregation_deadlock_is_retried_and_the_run_still_succeeds(session, patched_collect, monkeypatch):
+    """InnoDB 选中聚合当死锁牺牲方时整笔回滚；不重跑，本轮新内容的摘要、翻译和审核都不会入队。"""
+    from sqlalchemy.exc import OperationalError
+
+    from app.services import events
+
+    target = await _make_target(session)
+    calls = []
+    real = events.run_aggregation
+
+    async def deadlock_once(collect_session):
+        calls.append(collect_session.in_transaction())
+        if len(calls) == 1:
+            raise OperationalError("SELECT products FOR UPDATE", {}, Exception(1213, "Deadlock found"))
+        return await real(collect_session)
+
+    monkeypatch.setattr(events, "run_aggregation", deadlock_once)
+    monkeypatch.setattr(collect_module.random, "uniform", lambda *_: 0)
+    result = await collect_module.run_collection(_FakeRedis(), target.id)
+    assert calls == [False, False]
+    assert result["status"] == "success"
+    run = await session.get(CollectRun, result["run_id"])
+    assert run.status == RunStatus.SUCCESS
+    assert run.error is None
+
+
+@pytest.mark.parametrize("code", [1205, 2013])
+async def test_other_database_errors_are_not_retried_as_deadlocks(session, monkeypatch, code):
+    from sqlalchemy.exc import OperationalError
+
+    from app.services import events
+
+    calls = []
+
+    async def fail(collect_session):
+        calls.append(1)
+        raise OperationalError("SELECT", {}, Exception(code, "lock wait timeout"))
+
+    monkeypatch.setattr(events, "run_aggregation", fail)
+    with pytest.raises(OperationalError):
+        await collect_module._aggregate_with_retry(session)
+    assert calls == [1]
+
+
 async def test_request_accounting_failure_keeps_the_health_record(session, patched_collect, monkeypatch):
     from app.services import custom_policy
 
