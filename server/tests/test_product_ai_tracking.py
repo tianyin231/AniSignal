@@ -12,7 +12,7 @@ from app.models import CollectTarget, ContentVersion, MerchScan, Product, Produc
 from app.services import curation, product_discovery as discovery
 from app.services.events import run_aggregation
 from app.services.fulfillment import build_fulfillment_snapshot
-from app.services.product_discovery_ai import parse_merch_response
+from app.services.product_discovery_ai import is_generic_product_name, parse_merch_response
 from app.services.product_monitoring import configure_product_monitor
 from app.services.queue import LocalRedis
 from app.services.fulfillment_review_sweep import enqueue_pending_fulfillment_reviews
@@ -178,6 +178,40 @@ async def test_stale_ai_response_cannot_create_a_product_after_content_is_revise
     ai.side_effect = revised
     assert (await discovery.discover_merch_candidates(session))["created"] == 0
     assert not list(await session.scalars(select(Product)))
+
+
+@pytest.mark.parametrize("name,product_type,community", [
+    ("Q版手办", "手办", "wuwa"),
+    ("6比例手办", "手办", "wuwa"),
+    ("随机角色周边", "角色周边", "hsr"),
+    ("绝区零随机角色立牌", "立牌", "zzz"),
+    ("蓝色星原随机周边", "周边", "promilia"),
+])
+def test_names_without_a_specific_subject_are_generic(name, product_type, community):
+    assert is_generic_product_name(name, product_type, community)
+
+
+@pytest.mark.parametrize("name,product_type,community", [
+    ("鸣潮 茶歇时光系列 Q版手办 今汐", "手办", "wuwa"),
+    ("「卡提希娅」1/6比例手办", "手办", "wuwa"),
+    ("北通联名手柄", "手柄", "wuwa"),
+    ("游园熠刻系列旋转亚克力立牌 随机款", "立牌", "zzz"),
+    ("菲比手办", "手办", None),
+    ("椿手办", "手办", "wuwa"),
+])
+def test_names_with_a_character_series_or_brand_are_kept(name, product_type, community):
+    assert not is_generic_product_name(name, product_type, community)
+
+
+async def test_lottery_prize_is_dropped_while_the_real_product_in_the_same_post_is_created(session, ai):
+    await _official(session, title="周年周边上新", text="菲比手办开启预售，售价399元。转发抽奖送出随机角色周边一份。")
+    ai.return_value = (response(
+        merch(quote="菲比手办开启预售", price_note="399元"),
+        merch("随机角色周边", quote="随机角色周边", product_type="周边"),
+    ), None)
+    assert await discovery.discover_merch_candidates(session) == {"scanned": 1, "created": 1}
+    assert [p.name for p in await session.scalars(select(Product))] == ["菲比手办"]
+    assert [c.name for c in await session.scalars(select(ProductCandidate))] == ["菲比手办"]
 
 
 def test_shipping_month_uses_the_end_of_the_window_and_rejects_invented_dates():

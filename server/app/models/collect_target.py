@@ -17,7 +17,8 @@ def supports_view_threshold(platform: str, target_type: str) -> bool:
 class CollectTarget(Base):
     __tablename__ = "collect_targets"
     __table_args__ = (
-        UniqueConstraint("platform", "target_type", "target_value", name="uq_target"),
+        # 同一频道或关键词可以分属多个分区（0028 起数据库就是这个唯一键）。
+        UniqueConstraint("platform", "target_type", "target_value", "community", name="uq_target_community"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

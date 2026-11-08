@@ -293,7 +293,7 @@ async def discover_merch_candidates(
             message = await merch_message(payload, images)
             response, usage = await chat(config, MERCH_SYSTEM, message, json_mode=True)
             items = parse_merch_response(response, title=title, text=text, published_at=raw.published_at or raw.collected_at,
-                                         image_ids={image["id"] for image in images})
+                                         image_ids={image["id"] for image in images}, community=community)
             confirmed = [item for item in items if item.confidence >= 85]
             from app.services.fulfillment_automation import SIGNAL_TYPES
             from app.services.product_matching import matches_product_text

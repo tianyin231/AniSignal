@@ -22,6 +22,7 @@ MERCH_SYSTEM = """你是游戏周边商品编辑，负责自动建档与持续�
 "price_note":null,"presale_note":null,"balance_note":null,"ship_note":null,
 "expected_ship_at":null,"date_quote":null,"search_keyword":"菲比 手办","image_ids":[],"facts":[{"signal_type":"presale_open","confidence":95,"quote":"该商品预售的连续原文"}]}]}。
 没有具体商品时 products=[]。name 使用原文商品名，aliases 给出原文叫法和一两个明确指向同款的常用简称，均须包含品类，禁止只填角色名。
+name 必须带上能把它和同类商品区分开的具体对象：角色、系列、联名对象或原文型号，例如“茶歇时光系列 Q版手办 今汐”“「卡提希娅」1/6比例手办”；原文把对象和品类分开写时要合在一起。只剩品类或泛称的名字（如“Q版手办”“1/6比例手办”“随机角色周边”“角色立牌”）不是商品，抽奖送出的随机奖品也不是商品。
 existing_products 是本分区已有档案。同款跨平台、翻译名和简称合并到 existing_product_id；不同型号、代际、联名对象、再版或发售批次不可误合并。无法确认同款时不填写已有 id。
 quote 必须逐字连续摘自 title 或 text 并包含商品标识；不能拼接字段。confidence 是商品识别的置信度，明确发布就直接确认，不泛化为待查证。
 price_note、presale_note、balance_note、ship_note 只能填写该件商品对应的原文短摘录，不能把相邻商品的价格和日期抄过来；没有就 null。
@@ -68,7 +69,28 @@ def compact_name(value: str) -> str:
                    if not c.isspace() and not unicodedata.category(c).startswith(("P", "S")))
 
 
-def parse_merch_response(response: str, *, title: str, text: str, published_at: datetime, image_ids: set[int] | None = None) -> list[MerchItem]:
+# 只剩这些词（加上品类和游戏名）的名字没有指向具体商品，例如“Q版手办”“随机角色周边”。
+_GENERIC_NAME_PARTS = re.compile(r"\d+|q版|比例|随机|角色|周边|主题|联名|限定|官方|系列|套装|礼盒|全套|款式|款|新品|商品|产品|一份|若干")
+
+
+def is_generic_product_name(name: str, product_type: str, community: str | None = None) -> bool:
+    """名称去掉品类、游戏名和泛称后什么都不剩，就无法和同类商品区分；“椿手办”这种单字角色名仍算具体。"""
+    from app.communities import get_community
+
+    key = compact_name(name)
+    removals = [product_type]
+    if community:
+        meta = get_community(community)
+        # HSR、ZZZ 这类短英文缩写去掉时会误伤英文型号，只去掉完整游戏名。
+        removals += [*meta.game_names, *(a for a in meta.source_aliases if not (a.isascii() and len(a) <= 4))]
+    for word in sorted({compact_name(w) for w in removals if w}, key=len, reverse=True):
+        if word:
+            key = key.replace(word, "")
+    return not _GENERIC_NAME_PARTS.sub("", key)
+
+
+def parse_merch_response(response: str, *, title: str, text: str, published_at: datetime, image_ids: set[int] | None = None,
+                         community: str | None = None) -> list[MerchItem]:
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", response.strip(), flags=re.I)
     result = MerchResult.model_validate(json.loads(cleaned))
     for item in result.products:
@@ -112,4 +134,5 @@ def parse_merch_response(response: str, *, title: str, text: str, published_at: 
             if not supported:
                 raise ValueError("发货日期缺少原文依据")
             item.expected_ship_at = to_naive_utc(value)
-    return result.products
+    # 泛称不是商品：只丢掉这一件，同一公告里的具体商品照常建档。
+    return [item for item in result.products if not is_generic_product_name(item.name, item.product_type, community)]
