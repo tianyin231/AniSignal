@@ -70,23 +70,23 @@ async def test_trending_filter_before_top_five_and_keep_public_ranking(session, 
     assert [item["id"] for item in await select_trending(session, 5, community="wuwa")] == ids[:5]
 
 
-@pytest.mark.parametrize("hourly_limit,gap,item_count,late_minutes,expected_messages", [
-    (1, 20, 2, 0, 1),
-    (0, 60, 2, 0, 1),
-    (2, 20, 2, 100, 1),
-    (0, 120, 1, 0, 1),
-    (2, 20, 2, 0, 3),
-    (1, 20, 1, 0, 2),
+@pytest.mark.parametrize("gap,item_count,late_minutes,expected_messages", [
+    (20, 2, 0, 3),
+    (60, 2, 0, 1),
+    (20, 2, 100, 1),
+    (120, 1, 0, 1),
+    (0, 2, 100, 3),
+    (20, 1, 0, 2),
 ])
 async def test_split_daily_falls_back_to_complete_digest_when_window_is_too_short(
-    session, monkeypatch, hourly_limit, gap, item_count, late_minutes, expected_messages,
+    session, monkeypatch, gap, item_count, late_minutes, expected_messages,
 ):
     due = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    target = BotTarget(name="限频早报", umo="qq:GroupMessage:daily", enabled=True,
+    target = BotTarget(name="拆条早报", umo="qq:GroupMessage:daily", enabled=True,
                        created_at=due - timedelta(days=1), last_scan_at=due,
                        config={"community": "wuwa", "daily_enabled": True, "daily_time": "08:00",
                                "daily_style": "split", "updates_enabled": False, "delivery_mode": "astrbot",
-                               "hourly_limit": hourly_limit, "min_push_interval_minutes": gap,
+                               "min_push_interval_minutes": gap,
                                "quiet_start": 0, "quiet_end": 0})
     session.add(target)
     await session.commit()

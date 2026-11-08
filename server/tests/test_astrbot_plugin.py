@@ -255,6 +255,9 @@ def test_new_install_defaults_are_portable_and_mask_the_access_key():
     session=schema['targets']['templates']['session']['items']
     assert not {'ai_prompt','ai_provider_id'}.intersection(session['interaction']['items'])
     assert session['presentation']['items']['show_details_hint']['default'] is False
+    notifications = session['notifications']['items']
+    assert 'hourly_limit' not in notifications
+    assert notifications['min_push_interval_minutes']['default'] == 0
 
 
 def test_repository_install_manifests_match_standalone_plugin(plugin):
@@ -270,6 +273,7 @@ def test_repository_install_manifests_match_standalone_plugin(plugin):
 
 def test_legacy_cleanup_keeps_connection_and_session_configuration(plugin):
     config = {'base_url':'http://example.test', 'tools_key':'test-key', 'targets':[{'umo':'qq:GroupMessage:g',
+              'notifications':{'hourly_limit':2,'min_push_interval_minutes':15},
               'interaction':{'ai_prompt':'旧人格覆盖','ai_provider_id':'old-model','tools':['news']},
               'presentation':{'notification_template':'{content}'}}],
               'card_font_path':'/fonts/custom.ttf', 'legacy_cat_behavior':False, 'cat_reply_keywords':['猫']}
@@ -277,6 +281,7 @@ def test_legacy_cleanup_keeps_connection_and_session_configuration(plugin):
     assert clean(config) is True
     assert config == {'base_url':'http://example.test', 'tools_key':'test-key',
                       'targets':[{'umo':'qq:GroupMessage:g','interaction':{'tools':['news']},
+                                  'notifications':{'min_push_interval_minutes':15},
                                   'presentation':{'notification_template':'{content}'}}], 'card_font_path':'/fonts/custom.ttf'}
     assert clean(config) is False
 

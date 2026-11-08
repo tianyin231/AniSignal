@@ -101,17 +101,6 @@ def _is_quiet(local_hour: int, config: dict) -> bool:
     return local_hour >= start or local_hour < end
 
 
-async def _hourly_updates_count(session: AsyncSession, target_id: int, now: datetime) -> int:
-    return await session.scalar(
-        select(func.count()).select_from(BotDelivery).where(
-            BotDelivery.target_id == target_id,
-            BotDelivery.kind.in_(["daily", "updates", "critical", "calendar"]),
-            BotDelivery.status.in_(["sending", "accepted", "unknown"]),
-            BotDelivery.updated_at >= now - timedelta(hours=1),
-        )
-    ) or 0
-
-
 def classify_item(item: dict) -> str:
     """critical 立即推（可穿透静默）；normal 进合并窗口。"""
     if item.get("importance"):
@@ -754,7 +743,7 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
 
 
 async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, quiet: bool, quiet_critical: bool,
-                              hourly_limit: int, max_images: int, congested: bool = False) -> None:
+                              max_images: int, congested: bool = False) -> None:
     target = await resolve_target(session, target, "updates")
     known = await known_notification_keys(session, target.id, now)
     previously_known = set(known)
@@ -779,10 +768,8 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
     can_send = True
     if quiet or congested:
         can_send = False
-    elif hourly_limit and await _hourly_updates_count(session, target.id, now) >= hourly_limit:
-        can_send = False
     if can_send:
-        # 名额有限时先发最新的；较早的继续留在缓冲，超过发送窗口后自然淘汰。
+        # 合并时先发最新内容，未进入本批的消息留在缓冲中。
         items = sorted(buffer["items"], key=lambda item: _published(item.get("published_at")) or datetime.min, reverse=True)
         fresh_official = [item for item in items if item.get("identity") == "official" and not item.get("is_followup")]
         brief = await build_shared_brief(session, items, now)
@@ -827,7 +814,6 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
         quiet = _is_quiet(local.hour, config)
         quiet_critical = bool(config.get("quiet_critical", False))
         merge_minutes = int(config.get("merge_minutes", 0) or 0)
-        hourly_limit = int(config.get("hourly_limit", 2) or 0)
         max_images = image_limit(config)
         if config.get("reminders_enabled"):
             reminder_ids = list(await session.scalars(select(BotReminder.id).where(
@@ -853,10 +839,10 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     style = config.get("daily_style", "compact")
                     covers = collect_images(items, max_images)
                     parts = min(len(items), 2)
-                    gap = int(config.get("min_push_interval_minutes", 20) or 0)
-                    split_minutes = max(parts * gap, (parts // hourly_limit) * 60 if hourly_limit else 0)
+                    gap = int(config.get("min_push_interval_minutes", 0) or 0)
+                    split_minutes = parts * gap
                     remaining_minutes = (due + timedelta(hours=2) - now).total_seconds() / 60
-                    # 限频下发不完的拆条改为一条完整早报，不让最后的重点过期丢失。
+                    # 用户配置的间隔下发不完时，改发一条完整早报。
                     if style == "split" and items and split_minutes < remaining_minutes:
                         head = payload["text"].split("\n", 2)[0]
                         lifespan = {"scheduled_at": due.isoformat(), "expires_at": (due + timedelta(hours=2)).isoformat()}
@@ -901,8 +887,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     critical_items.append(item)
                 else:
                     normal_items.append(item)
-            # 空闲时单条立刻发；同轮多条、免打扰、额度用尽或已有待发时进缓冲，下个名额合并发最新的，
-            # 否则每条独占一个名额，夜间积压要到下午才能发完，还会让早报被判成重复。
+            # 空闲时单条立刻发；同轮多条、免打扰、尚未到配置的推送时间或已有待发时，合并缓冲内容。
             hold_updates = (merge_minutes > 0 or quiet or len(normal_items) > 1 or bool(buffer.get("items"))
                             or await delivery_congested(session, target, now))
             for kind, immediate in (("critical", critical_items), ("updates", [] if hold_updates else normal_items)):
@@ -937,7 +922,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                 buffer["flush_at"] = now.isoformat()
             await _flush_merge_buffer(
                 session, target, buffer, now,
-                quiet=quiet, quiet_critical=quiet_critical, hourly_limit=hourly_limit, max_images=max_images,
+                quiet=quiet, quiet_critical=quiet_critical, max_images=max_images,
                 congested=await delivery_congested(session, target, now),
             )
         elif buffer.get("items"):

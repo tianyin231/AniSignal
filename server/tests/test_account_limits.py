@@ -84,7 +84,7 @@ async def test_mail_and_bot_share_daily_budget_and_failures_count(client, sessio
     user.notification_enabled = True
     await set_setting(session, 'custom_feed_policy', {'daily_notifications_per_user': 2})
     _, key = await issue(client, cookie)
-    config = {**settings(), 'reminders_enabled': True, 'hourly_limit': 0, 'min_push_interval_minutes': 0}
+    config = {**settings(), 'reminders_enabled': True, 'min_push_interval_minutes': 0}
     response = await client.post('/api/bot/configuration', headers=key, json={'targets': [config]})
     target_id = response.json()['targets'][0]['id']
     mail = NotificationDelivery(user_id=user.id, kind='custom', source='schedule', period_date=datetime.now().date(),

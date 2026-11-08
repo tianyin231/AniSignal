@@ -79,7 +79,7 @@ async def test_query_details_recheck_private_monitor_access(client, session, cha
     assert (await client.post("/api/bot/detail", headers=key, json=body)).status_code == 404
 
 
-@pytest.mark.parametrize("blocked_by", ["reminders_disabled", "quiet", "hourly_limit"])
+@pytest.mark.parametrize("blocked_by", ["reminders_disabled", "quiet", "interval"])
 async def test_claim_reaches_other_session_beyond_blocked_first_page(client, session, monkeypatch, blocked_by):
     now = utcnow().replace(hour=16, minute=0, second=0, microsecond=0)
     monkeypatch.setattr("app.api.bot_companion.utcnow", lambda: now)
@@ -92,9 +92,9 @@ async def test_claim_reaches_other_session_beyond_blocked_first_page(client, ses
     elif blocked_by == "quiet":
         blocked.config = {**blocked.config, "quiet_start": 23, "quiet_end": 8}
     else:
-        blocked.config = {**blocked.config, "hourly_limit": 1, "min_push_interval_minutes": 0}
+        blocked.config = {**blocked.config, "min_push_interval_minutes": 20}
         session.add(BotDelivery(target_id=blocked.id, kind="updates", body="刚发过", status="accepted",
-                                dedupe_key="hourly-used", created_at=now, updated_at=now))
+                                dedupe_key="interval-used", created_at=now, updated_at=now))
     kind = "reminder" if blocked_by == "reminders_disabled" else "updates"
     session.add_all([BotDelivery(target_id=blocked.id, kind=kind, body="暂不可投递", dedupe_key=f"blocked:{i}",
                                 created_at=now, updated_at=now) for i in range(101)])

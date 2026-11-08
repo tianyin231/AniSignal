@@ -187,7 +187,7 @@ function cancelReminder(row: Reminder) {
           <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="font-semibold">{{ target.name }}</h3><p class="mt-1 text-sm text-muted">{{ target.client_name }} · {{ target.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ subscriptionLabel(target) }}</p></div><span class="shrink-0 rounded-full px-2 py-1 text-xs" :class="target.enabled ? 'bg-ok/10 text-ok' : 'bg-chip text-muted'">{{ !target.plugin_configured ? '已移除' : target.enabled ? '已启用' : '已暂停' }}</span></div>
           <p class="mono mt-2 truncate text-xs text-muted" :title="target.umo">{{ target.umo.split(':')[0] }} · 尾号 {{ (target.umo.split(':')[2] || '').slice(-8) }}</p>
           <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? '动态推送开启' : '动态推送关闭' }}</p>
-          <p v-if="target.updates_enabled" class="mt-1 text-xs text-muted">自动消息间隔 {{ target.min_push_interval_minutes }} 分钟 · {{ target.calendar_enabled ? `收尾提醒 ${target.calendar_time}` : '收尾提醒关闭' }}</p>
+          <p v-if="target.updates_enabled" class="mt-1 text-xs text-muted">{{ target.min_push_interval_minutes ? `推送间隔 ${target.min_push_interval_minutes} 分钟` : '即时推送' }} · {{ target.calendar_enabled ? `收尾提醒 ${target.calendar_time}` : '收尾提醒关闭' }}</p>
           <p class="mt-2 text-sm text-muted">{{ target.keywords.length ? target.keywords.join(' / ') : '不限关键词' }}</p>
           <p v-if="target.exclude_keywords?.length" class="mt-2 text-sm text-muted">排除：{{ target.exclude_keywords.join(' / ') }}</p>
           <p class="mt-2 text-sm text-muted">查询工具：{{ target.tools.map(t => toolNames[t]).join('、') || '全部关闭' }}</p>

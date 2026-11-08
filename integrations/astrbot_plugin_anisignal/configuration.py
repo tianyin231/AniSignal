@@ -17,6 +17,10 @@ def cleanup_legacy_configuration(config):
         config["base_url"] = "https://anisignal.xyz"
         changed = True
     for target in config.get("targets", []):
+        notifications = target.get("notifications", {})
+        if "hourly_limit" in notifications:
+            notifications.pop("hourly_limit")
+            changed = True
         interaction = target.get("interaction", {})
         for key in ("ai_prompt", "ai_provider_id"):
             if key in interaction:

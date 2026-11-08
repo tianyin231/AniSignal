@@ -140,7 +140,7 @@ async def test_scoped_queries_exclude_hidden_and_old_updates(session, monkeypatc
 async def test_merge_window_batches_normal_updates(session, monkeypatch):
     now = datetime(2026, 9, 13, 4, 0)  # 北京 12:00
     row = await target(session, community='wuwa', daily_enabled=False, updates_enabled=True,
-                       quiet_start=0, quiet_end=0, merge_minutes=5, hourly_limit=0, max_images=2)
+                       quiet_start=0, quiet_end=0, merge_minutes=5, max_images=2)
     row.last_scan_at = now - timedelta(minutes=10)
     source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
     session.add(source)

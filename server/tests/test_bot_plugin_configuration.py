@@ -22,6 +22,13 @@ def target(name='测试会话', umo='qq:GroupMessage:shared', **settings):
                       delivery_mode='astrbot', **settings).model_dump()
 
 
+def test_notification_interval_defaults_to_immediate_and_accepts_custom_minutes():
+    assert target()['min_push_interval_minutes'] == 0
+    configured = target(min_push_interval_minutes=180, hourly_limit=1)
+    assert configured['min_push_interval_minutes'] == 180
+    assert 'hourly_limit' not in configured
+
+
 async def test_instances_can_use_same_umo_without_reading_each_other(client, admin_headers, session):
     a, headers_a = await access(client, admin_headers, '机器人 A')
     b, headers_b = await access(client, admin_headers, '机器人 B')

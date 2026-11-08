@@ -1657,26 +1657,11 @@
                   "step": 1
                 }
               },
-              "hourly_limit": {
-                "description": "每小时自动消息上限",
-                "type": "int",
-                "default": 2,
-                "slider": {
-                  "min": 0,
-                  "max": 50,
-                  "step": 1
-                },
-                "hint": "0 仅取消本会话的小时限制；定时提醒仍可发送，但均受账号每日通知额度约束。"
-              },
               "min_push_interval_minutes": {
-                "description": "自动消息最小间隔（分钟）",
+                "description": "推送间隔（分钟）",
                 "type": "int",
-                "default": 20,
-                "slider": {
-                  "min": 0,
-                  "max": 120,
-                  "step": 1
-                }
+                "default": 0,
+                "hint": "0 表示立即发送；可按本会话需要填写非负分钟数。"
               },
               "daily_style": {
                 "description": "早报发送方式",
