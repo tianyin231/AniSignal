@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
         await queue.aclose()
 
 
-app = FastAPI(title="AniSignal API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="AniSignal API", version="1.0.0", lifespan=lifespan)
 
 # 跨域来源由 ANISIGNAL_CORS_ORIGINS 配置（本地 dev + 部署的 web 源）
 app.add_middleware(
