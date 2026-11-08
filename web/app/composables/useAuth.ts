@@ -1,5 +1,5 @@
 /**
- * 账号状态：客户端拉取 /api/auth/me（cookie 同源自动携带）。
+ * 账号状态：客户端拉取 /api/auth/session（cookie 同源自动携带）；未登录时返回 user=null，访客控制台不报 401。
  */
 import { safeRedirect } from '~/utils/safe-redirect'
 
@@ -26,7 +26,7 @@ export function useAuth() {
     if (import.meta.client && pendingMe) return pendingMe
     const run = (async () => {
       try {
-        user.value = await $fetch<AuthUser>('/api/auth/me')
+        user.value = (await $fetch<{ user: AuthUser | null }>('/api/auth/session')).user
       } catch {
         user.value = null
       } finally {

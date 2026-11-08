@@ -57,11 +57,19 @@ async def test_full_register_login_flow(client, session):
     assert resp.status_code == 200
     assert resp.json()["email"] == "user@example.com"
 
-    # 登出后再 me → 401
+    resp = await client.get("/api/auth/session")
+    assert resp.status_code == 200
+    assert resp.json()["user"]["email"] == "user@example.com"
+    assert resp.headers["cache-control"] == "no-store"
+
+    # 登出后再 me → 401；页面用的登录态接口仍是 200，只是没有用户
     resp = await client.post("/api/auth/logout")
     assert resp.status_code == 200
     resp = await client.get("/api/auth/me")
     assert resp.status_code == 401
+    resp = await client.get("/api/auth/session")
+    assert resp.status_code == 200
+    assert resp.json() == {"user": None}
 
 
 async def test_login_wrong_password_and_lockout(client, session):

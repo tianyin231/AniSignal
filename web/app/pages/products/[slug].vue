@@ -38,7 +38,24 @@ useVisibleRefresh(() => Promise.all([
   signalsRequest.refresh({ dedupe: 'defer' }),
 ]))
 
-useSeoMeta({ title: () => `${product.value.name} · 商品` })
+// 分享到群聊 / 社媒时的卡片：商品自身的分区、官方说明与开箱进展，有商品图就用商品图。
+const seoDescription = computed(() => {
+  const p = product.value
+  const brief = p.brief
+  const parts = [
+    `${communityMeta.value?.label ?? ''}周边${p.monitor_status === 'archived' ? '（已归档）' : ''}`,
+    brief?.official_text || p.price_note,
+    brief?.unboxing_accounts ? `${brief.unboxing_accounts} 个账号晒出实物` : null,
+    brief?.quality_accounts ? `${brief.quality_accounts} 个账号反馈质量问题` : null,
+  ]
+  return parts.filter(Boolean).join(' · ').replace(/\s+/g, ' ').slice(0, 120)
+})
+useSeoMeta({
+  title: () => `${product.value.name} · 商品`,
+  description: seoDescription,
+  ogDescription: seoDescription,
+  ogImage: () => product.value.images?.[0] || undefined,
+})
 </script>
 
 <template>

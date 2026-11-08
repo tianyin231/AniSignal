@@ -42,7 +42,7 @@ const list = computed(() => (data.value?.items ?? []).map(toRawItem))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 const goPage = (value: number) => router.replace({ query: { ...route.query, page: value > 1 ? value : undefined } })
 
-useSeoMeta({ title: '官方动态' })
+useSeoMeta({ title: '官方动态', description: '各游戏官方账号与官网公告的最新动态，汇总在一处。' })
 </script>
 
 <template>

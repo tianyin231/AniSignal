@@ -31,7 +31,8 @@ const { active } = useActiveChannel()
 // 其余页面跟随当前高亮的频道（详情页即内容所属分区），避免在星铁事件旁展示鸣潮商品
 const scope = computed(() => {
   if (route.query.community === 'all' || (route.path === '/' && !route.query.community)) return 'all'
-  return communityMeta(active.value) ? active.value! : community.value
+  if (communityMeta(active.value)) return active.value!
+  return community.value === 'ai' ? 'all' : community.value
 })
 const overviewTo = computed(() => ({ path: '/products', query: { community: scope.value } }))
 const fetchedAt = useState<Record<string, number>>('status-products-fetched-at', () => ({}))

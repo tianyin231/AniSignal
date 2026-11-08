@@ -164,10 +164,15 @@ export function useActiveChannel() {
     }
     if (queryKey) return queryKey
     if (query === 'all' || route.path === '/calendar') return null
+    // 与 useCommunityScope({ gameOnly }) 一致：从 AI 频道过来时列表看的是跨分区，顶栏不能还亮着 AI。
+    if (community.value === 'ai' && GAME_ONLY_PATH.test(route.path)) return null
     return community.value
   })
   return { active }
 }
+
+/** 只在游戏分区产生内容的栏目（事件、商品） */
+const GAME_ONLY_PATH = /^\/(events|products)(\/|$)/
 
 /** 内容 / 事件详情页：URL 不带分区，由页面 usePageCommunity 声明 */
 const DETAIL_PATH = /^\/(contents|events)\/[^/]+$/

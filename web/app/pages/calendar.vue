@@ -6,7 +6,7 @@ import { beijingDay, calendarDays, shiftCalendarMonth, type CalendarMilestone } 
 import { fmtTime } from '~/utils/admin-types'
 import { decodeEntities } from '~/utils/text'
 
-useSeoMeta({ title: '活动日历 · AniSignal' })
+useSeoMeta({ title: '活动日历 · AniSignal', description: '游戏活动、版本更新、周边预售与抽奖截止的时间表。' })
 
 const route = useRoute()
 const router = useRouter()

@@ -215,7 +215,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => timer && clearInterval(timer))
 
-useSeoMeta({ title: '数据统计' })
+useSeoMeta({ title: '数据统计', description: '采集量、事件与商品追踪的统计概览。' })
 </script>
 
 <template>

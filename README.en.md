@@ -14,7 +14,7 @@ A self-hosted cross-platform signal desk and event tracking radar. Consolidate p
 <img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-00DC82?style=flat-square&logo=nuxt&logoColor=white">
 <img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind-CSS%204-38BDF8?style=flat-square&logo=tailwindcss&logoColor=white">
 <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white">
-<img alt="MySQL 8" src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white">
+<img alt="MySQL 8.4" src="https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white">
 <img alt="Redis 7" src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white">
 <a href="https://github.com/tianyin231/AniSignal/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
 <img alt="Self-hosted" src="https://img.shields.io/badge/Self--hosted-7C3AED?style=flat-square">
@@ -43,7 +43,7 @@ Designed under the "Signal Desk" design system with dark mode and dynamic backdr
 | Module | Purpose and Value |
 | :--- | :--- |
 | **Multi-source Ingestion** | Ingestion from Bilibili (`bili` CLI wrapper, dynamic feeds, video search, circuit breakers), YouTube (Data API v3 with RSS fallback), X (low-frequency public sweeping), official game portals and CDNs. Integrated proxy pool and health monitoring. |
-| **Community Partitions** | Native support for Wuthering Waves, Azur Lane, Honkai: Star Rail, Arknights, Genshin Impact, Endfield, NIKKE, and AI News. Supports global cross-partition aggregation alongside isolated game channels. |
+| **Community Partitions** | Native support for 14 game partitions, including Wuthering Waves, Azur Lane, Honkai: Star Rail, Arknights, Genshin Impact, Endfield, Zenless Zone Zero, NIKKE and Infinity Nikki, plus AI News. Supports global cross-partition aggregation alongside isolated game channels. |
 | **Immutable Events Engine** | Raw inputs are immutable and versioned; automatic clustering over 72-hour windows; LLM extraction of structured facts and revision history; preserved human override locking. |
 | **Product Fulfillment Loop** | Automatic discovery of official merchandise from announcements; windowed tracking across review samples, first customer delivery, and quality feedback. |
 | **Personal & Custom Feeds** | Keyword attribution streams over existing collections, plus independent Bilibili UID/keyword monitoring queues with public sharing or private email options. |
@@ -97,7 +97,8 @@ The platform supports both global multi-community views and dedicated channel fe
 *   **Azur Lane**: Official posts, update changelogs, fanwork noise suppression, and collaboration detection.
 *   **Honkai: Star Rail**: Official feed, forward program tracking, community hotspots.
 *   **Arknights**: Official channels, YouTube EN releases, version updates, and event schedules.
-*   **NIKKE, Genshin Impact, Endfield**: Official social accounts, global updates, and custom keyword watches.
+*   **Genshin Impact, Endfield, NIKKE**: Official X accounts, official / global site notices, and official YouTube channels; Genshin and Endfield also include official Bilibili posts and community content.
+*   **Zenless Zone Zero, Infinity Nikki, Petit Planet, Honkai: Nexus Anima, Roco Kingdom, Azur Promilia, Neverness to Everness**: Official Bilibili posts and high-view community content.
 *   **AI News**: Frontier model releases, industry movements, two-pass quality scoring, and automated Chinese translations.
 
 ## Quick Start
@@ -135,10 +136,10 @@ For lightweight local development, run FastAPI with SQLite and an in-process que
 cd server
 uv run python -m app.local
 
-# Frontend (Node 20+ / pnpm)
+# Frontend (Node.js 22 / npm, same as the build image)
 cd web
-pnpm install
-pnpm dev
+npm ci
+npm run dev
 ```
 
 See [Deployment Guide](docs/deployment.md) for full configuration details and environment variables.

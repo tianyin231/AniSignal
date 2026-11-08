@@ -43,13 +43,19 @@ onMounted(() => {
   watch([loaded, user], () => {
     if (loaded.value && !user.value && !signingOut.value) navigateTo(loginRoute(route.fullPath), { replace: true })
   }, { immediate: true })
-  center.loadAll()
+  // 确认登录后才拉账号数据：未登录时不先发一串注定 401 的请求再跳走
+  let started = false
   let feedLoaded = false
-  watch(tab, (value) => {
-    if (value === 'feed' && !feedLoaded) {
-      feedLoaded = true
-      center.fetchFeed()
-    }
+  watch(user, (value) => {
+    if (!value || started) return
+    started = true
+    center.loadAll()
+    watch(tab, (key) => {
+      if (key === 'feed' && !feedLoaded) {
+        feedLoaded = true
+        center.fetchFeed()
+      }
+    }, { immediate: true })
   }, { immediate: true })
   // 旧锚点链接：等内容渲染出来再滚到对应卡片（如 #bot-access）
   let scrolled = !route.hash

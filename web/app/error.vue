@@ -6,6 +6,8 @@ const props = defineProps<{ error: NuxtError }>()
 const is404 = computed(() => props.error?.statusCode === 404)
 const status = computed(() => props.error?.statusCode ?? 500)
 const title = computed(() => (is404.value ? '信号丢失' : '页面出了点问题'))
+// 错误页不经过 app.vue 的标题模板，站名要自己带上
+useSeoMeta({ title: () => (is404.value ? '页面不存在 · AniSignal' : '页面出错了 · AniSignal'), robots: 'noindex' })
 const blurb = computed(() =>
   is404.value
     ? '这个地址可能已下线、拼写有误，或从未存在。资讯还在，只是这条路径没接上。'

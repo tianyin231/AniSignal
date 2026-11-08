@@ -50,7 +50,7 @@ function goPage(p: number) {
   router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })
 }
 
-useSeoMeta({ title: '事件库' })
+useSeoMeta({ title: '事件库', description: '把同一件事的官方与社区动态合并成事件，保留来源、时间线与修订记录。' })
 </script>
 
 <template>

@@ -21,7 +21,7 @@ function briefLine(product: ApiProductList['items'][number]) {
   return parts.join(' · ')
 }
 
-useSeoMeta({ title: '商品总览' })
+useSeoMeta({ title: '商品总览', description: '追踪游戏周边从官方公告、预售、尾款、发货到玩家开箱与质量反馈的全过程。' })
 
 const { api } = usePublicApi()
 // community=all（首页聚合进入）时跨分区展示并逐卡标注分区
@@ -42,7 +42,7 @@ useVisibleRefresh(() => refresh({ dedupe: 'defer' }), () => status.value !== 'pe
   <div class="min-w-0">
     <SectionNav />
     <div class="mb-6 mt-2 flex flex-wrap items-end justify-between gap-4">
-      <h1 class="text-3xl font-bold tracking-tight text-ink">商品追踪<span v-if="products.length" class="num ml-2 text-lg font-medium text-muted">{{ products.length }}</span></h1>
+      <h1 class="text-3xl font-bold tracking-tight text-ink">商品追踪<span v-if="products.length" class="num ml-2 text-lg font-medium text-muted"><span class="sr-only">，共 </span>{{ products.length }}<span class="sr-only"> 件</span></span></h1>
       <div class="flex gap-1 rounded-xl border border-line bg-card p-1" aria-label="商品状态筛选">
         <button v-for="item in filters" :key="item.value" type="button" class="min-h-11 cursor-pointer rounded-lg px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-brand" :aria-pressed="filter === item.value" :class="filter === item.value ? 'bg-brand-soft font-semibold text-brand-ink' : 'text-muted hover:bg-chip'" @click="filter = item.value">{{ item.label }}</button>
       </div>

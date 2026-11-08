@@ -135,11 +135,7 @@ async def logout(request: Request, response: Response, session: AsyncSession = D
     return {"message": "已退出"}
 
 
-@router.get("/me")
-async def me(request: Request, session: AsyncSession = Depends(get_session)):
-    user = await _current_user(request, session)
-    if user is None:
-        raise HTTPException(status_code=401, detail="未登录")
+def _user_payload(user: User) -> dict:
     return {
         "id": user.id,
         "email": user.email,
@@ -149,6 +145,22 @@ async def me(request: Request, session: AsyncSession = Depends(get_session)):
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
     }
+
+
+@router.get("/me")
+async def me(request: Request, session: AsyncSession = Depends(get_session)):
+    user = await _current_user(request, session)
+    if user is None:
+        raise HTTPException(status_code=401, detail="未登录")
+    return _user_payload(user)
+
+
+@router.get("/session")
+async def session_state(request: Request, response: Response, session: AsyncSession = Depends(get_session)):
+    """页面判断登录态用：未登录是正常状态，返回 user=null 而不是 401，访客的浏览器控制台不报错。"""
+    response.headers["Cache-Control"] = "no-store"
+    user = await _current_user(request, session)
+    return {"user": _user_payload(user) if user else None}
 
 
 @router.put("/profile")

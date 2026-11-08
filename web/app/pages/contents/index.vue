@@ -5,7 +5,7 @@ import { toRawItem } from '~/utils/public-utils'
 import { platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
 import { platformMeta, type Platform } from '~/utils/data'
 
-useSeoMeta({ title: '内容库 · AniSignal' })
+useSeoMeta({ title: '内容库 · AniSignal', description: '多平台采集的官方与社区内容，可按分区、平台和时间筛选。' })
 const { t } = useSiteConfig()
 
 const route = useRoute()

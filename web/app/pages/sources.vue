@@ -4,7 +4,7 @@ import { platformMeta, type Platform, type Region } from '~/utils/data'
 import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
 import type { PublicSource } from '~/composables/usePublicApi'
 
-useSeoMeta({ title: '来源健康' })
+useSeoMeta({ title: '来源健康', description: '每个采集来源最近一次运行的情况与健康状态。' })
 
 const { api } = usePublicApi()
 // 系统级页面：展示全部分区的来源，不跟随顶栏分区

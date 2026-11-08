@@ -14,7 +14,7 @@
 <img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-00DC82?style=flat-square&logo=nuxt&logoColor=white">
 <img alt="Tailwind CSS 4" src="https://img.shields.io/badge/Tailwind-CSS%204-38BDF8?style=flat-square&logo=tailwindcss&logoColor=white">
 <img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white">
-<img alt="MySQL 8" src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white">
+<img alt="MySQL 8.4" src="https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white">
 <img alt="Redis 7" src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white">
 <a href="https://github.com/tianyin231/AniSignal/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
 <img alt="自托管" src="https://img.shields.io/badge/%E8%87%AA%E6%89%98%E7%AE%A1-7C3AED?style=flat-square">
@@ -43,7 +43,7 @@ AniSignal 是一套轻量但严密的**自托管信息中枢**。它持续巡查
 | 模块 | 核心能力与价值 |
 | :--- | :--- |
 | **多源采集网络** | 支持 Bilibili（`bili` CLI 封装、账号动态与视频搜索、匿名风控熔断机制）、YouTube（Data API v3 优先 + RSS 自动回退）、X（低频公开巡检）、官方站点与游戏 CDN 直连。集成代理池与健康巡查。 |
-| **多社区与游戏分区** | 原生支持鸣潮、碧蓝航线、崩坏: 星穹铁道、明日方舟、原神、终末地、NIKKE 与 AI 行业快讯。支持跨分区全局聚合视角与单分区独立频道。 |
+| **多社区与游戏分区** | 原生支持鸣潮、碧蓝航线、崩坏：星穹铁道、明日方舟、原神、终末地、绝区零、NIKKE、无限暖暖等 14 个游戏分区与 AI 行业快讯。支持跨分区全局聚合视角与单分区独立频道。 |
 | **不可变数据与事件引擎** | 原始抓取数据不可覆写；72 小时时间窗与文本子串自动聚类；AI 提炼结构化事实（facts）与多版本修订史（revisions）；支持人工复核锁定。 |
 | **周边商品履约闭环** | 从官方正文自动识别周边情报并建档；按时间窗持续追踪送测、首开、用户批量到货与质量反馈，形成客观履约证据链。 |
 | **个人关注与定制监控** | 用户可在站内配置关键词流；亦可创建完全隔离的独立 B 站 UID / 关键词定制监控任务，支持公开共享或私有推送。 |
@@ -97,7 +97,8 @@ flowchart TD
 *   **碧蓝航线 (Azur Lane)**：B 站官方动态、官方更新日志、衍生同人降噪与联动内容识别。
 *   **崩坏: 星穹铁道 (Star Rail)**：官方动态流、前瞻活动追踪、社区热点资讯。
 *   **明日方舟 (Arknights)**：B 站官方账号、YouTube EN 频道、核心游戏更新与活动日历。
-*   **NIKKE、原神、终末地**：官方社交账号、国际服公告抓取与定制关注流。
+*   **原神、终末地、NIKKE**：X 官方账号、官网 / 国际服公告、YouTube 官方频道；原神与终末地另接入 B 站官方动态和社区内容。
+*   **绝区零、无限暖暖、星布谷地、崩坏：因缘精灵、洛克王国：世界、蓝色星原：旅谣、异环**：B 站官方动态与社区高播放内容。
 *   **AI 快讯 (AI News)**：前沿模型发布、行业动态抓取、双次质量评分与自动中文翻译。
 
 ## 快速开始
@@ -135,10 +136,10 @@ docker compose ps
 cd server
 uv run python -m app.local
 
-# 前端 (Node 20+ / pnpm)
+# 前端 (Node.js 22 / npm，与构建镜像一致)
 cd web
-pnpm install
-pnpm dev
+npm ci
+npm run dev
 ```
 
 完整配置指南与环境变量说明参见 [部署与本地开发文档](docs/deployment.md)。
