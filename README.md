@@ -17,6 +17,7 @@
 <img alt="MySQL 8.4" src="https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white">
 <img alt="Redis 7" src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white">
 <a href="https://github.com/tianyin231/AniSignal/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
+<a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square"></a>
 <img alt="自托管" src="https://img.shields.io/badge/%E8%87%AA%E6%89%98%E7%AE%A1-7C3AED?style=flat-square">
 </p>
 
@@ -166,6 +167,12 @@ AniSignal 提供官方的 AstrBot 插件（位于 `integrations/astrbot_plugin_a
 *   [前端开发规范](web/README.md) — Nuxt 4 目录结构、Tailwind 4 信号台设计令牌
 
 反馈问题时，请提供访问路径、复现步骤、部署环境与脱敏日志。
+
+## 许可证
+
+Copyright © 2026 tianyin231 与贡献者。本项目以 [GNU AGPL-3.0](LICENSE) 发布：可以自由使用、修改和分发；修改后的版本如果通过网络向他人提供服务，也需要以 AGPL-3.0 公开完整源码。
+
+`integrations/aihot` 收录的是第三方项目 [AIHOT](https://github.com/KKKKhazix/AIHOT)，按其原有的 MIT 许可证分发（见该目录下的 `LICENSE` 与 `NOTICE`），“AIHOT”名称与标志不在许可范围内。
 
 ---
 

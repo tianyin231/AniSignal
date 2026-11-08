@@ -1,6 +1,6 @@
 """B 站采集器：subprocess 调 bili CLI（二进制经多阶段构建已在镜像内）。
 
-命令形态与已知陷阱见 .agents/skills/anisignal/references/data-sources.md：
+命令形态与已知陷阱：
 - 动态必须用独立的 `dynamics <mid>` 入口（`user --dynamics` 返回空）
 - 搜索结果统计字段不全：搜索拿 BV 号后必须再请求 `video` 详情
 """

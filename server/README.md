@@ -49,4 +49,4 @@ uv run pytest
 
 配置定义见 [app/config.py](app/config.py)。SMTP、AI 和机器人均需要额外服务配置；邮件早报与定制监控已有任务实现，是否启用取决于部署配置。游戏事件按规则归并，AI 快讯采用独立的模型归组与编辑评分链路，准确性需要通过真实样本持续核对。
 
-[项目维护参考](../.agents/skills/anisignal/SKILL.md)与[早期设计](../docs/superpowers/specs/2026-08-12-wuthering-waves-event-radar-design.md)保留历史背景；旧日期的功能状态、主题范围与运维示例应以当前代码和部署配置复核。
+[早期设计](../docs/superpowers/specs/2026-08-12-wuthering-waves-event-radar-design.md)保留历史背景；旧日期的功能状态、主题范围与运维示例应以当前代码和部署配置复核。

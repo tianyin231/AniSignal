@@ -24,3 +24,6 @@ server/local.db
 # 本地产物：截图 / 宣传片渲染输出、WorkBuddy 工作区
 /output/
 /.workbuddy/
+
+# AI 工具的本地技能与笔记（含内部运维信息，不进公开仓库）
+.agents/

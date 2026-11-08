@@ -46,4 +46,4 @@ npm run build
 - 纯计算工具放在 `app/utils/` 并补 `tests/*.test.ts`，用 `node --test tests/*.test.ts` 运行。
 - 涉及模板和交互的修改需进行浏览器检查；`npm run build` 成功不能代替页面、响应式布局与实际数据状态验证。
 
-更多维护背景见[项目参考](../.agents/skills/anisignal/SKILL.md)。功能范围与当前状态以代码及[功能指南](../docs/features.md)为准，不沿用历史页面数量或固定内容主题。
+功能范围与当前状态以代码及[功能指南](../docs/features.md)为准，不沿用历史页面数量或固定内容主题。

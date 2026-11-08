@@ -17,6 +17,7 @@ A self-hosted cross-platform signal desk and event tracking radar. Consolidate p
 <img alt="MySQL 8.4" src="https://img.shields.io/badge/MySQL-8.4-4479A1?style=flat-square&logo=mysql&logoColor=white">
 <img alt="Redis 7" src="https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white">
 <a href="https://github.com/tianyin231/AniSignal/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
+<a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square"></a>
 <img alt="Self-hosted" src="https://img.shields.io/badge/Self--hosted-7C3AED?style=flat-square">
 </p>
 
@@ -166,6 +167,12 @@ For details, refer to the [AstrBot Plugin Guide](integrations/astrbot_plugin_ani
 *   [Frontend Guidelines](web/README.md) — Nuxt 4 structure, Tailwind 4 design tokens
 
 When filing an issue, please include the URL path, reproduction steps, deployment mode, and sanitized logs.
+
+## License
+
+Copyright © 2026 tianyin231 and contributors. AniSignal is released under the [GNU AGPL-3.0](LICENSE): you may use, modify and redistribute it; if you run a modified version as a network service for others, you must also publish its complete source under AGPL-3.0.
+
+`integrations/aihot` contains the third-party project [AIHOT](https://github.com/KKKKhazix/AIHOT), distributed under its original MIT License (see `LICENSE` and `NOTICE` in that directory). The "AIHOT" name and logo are not covered by that license.
 
 ---
 
