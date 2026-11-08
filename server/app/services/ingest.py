@@ -41,6 +41,15 @@ logger = logging.getLogger(__name__)
 FLAP_WINDOW = 30
 # 比热度榜最短的 6 小时窗口更密，窗口内总能找到起点。
 SNAPSHOT_HEARTBEAT = timedelta(hours=3)
+# last_seen_at 只是观测时间，没有页面或逻辑用到分钟级精度。每次采集都写会整行重写（raw_json 平均十几 KB），
+# 线上二进制日志近九成是这类写入；内容或指纹真有变化时 onupdate 仍会顺带刷新。
+LAST_SEEN_RESOLUTION = timedelta(hours=6)
+
+
+def _touch_last_seen(row, now) -> None:
+    if row.last_seen_at is None or row.last_seen_at <= now - LAST_SEEN_RESOLUTION:
+        row.last_seen_at = now
+
 
 # fetch_kind → (解析函数, parser 版本)；新平台接入时在这里注册
 def parse_custom_archive(raw: dict) -> NormalizedContent:
@@ -181,7 +190,7 @@ async def _ingest_one(
         return True, False, content.id, str(identity)
 
     # 已存在：原始数据不可覆盖，只更新观测字段
-    existing.last_seen_at = utcnow()
+    _touch_last_seen(existing, utcnow())
     if source_id is not None:
         existing.source_id = source_id
     if normalized.url and not existing.url:
@@ -301,7 +310,7 @@ async def _upsert_source(
         session.add(source)
         await session.flush()
         return source.id, str(source.identity)
-    existing.last_seen_at = utcnow()
+    _touch_last_seen(existing, utcnow())
     if author.name:
         existing.name = author.name
     if author.official_title:

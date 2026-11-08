@@ -93,16 +93,25 @@ async def send_user_notification(ctx, delivery_id: int) -> dict:
         return await process_delivery(session, delivery_id)
 
 
+MISSING_REVIEW_COOLDOWN_MS = 6 * 60 * 60 * 1000
+
+
 async def review_pending_news(ctx) -> dict:
-    """补偿未完成的近期快讯，候选查询负责冷却和次数上限。"""
+    """补偿未完成的近期快讯和漏审的游戏内容，候选查询负责冷却和次数上限。"""
     from app.db import SessionLocal
     from app.services.ai_news import pending_news_ids
+    from app.services.curation import missing_review_ids
     from app.services.queue import enqueue_review_jobs
 
     async with SessionLocal() as session:
         ids = await pending_news_ids(session)
-    await enqueue_review_jobs(ctx["redis"], ids)
-    return {"candidates": len(ids)}
+        missing = await missing_review_ids(session)
+    redis = ctx["redis"]
+    # 审核端按规则跳过的内容不留失败记录，靠这把冷却锁限制重复投递，不会每 5 分钟排一次。
+    claimed = [content_id for content_id in missing if await redis.set(
+        f"anisignal:missing-review:{content_id}", "1", nx=True, px=MISSING_REVIEW_COOLDOWN_MS)]
+    await enqueue_review_jobs(redis, ids + claimed)
+    return {"candidates": len(ids), "missing_reviews": len(claimed)}
 
 
 async def news_editorial_sweep(ctx) -> dict:

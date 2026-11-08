@@ -31,6 +31,37 @@ async def test_ingest_new_item(session):
     assert snapshots[0].metrics["view"] == 680
 
 
+async def test_unchanged_item_seen_again_is_not_rewritten(session):
+    """每轮都刷新 last_seen_at 会整行重写 raw_json，线上二进制日志近九成是它；精度到小时级就够。"""
+    from sqlalchemy import event
+
+    from app.services.ingest import LAST_SEEN_RESOLUTION
+
+    await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+    content = await session.scalar(select(RawContent))
+    first_seen = content.last_seen_at
+    updates = []
+
+    def record(conn, cursor, statement, *args):
+        if statement.lstrip().upper().startswith(("UPDATE RAW_CONTENTS", "UPDATE SOURCES")):
+            updates.append(statement.split()[1])
+
+    bind = session.get_bind()
+    event.listen(bind, "before_cursor_execute", record)
+    try:
+        await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+        assert updates == []
+        assert content.last_seen_at == first_seen
+        content.last_seen_at = utcnow() - LAST_SEEN_RESOLUTION - timedelta(minutes=1)
+        await session.commit()
+        updates.clear()
+        await ingest_items(session, "bilibili_search", [VIDEO_RAW])
+        assert "raw_contents" in updates
+        assert content.last_seen_at > utcnow() - timedelta(minutes=1)
+    finally:
+        event.remove(bind, "before_cursor_execute", record)
+
+
 async def test_concurrent_insert_of_the_same_item_is_retried_as_an_update(session, monkeypatch):
     """另一目标刚提交了同一条内容：撞唯一键后换新快照重试，这一条按已存在更新，不等下一轮。"""
     from sqlalchemy.exc import IntegrityError

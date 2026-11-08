@@ -86,6 +86,39 @@ class HighlightCandidate:
     official: bool
 
 
+MISSING_REVIEW_WINDOW = timedelta(days=3)
+MISSING_REVIEW_GRACE = timedelta(minutes=15)
+MISSING_REVIEW_BATCH = 20
+
+
+async def missing_review_ids(session: AsyncSession, *, now: datetime | None = None,
+                             limit: int = MISSING_REVIEW_BATCH) -> list[int]:
+    """采集后只在当轮投递一次审核；聚合死锁、发布重启或批量迁移入库时漏掉的游戏内容在这里补上。
+
+    没审核的内容不会按违规或不相关自动下架，也不会有 AI 提取的链接。快讯另有 pending_news_ids。
+    """
+    from app.services.ai import retry_allowed
+
+    now = now or utcnow()
+    games = [key for key, meta in COMMUNITIES.items() if meta.domain == "game"]
+    query = (
+        select(RawContent.id)
+        .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
+        .where(
+            RawContent.community.in_(games),
+            RawContent.hidden.is_(False),
+            ContentReview.raw_content_id.is_(None),
+            # 宽限期留给正常链路，免得和采集后的审核任务重复付费。
+            RawContent.collected_at >= now - MISSING_REVIEW_WINDOW,
+            RawContent.collected_at <= now - MISSING_REVIEW_GRACE,
+            retry_allowed("review_content", RawContent.collected_at),
+        )
+        .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
+        .limit(limit)
+    )
+    return list(await session.scalars(query))
+
+
 async def review_contents(
     session: AsyncSession, content_ids: list[int], *, force: bool = False
 ) -> ReviewStats:
