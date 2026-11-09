@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import yaml
 
+# 仓库入口借 __package__ 让相对导入落到 integrations 目录，Python 对此给出弃用提示。
+pytestmark = pytest.mark.filterwarnings('ignore:__package__ != __spec__.parent:DeprecationWarning')
+
 
 @pytest.fixture(params=['integrations/astrbot_plugin_anisignal/main.py', 'main.py'],
                 ids=['standalone', 'repository'])
@@ -70,11 +73,13 @@ def plugin(monkeypatch, request):
     module('astrbot.core.message')
     module('astrbot.core.message.message_event_result', MessageChain=Chain)
     path = Path(__file__).parents[2] / request.param
-    spec = importlib.util.spec_from_file_location('plugin_under_test', path,
-        submodule_search_locations=[str(path.parent)])
-    mod = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, mod)
-    spec.loader.exec_module(mod)
+    # 与 AstrBot 相同：插件目录是包，入口以 __import__(..., fromlist=['main']) 导入。
+    package = ModuleType('plugin_under_test')
+    package.__path__ = [str(path.parent)]
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    request.addfinalizer(lambda: [sys.modules.pop(name) for name in list(sys.modules)
+                                  if name.startswith('plugin_under_test.')])
+    mod = __import__('plugin_under_test.main', fromlist=['main'])
     obj = mod.AniSignalPlugin.__new__(mod.AniSignalPlugin)
     obj.api = AsyncMock(return_value={'ok':True})
     obj.render_delivery = AsyncMock(side_effect=lambda row: mod.render_notification(row, {}, '人格播报'))
@@ -93,6 +98,21 @@ def plugin(monkeypatch, request):
             get_conversation=AsyncMock(return_value=SimpleNamespace(persona_id=None)),
             add_message_pair=AsyncMock()))
     return obj
+
+
+
+def implementation(plugin, name):
+    """插件实现目录中的模块；仓库安装时它们位于 integrations/astrbot_plugin_anisignal。"""
+    return importlib.import_module(f"{sys.modules[plugin.__class__.__module__].__package__}.{name}")
+
+
+def test_plugin_entry_runs_once_under_astrbot_import(plugin):
+    """入口被当作包时，fromlist 会再执行一遍实现，注册出没有实例的重复命令和工具。"""
+    assert plugin.__class__.__module__ == 'plugin_under_test.main'
+    assert 'plugin_under_test.main.main' not in sys.modules
+    assert not hasattr(sys.modules['plugin_under_test.main'], '__path__')
+    assert implementation(plugin, 'configuration').__file__.endswith(
+        str(Path('integrations', 'astrbot_plugin_anisignal', 'configuration.py')))
 
 
 def delivery():
@@ -284,7 +304,7 @@ def test_legacy_cleanup_keeps_connection_and_session_configuration(plugin):
               'interaction':{'ai_prompt':'旧人格覆盖','ai_provider_id':'old-model','tools':['news']},
               'presentation':{'notification_template':'{content}'}}],
               'card_font_path':'/fonts/custom.ttf', 'legacy_cat_behavior':False, 'cat_reply_keywords':['猫']}
-    clean = sys.modules['plugin_under_test.configuration'].cleanup_legacy_configuration
+    clean = implementation(plugin, 'configuration').cleanup_legacy_configuration
     assert clean(config) is True
     assert config == {'base_url':'http://example.test', 'tools_key':'test-key',
                       'targets':[{'umo':'qq:GroupMessage:g','interaction':{'tools':['news']},
@@ -510,7 +530,7 @@ async def test_omitting_intro_skips_persona_generation_and_follows_template(plug
 
 async def test_daily_card_hint_is_controlled_by_the_same_plugin_option(plugin,monkeypatch):
     render=Mock(return_value='/tmp/brief.png')
-    monkeypatch.setattr(importlib.import_module('plugin_under_test.card'),'render_brief_card',render)
+    monkeypatch.setattr(implementation(plugin, 'card'),'render_brief_card',render)
     umo='qq:FriendMessage:self'
     options={}
     plugin.config['targets']=[{'umo':umo,'presentation':options}]
@@ -576,7 +596,7 @@ async def test_notification_reaction_uses_snapshot_and_keeps_verified_body_uncha
 
 @pytest.mark.parametrize('count', [1, 3])
 async def test_daily_card_does_not_repeat_expansion_hint_in_caption(plugin, monkeypatch, count):
-    card = importlib.import_module('plugin_under_test.card')
+    card = implementation(plugin, 'card')
     monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font, hint: path)
     brief = {'mode': 'daily', 'items': [{'title': '动态', 'summary': '具体变化'}] * count}
     sent, text = await plugin.send_brief_message('qq:FriendMessage:self', '短反应\n\n正文', brief, body='正文')
@@ -587,7 +607,7 @@ async def test_daily_card_does_not_repeat_expansion_hint_in_caption(plugin, monk
 
 
 async def test_daily_card_can_be_sent_without_a_forced_caption(plugin, monkeypatch):
-    card = importlib.import_module('plugin_under_test.card')
+    card = implementation(plugin, 'card')
     monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font, hint: path)
     brief = {'mode': 'daily', 'items': [{'title': '动态', 'summary': '具体变化'}]}
     sent, text = await plugin.send_brief_message('qq:FriendMessage:self', '正文', brief, body='正文')
@@ -657,7 +677,7 @@ async def test_notification_template_does_not_silently_restore_omitted_parts(plu
 
 
 async def test_text_notification_does_not_render_daily_card(plugin,monkeypatch):
-    card=importlib.import_module('plugin_under_test.card')
+    card=implementation(plugin, 'card')
     render=Mock()
     monkeypatch.setattr(card,'render_brief_card',render)
     plugin.config['targets']=[{'umo':delivery()['umo'],'presentation':{'notification_format':'text'}}]
@@ -668,7 +688,7 @@ async def test_text_notification_does_not_render_daily_card(plugin,monkeypatch):
 
 
 async def test_structured_notification_sends_real_image_in_template_order_without_card(plugin,monkeypatch):
-    card=importlib.import_module('plugin_under_test.card')
+    card=implementation(plugin, 'card')
     render=Mock()
     monkeypatch.setattr(card,'render_brief_card',render)
     row={**delivery(),'images':['https://example.test/cover.jpg'],'brief':{'mode':'daily','items':[
@@ -704,7 +724,7 @@ async def test_structured_send_error_never_sends_a_second_fallback(plugin):
 
 
 async def test_card_send_error_does_not_send_a_second_text_message(plugin, monkeypatch):
-    card = importlib.import_module('plugin_under_test.card')
+    card = implementation(plugin, 'card')
     monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font, hint: path)
     plugin.context.send_message.side_effect = TimeoutError()
     row = {**delivery(), 'brief': {'mode': 'daily', 'items': [{'title': '动态'}]}}
@@ -796,7 +816,7 @@ async def test_delivery_honors_configured_image_limit(plugin, max_images):
 
 
 async def test_daily_card_counts_toward_image_limit(plugin, monkeypatch):
-    card = importlib.import_module('plugin_under_test.card')
+    card = implementation(plugin, 'card')
     monkeypatch.setattr(card, 'render_brief_card', lambda brief, path, font, hint: path)
     row = {**delivery(), 'brief': {'mode': 'daily', 'items': [{'title': '今日消息'}]},
            'images': ['first', 'second', 'third'], 'max_images': 3}

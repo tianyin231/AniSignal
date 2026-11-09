@@ -28,7 +28,7 @@ except ImportError:  # 没有插件视图接口的 AstrBot 只保留原生设置
     web_request = None
 
 
-VERSION = "1.14.1"
+VERSION = "1.14.2"
 PLUGIN_NAME = "astrbot_plugin_anisignal"
 # AstrBot 的「更新」下载仓库默认分支；插件不在市场中，新版本提示由设置页自己检查。
 LATEST_METADATA_URL = "https://raw.githubusercontent.com/tianyin231/AniSignal/HEAD/metadata.yaml"
