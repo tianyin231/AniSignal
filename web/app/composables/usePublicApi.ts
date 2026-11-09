@@ -377,6 +377,8 @@ export function usePublicApi() {
   const config = useRuntimeConfig()
   // SSR 直连 FastAPI；浏览器走同源（Nitro routeRules 代理）
   const baseURL = import.meta.server ? config.apiSsrBase : config.public.apiBase
-  const api = $fetch.create({ baseURL, timeout: 15_000, retry: 0 })
+  // 服务端渲染直连后端时带上访客的 Cookie，账号屏蔽的分区在首屏就被过滤；浏览器请求自动携带。
+  const headers = import.meta.server ? useRequestHeaders(['cookie']) : undefined
+  const api = $fetch.create({ baseURL, timeout: 15_000, retry: 0, headers })
   return { api }
 }

@@ -1,6 +1,7 @@
 /**
  * 账号状态：客户端拉取 /api/auth/session（cookie 同源自动携带）；未登录时返回 user=null，访客控制台不报 401。
  */
+import { HIDDEN_COMMUNITIES_COOKIE } from '~/composables/useGameSection'
 import { safeRedirect } from '~/utils/safe-redirect'
 
 export interface AuthUser {
@@ -31,6 +32,8 @@ export function useAuth() {
         user.value = null
       } finally {
         loaded.value = true
+        // 会话检查会按账号校正屏蔽镜像 Cookie，重新读取后顶栏和分区回落才会跟着变。
+        if (import.meta.client) refreshCookie(HIDDEN_COMMUNITIES_COOKIE)
       }
     })()
     if (import.meta.client) {
@@ -55,6 +58,7 @@ export function useAuth() {
     try {
       await $fetch('/api/auth/logout', { method: 'POST' })
       user.value = null
+      refreshCookie(HIDDEN_COMMUNITIES_COOKIE)
     } finally {
       signingOut.value = false
     }

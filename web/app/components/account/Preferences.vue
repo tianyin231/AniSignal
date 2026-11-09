@@ -58,7 +58,10 @@ async function save() {
 <template>
   <section class="panel p-5" aria-labelledby="preferences-title">
     <h2 id="preferences-title" class="text-base font-bold text-ink">个人降噪</h2>
-    <p class="mt-1 text-xs leading-relaxed text-muted">作用于关注流、每日早报和 AI 精炼邮件；定制监控按各自规则收集。</p>
+    <p class="mt-1 text-xs leading-relaxed text-muted">
+      作用于关注流、每日早报和 AI 精炼邮件；定制监控按各自规则收集。想在网站列表里隐藏某个游戏，请到
+      <NuxtLink :to="{ path: '/account', query: { tab: 'profile' }, hash: '#hidden-communities' }" class="text-brand-ink underline-offset-2 hover:underline">账号与安全 → 屏蔽游戏分区</NuxtLink>。
+    </p>
 
     <form class="mt-4" @submit.prevent="save">
       <fieldset :disabled="!ready || busy">

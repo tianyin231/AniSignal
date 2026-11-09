@@ -19,6 +19,7 @@ from app.communities import (
     COMMUNITIES,
     DEFAULT_COMMUNITY,
     community_pattern,
+    community_conditions,
     community_query_pattern,
     is_all_community,
 )
@@ -39,6 +40,7 @@ from app.schemas.api import (
     PublicStats,
     StatisticsOverview,
 )
+from app.services.hidden_communities import request_hidden
 from app.services.urls import safe_link
 
 router = APIRouter(prefix="/api")
@@ -80,8 +82,9 @@ async def list_highlights(
     候选要扫描近 200 条内容并补指标与事件分组（实测 0.6–0.7s），是首页首屏最慢的一步；
     结果按分区短期缓存，精选本身按小时级变化，60 秒延迟可以接受。
     """
+    hidden = request_hidden(request) if is_all_community(community) else ()
     cache = getattr(request.app.state, "redis", None)
-    cache_key = f"highlights:v1:{community}:{limit}"
+    cache_key = f"highlights:v1:{community}:{limit}" + (f":-{'.'.join(hidden)}" if hidden else "")
     if cache is not None:
         try:
             cached = await cache.get(cache_key)
@@ -94,7 +97,7 @@ async def list_highlights(
 
     items = [
         PublicContentItem(**item)
-        for item in await select_highlights(session, limit, community=community)
+        for item in await select_highlights(session, limit, community=community, exclude=hidden)
     ]
     result = PublicContentList(items=items, total=len(items))
     if cache is not None:
@@ -107,6 +110,7 @@ async def list_highlights(
 
 @router.get("/trending", response_model=PublicContentList)
 async def list_trending(
+    request: Request,
     community: str = COMMUNITY_AGGREGATE_QUERY,
     hours: int = Query(default=24, ge=6, le=168, description="增量统计窗口"),
     limit: int = Query(default=10, ge=1, le=20),
@@ -118,7 +122,7 @@ async def list_trending(
     items = [
         PublicContentItem(**item)
         for item in await select_trending(
-            session, limit, community=community, hours=hours
+            session, limit, community=community, hours=hours, exclude=request_hidden(request)
         )
     ]
     return PublicContentList(items=items, total=len(items))
@@ -126,23 +130,25 @@ async def list_trending(
 
 @router.get("/calendar")
 async def content_calendar(
+    request: Request,
     community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     from app.services.calendar import calendar_groups
 
-    return await calendar_groups(session, community)
+    return await calendar_groups(session, community, exclude=request_hidden(request))
 
 
 @router.get("/calendar/month")
 async def monthly_calendar(
+    request: Request,
     month: str = Query(pattern=r"^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$"),
     community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     from app.services.calendar import calendar_month
 
-    return await calendar_month(session, community, month)
+    return await calendar_month(session, community, month, exclude=request_hidden(request))
 
 
 @router.get("/calendar/{schedule_id}.ics")
@@ -163,6 +169,7 @@ async def export_calendar(schedule_id: int, session: AsyncSession = Depends(get_
 
 @router.get("/codes")
 async def list_redeem_codes(
+    request: Request,
     community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
@@ -170,9 +177,8 @@ async def list_redeem_codes(
     from app.models import RedeemCode
 
     now = utcnow()
-    conditions: list = [RedeemCode.status == "active", RawContent.hidden.is_(False)]
-    if not is_all_community(community):
-        conditions.append(RedeemCode.community == community)
+    conditions: list = [RedeemCode.status == "active", RawContent.hidden.is_(False),
+                        *community_conditions(RedeemCode.community, community, request_hidden(request))]
     conditions.append(RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now))
     rows = await session.execute(
         select(RedeemCode, RawContent.url)
@@ -205,6 +211,7 @@ def _preview_mode(text: str | None, media: list, url: str | None) -> str:
 
 @router.get("/contents", response_model=PublicContentList)
 async def list_contents(
+    request: Request,
     platform: str | None = Query(default=None),
     community: str = COMMUNITY_AGGREGATE_QUERY,
     content_type: str | None = Query(default=None),
@@ -223,7 +230,8 @@ async def list_contents(
 ):
     from app.services.classify import HIDDEN_CATEGORIES
 
-    conditions: list = [] if is_all_community(community) else [RawContent.community == community]
+    hidden = request_hidden(request) if request is not None else ()
+    conditions: list = community_conditions(RawContent.community, community, hidden)
     if platform:
         conditions.append(
             RawContent.platform.in_(("kuro_cn", "kuro_global"))
@@ -431,7 +439,9 @@ async def rss_feed(
         return Response(content=cached[1], media_type="application/rss+xml; charset=utf-8")
 
     # 直接调用 endpoint 函数时 FastAPI 的 Query 默认值不会解析，必须显式传全部参数
+    # RSS 结果在进程内共享缓存，不能带上某个账号的屏蔽：request 传 None。
     listing = await list_contents(
+        request=None,
         platform=None,
         community=community,
         content_type=None,
@@ -660,6 +670,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
 
 @router.get("/events", response_model=EventListOut)
 async def list_events(
+    request: Request,
     category: str | None = Query(default=None),
     community: str = COMMUNITY_AGGREGATE_QUERY,
     product_slug: str | None = Query(default=None),
@@ -677,9 +688,8 @@ async def list_events(
     from app.services.views import events_to_out
 
     # 资讯事件由专用发布层重新核对审核版本与引用，避免游戏出口暴露旧摘要。
-    conditions = [EventModel.is_active.is_(True), EventModel.category != "ai_news"]
-    if not is_all_community(community):
-        conditions.append(EventModel.community == community)
+    conditions = [EventModel.is_active.is_(True), EventModel.category != "ai_news",
+                  *community_conditions(EventModel.community, community, request_hidden(request))]
     latest_evidence_sq = (
         select(
             Evidence.event_id.label("event_id"),
@@ -756,15 +766,15 @@ async def get_event(event_id: int, session: AsyncSession = Depends(get_session))
 
 @router.get("/products", response_model=ProductListOut)
 async def list_products(
+    request: Request,
     community: str = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     from app.models import Product as ProductModel
     from app.services.views import products_to_out
 
-    query = select(ProductModel)
-    if not is_all_community(community):
-        query = query.where(ProductModel.community == community)
+    query = select(ProductModel).where(
+        *community_conditions(ProductModel.community, community, request_hidden(request)))
     products = list(
         (
             await session.execute(

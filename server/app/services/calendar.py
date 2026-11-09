@@ -8,6 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
+from app.communities import community_conditions
 from app.models import ContentSchedule, RawContent, Source
 
 
@@ -43,7 +44,7 @@ def schedule_entry(schedule: ContentSchedule, url: str | None) -> dict:
 async def calendar_entries(
     session: AsyncSession, community: str, *, now: datetime | None = None,
     window_start: datetime | None = None, window_end: datetime | None = None,
-    extra_conditions: tuple = (),
+    extra_conditions: tuple = (), exclude: tuple[str, ...] = (),
 ) -> list[dict]:
     now = now or utcnow()
     window_start = window_start or now - timedelta(days=14)
@@ -53,8 +54,7 @@ async def calendar_entries(
         ContentSchedule.start_at < window_end,
         or_(ContentSchedule.start_at >= window_start, ContentSchedule.end_at >= window_start),
     ]
-    if community != "all":
-        conditions.append(ContentSchedule.community == community)
+    conditions.extend(community_conditions(ContentSchedule.community, community, exclude))
     rows = await session.execute(
         select(ContentSchedule, RawContent.url)
         .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
@@ -76,20 +76,20 @@ async def calendar_entries(
     return list(unique.values())
 
 
-async def calendar_month(session: AsyncSession, community: str, month: str) -> dict:
+async def calendar_month(session: AsyncSession, community: str, month: str, *, exclude: tuple[str, ...] = ()) -> dict:
     first = datetime.strptime(month, "%Y-%m")
     # 月历从周一开始，固定六周；北京时间的日期边界转换为库内 UTC。
     grid_start = first - timedelta(days=first.weekday(), hours=8)
     items = await calendar_entries(session, community, window_start=grid_start,
-                                   window_end=grid_start + timedelta(days=42))
+                                   window_end=grid_start + timedelta(days=42), exclude=exclude)
     items.sort(key=lambda item: (item["start_at"], item["id"]))
     return {"month": month, "items": items}
 
 
-async def calendar_groups(session: AsyncSession, community: str) -> dict:
+async def calendar_groups(session: AsyncSession, community: str, *, exclude: tuple[str, ...] = ()) -> dict:
     now = utcnow()
     groups: dict[str, list] = {"ongoing": [], "upcoming": [], "recent": [], "ended": []}
-    for entry in await calendar_entries(session, community, now=now):
+    for entry in await calendar_entries(session, community, now=now, exclude=exclude):
         start, end = entry["start_at"], entry["end_at"]
         if start > now:
             groups["upcoming"].append(entry)

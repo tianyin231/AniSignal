@@ -99,7 +99,10 @@ onBeforeUnmount(center.dispose)
       </div>
     </div>
     <AccountMonitors v-else-if="tab === 'custom'" />
-    <AccountProfile v-else />
+    <div v-else class="space-y-5">
+      <AccountProfile />
+      <AccountHiddenCommunities />
+    </div>
   </div>
   <p v-else role="status" class="py-24 text-center text-sm text-faint">正在确认登录状态…</p>
 </template>

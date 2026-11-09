@@ -3,13 +3,13 @@ import { avatarGradient, displayName } from '~/utils/avatars'
 import { loginRoute } from '~/utils/safe-redirect'
 import { PROJECT_GITHUB_URL } from '~/utils/project'
 import type { RouteLocationRaw } from 'vue-router'
-import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { communityClasses, GAME_COMMUNITIES, useHiddenCommunities } from '~/composables/useGameSection'
 
 const route = useRoute()
 // 顶栏只有一层：品牌旁的"频道"组（首页/鸣潮/碧蓝航线…）+ 右侧工具；
 // 栏目导航（官方动态/活动日历/商品/事件/内容库）由 SectionNav 放在内容区首行。
 const brand = communityClasses('blue')
-const channels = [
+const allChannels = [
   { key: 'home', label: '首页', nav: brand.nav, dot: brand.dot, to: '/' as RouteLocationRaw },
   ...GAME_COMMUNITIES.map(c => ({
     key: c.key,
@@ -30,6 +30,9 @@ const { active } = useActiveChannel()
 // 全站工具页沿用首页主题色，但顶栏高亮的是"更多"而不是"首页"
 const TOOL_PATHS = ['/stats', '/sources', '/watch', '/project']
 const activeChannel = computed(() => (TOOL_PATHS.includes(route.path) ? null : active.value))
+// 账号屏蔽的分区不进顶栏；正在浏览的分区（例如从链接打开）仍保留，以免当前页没有高亮。
+const { hidden } = useHiddenCommunities()
+const channels = computed(() => allChannels.filter(ch => !hidden.value.has(ch.key) || ch.key === activeChannel.value))
 
 // ---------- 频道按宽度收纳（md 起）----------
 // 依次放入能完整显示的频道，其余收进"更多"；当前频道始终占一个位置。手机端整行横滑，不收纳。
@@ -43,16 +46,16 @@ const trackWidth = ref(0)
 const visibleKeys = computed<Set<string> | null>(() => {
   const widths = channelWidths.value
   const room = trackWidth.value
-  if (!desktop.value || widths.length !== channels.length || !room) return null
+  if (!desktop.value || widths.length !== channels.value.length || !room) return null
   if (widths.reduce((sum, w) => sum + w, 0) <= room) return null
-  const activeIndex = channels.findIndex(ch => ch.key === activeChannel.value)
+  const activeIndex = channels.value.findIndex(ch => ch.key === activeChannel.value)
   const keys = new Set<string>()
   let used = 0
   if (activeIndex >= 0) {
-    keys.add(channels[activeIndex]!.key)
+    keys.add(channels.value[activeIndex]!.key)
     used = widths[activeIndex]!
   }
-  for (const [index, ch] of channels.entries()) {
+  for (const [index, ch] of channels.value.entries()) {
     if (index === activeIndex) continue
     if (used + widths[index]! > room) break
     used += widths[index]!
@@ -60,8 +63,8 @@ const visibleKeys = computed<Set<string> | null>(() => {
   }
   return keys
 })
-const shownChannels = computed(() => (visibleKeys.value ? channels.filter(ch => visibleKeys.value!.has(ch.key)) : channels))
-const overflowChannels = computed(() => (visibleKeys.value ? channels.filter(ch => !visibleKeys.value!.has(ch.key)) : []))
+const shownChannels = computed(() => (visibleKeys.value ? channels.value.filter(ch => visibleKeys.value!.has(ch.key)) : channels.value))
+const overflowChannels = computed(() => (visibleKeys.value ? channels.value.filter(ch => !visibleKeys.value!.has(ch.key)) : []))
 function measureChannels() {
   // 隐藏测量行按选中态（semibold）排版取宽度上限，切换频道时不会因字重变化被挤出
   const row = channelMeasure.value
@@ -88,6 +91,8 @@ function revealActiveChannel() {
   }
 }
 watch(activeChannel, () => nextTick(revealActiveChannel))
+// 频道增减后重新测量宽度，收纳计算才对得上
+watch(() => channels.value.map(ch => ch.key).join(), () => nextTick(measureChannels))
 onMounted(() => {
   desktopQuery = window.matchMedia('(min-width: 768px)')
   syncDesktop()

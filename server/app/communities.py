@@ -217,6 +217,16 @@ def is_all_community(value: str | None) -> bool:
     return (value or "") == COMMUNITY_ALL
 
 
+def community_conditions(column, community: str | None, hidden=()) -> list:
+    """分区筛选条件：指定分区只看该分区；跨分区聚合时去掉账号屏蔽的分区。
+
+    显式打开某个分区（链接或顶栏）时照常显示，屏蔽只作用于聚合视图。
+    """
+    if not is_all_community(community):
+        return [column == community]
+    return [column.notin_(tuple(hidden))] if hidden else []
+
+
 def get_community(key: str | None) -> CommunityMeta:
     """按 key 取分区元数据；未知/缺省回落默认分区。"""
     return COMMUNITIES.get(key or "", COMMUNITIES[DEFAULT_COMMUNITY])

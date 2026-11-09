@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community, is_all_community
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, community_conditions, get_community
 from app.models import (
     ClassificationRule,
     CollectTarget,
@@ -374,7 +374,7 @@ async def review_recent_contents(
 
 async def select_trending(
     session: AsyncSession, limit: int = 10, community: str = DEFAULT_COMMUNITY, hours: int = 24,
-    *, item_filter: Callable[[dict], bool] | None = None,
+    *, item_filter: Callable[[dict], bool] | None = None, exclude: tuple[str, ...] = (),
 ) -> list[dict]:
     """热度飙升：窗口内播放增量最高的内容（≥2 个快照才可参与）。
 
@@ -386,7 +386,7 @@ async def select_trending(
 
     window_start = utcnow() - timedelta(hours=hours)
     latest = _latest_version_subquery()
-    conditions: list = [] if is_all_community(community) else [RawContent.community == community]
+    conditions: list = community_conditions(RawContent.community, community, exclude)
     conditions.append(RawContent.hidden.is_(False))
     hidden_platforms = settings_service.hidden_platforms(
         await settings_service.get_media_visibility(session)
@@ -477,7 +477,7 @@ async def select_trending(
 
 
 async def select_highlights(
-    session: AsyncSession, limit: int = 5, community: str = DEFAULT_COMMUNITY
+    session: AsyncSession, limit: int = 5, community: str = DEFAULT_COMMUNITY, *, exclude: tuple[str, ...] = (),
 ) -> list[dict]:
     """返回官方与社区混排精选；AI 结果缺失时使用可解释的规则分数。"""
     latest = _latest_version_subquery()
@@ -496,7 +496,7 @@ async def select_highlights(
         .where(
             publication_time >= utcnow() - HIGHLIGHT_WINDOW,
             RawContent.hidden.is_(False),
-            *([] if is_all_community(community) else [RawContent.community == community]),
+            *community_conditions(RawContent.community, community, exclude),
         )
         .order_by(publication_time.desc(), RawContent.id.desc())
         .limit(200)

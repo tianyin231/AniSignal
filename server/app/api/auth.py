@@ -80,7 +80,7 @@ async def verify(body: dict, request: Request, response: Response, session: Asyn
     user.is_verified = True
     user.last_login_at = utcnow()
     token = await create_session(session, user)
-    _set_session_cookie(request, response, token)
+    _set_session_cookie(request, response, token, user)
     return {"message": "验证成功，已登录", "email": user.email}
 
 
@@ -122,7 +122,7 @@ async def login(body: dict, request: Request, response: Response, session: Async
     clear_login_failures(email)
     user.last_login_at = utcnow()
     token = await create_session(session, user)
-    _set_session_cookie(request, response, token)
+    _set_session_cookie(request, response, token, user)
     return {"message": "登录成功", "email": user.email}
 
 
@@ -132,6 +132,7 @@ async def logout(request: Request, response: Response, session: AsyncSession = D
     if token:
         await revoke_current_session(session, token)
     response.delete_cookie(SESSION_COOKIE, secure=_secure_request(request), httponly=True, samesite="lax")
+    sync_hidden_cookie(request, response, None)
     return {"message": "已退出"}
 
 
@@ -160,6 +161,8 @@ async def session_state(request: Request, response: Response, session: AsyncSess
     """页面判断登录态用：未登录是正常状态，返回 user=null 而不是 401，访客的浏览器控制台不报错。"""
     response.headers["Cache-Control"] = "no-store"
     user = await _current_user(request, session)
+    # 换账号、别处改了屏蔽或会话已失效时，在这里把浏览器中的屏蔽镜像校正为当前账号的设置。
+    sync_hidden_cookie(request, response, user)
     return {"user": _user_payload(user) if user else None}
 
 
@@ -212,7 +215,7 @@ async def change_password(
     user.password_hash = hash_password(new)
     await revoke_all_sessions(session, user.id)  # 改密后全部会话失效
     token = await create_session(session, user)
-    _set_session_cookie(request, response, token)  # 当前设备免重登
+    _set_session_cookie(request, response, token, user)  # 当前设备免重登
     return {"message": "密码已修改"}
 
 
@@ -257,7 +260,7 @@ def _secure_request(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
-def _set_session_cookie(request: Request, response: Response, token: str) -> None:
+def _set_session_cookie(request: Request, response: Response, token: str, user: User) -> None:
     settings = get_settings()
     response.set_cookie(
         SESSION_COOKIE,
@@ -267,6 +270,22 @@ def _set_session_cookie(request: Request, response: Response, token: str) -> Non
         samesite="lax",
         secure=_secure_request(request),
     )
+    sync_hidden_cookie(request, response, user, force=True)
+
+
+def sync_hidden_cookie(request: Request, response: Response, user: User | None, *, force: bool = False) -> None:
+    """让屏蔽镜像 Cookie 与账号设置一致；页面脚本要读取它来隐藏顶栏频道，因此不设 HttpOnly。"""
+    from app.services.hidden_communities import HIDDEN_COOKIE, account_hidden, hidden_cookie_value
+
+    value = hidden_cookie_value(account_hidden(user))
+    current = request.cookies.get(HIDDEN_COOKIE) or ""
+    if value == current and not (force and value):
+        return
+    if value:
+        response.set_cookie(HIDDEN_COOKIE, value, max_age=get_settings().session_days * 24 * 3600,
+                            samesite="lax", secure=_secure_request(request))
+    else:
+        response.delete_cookie(HIDDEN_COOKIE, secure=_secure_request(request), samesite="lax")
 
 
 async def _current_user(request: Request, session: AsyncSession) -> User | None:

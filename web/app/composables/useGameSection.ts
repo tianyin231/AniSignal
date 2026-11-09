@@ -177,17 +177,41 @@ const GAME_ONLY_PATH = /^\/(events|products)(\/|$)/
 /** 内容 / 事件详情页：URL 不带分区，由页面 usePageCommunity 声明 */
 const DETAIL_PATH = /^\/(contents|events)\/[^/]+$/
 
+/** 账号屏蔽镜像 Cookie：登录、退出和会话检查时由后端按账号写入，值为以点分隔的分区 key。 */
+export const HIDDEN_COMMUNITIES_COOKIE = 'anisignal_hidden'
+
+/**
+ * 当前账号屏蔽的游戏分区（只影响网站浏览）。服务端渲染与浏览器读同一个镜像 Cookie，
+ * 首屏与水合结果一致；确认未登录后不再生效。
+ */
+export function useHiddenCommunities() {
+  const raw = useCookie<string | null | undefined>(HIDDEN_COMMUNITIES_COOKIE, { readonly: true, decode: value => value })
+  const user = useState<unknown>('auth-user', () => null)
+  const loaded = useState<boolean>('auth-loaded', () => false)
+  const hidden = computed(() => {
+    if (loaded.value && !user.value) return new Set<string>()
+    return new Set(String(raw.value || '').split('.').filter(key => VALID_KEYS.has(key as GameCommunityKey)))
+  })
+  return { hidden }
+}
+
 export function useGameSection() {
   const route = useRoute()
   const router = useRouter()
   const stored = useState<GameCommunityKey>('game-section-stored', () => DEFAULT_COMMUNITY)
   const hydrated = useState('game-section-hydrated', () => false)
+  const { hidden } = useHiddenCommunities()
+
+  // 记忆或默认的分区被屏蔽时改用第一个未屏蔽的游戏分区；URL 显式指定的分区照常显示。
+  const unhidden = (key: GameCommunityKey): GameCommunityKey => (hidden.value.has(key)
+    ? GAME_COMMUNITIES.find(item => item.key !== 'ai' && !hidden.value.has(item.key))?.key ?? key
+    : key)
 
   const community = computed<GameCommunityKey>(() => {
     if (route.path === '/ai' || route.path.startsWith('/ai/')) return 'ai'
     const query = String(route.query.community || '')
     if (VALID_KEYS.has(query)) return query as GameCommunityKey
-    return hydrated.value ? stored.value : DEFAULT_COMMUNITY
+    return unhidden(hydrated.value ? stored.value : DEFAULT_COMMUNITY)
   })
 
   /** 当前分区的完整元数据（label/color），供品牌徽章、强调条等消费。 */
@@ -195,8 +219,9 @@ export function useGameSection() {
     () => GAME_COMMUNITIES.find(item => item.key === community.value) ?? GAME_COMMUNITIES[0],
   )
 
+  const omitFromUrl = (key: string) => key === DEFAULT_COMMUNITY && !hidden.value.has(key)
   const communityQuery = computed(() =>
-    community.value === DEFAULT_COMMUNITY ? {} : { community: community.value },
+    omitFromUrl(community.value) ? {} : { community: community.value },
   )
 
   function hydrate() {
@@ -230,7 +255,7 @@ export function useGameSection() {
     await router.replace({
       query: {
         ...route.query,
-        community: key === DEFAULT_COMMUNITY ? undefined : key,
+        community: omitFromUrl(key) ? undefined : key,
         page: undefined,
       },
     })

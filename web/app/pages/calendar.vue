@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-vue-next'
-import { GAME_COMMUNITIES, communityClasses } from '~/composables/useGameSection'
+import { GAME_COMMUNITIES, communityClasses, useHiddenCommunities } from '~/composables/useGameSection'
 import type { CalendarEntry } from '~/composables/usePublicApi'
 import { beijingDay, calendarDays, shiftCalendarMonth, type CalendarMilestone } from '~/utils/calendar'
 import { fmtTime } from '~/utils/admin-types'
@@ -47,10 +47,13 @@ const detailGroups = computed(() => [
   { key: 'milestones', items: selectedMilestones.value, collapsible: false },
   { key: 'ongoing', items: ongoingItems.value.map(entry => ({ entry, date: selectedDay.value, at: entry.end_at ?? entry.start_at!, phase: 'ongoing' as const })), collapsible: true },
 ])
-const filters = [
+// 账号屏蔽的分区不出现在筛选里（「全部游戏」也已在后端排除），当前选中的除外。
+const { hidden } = useHiddenCommunities()
+const filters = computed(() => [
   { key: 'all', label: '全部游戏', color: 'blue' },
-  ...GAME_COMMUNITIES.map(c => ({ ...c, label: c.key === 'ai' ? 'AI 快讯' : c.label })),
-]
+  ...GAME_COMMUNITIES.filter(c => !hidden.value.has(c.key) || c.key === community.value)
+    .map(c => ({ ...c, label: c.key === 'ai' ? 'AI 快讯' : c.label })),
+])
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const selectedLabel = computed(() => new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long', timeZone: 'UTC' }).format(new Date(`${selectedDay.value}T00:00:00Z`)))
 const kindLabels: Record<string, string> = { activity: '活动', maintenance: '更新 / 维护', pool: '卡池', broadcast: '直播', delay: '变更', deadline: '截止' }

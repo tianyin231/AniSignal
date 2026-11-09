@@ -3,11 +3,11 @@
 import logging
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import literal, or_, select, func, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, sync_hidden_cookie
 from app.clock import utcnow
 from app.communities import COMMUNITIES, DEFAULT_COMMUNITY
 from app.db import get_session
@@ -26,6 +26,7 @@ from app.models import (
 from app.schemas.api import PublicContentItem, PublicContentList
 from app.services.notifications import beijing_today, create_delivery, enabled_keywords
 from app.services.feed_preferences import preference_conditions
+from app.services.hidden_communities import account_hidden, normalize_hidden
 from app.services.queue import BaseQueue
 
 logger = logging.getLogger(__name__)
@@ -134,10 +135,37 @@ async def update_feed_preferences(
     if not isinstance(excluded, list) or len(excluded) > 20 or any(not isinstance(k, str) or not k.strip() or len(k.strip()) > 64 for k in excluded):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "最多 20 个排除词，每个 1–64 字")
     preferences = {"communities": list(dict.fromkeys(communities)), "exclude_keywords": list(dict.fromkeys(k.strip() for k in excluded))}
-    # 偏好改变后，手动早报不能复用旧筛选条件生成的快照。
-    user.feed_preferences = {**preferences, "updated_at": utcnow().isoformat()}
+    # 偏好改变后，手动早报不能复用旧筛选条件生成的快照。保留同一字段里的网站屏蔽设置。
+    user.feed_preferences = {**(user.feed_preferences or {}), **preferences, "updated_at": utcnow().isoformat()}
     await session.commit()
     return preferences
+
+
+@router.get("/hidden-communities")
+async def get_hidden_communities(user: User = Depends(get_current_user)):
+    return {"communities": account_hidden(user)}
+
+
+@router.put("/hidden-communities")
+async def update_hidden_communities(
+    body: dict,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """网站浏览屏蔽：只隐藏跨分区聚合列表里的这些分区，不影响邮件、Bot 与关注流。"""
+    values = body.get("communities", [])
+    if not isinstance(values, list) or any(not isinstance(c, str) or c not in COMMUNITIES for c in values):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择有效游戏分区")
+    hidden = normalize_hidden(values)
+    if len(hidden) >= len(COMMUNITIES):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "至少保留一个分区")
+    # 不更新 updated_at：它只用于邮件早报快照，屏蔽不改变邮件内容。
+    user.feed_preferences = {**(user.feed_preferences or {}), "hidden_communities": hidden}
+    await session.commit()
+    sync_hidden_cookie(request, response, user)
+    return {"communities": hidden}
 
 
 @router.get("/notifications")
