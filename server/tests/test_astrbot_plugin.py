@@ -911,3 +911,41 @@ async def test_settings_view_reports_rejected_sync_after_saving(plugin):
     assert (status, error) == (200, None) and plugin.config.saved
     after = plugin.view_state()
     assert after['sync']['state'] == 'error' and '最多启用 3 个' in after['sync']['error']
+
+
+class FakeResponse:
+    def __init__(self, text, status=200):
+        self.status, self.body = status, text
+
+    async def text(self):
+        return self.body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+@pytest.mark.parametrize('remote, latest, available', [
+    ('name: astrbot_plugin_anisignal\nversion: v9.0.0\n', '9.0.0', True),
+    ('version: "v1.2.0"\n', '1.2.0', False),
+    ('没有版本号', '', False),
+])
+async def test_settings_view_compares_repository_version(plugin, monkeypatch, remote, latest, available):
+    mod = view_ready(plugin)
+    monkeypatch.setattr(sys.modules['aiohttp'], 'ClientTimeout', lambda **kwargs: None, raising=False)
+    plugin.client = SimpleNamespace(get=lambda url, timeout=None: FakeResponse(remote))
+    assert plugin.view_state()['update']['checked'] is False
+    await plugin.check_latest_version()
+    assert plugin.view_state()['update'] == {'current': mod.VERSION, 'latest': latest, 'available': available, 'checked': True}
+
+
+async def test_unreachable_repository_does_not_break_the_settings_view(plugin, monkeypatch):
+    view_ready(plugin)
+    monkeypatch.setattr(sys.modules['aiohttp'], 'ClientTimeout', lambda **kwargs: None, raising=False)
+    def offline(url, timeout=None):
+        raise ConnectionError('github unreachable')
+    plugin.client = SimpleNamespace(get=offline)
+    await plugin.check_latest_version()
+    assert plugin.view_state()['update']['available'] is False and plugin.latest_checked_at is not None

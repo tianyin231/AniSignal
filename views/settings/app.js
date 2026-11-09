@@ -299,6 +299,7 @@ function applyLiveState(state) {
     server_targets: state.server_targets,
     recent_sessions: state.recent_sessions,
     providers: state.providers,
+    update: state.update,
   });
   if (state.revision !== S.data.revision) S.stale = true;
   render();
@@ -427,7 +428,13 @@ function renderTop() {
   $("#save-btn").disabled = !dirty || S.busy;
   $("#save-btn").textContent = S.busy ? "处理中…" : "保存并同步";
   $("#sync-btn").disabled = S.busy || !S.data;
-  if (S.data) $("#version").textContent = `会话与通知设置 · v${S.data.version}`;
+  if (S.data) {
+    const update = S.data.update || {};
+    $("#version").replaceChildren(`会话与通知设置 · v${S.data.version}`,
+      update.available ? h("button", {
+        type: "button", class: "update-flag", title: "查看更新方式", onClick: () => select("connection"),
+      }, `有新版本 v${update.latest}`) : "");
+  }
 }
 
 function renderBanner() {
@@ -621,13 +628,26 @@ function renderConnection() {
       fieldRow(connMeta("card_font_path"), textInput(S.draft.card_font_path, (v) => { S.draft.card_font_path = v; changed(false); },
         { key: "card_font_path", mono: true, placeholder: "留空使用内置字体" }))));
 
+  const update = S.data.update || {};
+  const updateBadge = !update.checked ? h("span", { class: "badge" }, "正在检查新版本")
+    : update.available ? h("span", { class: "badge warn" }, `有新版本 v${update.latest}`)
+      : update.latest ? h("span", { class: "badge ok" }, "已是最新")
+        : h("span", { class: "badge" }, "暂时无法连接 GitHub 检查版本");
+  const updates = h("section", { class: "card" }, h("div", { class: "card-body" },
+    h("div", { class: "inline-row", style: "margin-bottom:6px" },
+      h("h3", { style: "margin:0;font-size:14px" }, "插件更新"),
+      h("span", { class: "badge brand" }, `当前 v${S.data.version}`), updateBadge),
+    h("p", { class: "hint", style: "margin:0" },
+      "在 AstrBot「插件」页的 AniSignal 卡片上点「更新」，即可获取 GitHub 仓库的最新版本，设置会保留。",
+      "\n如果点「更新」时弹出「选择插件安装源」，选择 GitHub 仓库 tianyin231/AniSignal 后继续；只需选择一次，之后每次一键更新。")));
+
   const guide = h("section", { class: "card" }, h("div", { class: "card-body" },
     h("h3", { style: "margin:0 0 6px;font-size:14px" }, "添加会话"),
     h("p", { class: "hint", style: "margin:0" },
       "在目标群聊或私聊发送 /情报会话，复制回复里的完整会话标识；也可以直接从左侧「最近有消息的会话」添加。",
       "\n移除会话后，AniSignal 会暂停该会话的推送，并保留历史投递记录。")));
 
-  return [account, settings, guide];
+  return [account, settings, updates, guide];
 }
 
 /* ---------- 会话编辑 ---------- */
@@ -1087,6 +1107,8 @@ async function start() {
   try {
     await bridge.ready();
     load(await fetchState());
+    // 版本检查在后台进行，首次打开时稍后补取一次结果。
+    if (!S.data.update?.checked) setTimeout(poll, 6000);
   } catch (error) {
     renderFailure(error);
   }

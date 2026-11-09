@@ -6,6 +6,7 @@ import html
 import json
 import re
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,8 +28,15 @@ except ImportError:  # 没有插件视图接口的 AstrBot 只保留原生设置
     web_request = None
 
 
-VERSION = "1.14.0"
+VERSION = "1.14.1"
 PLUGIN_NAME = "astrbot_plugin_anisignal"
+# AstrBot 的「更新」下载仓库默认分支；插件不在市场中，新版本提示由设置页自己检查。
+LATEST_METADATA_URL = "https://raw.githubusercontent.com/tianyin231/AniSignal/HEAD/metadata.yaml"
+LATEST_CHECK_SECONDS = 6 * 3600
+
+
+def _version_key(text):
+    return tuple(int(part) for part in re.findall(r"\d+", str(text))[:3])
 
 
 def _strip_meme_control_blocks(text: str) -> str:
@@ -76,6 +84,9 @@ class AniSignalPlugin(Star):
         self.sync_error = ""
         self.last_synced_at = ""
         self.configuration_dirty = cleanup_legacy_configuration(config)
+        self.latest_version = ""
+        self.latest_checked_at = None
+        self.version_task = None
         if web_request is not None and hasattr(context, "register_web_api"):
             # views/settings 通过 Dashboard bridge 调用，路由沿用 Dashboard 登录鉴权。
             for route, handler, methods, desc in (
@@ -411,6 +422,33 @@ class AniSignalPlugin(Star):
         except Exception as exc:
             await self.record_sync_failure(exc)
 
+    async def check_latest_version(self):
+        """读取仓库默认分支的版本号；失败只是不提示，不影响插件功能。"""
+        try:
+            async with self.client.get(LATEST_METADATA_URL, timeout=aiohttp.ClientTimeout(total=8)) as response:
+                if response.status == 200:
+                    match = re.search(r"^version:\s*[\"']?v?(\d+(?:\.\d+)*)", await response.text(), re.MULTILINE)
+                    if match:
+                        self.latest_version = match[1]
+        except Exception:
+            logger.info("AniSignal latest version check skipped")
+        finally:
+            self.latest_checked_at = time.monotonic()
+
+    def update_state(self):
+        latest = getattr(self, "latest_version", "")
+        return {"current": VERSION, "latest": latest,
+                "available": bool(latest) and _version_key(latest) > _version_key(VERSION),
+                "checked": getattr(self, "latest_checked_at", None) is not None}
+
+    def schedule_version_check(self):
+        checked = getattr(self, "latest_checked_at", None)
+        task = getattr(self, "version_task", None)
+        if getattr(self, "client", None) is None or (task and not task.done()):
+            return
+        if checked is None or time.monotonic() - checked > LATEST_CHECK_SECONDS:
+            self.version_task = asyncio.create_task(self.check_latest_version())
+
     def view_state(self):
         """设置视图所需的全部状态；密钥只回传是否已填写和末四位。"""
         schema = live_schema(self.config)
@@ -442,6 +480,7 @@ class AniSignalPlugin(Star):
             "server_targets": {umo: {"enabled": bool(row.get("enabled")), "name": row.get("name", "")} for umo, row in self.targets.items()},
             "recent_sessions": [{"umo": umo, "last_active": at} for umo, at in recent],
             "providers": providers,
+            "update": self.update_state(),
         }
 
     async def save_view_configuration(self, payload):
@@ -463,6 +502,7 @@ class AniSignalPlugin(Star):
         return 200, None
 
     async def view_settings(self):
+        self.schedule_version_check()
         return json_response(self.view_state())
 
     async def view_save(self):
@@ -830,6 +870,8 @@ class AniSignalPlugin(Star):
                                    _strip_meme_control_blocks(comp.text or "")).strip()
 
     async def terminate(self):
+        if getattr(self, "version_task", None) and not self.version_task.done():
+            self.version_task.cancel()
         if self.outbox_task:
             self.outbox_task.cancel()
             try:
