@@ -6,7 +6,7 @@
 
 ## 快速接入
 
-1. 在 AstrBot 的「插件管理 → 安装插件 → 从链接安装」中填写 `https://github.com/tianyin231/AniSignal`，点击安装。仓库根目录已提供插件入口、元数据、设置和依赖声明，AstrBot 会自动安装依赖。推荐用这种方式安装，之后可以在插件卡片上一键更新，见下文「更新」。
+1. 在 AstrBot 的「插件管理 → 安装插件 → 从链接安装」中填写 `https://github.com/tianyin231/AniSignal`，点击安装。仓库根目录已提供插件入口、元数据、设置和依赖声明，AstrBot 会自动安装依赖。推荐用这种方式安装；之后的更新方法见下文「更新」。
 2. 也可手动将本目录完整复制到 AstrBot 的 `data/plugins/astrbot_plugin_anisignal/`。保留 `main.py`、`configuration.py`、`notification_template.py`、`card.py`、`_conf_schema.json`、`metadata.yaml`、`requirements.txt`、`logo.png`，以及 `views/` 和 `.astrbot-plugin/` 两个目录，安装依赖后在插件管理中加载或重载：
 
    ```bash
@@ -14,7 +14,7 @@
    python -m pip install -r data/plugins/astrbot_plugin_anisignal/requirements.txt
    ```
 
-   手动复制的插件第一次点「更新」时，AstrBot 会请你选择插件安装源，选择 GitHub 仓库后即改为从仓库更新。
+   手动复制的插件同样可以按下文「更新」的方法一键更新。
 
 3. 打开 AniSignal 管理端 `/admin/bot`，在「AstrBot 接入」中创建独立接入密钥。密钥只显示一次，每个 AstrBot 实例单独创建一个。
 4. 在 AstrBot 的 AniSignal 插件设置中填写：
@@ -42,10 +42,15 @@ AstrBot 所在容器或主机必须能访问填写的服务地址。插件约每
 
 ## 更新
 
-在 AstrBot「插件」页的 AniSignal 卡片上点「更新」。AstrBot 会下载仓库默认分支的最新代码、替换插件目录、补装依赖并重载插件，不需要重启 AstrBot，也不需要执行命令。插件设置保存在 AstrBot 的配置目录中，更新后保留。
+AniSignal 不在 AstrBot 插件市场中，仓库自带一个只含本插件的插件源。设置一次后，有新版本时 AniSignal 卡片会显示「有新版本」，点它即可更新：
 
-- 第一次更新时如果弹出「选择插件安装源」，选择 GitHub 仓库 `tianyin231/AniSignal` 后继续。只需选择一次，从链接安装的插件不会出现这一步。
-- 插件不在 AstrBot 插件市场中，卡片不会显示「有更新」。打开设置页时，插件会读取仓库中的版本号（最多每 6 小时一次），有新版本时在页面顶部提示。读取失败不影响插件功能。
+1. 打开 AstrBot「插件市场」页，点标签旁显示当前插件源的按钮（插件源管理），选择「添加插件源」，源地址填写 `https://raw.githubusercontent.com/tianyin231/AniSignal/main/astrbot-plugin-source.json`，解析后保存。
+2. 回到「插件」页，在 AniSignal 卡片上点「⋯」→「更换插件源」，选择 AniSignal 插件源，点「使用该插件源」。
+
+更新时 AstrBot 会下载仓库默认分支的最新代码、替换插件目录、补装依赖并重载插件，不需要重启 AstrBot，也不需要执行命令。插件设置保存在 AstrBot 的配置目录中，更新后保留。
+
+- 不想添加插件源时，可以点「⋯」→「重新安装」获取最新版本。手动复制的插件第一次会弹出「选择插件安装源」，选择 GitHub 仓库 `tianyin231/AniSignal`；因为 AstrBot 检测不到新版本，还会询问是否强制更新，确认即可。
+- 插件设置页也会读取仓库中的版本号（打开设置页时检查，最多每 6 小时一次），有新版本时在页面顶部提示。读取失败不影响插件功能。
 - 插件与 AniSignal 服务端同仓库发布；自建服务端时，更新插件后也请同步更新服务端。
 
 ## 订阅范围

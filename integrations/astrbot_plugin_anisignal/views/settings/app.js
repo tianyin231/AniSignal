@@ -638,8 +638,13 @@ function renderConnection() {
       h("h3", { style: "margin:0;font-size:14px" }, "插件更新"),
       h("span", { class: "badge brand" }, `当前 v${S.data.version}`), updateBadge),
     h("p", { class: "hint", style: "margin:0" },
-      "在 AstrBot「插件」页的 AniSignal 卡片上点「更新」，即可获取 GitHub 仓库的最新版本，设置会保留。",
-      "\n如果点「更新」时弹出「选择插件安装源」，选择 GitHub 仓库 tianyin231/AniSignal 后继续；只需选择一次，之后每次一键更新。")));
+      "AniSignal 不在 AstrBot 插件市场中。按下面设置一次，之后有新版本时 AniSignal 卡片会显示「有新版本」，点它即可更新，设置会保留。"),
+    h("ol", { class: "steps" },
+      h("li", null, "打开 AstrBot「插件市场」页，点标签旁显示当前插件源的按钮，选择「添加插件源」，源地址填：",
+        h("code", { class: "copyable", title: "点击选中整段地址" }, PLUGIN_SOURCE_URL), "，解析后保存。"),
+      h("li", null, "回到「插件」页，在 AniSignal 卡片上点「⋯」→「更换插件源」，选择刚添加的 AniSignal 插件源，点「使用该插件源」。")),
+    h("p", { class: "hint", style: "margin:0" },
+      "没有设置插件源时，也可以点「⋯」→「重新安装」获取最新版本：首次会请你选择安装源，选 GitHub 仓库后确认强制更新。")));
 
   const guide = h("section", { class: "card" }, h("div", { class: "card-body" },
     h("h3", { style: "margin:0 0 6px;font-size:14px" }, "添加会话"),
@@ -811,6 +816,8 @@ function renderSubscription(t, index) {
 
   return sections;
 }
+
+const PLUGIN_SOURCE_URL = "https://raw.githubusercontent.com/tianyin231/AniSignal/main/astrbot-plugin-source.json";
 
 function emptyFeedsText() {
   const quota = S.data.sync.identity?.quota;

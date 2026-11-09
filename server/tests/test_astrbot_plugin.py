@@ -1,6 +1,7 @@
 """验证发送结果不明时不重发，以及工具操作者始终取自真实事件。"""
 import importlib.util
 import asyncio
+import hashlib
 import copy
 import json
 import sys
@@ -99,6 +100,19 @@ def plugin(monkeypatch, request):
             add_message_pair=AsyncMock()))
     return obj
 
+
+def test_plugin_source_lists_the_current_release():
+    """AstrBot 按插件源的版本号提示更新，按 -md5.json 判断缓存是否过期；两者都要随版本更新。"""
+    root = Path(__file__).parents[2]
+    meta = yaml.safe_load((root / 'metadata.yaml').read_text(encoding='utf-8'))
+    raw = (root / 'astrbot-plugin-source.json').read_bytes().replace(b'\r\n', b'\n')
+    entries = {key: value for key, value in json.loads(raw).items() if key != '$meta'}
+    assert list(entries) == [f"{meta['author']}/{meta['name']}"]
+    entry = next(iter(entries.values()))
+    assert (entry['name'], entry['repo']) == (meta['name'], meta['repo'])
+    assert entry['version'] == meta['version'].removeprefix('v'), '发布新版本时同步插件源中的 version'
+    digest = json.loads((root / 'astrbot-plugin-source-md5.json').read_text(encoding='utf-8'))['md5']
+    assert digest == hashlib.md5(raw).hexdigest(), f'astrbot-plugin-source-md5.json 应为 {hashlib.md5(raw).hexdigest()}'
 
 
 def implementation(plugin, name):
