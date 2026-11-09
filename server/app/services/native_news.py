@@ -65,10 +65,12 @@ async def images(session, rows):
     return result
 
 
-async def feed(*, q="", topic="", kind="all", hours=168, sort="time", selected=False, limit=20, offset=0):
+async def feed(*, q="", topic="", kind="all", hours=168, sort="time", selected=False, limit=20, offset=0,
+               exclude_platforms=()):
     async with SessionLocal() as session:
         if sort == "hot":
-            entries = await list_stories(session, q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected)
+            entries = await list_stories(session, q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected,
+                                         exclude_platforms=exclude_platforms)
             aliases = await article_aliases(session, [entry["id"] for entry in entries[offset:offset + limit]])
             items = []
             for entry in entries[offset:offset + limit]:
@@ -83,6 +85,8 @@ async def feed(*, q="", topic="", kind="all", hours=168, sort="time", selected=F
         for row in reversed(records):
             score, chosen = selected_score(row, policy)
             if not available(row, now) or selected and not chosen or kind != "all" and row.news["kind"] != kind:
+                continue
+            if row.raw.platform in exclude_platforms:
                 continue
             if topic and topic not in row.news["topics"]:
                 continue

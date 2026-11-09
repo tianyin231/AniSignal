@@ -14,6 +14,7 @@ from app.db import get_session
 from app.models import CollectTarget, ContentReview, ContentVersion, RawContent, Source
 from app.services.ai_news import NEWS_TOPICS, approved_news_query, reference_links
 from app.services import settings as settings_service
+from app.services.hidden_communities import AI_COMMUNITY, request_blocks
 
 router = APIRouter(prefix="/api/ai-news")
 
@@ -50,8 +51,14 @@ class NewsList(BaseModel):
     sources: list[NewsSource]
 
 
+def _blocked_platforms(request: Request) -> tuple[str, ...]:
+    # 账号在 AI 快讯里屏蔽的来源平台；日报、周报等已发布的编辑产物不受影响。
+    return request_blocks(request).raw_platforms(AI_COMMUNITY)
+
+
 @router.get("", response_model=NewsList)
 async def list_news(
+    request: Request,
     q: str = Query(default="", max_length=100),
     topic: str = Query(default="", max_length=30),
     kind: Literal["all", "report", "rumor"] = "all",
@@ -61,12 +68,16 @@ async def list_news(
     session: AsyncSession = Depends(get_session),
 ):
     from app.services import aihot
+    blocked = _blocked_platforms(request)
     if aihot.enabled():
-        result = await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, limit=limit, offset=offset)
+        result = await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, limit=limit, offset=offset,
+                                  exclude_platforms=blocked)
         result["sources"] = await _monitoring_sources(session, result["sources"])
         return result
     news = ContentReview.news
     query = (await approved_news_query(session)).where(RawContent.published_at >= utcnow() - timedelta(hours=hours))
+    if blocked:
+        query = query.where(RawContent.platform.notin_(blocked))
     if kind != "all":
         query = query.where(news["kind"].as_string() == kind)
     if topic:
@@ -137,6 +148,7 @@ async def news_sources(session: AsyncSession = Depends(get_session)):
 
 @router.get("/events")
 async def news_events(
+    request: Request,
     q: str = Query(default="", max_length=100),
     topic: str = Query(default="", max_length=30),
     kind: Literal["all", "report", "rumor"] = "all",
@@ -148,13 +160,16 @@ async def news_events(
     session: AsyncSession = Depends(get_session),
 ):
     from app.services import aihot
+    blocked = _blocked_platforms(request)
     if aihot.enabled():
-        result = await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected, limit=limit, offset=offset)
+        result = await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected, limit=limit,
+                                  offset=offset, exclude_platforms=blocked)
         result["sources"] = await _monitoring_sources(session, result["sources"])
         return result
     from app.services.news_publication import list_stories
 
-    items = await list_stories(session, q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected)
+    items = await list_stories(session, q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected,
+                               exclude_platforms=blocked)
     return {"items": items[offset:offset + limit], "total": len(items), "topics": list(NEWS_TOPICS),
         "sources": await source_status(session)}
 

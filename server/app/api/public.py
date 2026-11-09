@@ -40,7 +40,7 @@ from app.schemas.api import (
     PublicStats,
     StatisticsOverview,
 )
-from app.services.hidden_communities import request_hidden
+from app.services.hidden_communities import request_blocks, request_hidden
 from app.services.urls import safe_link
 
 router = APIRouter(prefix="/api")
@@ -82,9 +82,9 @@ async def list_highlights(
     候选要扫描近 200 条内容并补指标与事件分组（实测 0.6–0.7s），是首页首屏最慢的一步；
     结果按分区短期缓存，精选本身按小时级变化，60 秒延迟可以接受。
     """
-    hidden = request_hidden(request) if is_all_community(community) else ()
+    blocks = request_blocks(request).scoped(community)
     cache = getattr(request.app.state, "redis", None)
-    cache_key = f"highlights:v1:{community}:{limit}" + (f":-{'.'.join(hidden)}" if hidden else "")
+    cache_key = f"highlights:v1:{community}:{limit}" + (f":-{'.'.join(blocks.tokens())}" if blocks else "")
     if cache is not None:
         try:
             cached = await cache.get(cache_key)
@@ -97,7 +97,10 @@ async def list_highlights(
 
     items = [
         PublicContentItem(**item)
-        for item in await select_highlights(session, limit, community=community, exclude=hidden)
+        for item in await select_highlights(
+            session, limit, community=community, exclude=blocks.communities,
+            where=blocks.platform_conditions(RawContent.platform, RawContent.community),
+        )
     ]
     result = PublicContentList(items=items, total=len(items))
     if cache is not None:
@@ -119,10 +122,12 @@ async def list_trending(
     """热度飙升：窗口内播放增量最高的内容（需 ≥2 个指标快照）。"""
     from app.services.curation import select_trending
 
+    blocks = request_blocks(request).scoped(community)
     items = [
         PublicContentItem(**item)
         for item in await select_trending(
-            session, limit, community=community, hours=hours, exclude=request_hidden(request)
+            session, limit, community=community, hours=hours, exclude=blocks.communities,
+            where=blocks.platform_conditions(RawContent.platform, RawContent.community),
         )
     ]
     return PublicContentList(items=items, total=len(items))
@@ -230,14 +235,17 @@ async def list_contents(
 ):
     from app.services.classify import HIDDEN_CATEGORIES
 
-    hidden = request_hidden(request) if request is not None else ()
-    conditions: list = community_conditions(RawContent.community, community, hidden)
+    blocks = request_blocks(request).scoped(community)
+    conditions: list = community_conditions(RawContent.community, community, blocks.communities)
     if platform:
         conditions.append(
             RawContent.platform.in_(("kuro_cn", "kuro_global"))
             if platform == "kuro"
             else RawContent.platform == platform
         )
+    else:
+        # 显式选中某个平台时照常显示，与直接打开被屏蔽分区的规则一致。
+        conditions.extend(blocks.platform_conditions(RawContent.platform, RawContent.community))
     if content_type:
         conditions.append(RawContent.content_type == content_type)
     if identity:

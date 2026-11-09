@@ -275,9 +275,9 @@ def _set_session_cookie(request: Request, response: Response, token: str, user: 
 
 def sync_hidden_cookie(request: Request, response: Response, user: User | None, *, force: bool = False) -> None:
     """让屏蔽镜像 Cookie 与账号设置一致；页面脚本要读取它来隐藏顶栏频道，因此不设 HttpOnly。"""
-    from app.services.hidden_communities import HIDDEN_COOKIE, account_hidden, hidden_cookie_value
+    from app.services.hidden_communities import HIDDEN_COOKIE, account_blocks, hidden_cookie_value
 
-    value = hidden_cookie_value(account_hidden(user))
+    value = hidden_cookie_value(account_blocks(user))
     current = request.cookies.get(HIDDEN_COOKIE) or ""
     if value == current and not (force and value):
         return

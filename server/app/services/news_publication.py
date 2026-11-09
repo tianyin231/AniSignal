@@ -76,10 +76,14 @@ async def visible_records(session, *, now=None, days=30):
         and not (row.current and row.event and not row.event.is_active)]
 
 
-async def list_stories(session, *, q="", topic="", kind="all", hours=168, sort="time", selected=False, now=None):
+async def list_stories(session, *, q="", topic="", kind="all", hours=168, sort="time", selected=False, now=None,
+                       exclude_platforms=()):
     now = now or utcnow()
     policy = await get_policy(session)
     records = await visible_records(session, now=now, days=max(30, (hours + 23) // 24))
+    if exclude_platforms:
+        # 账号屏蔽的平台在归组前剔除：只由这些平台报道的事件整条消失，其余事件保留其他来源。
+        records = [row for row in records if row.raw.platform not in exclude_platforms]
     pools = {}
     for row in records:
         if row.current and row.grouping.relation == "ROUNDUP":

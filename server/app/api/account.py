@@ -26,7 +26,7 @@ from app.models import (
 from app.schemas.api import PublicContentItem, PublicContentList
 from app.services.notifications import beijing_today, create_delivery, enabled_keywords
 from app.services.feed_preferences import preference_conditions
-from app.services.hidden_communities import account_hidden, normalize_hidden
+from app.services.hidden_communities import PLATFORM_TOKENS, account_blocks, normalize_hidden, normalize_platforms
 from app.services.queue import BaseQueue
 
 logger = logging.getLogger(__name__)
@@ -141,9 +141,13 @@ async def update_feed_preferences(
     return preferences
 
 
+def _blocks_body(blocks) -> dict:
+    return {"communities": list(blocks.communities), "platforms": list(blocks.platforms)}
+
+
 @router.get("/hidden-communities")
 async def get_hidden_communities(user: User = Depends(get_current_user)):
-    return {"communities": account_hidden(user)}
+    return _blocks_body(account_blocks(user))
 
 
 @router.put("/hidden-communities")
@@ -154,18 +158,26 @@ async def update_hidden_communities(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """网站浏览屏蔽：只隐藏跨分区聚合列表里的这些分区，不影响邮件、Bot 与关注流。"""
-    values = body.get("communities", [])
+    """网站浏览屏蔽：分区只隐藏跨分区聚合列表，来源平台按游戏 / AI 两组过滤；不影响邮件、Bot 与关注流。
+
+    请求体缺少某个字段时保留该项原设置。
+    """
+    current = account_blocks(user)
+    values = body.get("communities", list(current.communities))
     if not isinstance(values, list) or any(not isinstance(c, str) or c not in COMMUNITIES for c in values):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择有效游戏分区")
     hidden = normalize_hidden(values)
     if len(hidden) >= len(COMMUNITIES):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "至少保留一个分区")
+    tokens = body.get("platforms", list(current.platforms))
+    if not isinstance(tokens, list) or any(not isinstance(t, str) or t not in PLATFORM_TOKENS for t in tokens):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择有效来源平台")
+    platforms = normalize_platforms(tokens)
     # 不更新 updated_at：它只用于邮件早报快照，屏蔽不改变邮件内容。
-    user.feed_preferences = {**(user.feed_preferences or {}), "hidden_communities": hidden}
+    user.feed_preferences = {**(user.feed_preferences or {}), "hidden_communities": hidden, "hidden_platforms": platforms}
     await session.commit()
     sync_hidden_cookie(request, response, user)
-    return {"communities": hidden}
+    return _blocks_body(account_blocks(user))
 
 
 @router.get("/notifications")

@@ -94,10 +94,21 @@ async def sources():
         for r in rows if r["enabled"] and r.get("participation_mode") != "isolated"]
 
 
-async def feed(*, q="", topic="", kind="all", hours=168, sort="time", selected=False, limit=20, offset=0):
+async def feed(*, q="", topic="", kind="all", hours=168, sort="time", selected=False, limit=20, offset=0,
+               exclude_platforms=()):
     if unified():
         from app.services import native_news
-        return await native_news.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected, limit=limit, offset=offset)
+        return await native_news.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected,
+                                      limit=limit, offset=offset, exclude_platforms=exclude_platforms)
+    # 外部 AIHOT 引擎只回传本页；账号屏蔽的平台在页内剔除，总数仍按引擎计。
+    result = await _external_feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected,
+                                  limit=limit, offset=offset)
+    if exclude_platforms:
+        result["items"] = [item for item in result["items"] if item.get("platform") not in exclude_platforms]
+    return result
+
+
+async def _external_feed(*, q, topic, kind, hours, sort, selected, limit, offset):
     if sort == "hot":
         data = await request("/api/site/hot")
         items = []
