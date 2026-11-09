@@ -240,7 +240,9 @@ def update_catalog(config, catalog, identity, *, synced_at="", sync_error=""):
     feed_options = {row["id"]: f"{row['name']} · {'我的监控' if row['owned'] else '公共监控'}" for row in feeds}
     items["subscription"]["items"]["custom_feed_ids"].update(options=list(feed_options), labels=list(feed_options.values()))
     presets = catalog.get("custom_presets", {})
-    items["subscription"]["items"]["custom_feeds"].update(options=list(presets), labels=list(presets.values()))
+    # 现有站点预设已并入对应游戏分区的官方来源；没有预设时隐藏这个旧字段，免得被当成缺少权限。
+    items["subscription"]["items"]["custom_feeds"].update(options=list(presets), labels=list(presets.values()),
+                                                         invisible=not presets)
     sources = {**options, **{f"preset:{key}": name for key, name in catalog.get("custom_presets", {}).items()},
                **{f"feed:{key}": value for key, value in feed_options.items()}}
     for field in ("daily_sources", "updates_sources"):

@@ -790,10 +790,12 @@ function renderSubscription(t, index) {
   sections.push(h("div", { class: "section" },
     h("h3", null, "定制信息源与监控"),
     h("p", { class: "lede" }, "任何模式下都会额外推送这里勾选的内容。"),
-    fieldRow(presetMeta, presets.length ? chipSet(presets, sub.custom_feeds || [], (v) => set("custom_feeds", v), "custom_feeds")
-      : h("div", { class: "empty" }, "暂无可用的定制信息源。")),
+    // 现有站点预设已并入游戏分区的官方来源；只有仍有预设或旧配置残留时才显示这一项。
+    presets.length || (sub.custom_feeds || []).length
+      ? fieldRow(presetMeta, chipSet(presets, sub.custom_feeds || [], (v) => set("custom_feeds", v), "custom_feeds")) : null,
     fieldRow(feedMeta, feeds.length ? chipSet(feeds, sub.custom_feed_ids || [], (v) => set("custom_feed_ids", v), "custom_feed_ids")
-      : h("div", { class: "empty" }, S.data.connection.tools_key_set ? "当前账号没有可用的监控。" : "填写用户 Token 并同步后，这里会列出账号可用的监控。"))));
+      : h("div", { class: "empty" }, S.data.connection.tools_key_set ? emptyFeedsText() : "填写用户 Token 并同步后，这里会列出账号可用的监控。"),
+      { hint: feeds.length ? "勾选要推送到此会话的本人监控与他人公开的监控；新的监控在 AniSignal 网站「账号中心 → 定制监控」中创建。" : null })));
 
   sections.push(h("div", { class: "section" },
     h("h3", null, "关键词"),
@@ -808,6 +810,12 @@ function renderSubscription(t, index) {
     fieldRow(meta("subscription", "inherit_keywords"), switchControl(sub.inherit_keywords, (v) => set("inherit_keywords", v), "inherit_keywords"), { inline: true })));
 
   return sections;
+}
+
+function emptyFeedsText() {
+  const quota = S.data.sync.identity?.quota;
+  const limit = quota ? `（每个账号最多 ${quota.max_feeds} 个）` : "";
+  return `还没有可选的监控。在 AniSignal 网站「账号中心 → 定制监控」点「新建监控」创建${limit}，约 1 分钟后出现在这里。`;
 }
 
 function renderChannelPicker(t, index) {

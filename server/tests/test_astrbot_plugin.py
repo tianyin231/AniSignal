@@ -190,6 +190,7 @@ async def test_account_catalog_populates_choices_and_grouped_platform_selection_
     assert not any(key.startswith('channel_') for key in sent)
     items = plugin.config.schema['targets']['templates']['session']['items']
     assert items['subscription']['items']['custom_feed_ids']['options'] == [10]
+    assert items['subscription']['items']['custom_feeds']['invisible'] is True
     assert '我的私有源' in str(items['notifications']['items']['daily_sources']['labels'])
     assert '我的账号' in plugin.config.schema['tools_key']['hint']
 
