@@ -1,0 +1,8 @@
+{
+  "views": {
+    "settings": {
+      "title": "AniSignal 设置",
+      "description": "按会话勾选订阅来源、通知时间与回复方式，保存后立即同步到 AniSignal。"
+    }
+  }
+}

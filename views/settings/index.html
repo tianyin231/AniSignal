@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AniSignal 设置</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <img src="./brand.webp" alt="" width="36" height="36" />
+          <div>
+            <strong>AniSignal 情报助手</strong>
+            <span id="version">会话与通知设置</span>
+          </div>
+        </div>
+        <div id="sync-pill" class="sync-pill" role="status">正在读取</div>
+        <div class="top-actions">
+          <span id="dirty-note" class="dirty-note" hidden>有未保存的修改</span>
+          <button id="discard-btn" class="btn quiet" type="button" hidden>放弃修改</button>
+          <button id="sync-btn" class="btn" type="button" disabled>立即同步</button>
+          <button id="save-btn" class="btn primary" type="button" disabled>保存并同步</button>
+        </div>
+      </header>
+      <div id="banner"></div>
+      <div id="root" class="loading" aria-busy="true">
+        <div><div class="spinner"></div>正在读取插件设置…</div>
+      </div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

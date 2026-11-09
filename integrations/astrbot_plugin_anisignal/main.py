@@ -17,11 +17,18 @@ from astrbot.api.message_components import Plain
 from astrbot.core.provider.entities import ProviderRequest
 from astrbot.core.message.message_event_result import MessageChain
 
-from .configuration import apply_subscription, cleanup_legacy_configuration, quota_summary, to_plugin_target, to_server_target, update_catalog, upgrade_subscriptions
+from .configuration import (apply_subscription, cleanup_legacy_configuration, configuration_revision, live_schema,
+    normalize_view_configuration, quota_summary, to_plugin_target, to_server_target, update_catalog, upgrade_subscriptions)
 from .notification_template import details_hint, render_notification
 
+try:
+    from astrbot.api.web import error_response, json_response, request as web_request
+except ImportError:  # 没有插件视图接口的 AstrBot 只保留原生设置页。
+    web_request = None
 
-VERSION = "1.13.2"
+
+VERSION = "1.14.0"
+PLUGIN_NAME = "astrbot_plugin_anisignal"
 
 
 def _strip_meme_control_blocks(text: str) -> str:
@@ -51,7 +58,7 @@ def _notification_plaintext(text: str) -> str:
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
 
 
-@register("astrbot_plugin_anisignal", "AniSignal", "情报工具、人格播报与会话提醒", VERSION)
+@register(PLUGIN_NAME, "AniSignal", "情报工具、人格播报与会话提醒", VERSION)
 class AniSignalPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -69,6 +76,13 @@ class AniSignalPlugin(Star):
         self.sync_error = ""
         self.last_synced_at = ""
         self.configuration_dirty = cleanup_legacy_configuration(config)
+        if web_request is not None and hasattr(context, "register_web_api"):
+            # views/settings 通过 Dashboard bridge 调用，路由沿用 Dashboard 登录鉴权。
+            for route, handler, methods, desc in (
+                    ("settings", self.view_settings, ["GET"], "AniSignal 设置视图：读取"),
+                    ("settings/save", self.view_save, ["POST"], "AniSignal 设置视图：保存并同步"),
+                    ("settings/sync", self.view_sync, ["POST"], "AniSignal 设置视图：立即同步")):
+                context.register_web_api(f"/{PLUGIN_NAME}/{route}", handler, methods, desc)
 
     async def initialize(self):
         self.client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
@@ -365,25 +379,101 @@ class AniSignalPlugin(Star):
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                # 配置被拒绝时重新读取主节点状态，让用户能看到真实额度和上次已生效配置。
-                previous = {}
-                try:
-                    previous = await self.api("/configuration")
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    pass
-                self.targets = {row["umo"]: row for row in previous.get("targets", [])}
-                self.identity = previous.get("identity", {})
-                self.last_briefs = {}
-                self.sync_error = str(exc) if isinstance(exc, ValueError) else "主节点连接暂不可用"
-                update_catalog(self.config, previous.get("catalog", {}), self.identity, sync_error=self.sync_error)
-                self.configuration_ready = False
-                if isinstance(exc, ValueError):
-                    logger.warning("AniSignal 插件配置未同步：%s", exc)
-                else:
-                    logger.warning("AniSignal target refresh failed (%s)", type(exc).__name__)
+                await self.record_sync_failure(exc)
             await asyncio.sleep(30)
+
+    async def record_sync_failure(self, exc):
+        # 配置被拒绝时重新读取主节点状态，让用户能看到真实额度和上次已生效配置。
+        previous = {}
+        try:
+            previous = await self.api("/configuration")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        self.targets = {row["umo"]: row for row in previous.get("targets", [])}
+        self.identity = previous.get("identity", {})
+        self.last_briefs = {}
+        self.sync_error = str(exc) if isinstance(exc, ValueError) else "主节点连接暂不可用"
+        update_catalog(self.config, previous.get("catalog", {}), self.identity, sync_error=self.sync_error)
+        self.configuration_ready = False
+        if isinstance(exc, ValueError):
+            logger.warning("AniSignal 插件配置未同步：%s", exc)
+        else:
+            logger.warning("AniSignal target refresh failed (%s)", type(exc).__name__)
+
+    async def sync_now(self):
+        """设置视图保存后立即同步一次；结果写进同步状态，由视图展示。"""
+        try:
+            await asyncio.wait_for(self.synchronize_configuration(), timeout=25)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self.record_sync_failure(exc)
+
+    def view_state(self):
+        """设置视图所需的全部状态；密钥只回传是否已填写和末四位。"""
+        schema = live_schema(self.config)
+        targets = copy.deepcopy(self.config.get("targets", []))
+        upgrade_subscriptions({"targets": targets})
+        key = str(self.config.get("tools_key", "") or "")
+        configured = {target.get("umo") for target in targets}
+        recent = sorted(((umo, at) for umo, at in self.last_activity.items() if umo not in configured),
+                        key=lambda row: row[1], reverse=True)[:20]
+        providers = []
+        try:
+            for provider in self.context.get_all_providers():
+                meta = provider.meta()
+                providers.append({"id": meta.id, "model": getattr(meta, "model", "") or ""})
+        except Exception:
+            providers = []
+        state = "error" if self.sync_error else ("synced" if self.identity else "pending")
+        return {
+            "version": VERSION,
+            "revision": configuration_revision(self.config),
+            "connection": {"base_url": self.config.get("base_url", ""), "card_font_path": self.config.get("card_font_path", ""),
+                           "tools_key_set": bool(key), "tools_key_tail": key[-4:] if len(key) >= 12 else ""},
+            "sync": {"state": state, "error": self.sync_error, "synced_at": self.last_synced_at,
+                     "ready": self.configuration_ready, "identity": {k: v for k, v in self.identity.items() if k in ("user", "quota", "legacy")},
+                     "quota_summary": quota_summary(self.identity)},
+            "schema": {"session": schema["targets"]["templates"]["session"]["items"],
+                       "connection": {key: schema[key] for key in ("base_url", "tools_key", "card_font_path") if key in schema}},
+            "targets": targets,
+            "server_targets": {umo: {"enabled": bool(row.get("enabled")), "name": row.get("name", "")} for umo, row in self.targets.items()},
+            "recent_sessions": [{"umo": umo, "last_active": at} for umo, at in recent],
+            "providers": providers,
+        }
+
+    async def save_view_configuration(self, payload):
+        """校验并写入设置视图的提交，返回 (状态码, 错误或 None)。写入后立即同步。"""
+        payload = payload if isinstance(payload, dict) else {}
+        updates, errors = normalize_view_configuration(payload.get("config"), self.config)
+        if errors:
+            return 400, "；".join(errors[:6]) + ("…" if len(errors) > 6 else "")
+        async with self.configuration_lock:
+            if payload.get("revision") != configuration_revision(self.config):
+                return 409, "设置已在别处修改（例如聊天中改了订阅），请重新载入后再保存。"
+            self.config.update(updates)
+            self.configuration_dirty = True
+            try:
+                await self.save_configuration()
+            except OSError:
+                return 500, "设置未能写入，请检查 AstrBot 配置文件权限后重试。"
+        await self.sync_now()
+        return 200, None
+
+    async def view_settings(self):
+        return json_response(self.view_state())
+
+    async def view_save(self):
+        status, error = await self.save_view_configuration(await web_request.json(default={}))
+        if error:
+            return error_response(error, status_code=status)
+        return json_response({"saved": True, **self.view_state()})
+
+    async def view_sync(self):
+        await self.sync_now()
+        return json_response(self.view_state())
 
     async def report_activity(self):
         """回传各会话最近活跃时间供管理端辨认；失败只影响本轮。"""

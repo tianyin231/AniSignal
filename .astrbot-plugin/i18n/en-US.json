@@ -1,0 +1,8 @@
+{
+  "views": {
+    "settings": {
+      "title": "AniSignal Settings",
+      "description": "Choose sources, notification times and reply styles for each chat; saving syncs to AniSignal right away."
+    }
+  }
+}

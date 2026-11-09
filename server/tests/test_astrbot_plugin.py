@@ -263,9 +263,16 @@ def test_new_install_defaults_are_portable_and_mask_the_access_key():
 def test_repository_install_manifests_match_standalone_plugin(plugin):
     root = Path(__file__).parents[2]
     standalone = root / 'integrations/astrbot_plugin_anisignal'
-    for filename in ['metadata.yaml', '_conf_schema.json']:
+    for filename in ['metadata.yaml', '_conf_schema.json', 'logo.png']:
         assert (root / filename).read_bytes() == (standalone / filename).read_bytes(), \
             f'修改插件设置或元数据后，需要同步根目录的 {filename}'
+    # 仓库安装时 AstrBot 从仓库根目录扫描设置视图和视图标题，两处文件必须一致。
+    for folder in ['views', '.astrbot-plugin']:
+        files = sorted(path.relative_to(standalone) for path in (standalone / folder).rglob('*') if path.is_file())
+        assert files and files == sorted(path.relative_to(root) for path in (root / folder).rglob('*') if path.is_file())
+        for relative in files:
+            assert (root / relative).read_bytes() == (standalone / relative).read_bytes(), \
+                f'修改设置视图后，需要同步根目录的 {relative}'
     metadata = yaml.safe_load((root / 'metadata.yaml').read_text(encoding='utf-8'))
     assert metadata['version'] == 'v' + sys.modules[plugin.__class__.__module__].VERSION
     assert metadata['repo'] == 'https://github.com/tianyin231/AniSignal'
@@ -798,3 +805,109 @@ async def test_daily_card_counts_toward_image_limit(plugin, monkeypatch):
     assert len(images) == 3 and images[0].endswith('brief.png')
     assert images[1:] == ['first', 'second']
     plugin.context.send_message.assert_awaited_once()
+
+
+def view_ready(plugin, targets=None, identity=None):
+    mod = sys.modules[plugin.__class__.__module__]
+    plugin.config.update(base_url='https://anisignal.xyz', tools_key='user-token-abcd1234', card_font_path='',
+                         configuration_imported=True, targets=targets if targets is not None else [
+                             mod.to_plugin_target({'name': '鸣潮群', 'umo': 'qq:GroupMessage:100', 'enabled': True,
+                                                   'channels': ['wuwa:official:bilibili'], 'scope_mode': 'channels'})])
+    plugin.identity = identity or {}
+    plugin.sync_error = ''
+    plugin.last_synced_at = ''
+    plugin.api.return_value = {'targets': [], 'identity': {'client_id': 'mine', 'user': {'id': 5, 'display_name': '测试账号'}}}
+    return mod
+
+
+async def test_settings_view_never_returns_the_token_and_suggests_unconfigured_sessions(plugin):
+    view_ready(plugin)
+    plugin.last_activity = {'qq:GroupMessage:100': '2026-11-09T10:00:00+00:00',
+                            'qq:GroupMessage:200': '2026-11-09T11:00:00+00:00',
+                            'qq:FriendMessage:300': '2026-11-09T12:00:00+00:00'}
+    state = plugin.view_state()
+    assert 'user-token-abcd1234' not in json.dumps(state, ensure_ascii=False)
+    assert state['connection']['tools_key_set'] is True and state['connection']['tools_key_tail'] == '1234'
+    assert [row['umo'] for row in state['recent_sessions']] == ['qq:FriendMessage:300', 'qq:GroupMessage:200']
+    assert state['targets'][0]['subscription']['channel_wuwa'] == ['wuwa:official:bilibili']
+    assert 'channel_wuwa' in state['schema']['session']['subscription']['items']
+    assert state['providers'] == [] and state['sync']['state'] == 'pending'
+
+
+async def test_settings_view_save_keeps_token_fills_defaults_and_syncs_at_once(plugin):
+    view_ready(plugin)
+    state = plugin.view_state()
+    target = copy.deepcopy(state['targets'][0])
+    target['subscription']['channel_wuwa'] = ['wuwa:official:bilibili', 'wuwa:product']
+    target['notifications'] = {'daily_time': '09:30', 'merge_minutes': '15'}
+    added = {'name': ' 新私聊 ', 'umo': 'qq:FriendMessage:300'}
+    status, error = await plugin.save_view_configuration({'revision': state['revision'], 'config': {
+        'base_url': 'https://anisignal.xyz/', 'targets': [target, added]}})
+    assert (status, error) == (200, None)
+    saved = plugin.config.saved
+    assert saved['tools_key'] == 'user-token-abcd1234' and saved['base_url'] == 'https://anisignal.xyz'
+    assert saved['configuration_imported'] is True
+    first, second = saved['targets']
+    assert first['notifications']['daily_time'] == '09:30' and first['notifications']['merge_minutes'] == 15
+    assert first['notifications']['daily_enabled'] is True
+    assert second['name'] == '新私聊' and second['__template_key'] == 'session' and second['enabled'] is False
+    sent = plugin.api.call_args.args[1]['targets']
+    assert sent[0]['channels'] == ['wuwa:official:bilibili', 'wuwa:product']
+    assert plugin.configuration_ready and plugin.identity['user']['id'] == 5
+
+
+@pytest.mark.parametrize('change, message', [
+    (lambda t: t.update(umo='群号100'), '会话标识'),
+    (lambda t: t.update(name=''), '缺少名称'),
+    (lambda t: t['notifications'].update(daily_time='8点'), '早报时间'),
+    (lambda t: t['notifications'].update(quiet_start=30), '超出范围'),
+    (lambda t: t['interaction'].update(tools=['digest', 'shell']), '未知选项'),
+    (lambda t: t['presentation'].update(reply_mode='voice'), '不是可选值'),
+])
+async def test_settings_view_rejects_invalid_sessions_without_saving(plugin, change, message):
+    view_ready(plugin)
+    state = plugin.view_state()
+    target = copy.deepcopy(state['targets'][0])
+    change(target)
+    status, error = await plugin.save_view_configuration({'revision': state['revision'], 'config': {
+        'base_url': 'https://anisignal.xyz', 'targets': [target]}})
+    assert status == 400 and message in error
+    assert not hasattr(plugin.config, 'saved')
+    plugin.api.assert_not_awaited()
+
+
+async def test_settings_view_rejects_duplicates_and_stale_revisions(plugin):
+    view_ready(plugin)
+    state = plugin.view_state()
+    target = state['targets'][0]
+    status, error = await plugin.save_view_configuration({'revision': state['revision'], 'config': {
+        'base_url': 'https://anisignal.xyz', 'targets': [target, copy.deepcopy(target)]}})
+    assert status == 400 and '重复' in error
+    plugin.config['targets'][0]['subscription']['keywords'] = ['聊天里改的']
+    status, error = await plugin.save_view_configuration({'revision': state['revision'], 'config': {
+        'base_url': 'https://anisignal.xyz', 'targets': [target]}})
+    assert status == 409 and '重新载入' in error
+    assert plugin.config['targets'][0]['subscription']['keywords'] == ['聊天里改的']
+
+
+async def test_settings_view_can_replace_or_clear_the_token(plugin):
+    view_ready(plugin)
+    state = plugin.view_state()
+    config = {'base_url': 'https://anisignal.xyz', 'targets': state['targets'], 'tools_key': ' new-token-0000 '}
+    assert await plugin.save_view_configuration({'revision': state['revision'], 'config': config}) == (200, None)
+    assert plugin.config.saved['tools_key'] == 'new-token-0000'
+    state = plugin.view_state()
+    config = {'base_url': 'https://anisignal.xyz', 'targets': state['targets'], 'clear_tools_key': True}
+    assert await plugin.save_view_configuration({'revision': state['revision'], 'config': config}) == (200, None)
+    assert plugin.config.saved['tools_key'] == ''
+
+
+async def test_settings_view_reports_rejected_sync_after_saving(plugin):
+    view_ready(plugin)
+    state = plugin.view_state()
+    plugin.api.side_effect = [ValueError('当前账号最多启用 3 个 Bot 会话'), {'targets': [], 'identity': {}}]
+    status, error = await plugin.save_view_configuration({'revision': state['revision'], 'config': {
+        'base_url': 'https://anisignal.xyz', 'targets': state['targets']}})
+    assert (status, error) == (200, None) and plugin.config.saved
+    after = plugin.view_state()
+    assert after['sync']['state'] == 'error' and '最多启用 3 个' in after['sync']['error']

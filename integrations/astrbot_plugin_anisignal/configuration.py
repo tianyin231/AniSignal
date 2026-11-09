@@ -1,9 +1,17 @@
 """AstrBot 设置页的分组结构与 AniSignal 会话配置之间的转换。"""
 
 import copy
+import hashlib
 import json
+import re
 from functools import cache
 from pathlib import Path
+
+
+UMO_PATTERN = re.compile(r"^[^:]+:(FriendMessage|GroupMessage):[^:]+$")
+TIME_PATTERN = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+# 选项随账号目录变化，校验交给主节点；其余固定选项在本地先拦下。
+CATALOG_FIELDS = {"channels", "custom_feeds", "custom_feed_ids", "daily_sources", "updates_sources"}
 
 
 def cleanup_legacy_configuration(config):
@@ -30,9 +38,162 @@ def cleanup_legacy_configuration(config):
 
 
 @cache
+def plugin_schema():
+    return json.loads(Path(__file__).with_name("_conf_schema.json").read_text(encoding="utf-8"))
+
+
 def target_schema():
-    schema = json.loads(Path(__file__).with_name("_conf_schema.json").read_text(encoding="utf-8"))
-    return schema["targets"]["templates"]["session"]["items"]
+    return plugin_schema()["targets"]["templates"]["session"]["items"]
+
+
+def live_schema(config):
+    """AstrBot 载入的 schema 带有账号目录选项；测试或旧版本缺失时退回文件。"""
+    return getattr(config, "schema", None) or plugin_schema()
+
+
+def configuration_revision(config):
+    """设置视图用它发现别处的并发修改；不纳入密钥，避免把密钥派生值交给页面。"""
+    snapshot = {key: config.get(key) for key in ("base_url", "card_font_path", "targets")}
+    return hashlib.sha256(json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _coerce_field(value, meta, label, errors, field):
+    kind, default = meta.get("type"), copy.deepcopy(meta.get("default"))
+    if value is None:
+        return default
+    if kind == "bool":
+        if isinstance(value, bool):
+            return value
+        errors.append(f"{label}应为开关")
+        return default
+    if kind == "int":
+        try:
+            if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+                raise ValueError
+            number = int(value)
+        except (TypeError, ValueError):
+            errors.append(f"{label}应为整数")
+            return default
+        slider = meta.get("slider") or {}
+        low, high = slider.get("min", 0), slider.get("max")
+        if number < low or (high is not None and number > high):
+            errors.append(f"{label}超出范围" + (f" {low}～{high}" if high is not None else f"，不能小于 {low}"))
+        return number
+    if kind in ("string", "text"):
+        if not isinstance(value, str):
+            errors.append(f"{label}应为文字")
+            return default
+        value = value.strip() if kind == "string" else value
+        if meta.get("options") and value not in meta["options"]:
+            errors.append(f"{label}不是可选值：{value}")
+            return default
+        return value
+    if kind == "list":
+        if not isinstance(value, list):
+            errors.append(f"{label}应为列表")
+            return default
+        items = []
+        for item in value:
+            if field == "custom_feed_ids":
+                try:
+                    item = int(item)
+                except (TypeError, ValueError):
+                    errors.append(f"{label}包含无效监控")
+                    continue
+            elif isinstance(item, str):
+                item = item.strip()
+                if not item:
+                    continue
+            else:
+                errors.append(f"{label}包含无效项")
+                continue
+            if item not in items:
+                items.append(item)
+        options = meta.get("options")
+        if options and field not in CATALOG_FIELDS and not field.startswith("channel_"):
+            if unknown := [item for item in items if item not in options]:
+                errors.append(f"{label}包含未知选项：{'、'.join(map(str, unknown[:3]))}")
+                items = [item for item in items if item in options]
+        return items
+    return copy.deepcopy(value)
+
+
+def normalize_view_target(raw, items, index):
+    """把设置视图提交的会话收敛成模板列表条目，字段与默认值以 schema 为准。"""
+    errors = []
+    raw = raw if isinstance(raw, dict) else {}
+    label = f"第 {index + 1} 个会话"
+    result = {"__template_key": "session"}
+    for field, meta in items.items():
+        if meta.get("type") == "object":
+            group = raw.get(field) if isinstance(raw.get(field), dict) else {}
+            result[field] = {key: _coerce_field(group.get(key), item, f"{label}·{item.get('description', key)}", errors, key)
+                             for key, item in meta["items"].items()}
+        else:
+            result[field] = _coerce_field(raw.get(field), meta, f"{label}·{meta.get('description', field)}", errors, field)
+    name = result.get("name", "")
+    if name:
+        label = f"「{name}」"
+    if not name:
+        errors.append(f"{label}缺少名称")
+    elif len(name) > 100:
+        errors.append(f"{label}的名称超过 100 字")
+    if not UMO_PATTERN.match(result.get("umo", "")):
+        errors.append(f"{label}的会话标识应形如 平台:GroupMessage:群号 或 平台:FriendMessage:用户")
+    notifications = result.get("notifications", {})
+    for key, title in (("daily_time", "早报时间"), ("calendar_time", "收尾提醒时间")):
+        if key in notifications and not TIME_PATTERN.match(notifications[key]):
+            errors.append(f"{label}的{title}应为 HH:mm")
+    subscription = result.get("subscription", {})
+    for key, title in (("keywords", "关注关键词"), ("exclude_keywords", "排除关键词")):
+        words = subscription.get(key, [])
+        if len(words) > 20:
+            errors.append(f"{label}的{title}最多 20 个")
+        if any(len(word) > 64 for word in words):
+            errors.append(f"{label}的{title}每个不超过 64 字")
+    if len(result.get("interaction", {}).get("manager_ids", [])) > 20:
+        errors.append(f"{label}的管理用户最多 20 个")
+    return result, errors
+
+
+def normalize_view_configuration(payload, config):
+    """校验设置视图的整份提交；密钥留空表示不修改。返回待写入的字段与错误。"""
+    schema = live_schema(config)
+    items = schema["targets"]["templates"]["session"]["items"]
+    payload = payload if isinstance(payload, dict) else {}
+    errors, updates = [], {}
+    base_url = payload.get("base_url", config.get("base_url", ""))
+    if not isinstance(base_url, str) or not re.match(r"^https?://[^\s/]+", base_url.strip()):
+        errors.append("服务地址应以 http:// 或 https:// 开头")
+    else:
+        updates["base_url"] = base_url.strip().rstrip("/")
+    tools_key = payload.get("tools_key")
+    if payload.get("clear_tools_key"):
+        updates["tools_key"] = ""
+    elif tools_key is not None:
+        if not isinstance(tools_key, str):
+            errors.append("用户 Token 应为文字")
+        elif tools_key.strip():
+            updates["tools_key"] = tools_key.strip()
+    font = payload.get("card_font_path", config.get("card_font_path", ""))
+    if not isinstance(font, str):
+        errors.append("字体路径应为文字")
+    else:
+        updates["card_font_path"] = font.strip()
+    targets = payload.get("targets", [])
+    if not isinstance(targets, list):
+        errors.append("会话列表格式无效")
+        targets = []
+    normalized, seen = [], set()
+    for index, raw in enumerate(targets):
+        target, target_errors = normalize_view_target(raw, items, index)
+        errors.extend(target_errors)
+        if target.get("umo") in seen:
+            errors.append(f"会话标识重复：{target['umo']}")
+        seen.add(target.get("umo"))
+        normalized.append(target)
+    updates["targets"] = normalized
+    return updates, errors
 
 
 def upgrade_subscriptions(config):
