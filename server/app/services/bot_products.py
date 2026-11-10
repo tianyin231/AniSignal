@@ -1,15 +1,81 @@
 """商品频道的已采纳履约变化；复用现有修订和发送预算，不调用摘要模型。"""
 
+import re
+
 from sqlalchemy import select
 
+from app.communities import COMMUNITIES
 from app.config import get_settings
 from app.models import Product, ProductFulfillmentRevision
 from app.services.fulfillment import build_fulfillment_snapshot, load_product_signal_data
 from app.services.fulfillment_revisions import verified_fulfillment_state
 from app.services.notifications import _plain
 
-AXES = {"official": "官方履约", "consumer": "消费者到货", "quality": "质量风险"}
-EMPTY = {"official": "暂无已采纳官方履约信号", "consumer": "暂无已采纳自购到货信号", "quality": "暂无已采纳质量反馈"}
+AXES = ("official", "consumer", "quality")
+# 群消息只说发生了什么；“已采纳 N”等审核口径留在商品页。
+OFFICIAL = {"presale_open": "开启预售", "balance_open": "开启尾款", "delayed": "宣布延期",
+            "shipping_started": "开始发货", "aftersales_notice": "发布售后说明"}
+QUALITY = {"isolated_issue": "出现质量反馈", "repeated_issue": "多个来源反馈质量问题"}
+# 详情只取商品档案的原文字段，不另行推断价格或日期。
+DETAILS = {
+    "开启预售": (("price_note", "价格"), ("presale_at", "预售"), ("ship_note", "发货")),
+    "开启尾款": (("balance_window", "尾款"), ("ship_note", "发货")),
+    "宣布延期": (("original_ship_at", "原定发货"), ("ship_note", "发货")),
+    "开始发货": (("ship_note", "发货"),),
+}
+
+
+def describe_change(previous: dict, state: dict, current: dict | None = None) -> tuple[list[str], list[str], bool]:
+    """返回（变化、补充说明、是否更正）；同一状态只多了证据条数不算新进展。"""
+    events, notes = [], []
+    correction = any(state[axis]["verified_count"] < previous[axis]["verified_count"] for axis in AXES)
+    correction = correction or any(state[key] < previous[key] for key in ("sample_count", "observation_count"))
+    official, before = state["official"], previous["official"]
+    if not official["verified_count"] and before["verified_count"]:
+        old = OFFICIAL.get(before["state"])
+        notes.append(f"此前「{old}」的判断已撤回" if old else "此前的官方履约判断已撤回")
+    elif official["verified_count"] and official["state"] != before["state"]:
+        events.append(OFFICIAL.get(official["state"]) or _plain(((current or {}).get("official") or {}).get("state_label") or "官方履约有更新"))
+    consumer, before = state["consumer"], previous["consumer"]
+    if consumer["verified_count"] > before["verified_count"]:
+        count = consumer["verified_count"]
+        events.append("首位玩家晒出到货" if count == 1 else f"已有 {count} 位玩家晒出到货")
+    elif consumer["verified_count"] < before["verified_count"]:
+        notes.append("部分到货反馈已撤回" if consumer["verified_count"] else "此前的到货反馈已撤回")
+    if state["sample_count"] > previous["sample_count"]:
+        events.append("出现送测样品")
+    if state["observation_count"] > previous["observation_count"] and not events:
+        events.append("出现实物开箱")
+    quality, before = state["quality"], previous["quality"]
+    if quality["state"] != before["state"] and quality["state"] in QUALITY:
+        events.append(QUALITY[quality["state"]])
+    elif quality["verified_count"] > before["verified_count"] and quality["state"] in QUALITY:
+        events.append("质量反馈增加")
+    elif quality["verified_count"] < before["verified_count"]:
+        notes.append("部分质量反馈已撤回" if quality["verified_count"] else "此前的质量反馈已撤回")
+    if any(event in QUALITY.values() or event == "质量反馈增加" for event in events):
+        notes.append("质量反馈只代表已收集到的个例，不代表整体情况")
+    return events, notes, correction
+
+
+def short_name(name: str, community: str) -> str:
+    meta = COMMUNITIES.get(community)
+    for game in sorted(meta.game_names if meta else (), key=len, reverse=True):
+        if name.startswith(game) and len(name) > len(game) + 1:
+            return name[len(game):].lstrip(" ·｜|：:-")
+    return name
+
+
+def _detail(value: str | None, label: str) -> str:
+    text = re.split(r"[。！!；;\n]", _plain(value or "").strip(), maxsplit=1)[0].strip(" ，,")
+    if not text or len(text) > 32:
+        return ""
+    return text if re.search(r"[：:]", text) else f"{label}：{text}"
+
+
+def product_details(product: Product, events: list[str]) -> list[str]:
+    fields = next((DETAILS[event] for event in events if event in DETAILS), ())
+    return list(dict.fromkeys(filter(None, (_detail(getattr(product, field), label) for field, label in fields))))
 
 
 async def revision_item(session, revision):
@@ -30,20 +96,28 @@ async def revision_item(session, revision):
                and raw.community == product.community}
     if (any(state[axis]["verified_count"] for axis in AXES) or state["sample_count"] or state["observation_count"]) and not visible:
         return None
-    previous = verified_fulfillment_state(revision.previous_snapshot)
-    correction = any(state[axis]["verified_count"] < previous[axis]["verified_count"] for axis in AXES)
-    correction = correction or any(state[key] < previous[key] for key in ("sample_count", "observation_count"))
-    points = [f"{label}：{_plain(current[axis]['state_label']) if state[axis]['verified_count'] else EMPTY[axis]}（已采纳 {state[axis]['verified_count']}）"
-              for axis, label in AXES.items()]
-    points += [f"送测样品：{state['sample_count']} 个独立来源", f"购买方式未注明的实物展示：{state['observation_count']} 个独立来源"]
-    title = f"{_plain(product.name)} · 履约{'更正' if correction else '变化'}"
-    text = "；".join(points) + "。已采纳信息仍可随证据修正。"
+    events, notes, correction = describe_change(verified_fulfillment_state(revision.previous_snapshot), state, current)
+    if not events and not notes:
+        # 同一状态只多了一条证据，对群聊不算新进展；商品页照常更新。
+        return None
+    name = _plain(product.name)
+    short = short_name(name, product.community)
+    series = re.match(r"(?P<series>\S{2,20}系列)\s+(?P<item>\S.*)$", short)
+    change = "、".join(events[:2]) if events else "履约判断有更正"
+    details = product_details(product, events)
+    summary = "。".join([*notes, "；".join(details)] if details else notes)
+    summary = summary + "。" if summary else ""
+    text = f"{name}{change}。{summary}"
     return {"id": f"fulfillment:{revision.id}", "content_ids": [], "community": product.community,
-            "title": title, "text": text, "summary": text, "key_points": points,
+            "title": f"{short} {change}", "text": text, "summary": summary or text,
+            "key_points": [change, *notes, *details],
             "url": f"{get_settings().public_base_url.rstrip('/')}/products/{product.slug}",
             "source": "商品履约档案", "platform": "product", "identity": "system", "content_type": "fulfillment",
             "published_at": revision.created_at, "collected_at": revision.created_at, "importance": True,
             "strength": "strong", "keywords": [], "image": None, "event_id": None,
+            "product": {"name": short, "series": series["series"] if series else "",
+                        "item": series["item"] if series else short, "change": change,
+                        "details": details, "notes": notes, "correction": correction},
             "fulfillment_evidence_ids": sorted(visible), "watch_terms": product.watch_terms or [],
             "fulfillment_revision": revision.id, "notification_channels": [f"{product.community}:product"]}
 

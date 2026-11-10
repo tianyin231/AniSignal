@@ -15,7 +15,8 @@ from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentMatch, ContentSchedule, ContentVersion, Event, Evidence, Product, RawContent, RedeemCode, Source
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
 from app.services.bot_briefs import (_published, _source, build_brief, build_shared_brief, changed_points, fallback_items, format_brief,
-                                    is_recent_item, news_points, point_key, prune_shared_copies, publication_label, single_item_brief)
+                                    LAYOUT, is_recent_item, news_points, point_key, products_brief, prune_shared_copies, publication_label,
+                                    single_item_brief)
 from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 from app.services.bot_calendar import calendar_brief, upcoming_entries, refresh_calendar, scheduled_at, normalized_title
@@ -714,10 +715,13 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
         return False
     if len(usable) == len(items) and (usable or row.brief.get("mode") == "notice"):
         # 已排队的早报也使用当前事实模板；不把旧交互提示继续送给插件。
-        if brief.get("mode") == "daily":
-            row.body = format_brief(brief)
-            if commit:
-                await session.commit()
+        # 新版式按实际发送时刻重排，“今天/昨天”不会因免打扰顺延而说错。
+        if brief.get("mode") == "daily" or (brief.get("layout") == LAYOUT and brief.get("mode") in {"updates", "products"}):
+            body = format_brief(brief, now)
+            if body != row.body:
+                row.body = body
+                if commit:
+                    await session.commit()
         return True
     if usable:
         brief = notification_brief({**row.brief, "items": usable},
@@ -728,7 +732,7 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
                 item["published_at"] = datetime.fromisoformat(item["published_at"])
             body = format_short_update(item)
         else:
-            body = format_brief(brief)
+            body = format_brief(brief, now)
         values = {"brief": brief, "body": body, "media": collect_images(usable, image_limit(config)) or None}
     else:
         values = {"status": "cancelled", "receipt": None, "updated_at": now,
@@ -779,7 +783,7 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
             window_key = hashlib.sha256(
                 (f"merge:{target.id}:" + "".join(sorted(i["dedupe"] for i in items if i["dedupe"] in selected_keys))).encode()
             ).hexdigest()[:32]
-            await create_delivery(session, target, "updates", format_brief(brief), f"updates:{target.id}:{window_key}",
+            await create_delivery(session, target, "updates", format_brief(brief, now), f"updates:{target.id}:{window_key}",
                                   media=collect_images(brief["items"], max_images), brief=brief)
             # 每批文案有条数上限，只移除实际入队的来源，其余消息留待下一批。
             remaining = [item for item in items if item["dedupe"] not in selected_keys]
@@ -862,7 +866,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                         brief = notification_brief(brief, identified)
                         brief = {**brief, "scheduled_at": due.isoformat(), "expires_at": (due + timedelta(hours=2)).isoformat()}
                         if brief["items"]:
-                            await create_delivery(session, target, "daily", format_brief(brief), key, media=covers, brief=brief)
+                            await create_delivery(session, target, "daily", format_brief(brief, due), key, media=covers, brief=brief)
         if config.get("updates_enabled") and config.get("calendar_enabled", True) and not quiet:
             due = scheduled_at(now, config.get("calendar_time", "20:00"))
             key = f"calendar-digest:{target.id}:{local.date()}"
@@ -882,11 +886,19 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             normal_items = []
             already = await known_notification_keys(session, target.id, now)
             candidates = [item for item in payload["items"] if is_recent_item(item, now)]
+            product_items = []
             for item in await prepare_update_items(session, target.id, candidates, now, already):
-                if classify_item(item) == "critical":
+                if item.get("fulfillment_revision"):
+                    product_items.append(item)
+                elif classify_item(item) == "critical":
                     critical_items.append(item)
                 else:
                     normal_items.append(item)
+            if product_items:
+                # 同一轮的周边变化合成一条；预售、到货不算急事，按普通动态遵守免打扰。
+                brief = notification_brief(products_brief(product_items, now), product_items)
+                digest = hashlib.sha256("".join(sorted(item["dedupe"] for item in product_items)).encode()).hexdigest()[:32]
+                await create_delivery(session, target, "updates", format_brief(brief, now), f"products:{target.id}:{digest}", brief=brief)
             # 空闲时单条立刻发；同轮多条、免打扰、尚未到配置的推送时间或已有待发时，合并缓冲内容。
             hold_updates = (merge_minutes > 0 or quiet or len(normal_items) > 1 or bool(buffer.get("items"))
                             or await delivery_congested(session, target, now))
@@ -894,7 +906,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                 for item in immediate:
                     brief = notification_brief(await build_shared_brief(session, [item], now), [item])
                     if brief["items"]:
-                        await create_delivery(session, target, kind, format_brief(brief),
+                        await create_delivery(session, target, kind, format_brief(brief, now),
                                               f"{kind}:{target.id}:{item['dedupe']}",
                                               media=collect_images(brief["items"], max_images), brief=brief)
             if normal_items and hold_updates:

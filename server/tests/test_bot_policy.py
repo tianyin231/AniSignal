@@ -490,6 +490,27 @@ async def test_calendar_skips_date_only_and_maintenance_copy_is_relevant(session
     assert '想参与' not in text and '/展开' not in text and brief['truncated'] is False
 
 
+def test_calendar_lists_groups_with_relative_days():
+    from datetime import datetime
+    due = datetime(2026, 11, 10, 12)  # 北京时间 20:00 发出
+
+    def entry(title, community, stage, kind="activity"):
+        return {"title": title, "kind": kind, "community": community, "stage_at": stage.isoformat(),
+                "expires_at": stage.isoformat(), "url": "", "schedule_ids": [len(title)], "content_ids": [1]}
+    deadline = datetime(2026, 11, 10, 19, 59)
+    entries = [entry("花藏繁生", "hsr", deadline, "pool"), entry("踏潮探历", "wuwa", deadline),
+               entry("声骸材料限时双倍活动", "wuwa", deadline), entry("「沉晦执明」挑战", "wuwa", deadline),
+               entry("港区维护", "blhx", datetime(2026, 11, 11, 2), "maintenance")]
+    text, brief = calendar_brief(entries, due)
+    assert text.splitlines() == [
+        "接下来 24 小时，有 4 项活动或卡池截止、1 次维护：",
+        "· 崩坏星穹铁道 明天 03:59 截止：花藏繁生",
+        "· 鸣潮 明天 03:59 截止：踏潮探历、声骸材料限时双倍活动 等 3 项",
+        "· 碧蓝航线 明天 10:00 开始维护：港区维护",
+    ]
+    assert brief["title"] == "日程提醒" and brief["truncated"] is True
+
+
 async def test_queued_daily_uses_current_fact_template_without_rewriting_accepted_history(session):
     now=utcnow().replace(hour=0,minute=0,second=0,microsecond=0)
     row=await target(session,now,daily_enabled=True,daily_time='08:00')

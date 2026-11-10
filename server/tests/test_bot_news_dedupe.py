@@ -71,7 +71,8 @@ async def test_compilation_only_keeps_new_fact_without_replacing_original_review
         "headline": "DeepSeek 公布补偿", "new_facts": ["退还 7 天费用"]}], seen)
     await bot_news.dedupe_pending_news(session, t.id, utcnow())
     assert "恢复" not in row.body and "退还 7 天费用" in row.body
-    assert "https://x.com/test/status/2" in row.body and "待核实" in row.body
+    # 普通报道只注明来源；“待核实”留给传闻。
+    assert "https://x.com/test/status/2" in row.body and "X 消息来源" in row.body and "转述" not in row.body
     assert row.brief["items"][0]["news"] == original
     assert row.brief["items"][0]["notification_news"]["summary"] == "来源补充称：退还 7 天费用"
 

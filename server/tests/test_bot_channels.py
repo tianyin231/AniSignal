@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select
 
 from app.api.bot import TargetBody
 from app.clock import utcnow
@@ -211,3 +212,49 @@ async def test_fulfillment_change_reuses_shared_budget_and_revalidates_evidence(
     raw.hidden = True
     assert not await bot.prepare_delivery(session, delivery, target=row)
     assert delivery.status == "cancelled"
+
+
+def presale_snapshot(count=1):
+    return {"official": {"state": "presale_open", "state_label": "开启预售", "verified_count": count},
+            "consumer": {"state": "no_verified_receipt", "state_label": "暂无明确自购到货证据", "verified_count": 0},
+            "quality": {"state": "no_verified_issue", "state_label": "暂无明确质量风险", "verified_count": 0},
+            "sample_count": 0, "observation_count": 0}
+
+
+async def test_same_round_presales_become_one_plain_message(session, monkeypatch):
+    raw = await content(session, "镜锁妄世心照红尘系列周边预售公告")
+    names = ["鸣潮 镜锁妄世心照红尘系列 锁暝印象长柄伞", "鸣潮 镜锁妄世心照红尘系列 心·此心所栖印象手链",
+             "鸣潮 镜锁妄世心照红尘系列 心「流灯照归心」主题礼盒", "鸣潮 清辉长照主题亚克力朝月灯"]
+    for index, name in enumerate(names):
+        product = Product(name=name, slug=f"merch-{index}", community="wuwa", watch_terms=[name],
+                          presale_at="预售时间：2026/11/11 18:00起", ship_note="发货时间：以页面显示为准")
+        session.add(product)
+        await session.flush()
+        previous = presale_snapshot(0)
+        previous["official"]["state"] = "no_verified_signal"
+        session.add(ProductFulfillmentRevision(product_id=product.id, community="wuwa", previous_snapshot=previous,
+                                               snapshot=presale_snapshot(), reason="采纳预售公告",
+                                               created_at=utcnow() - timedelta(minutes=1)))
+    await session.commit()
+
+    async def signal_data(*args):
+        return ([(SimpleNamespace(review_status="verified"), SimpleNamespace(role="primary"), raw, None)], {})
+
+    async def projection(*args, **kwargs):
+        return presale_snapshot()
+
+    monkeypatch.setattr(bot_products, "load_product_signal_data", signal_data)
+    monkeypatch.setattr(bot_products, "build_fulfillment_snapshot", projection)
+    row = await target(session, ["wuwa:product"])
+    row.config = {**row.config, "quiet_start": 0, "quiet_end": 0}
+    await session.commit()
+    await bot.run_bot_notifications(session)
+    rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.target_id == row.id)))
+    assert len(rows) == 1 and rows[0].kind == "updates" and rows[0].brief["mode"] == "products"
+    body = rows[0].body
+    assert body.startswith("鸣潮｜4 款周边开启预售\n")
+    assert "· 镜锁妄世心照红尘系列：锁暝印象长柄伞、心·此心所栖印象手链、心「流灯照归心」主题礼盒" in body
+    assert "· 清辉长照主题亚克力朝月灯" in body
+    assert "预售时间：2026/11/11 18:00起 · 发货时间：以页面显示为准" in body
+    assert body.endswith("/products?community=wuwa")
+    assert "已采纳" not in body and "履约" not in body and body.count("/products") == 1

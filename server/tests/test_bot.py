@@ -164,7 +164,7 @@ async def test_merge_window_batches_normal_updates(session, monkeypatch):
     rows = list(await session.scalars(select(BotDelivery).where(BotDelivery.kind == 'updates')))
     assert len(rows) == 1
     assert '刚刚的重点' not in rows[0].body and '/展开' not in rows[0].body
-    assert rows[0].body.startswith('1. ') and '\n\n2. ' in rows[0].body
+    assert rows[0].body.startswith('① ') and '\n\n② ' in rows[0].body
     assert '合并消息0' in rows[0].body and '合并消息1' in rows[0].body
     assert set(rows[0].media) == {'https://img.example/merge0.jpg', 'https://img.example/merge1.jpg'}
 
@@ -195,7 +195,7 @@ async def test_short_format_and_multi_image(session, monkeypatch):
     assert len(rows) == 1
     body = rows[0].body
     assert '短讯标题0' in body and '短讯标题1' in body
-    assert '发布：09/13 11:00' in body and '11:58' not in body and '12:00' not in body
+    assert '今天 11:00' in body and '11:58' not in body and '12:00' not in body and '发布：' not in body
     assert set(rows[0].media) == {'https://img.example/0.jpg', 'https://img.example/1.jpg'}
     assert rows[0].brief['mode'] == 'updates'
     assert all(item['sources'][0]['content_ids'] for item in rows[0].brief['items'])
@@ -248,7 +248,7 @@ async def test_format_helpers():
     assert '鸣潮｜测试标题，这是一句说明 第二行' in text
     assert 'https://example.com/a' not in text
     assert '这是一句说明 第二行' in text
-    assert '发布：09/13 12:00' in text
+    assert text.endswith('\n09/13 12:00')
     unknown = bot.format_short_update({'title': '未标时间的动态', 'published_at': None,
                                       'collected_at': datetime(2026, 9, 13, 4, 0)})
     assert unknown == '未标时间的动态'

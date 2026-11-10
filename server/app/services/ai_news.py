@@ -72,11 +72,20 @@ NEWS_REVIEW_PROMPT = """你是人工智能资讯编辑。输入是平台公开�
 - 与 AI 无关、资料过少无法说明发生什么、或不符合新闻要求时 newsworthy=false，其他字段仍要给出。"""
 
 
+def _whole_sentences(value: str, limit: int) -> str:
+    """超长摘要退到最后一个完整句，避免群里出现“利用 Codex 和 Claude 等”这种半句。"""
+    if len(value) <= limit:
+        return value
+    head = value[:limit]
+    end = max(head.rfind(mark) for mark in "。！？；!?;")
+    return head[:end + 1] if end >= limit // 2 else head.rstrip("，、：:； ") + "…"
+
+
 def parse_news(value: object) -> dict | None:
     if not isinstance(value, dict) or not isinstance(value.get("newsworthy"), bool):
         return None
     headline = str(value.get("headline") or "").strip()[:80]
-    summary = str(value.get("summary") or "").strip()[:180]
+    summary = _whole_sentences(str(value.get("summary") or "").strip(), 180)
     kind = value.get("kind")
     if value["newsworthy"] and (not headline or not summary or kind not in {"report", "rumor"}):
         return None

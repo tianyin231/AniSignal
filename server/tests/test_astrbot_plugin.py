@@ -91,6 +91,7 @@ def plugin(monkeypatch, request):
     obj.targets = {}
     obj.last_activity = {}
     obj.last_briefs = {}
+    obj.recent_intros = {}
     obj.context = SimpleNamespace(get_platform_inst=lambda p: None, send_message=AsyncMock(return_value=True),
         conversation_manager=SimpleNamespace(
             get_curr_conversation_id=AsyncMock(return_value='cid-1'),
@@ -521,6 +522,23 @@ async def test_notification_keeps_original_persona_actions_emoji_and_length(plug
     assert (await type(plugin).render_delivery(plugin, row)).text == intro+'\n\n'+row['body']
     prompt = plugin.context.llm_generate.await_args.kwargs['system_prompt']
     assert prompt.startswith('自定义会话人格') and '最多24字' not in prompt
+
+
+async def test_notification_intro_is_one_short_line_and_varies_from_recent_ones(plugin):
+    plugin._resolve_persona = AsyncMock(return_value=('model', '软糯小猫娘', 'catgirl'))
+    retold = ('猫猫刚扒拉到一条快讯！' + '法美英等八国政府和OpenAI、Anthropic这些AI巨头在巴黎签了安全呼吁，'
+              '说要建立模型关停机制还要独立审计，不过暂时不具备强制力哦。')
+    plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text=retold))
+    row = delivery()
+    assert (await type(plugin).render_delivery(plugin, row)).text == '猫猫刚扒拉到一条快讯！\n\n' + row['body']
+    prompt = plugin.context.llm_generate.await_args.kwargs['system_prompt']
+    assert '不要复述正文' in prompt and '最近几次的开场' not in prompt
+    plugin.context.llm_generate.return_value = SimpleNamespace(completion_text='这下维护前得赶紧收菜了。')
+    await type(plugin).render_delivery(plugin, row)
+    prompt = plugin.context.llm_generate.await_args.kwargs['system_prompt']
+    assert '最近几次的开场' in prompt and '猫猫刚扒拉到一条快讯！' in prompt
+    plugin.context.llm_generate.return_value = SimpleNamespace(completion_text='哇' * 80)
+    assert (await type(plugin).render_delivery(plugin, row)).text == row['body']
 
 
 @pytest.mark.parametrize('conversation_persona',[None,'previous-persona'])

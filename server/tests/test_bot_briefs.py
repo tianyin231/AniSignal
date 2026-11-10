@@ -59,7 +59,7 @@ async def test_brief_dates_do_not_present_generation_time_as_publication(session
     for mode in ('daily', 'updates'):
         brief = await briefs.build_brief(session, sources, datetime(2026, 10, 9, 7, 40), mode=mode)
         text = briefs.format_brief(brief)
-        assert '发布：10/09 14:00' in text
+        assert '官方 · 10/09 14:00' in text and '发布：' not in text
         assert '15:40' not in text and '15:09' not in text
         assert brief['items'][0]['published_label'] == '发布：10/09 14:00'
         assert brief['items'][1]['published_label'] == ''
@@ -240,12 +240,14 @@ async def test_updates_are_complete_shares_and_arknights_is_not_rejected_as_a_da
     source = content(1, community='arknights', title='《明日方舟》EP - 大地之盐',
                      text='10月9日大地之盐正式上架各音乐平台，包含伴奏版。', published_at=datetime(2026, 10, 9, 3))
     brief = await briefs.build_brief(session, [source], datetime(2026, 10, 9, 4))
-    assert briefs.format_brief(brief) == share + '\n发布：10/09 11:00'
+    assert briefs.format_brief(brief) == share + '\n官方 · 10/09 11:00'
     assert brief['items'][0]['share_text'] == share
     assert brief['items'][0]['sources'][0]['title'] == source['title']
     assert source['url'] in briefs.format_detail(brief['items'][0])
     brief['items'].append({**brief['items'][0], 'share_text': '鸣潮先约电台深夜频道更新啦。', 'community': 'wuwa'})
-    assert briefs.format_brief(brief) == f'1. {share}\n发布：10/09 11:00\n\n2. 鸣潮先约电台深夜频道更新啦。\n发布：10/09 11:00'
+    assert briefs.format_brief(brief) == f'① {share}\n官方 · 10/09 11:00\n\n② 鸣潮先约电台深夜频道更新啦。\n官方 · 10/09 11:00'
+    # 发送时刻按北京时间写今天/昨天。
+    assert briefs.format_brief(brief, datetime(2026, 10, 9, 17)).endswith('\n官方 · 昨天 11:00')
 
 
 async def test_share_text_cannot_bypass_date_or_fact_checks(session, monkeypatch):
@@ -489,3 +491,51 @@ def test_activity_eligibility_cannot_become_a_reward_claim():
     assert briefs._grounded_copy('天工寻物活动', '做四鸣井任务就能拿500星声。', evidence) is None
     assert briefs._grounded_copy('天工寻物活动', '活动奖励含500星声，参与需14级并激活四鸣井。', evidence)
     assert briefs._grounded_copy('七日任务', '完成七日任务就能拿限定换装。', '完成七日任务，可获得限定换装。')
+
+
+def news(n, kind='report', **extra):
+    return {**content(n, community='ai', source='TechCrunch · AI', platform='rss', identity='media',
+                      url=f'https://news.example/{n}', published_at=datetime(2026, 11, 10, 14, 5)),
+            'news': {'kind': kind, 'headline': f'快讯标题{n}', 'summary': f'快讯摘要{n}。'}, **extra}
+
+
+async def test_ai_news_names_source_once_and_only_rumors_need_verification(session):
+    now = datetime(2026, 11, 10, 14, 30)
+    single = await briefs.build_shared_brief(session, [news(1)], now)
+    text = briefs.format_brief(single, now)
+    assert text == '[AI 快讯] 快讯标题1\n快讯摘要1。\nTechCrunch · AI · 今天 22:05\nhttps://news.example/1'
+    pair = await briefs.build_shared_brief(session, [news(1), news(2, 'rumor')], now)
+    text = briefs.format_brief(pair, now)
+    assert text.startswith('AI 快讯 · 2 条\n\n① ')
+    assert '② [传闻] 快讯标题2' in text and '待核实 · TechCrunch · AI · 今天 22:05' in text
+    assert '转述' not in text and text.count('待核实') == 1
+    complete = ('TechCrunch 报道，Kirt McMaster 的公司 Kora Systems 宣布推出一款集成 AI 模型和代理的 Linux 桌面操作系统 Kora。'
+                '该系统旨在服务于重度 AI 用户，预计 2027 年免费发布，支持 Intel、AMD 及 Qualcomm 芯片。')
+    cut = complete + '开发团队利用 OpenAI Codex 和 Anthropic Claude 等'
+    assert len(cut) >= 150 and briefs.news_share({'headline': 'Kora', 'summary': cut}) == 'Kora\n' + complete
+    assert briefs.news_share({'headline': 'DeepSeek', 'summary': '退还 7 天费用'}) == 'DeepSeek\n退还 7 天费用'
+
+
+def test_fallback_copy_drops_greetings_and_decorations():
+    notice = content(1, community='blhx', title='港区改造通知',
+                     text='各位亲爱的指挥官，司令部将于11月12日10:00~15:00对港区进行为期5小时的改造建设（如有变动将会另行发布通知）。')
+    body = briefs.format_brief({'mode': 'updates', 'items': briefs.fallback_items([notice])})
+    assert '亲爱的指挥官' not in body and '如有变动' not in body and '11月12日10:00~15:00' in body
+    assert briefs._clean_copy('◆家具贩售注意◆，联动主题家具「漫研社」将于维护后登场~！') == '家具贩售注意：联动主题家具「漫研社」将于维护后登场~！'
+    assert briefs._clean_copy('〓明日方舟 粘土人 拉普兰德 再贩开启！〓') == '明日方舟 粘土人 拉普兰德 再贩开启！'
+    foreign = content(2, community='nikke', title='', text='Marian thinks the commander is kind and helpful in this episode of the comic series today')
+    assert briefs.fallback_items([foreign]) == []
+
+
+async def test_model_failure_fallback_is_not_cached_for_other_sessions(session, monkeypatch):
+    monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
+    chat = AsyncMock(side_effect=TimeoutError())
+    monkeypatch.setattr(briefs, 'chat', chat)
+    source = content(1, published_at=datetime(2026, 10, 9, 3))
+    first = await briefs.build_shared_brief(session, [source], datetime(2026, 10, 9, 4))
+    assert first['items'] and 'share_text' not in first['items'][0]
+    share = '崩坏星穹铁道4.6版本9月28日上线啦。'
+    chat.side_effect = None
+    chat.return_value = (json.dumps({'items': [{'indices': [1], 'title': '4.6版本上线', 'summary': share}]}), {})
+    second = await briefs.build_shared_brief(session, [source], datetime(2026, 10, 9, 4))
+    assert chat.await_count == 2 and second['items'][0]['share_text'] == share

@@ -76,13 +76,24 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1].rstrip("，、：； ") + "…"
 
 
+# ✦小标题✦ 由 news_points 还原成段落，这里不动。
+_DECOR_CHARS = "〓◆◇★☆■□●○◎♦❖▶►▼▲"
+_DECOR_LABEL = re.compile(rf"([{_DECOR_CHARS}])([^{_DECOR_CHARS}\n，。！？]{{1,12}})\1\s*[，,：:]?\s*")
+_DECOR = re.compile(rf"[{_DECOR_CHARS}]+")
+# 公告开头的称呼不是信息，回退文案直接从正事说起。
+_GREETING = re.compile(r"^(?:(?:各位|亲爱的|尊敬的)[^，,：:！!。？?\s]{0,14}|[^，,：:！!。？?\s]{1,10}(?:您好|你们好|大家好))[，,：:！!]\s*")
+
+
 def _clean_copy(value: str, published_at=None) -> str:
     """只清展示文案，来源快照保留原文供展开核对。"""
     value = re.sub(r"#[^#\n]{1,80}#", "", value or "")
     value = re.sub(r"(?:^|\s)(?:标题|正文|摘要|内容)\s*[：:]\s*", " ", value)
     value = re.split(r"(?:更多资讯(?:请|，|,)|关注(?:我们|官方账号)|(?:官方网站|游戏官网|立即下载|下载游戏)\s*[：:])", value, maxsplit=1)[0]
     value = re.sub(r"https?://\S+", "", value)
-    return dated_text(value, published_at).strip(" |｜·：:—-")
+    value = _DECOR.sub(" ", _DECOR_LABEL.sub(r" \2：", value))
+    value = re.sub(r"\s*([，。！？：；,])", r"\1", value)
+    value = dated_text(value, published_at).strip(" |｜·：:—-，,")
+    return _GREETING.sub("", value).strip()
 
 
 def _complete_text(value: str, limit: int) -> str:
@@ -141,6 +152,7 @@ def _summary_copy(value: str, title: str, published_at=None, *, limit: int | Non
         if not tail or tail[0] in " ，。！？!?:：|｜—-" or tail.rstrip("。！!") in {"已发布", "已上线", "发布了", "上线了"}:
             value = tail.lstrip(" ，。！？!?:：|｜—-")
     value = re.sub(r"(?:官方版本/?活动信息|具体(?:内容|详情)?(?:请以|以)?后续(?:公告|公布)?为准|具体(?:内容|详情)?待后续(?:公告|公布)?)[。！!]?", "", value).strip()
+    value = re.sub(r"[（(](?:如有变动|若有变动|如有调整)[^）)]{0,30}[）)]", "", value)
     if value.rstrip("。！!") in {"已发布", "已上线", "发布了", "上线了"}:
         return ""
     return _complete_text(value, limit) if limit is not None else value
@@ -234,8 +246,9 @@ def _short_title(item: dict) -> str:
         # 动态可能拿整段角色台词作标题；从后续正文取完整句，不截成“欢迎回来”。
         body = _clean_copy(item.get("text") or "", item.get("published_at"))
         body = body.removeprefix(_clean_copy(item.get("source_title") or item.get("title", ""), item.get("published_at"))).strip()
-        title = _complete_text(body, 50)
-    return title or "新动态"
+        # 正文也没有完整句时才截标题；不再用只有“新动态”三个字的占位。
+        title = _complete_text(body, 50) or _clip(title, 40)
+    return title
 
 
 def _source(item: dict) -> dict:
@@ -261,6 +274,7 @@ def _source(item: dict) -> dict:
         "is_supplement": bool(item.get("is_supplement")),
         **({"notification_channels": item["notification_channels"]} if item.get("notification_channels") is not None else {}),
         **({"fulfillment_revision": item["fulfillment_revision"]} if item.get("fulfillment_revision") else {}),
+        **({"product": item["product"]} if item.get("product") else {}),
         **({"custom_feed": item["custom_feed"]} if item.get("custom_feed") else {}),
         **({"news": item["news"]} if item.get("news") else {}),
     }
@@ -299,6 +313,10 @@ def fallback_items(items: list[dict], limit: int = MAX_ITEMS, *, require_chinese
                 continue
         elif require_chinese and summary and not re.search(r"[\u4e00-\u9fff]", summary):
             summary = ""
+        if not title:
+            title, summary = _complete_text(summary, 80), ""
+            if not title:
+                continue
         selected.append({**source, "title": title, "summary": summary, "sources": [source]})
         if len(selected) >= limit:
             break
@@ -347,12 +365,8 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
         for item in [item for item in items if item.get("news")][:limit]:
             source = _source(item)
             news = item["news"]
-            label = "AI 传闻" if news["kind"] == "rumor" else "AI 快讯"
-            share = f"[{label}] {news['headline']}\n{news['summary']}\n来源：{source['source']}（转述，待核实）"
-            if source["url"]:
-                share += "\n" + source["url"]
             selected.append({**source, "title": news["headline"], "summary": news["summary"],
-                             "share_text": share, "sources": [source]})
+                             "share_text": news_share(news), "sources": [source]})
         game_items = [item for item in items if not item.get("news")]
         if game_items:
             selected += await select_brief_items(session, game_items, now, limit=limit, use_ai=use_ai)
@@ -477,38 +491,170 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
                            duration_ms=int((time.monotonic() - started) * 1000), status=status)
 
 
-def format_brief(brief: dict) -> str:
+PLATFORM_LABELS = {"bilibili": "B站", "miyoushe": "米游社", "kuro_cn": "库街区", "kuro_global": "库街区国际服",
+                   "youtube": "YouTube", "x": "X", "weibo": "微博"}
+_NUMBERS = "①②③④⑤⑥⑦⑧⑨⑩"
+# 正文版式版本；发送前只重排这一版快照，旧快照的文案里已自带来源行。
+LAYOUT = 2
+
+
+def _finished(value: str) -> str:
+    """上游按字数截断的长摘要可能停在半句；退回最后一个完整句，否则标出省略。短句不带句号不算截断。"""
+    value = value.strip()
+    if len(value) < 150 or value[-1] in "。！？!?；;…）)」』\"”":
+        return value
+    end = max(value.rfind(mark) for mark in "。！？!?；;")
+    return value[:end + 1] if end >= len(value) // 2 else value.rstrip("，、：:") + "…"
+
+
+def news_share(news: dict) -> str:
+    """标签、来源和链接在排版时补上，合并多条快讯时不必逐条重复。"""
+    return f"{news['headline']}\n{_finished(news['summary'])}"
+
+
+def time_label(item: dict, now: datetime | None = None) -> str:
+    """按发送时刻写今天/昨天；未知发布时间不补，合并来源时保留各自时间。"""
+    times = sorted({published for source in (item.get("sources") or [item])
+                    if (published := _published(source.get("published_at")))})
+    today = (_published(now) + timedelta(hours=8)).date() if now else None
+    labels = []
+    for value in times:
+        local = value + timedelta(hours=8)
+        day = ("今天" if local.date() == today else "昨天" if local.date() == today - timedelta(days=1) else "") if today else ""
+        labels.append(f"{day} {local:%H:%M}" if day else local.strftime("%m/%d %H:%M"))
+    return " / ".join(dict.fromkeys(labels))
+
+
+def source_label(item: dict) -> str:
+    labels = []
+    for source in (item.get("sources") or [item]):
+        name = (source.get("source") or "").strip()
+        name = "" if name == "原始来源" else name
+        platform = PLATFORM_LABELS.get(source.get("platform") or "", "")
+        meta = COMMUNITIES.get(source.get("community"))
+        if source.get("identity") == "official" and meta and name in meta.game_names:
+            # 官号与游戏同名时，正文开头已有游戏名。
+            labels.append(f"{platform}官号" if platform else "官方")
+        else:
+            labels.append(" ".join(filter(None, (platform, name))))
+    return "、".join(list(dict.fromkeys(filter(None, labels)))[:2])
+
+
+def _footer(item: dict, now: datetime | None = None) -> str:
+    # 传闻已在标题标签注明；普通快讯是媒体报道，不再逐条写“转述，待核实”。
+    rumor = (item.get("news") or {}).get("kind") == "rumor"
+    return " · ".join(filter(None, ("待核实" if rumor else "", source_label(item), time_label(item, now))))
+
+
+def _news_text(item: dict, *, label: bool) -> str:
+    text = item.get("share_text") or f"{item['title']}\n{item.get('summary') or ''}".strip()
+    rumor = item["news"].get("kind") == "rumor"
+    if label:
+        return f"[{'AI 传闻' if rumor else 'AI 快讯'}] {text}"
+    return f"[传闻] {text}" if rumor else text
+
+
+def _update_block(item: dict, now: datetime | None, *, label: bool = True) -> str:
+    if item.get("news"):
+        if (item.get("share_text") or "").startswith("[AI "):
+            # 旧快照的文案已含标签、来源和链接，只补发布时间。
+            return "\n".join(filter(None, (item["share_text"], publication_label(item))))
+        lines = [_news_text(item, label=label), _footer(item, now)]
+        if item.get("url"):
+            lines.append(item["url"])
+        return "\n".join(filter(None, lines))
+    # 新文案直接成句；旧快照和模型不可用时仍能按原有事实发送。
+    text = item.get("share_text") or _fallback_share(item)
+    if item.get("is_followup"):
+        text = "补充：" + text
+    meta = COMMUNITIES.get(item.get("community"))
+    if meta and not any(name in text for name in meta.game_names):
+        text = f"{meta.label}｜{text}"
+    return "\n".join(filter(None, (text, _footer(item, now))))
+
+
+def format_products(items: list[dict]) -> str:
+    """同一轮的商品变化合成一条：同款变化写一次，同系列写成一行，只留一个链接。"""
+    groups = {}
+    for item in items:
+        groups.setdefault(item.get("community") or "", []).append(item)
+    sections = []
+    for community, group in groups.items():
+        label = COMMUNITY_LABELS.get(community, "")
+        head = f"{label}｜" if label else ""
+        products = [item.get("product") or {"name": item["title"], "item": item["title"], "series": "",
+                                             "change": "", "details": [], "notes": []} for item in group]
+        if len(group) == 1:
+            product = products[0]
+            lines = [f"{head}{product['name']} {product['change']}".rstrip(), *product["notes"]]
+            details = product["details"]
+            link = group[0].get("url") or ""
+        else:
+            changes = list(dict.fromkeys(product["change"] for product in products))
+            same = len(changes) == 1
+            lines = [f"{head}{len(group)} 款周边{changes[0] if same else '有新进展'}"]
+            rows = {}
+            for product in products:
+                rows.setdefault(product["series"] if same and product["series"] else id(product), []).append(product)
+            bullets = []
+            for series, members in rows.items():
+                if isinstance(series, str) and len(members) > 1:
+                    bullets.append(f"· {series}：" + "、".join(member["item"] for member in members))
+                else:
+                    bullets += [f"· {member['name']}" + ("" if same else f"：{member['change']}") for member in members]
+            if len(bullets) > 6:
+                bullets = [*bullets[:5], f"· 另有 {len(bullets) - 5} 款"]
+            lines += bullets
+            details = [detail for detail in products[0]["details"] if all(detail in p["details"] for p in products)]
+            lines += [note for note in products[0]["notes"] if all(note in p["notes"] for p in products)]
+            base, found, _ = (group[0].get("url") or "").partition("/products/")
+            link = f"{base}/products?community={community}" if found else ""
+        if details:
+            lines.append(" · ".join(details))
+        if link:
+            lines.append(link)
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
+
+
+def products_brief(items: list[dict], now: datetime) -> dict:
+    selected = []
+    # 按变化发生的先后列出，同系列商品保持官方公布的顺序。
+    for item in sorted(items, key=lambda item: item.get("fulfillment_revision") or 0):
+        source = _source(item)
+        selected.append({**source, "summary": item.get("summary") or source["text"],
+                         "published_label": publication_label(source), "sources": [source]})
+    return {"mode": "products", "layout": LAYOUT, "title": "周边动态",
+            "date": (now + timedelta(hours=8)).strftime("%m/%d"), "items": selected}
+
+
+def format_brief(brief: dict, now: datetime | None = None) -> str:
+    if brief.get("mode") == "products":
+        return format_products(brief.get("items") or [])
     limit = UPDATE_ITEMS if brief.get("mode") == "updates" else MAX_ITEMS
     items = brief["items"][:limit]
     if brief.get("mode") == "updates":
-        lines = []
+        # 多条快讯共用一个标题，逐条只标出传闻。
+        all_news = len(items) > 1 and all(item.get("news") for item in items)
+        blocks = [f"AI 快讯 · {len(items)} 条"] if all_news else []
         for index, item in enumerate(items, 1):
-            # 新文案直接成句；旧快照和模型不可用时仍能按原有事实发送。
-            text = item.get("share_text") or _fallback_share(item)
-            if item.get("is_followup"):
-                text = "补充：" + text
-            meta = COMMUNITIES.get(item.get("community"))
-            if meta and not any(name in text for name in meta.game_names):
-                text = f"{meta.label}｜{text}"
-            if when := publication_label(item):
-                text += "\n" + when
-            lines.append((f"{index}. " if len(items) > 1 else "") + text)
-        return "\n\n".join(lines) or "暂时没有值得单独推送的新消息。"
+            number = f"{_NUMBERS[index - 1]} " if len(items) > 1 else ""
+            blocks.append(number + _update_block(item, now, label=not all_news))
+        return "\n\n".join(blocks) or "暂时没有值得单独推送的新消息。"
     # 早报日期仅表示刊期，不把生成时刻摆在消息头上冒充内容发布时间。
     lines = [f"{brief['title']} · {brief['date'].split(' ', 1)[0]}"]
     for index, item in enumerate(items, 1):
         label = COMMUNITY_LABELS.get(item.get("community"), "")
         prefix = f"[{label}] " if label else ""
-        lines.append(f"\n{index}. {prefix}{item['title']}")
+        if (item.get("news") or {}).get("kind") == "rumor":
+            prefix += "[传闻] "
+        lines.append(f"\n{_NUMBERS[index - 1]} {prefix}{item['title']}")
         if item.get("summary"):
             lines.append(item["summary"])
-        if item.get("news"):
-            label = "传闻，待核实" if item["news"]["kind"] == "rumor" else "转述，待核实"
-            lines.append(f"来源：{item['source']}（{label}）")
-            if item.get("url"):
-                lines.append(item["url"])
-        if when := publication_label(item):
-            lines.append(when)
+        if footer := _footer(item, now):
+            lines.append(footer)
+        if item.get("news") and item.get("url"):
+            lines.append(item["url"])
     if not items:
         lines.append("暂时没有值得单独推送的新消息。")
     return "\n".join(lines)
@@ -542,7 +688,7 @@ async def build_shared_brief(session, items: list[dict], now=None, *, mode="upda
             # 定制官号直接保留原文；复用模板和投递限流，不为新增频道调用摘要模型。
             edited = [{**source, "summary": _complete_text(source["text"], 240), "sources": [source]}]
         elif source.get("fulfillment_revision"):
-            edited = [{**source, "summary": source["text"], "sources": [source]}]
+            edited = [{**source, "summary": item.get("summary") or source["text"], "sources": [source]}]
         elif source["is_followup"]:
             # 本群续报只取可确认的新增事实，不套用完整公告或重新调用编辑模型。
             edited = fallback_items([source], limit=1)
@@ -558,8 +704,11 @@ async def build_shared_brief(session, items: list[dict], now=None, *, mode="upda
             key = _COPY_PREFIX + digest
             cached = await get_setting(session, key)
             uncached = cached is None
+            model_fallback = False
             if uncached:
                 edited = await select_brief_items(session, [source], now, limit=1)
+                # 模型超时或文案被拦下时用的是原文回退；不缓存，下一个会话还能再请模型写。
+                model_fallback = any("share_text" not in row for row in edited)
                 # 只缓存文案，来源、去重键和会话历史由本次输入提供。
                 cached = {"items": [{field: row[field] for field in ("title", "summary", "share_text") if field in row}
                                     for row in edited]}
@@ -572,7 +721,7 @@ async def build_shared_brief(session, items: list[dict], now=None, *, mode="upda
             if fallback:
                 cached = {"items": [{field: row[field] for field in ("title", "summary")}
                                     for row in fallback_items([source], limit=1)]}
-            if uncached or repeated:
+            if (uncached or repeated) and not model_fallback:
                 await set_setting(session, key, cached)
                 logger.info("Bot shared copy content=%s selected=%d fallback=%s", item.get("id"), len(cached["items"]), bool(fallback))
             edited = [{**source, **copy, "sources": [source]} for copy in cached["items"]]
@@ -583,7 +732,7 @@ async def build_shared_brief(session, items: list[dict], now=None, *, mode="upda
             selected.append(row)
         if len(selected) >= limit:
             break
-    return {"mode": mode, "title": "今日速报" if mode == "daily" else "刚刚的重点",
+    return {"mode": mode, "layout": LAYOUT, "title": "今日速报" if mode == "daily" else "刚刚的重点",
             "date": (now + timedelta(hours=8)).strftime("%m/%d"), "items": selected}
 
 

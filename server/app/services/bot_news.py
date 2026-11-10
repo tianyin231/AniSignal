@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 
 from app.models import AiUsage, BotDelivery
 from app.services.ai import ai_available, chat, get_ai_config, record_usage
-from app.services.bot_briefs import format_brief, is_recent_item
+from app.services.bot_briefs import format_brief, is_recent_item, news_share
 
 logger = logging.getLogger(__name__)
 _KINDS = ("daily", "updates", "critical")
@@ -146,16 +146,12 @@ async def dedupe_pending_news(session, target_id: int, now) -> dict:
             if decision["action"] == "skip":
                 continue
             news = {**item["news"], "headline": decision["headline"], "summary": decision["summary"]}
-            label = "AI 传闻" if news["kind"] == "rumor" else "AI 快讯"
-            share = f"[{label}] {news['headline']}\n{news['summary']}\n来源：{item['source']}（转述，待核实）"
-            if item.get("url"):
-                share += "\n" + item["url"]
             items.append({**item, "title": news["headline"], "summary": news["summary"],
-                          "share_text": share, "notification_news": news})
+                          "share_text": news_share(news), "notification_news": news})
         brief = {**row.brief, "items": items, "news_dedupe_checked": True}
         if items:
             # 保留原去重键：被裁掉的旧事实也已覆盖，不能再以另一种排版入队。
-            body = format_brief({**brief, "mode": "updates"}) if brief.get("mode") == "single" else format_brief(brief)
+            body = format_brief({**brief, "mode": "updates"} if brief.get("mode") == "single" else brief, now)
             values = {"brief": brief, "body": body, "rendered_body": None, "error": None}
         else:
             cancelled += 1

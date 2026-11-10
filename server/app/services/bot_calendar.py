@@ -62,23 +62,33 @@ async def upcoming_entries(session, community: str, now: datetime, *, channels=N
     return merge_entries(entries)
 
 
+CALENDAR_GROUPS = 4
+
+
+def relative_when(value: datetime, due: datetime) -> str:
+    """以提醒发出的北京日期为准写今天/明天，清单只在当晚两小时内发送。"""
+    local = value + timedelta(hours=8)
+    day = {0: "今天", 1: "明天", 2: "后天"}.get((local.date() - (due + timedelta(hours=8)).date()).days)
+    return f"{day} {local:%H:%M}" if day else local.strftime("%m/%d %H:%M")
+
+
 def calendar_brief(entries: list[dict], due: datetime) -> tuple[str, dict]:
     ending = sum(entry["kind"] != "maintenance" for entry in entries)
     maintenance = len(entries) - ending
     overview = []
     if ending:
-        overview.append(f"{ending} 项活动或卡池将截止")
+        overview.append(f"{ending} 项活动或卡池截止")
     if maintenance:
-        overview.append(f"{maintenance} 项维护将开始")
-    lines = ["明日前的小提醒", "未来 24 小时，" + "，".join(overview) + "。"]
+        overview.append(f"{maintenance} 次维护")
+    lines = ["接下来 24 小时，有 " + "、".join(overview) + "："]
     groups = {}
     for entry in entries:
         key = (entry["community"], entry["stage_at"], entry["kind"] == "maintenance")
         groups.setdefault(key, []).append(entry)
-    truncated = len(groups) > 2
-    for (community, when, maintenance_start), group in list(groups.items())[:2]:
+    truncated = len(groups) > CALENDAR_GROUPS
+    for (community, when, maintenance_start), group in list(groups.items())[:CALENDAR_GROUPS]:
         label = COMMUNITY_LABELS.get(community, community)
-        when = (datetime.fromisoformat(when) + timedelta(hours=8)).strftime("%m/%d %H:%M")
+        when = relative_when(datetime.fromisoformat(when), due)
         names = []
         for entry in group[:2]:
             match = re.search(r"[「『\[【](.*?)[」』\]】]", entry["title"])
@@ -87,16 +97,16 @@ def calendar_brief(entries: list[dict], due: datetime) -> tuple[str, dict]:
                 names.append(name)
         topic = "、".join(names)
         truncated = truncated or len(group) > len(names)
-        if len(group) > len(names) and topic:
-            topic += "等"
-        action = "开始维护" if maintenance_start else f"{len(group)} 项截止"
-        lines.append(f"· [{label}] {when} {action}" + (f"：{topic}" if topic else ""))
-    if len(groups) > 2:
-        lines.append(f"另有 {len(groups) - 2} 组日程。")
+        if len(group) > len(names):
+            topic = f"{topic} 等 {len(group)} 项" if topic else f"{len(group)} 项"
+        action = "开始维护" if maintenance_start else "截止"
+        lines.append(f"· {label} {when} {action}" + (f"：{topic}" if topic else ""))
+    if len(groups) > CALENDAR_GROUPS:
+        lines.append(f"另有 {len(groups) - CALENDAR_GROUPS} 组日程没列出。")
     text = "\n".join(lines)
-    brief = {"mode": "calendar", "title": "明日前的小提醒", "date": (due + timedelta(hours=8)).strftime("%m/%d %H:%M"),
+    brief = {"mode": "calendar", "title": "日程提醒", "date": (due + timedelta(hours=8)).strftime("%m/%d %H:%M"),
              "scheduled_at": due.isoformat(), "expires_at": max(entry["expires_at"] for entry in entries), "truncated": truncated,
-             "items": [{"title": "明日前的小提醒", "summary": "，".join(overview), "community": "",
+             "items": [{"title": "日程提醒", "summary": "，".join(overview), "community": "",
                         "calendar_entries": entries, "sources": entries}]}
     return text, brief
 
