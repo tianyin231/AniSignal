@@ -638,7 +638,7 @@ function renderConnection() {
       h("h3", { style: "margin:0;font-size:14px" }, "插件更新"),
       h("span", { class: "badge brand" }, `当前 v${S.data.version}`), updateBadge),
     h("p", { class: "hint", style: "margin:0" },
-      "AniSignal 不在 AstrBot 插件市场中。按下面设置一次，之后有新版本时 AniSignal 卡片会显示「有新版本」，点它即可更新，设置会保留。"),
+      "从插件市场安装时，插件页会直接提示新版本。从链接或手动安装时，按下面设置一次，之后有新版本时 AniSignal 卡片会显示「有新版本」，点它即可更新，设置会保留。"),
     h("ol", { class: "steps" },
       h("li", null, "打开 AstrBot「插件市场」页，点标签旁显示当前插件源的按钮，选择「添加插件源」，源地址填：",
         h("code", { class: "copyable", title: "点击选中整段地址" }, PLUGIN_SOURCE_URL), "，解析后保存。"),
@@ -817,7 +817,7 @@ function renderSubscription(t, index) {
   return sections;
 }
 
-const PLUGIN_SOURCE_URL = "https://raw.githubusercontent.com/tianyin231/AniSignal/main/astrbot-plugin-source.json";
+const PLUGIN_SOURCE_URL = "https://raw.githubusercontent.com/tianyin231/AstrBot_Plugin_AniSignal/main/astrbot-plugin-source.json";
 
 function emptyFeedsText() {
   const quota = S.data.sync.identity?.quota;

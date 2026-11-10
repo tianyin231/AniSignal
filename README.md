@@ -147,9 +147,9 @@ npm run dev
 
 ## 接入 QQ（AstrBot 插件）
 
-插件位于 `integrations/astrbot_plugin_anisignal`：
+插件源码位于 `integrations/astrbot_plugin_anisignal`，发布到独立仓库 [AstrBot_Plugin_AniSignal](https://github.com/tianyin231/AstrBot_Plugin_AniSignal)：
 
-1. 在 AstrBot 管理面板的「插件管理 → 从链接安装」中填入本仓库地址 `https://github.com/tianyin231/AniSignal`；
+1. 在 AstrBot 管理面板的「插件管理 → 从链接安装」中填入插件仓库地址 `https://github.com/tianyin231/AstrBot_Plugin_AniSignal`；
 2. 填写 AniSignal 服务地址与授权密钥；
 3. 在群聊或私聊里发送 `/情报订阅` 或 `/帮助`，设置要接收的分区和推送方式。
 

@@ -299,7 +299,8 @@ def test_new_install_defaults_are_portable_and_mask_the_access_key():
 def test_repository_install_manifests_match_standalone_plugin(plugin):
     root = Path(__file__).parents[2]
     standalone = root / 'integrations/astrbot_plugin_anisignal'
-    for filename in ['metadata.yaml', '_conf_schema.json', 'logo.png']:
+    # 根目录这份入口留给早期从主仓库安装的实例；插件市场与新安装使用独立仓库 AstrBot_Plugin_AniSignal。
+    for filename in ['metadata.yaml', '_conf_schema.json', 'logo.png', 'astrbot-plugin-source.json']:
         assert (root / filename).read_bytes() == (standalone / filename).read_bytes(), \
             f'修改插件设置或元数据后，需要同步根目录的 {filename}'
     # 仓库安装时 AstrBot 从仓库根目录扫描设置视图和视图标题，两处文件必须一致。
@@ -311,7 +312,11 @@ def test_repository_install_manifests_match_standalone_plugin(plugin):
                 f'修改设置视图后，需要同步根目录的 {relative}'
     metadata = yaml.safe_load((root / 'metadata.yaml').read_text(encoding='utf-8'))
     assert metadata['version'] == 'v' + sys.modules[plugin.__class__.__module__].VERSION
-    assert metadata['repo'] == 'https://github.com/tianyin231/AniSignal'
+    assert metadata['repo'] == 'https://github.com/tianyin231/AstrBot_Plugin_AniSignal'
+    # 版本检查和设置页给出的插件源地址都要指向发布仓库，否则会读到停更仓库的版本号。
+    raw = 'https://raw.githubusercontent.com/' + metadata['repo'].removeprefix('https://github.com/')
+    assert sys.modules[plugin.__class__.__module__].LATEST_METADATA_URL == f'{raw}/HEAD/metadata.yaml'
+    assert f'"{raw}/main/astrbot-plugin-source.json"' in (standalone / 'views/settings/app.js').read_text(encoding='utf-8')
 
 
 def test_legacy_cleanup_keeps_connection_and_session_configuration(plugin):

@@ -149,9 +149,9 @@ See the [deployment guide](docs/deployment.md) for full configuration and enviro
 
 ## QQ via AstrBot
 
-The plugin lives in `integrations/astrbot_plugin_anisignal`:
+The plugin source lives in `integrations/astrbot_plugin_anisignal` and is published to the standalone repository [AstrBot_Plugin_AniSignal](https://github.com/tianyin231/AstrBot_Plugin_AniSignal):
 
-1. In the AstrBot panel, open "Plugin Management → Install from Link" and enter `https://github.com/tianyin231/AniSignal`;
+1. In the AstrBot panel, open "Plugin Management → Install from Link" and enter the plugin repository `https://github.com/tianyin231/AstrBot_Plugin_AniSignal`;
 2. fill in your AniSignal server URL and access key;
 3. send `/情报订阅` or `/帮助` in a group or private chat to choose sections and delivery.
 

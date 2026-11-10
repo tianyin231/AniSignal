@@ -1,0 +1,24 @@
+{
+  "$meta": {
+    "schema_version": 1,
+    "name": "AniSignal",
+    "description": "AniSignal 情报助手的 AstrBot 插件源，用于检测新版本并一键更新。",
+    "homepage": "https://anisignal.xyz",
+    "repository": "https://github.com/tianyin231/AstrBot_Plugin_AniSignal"
+  },
+  "AniSignal/astrbot_plugin_anisignal": {
+    "author": "AniSignal",
+    "name": "astrbot_plugin_anisignal",
+    "display_name": "AniSignal 情报助手",
+    "desc": "在插件设置中管理各会话的资讯订阅、每日速报与商品进展。",
+    "version": "1.14.5",
+    "repo": "https://github.com/tianyin231/AstrBot_Plugin_AniSignal",
+    "logo": "https://raw.githubusercontent.com/tianyin231/AstrBot_Plugin_AniSignal/main/logo.png",
+    "astrbot_version": ">=4.28.2",
+    "tags": [
+      "资讯",
+      "订阅",
+      "通知"
+    ]
+  }
+}
