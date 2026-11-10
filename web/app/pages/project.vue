@@ -1,19 +1,44 @@
 <script setup lang="ts">
-import { ArrowUpRight, ChevronDown, GitBranch, GitCommitHorizontal, GitFork, MessageSquare, Star, Tag, Users } from 'lucide-vue-next'
+import { ArrowUpRight, Bot, ChevronDown, GitBranch, GitCommitHorizontal, GitFork, MessageSquare, Star, Tag, Users } from 'lucide-vue-next'
 import { fmtTime } from '~/utils/admin-types'
-import { PROJECT_GITHUB_URL, PROJECT_REPOSITORY, type ProjectOverview } from '~/utils/project'
+import { relativeTime, toTimestamp } from '~/utils/schedule'
+import { PROJECT_GITHUB_URL, PROJECT_REPOSITORIES, type ProjectCommit, type ProjectOverview, type ProjectRepository, type ProjectRepositoryKey } from '~/utils/project'
 
-useSeoMeta({ title: '开源与更新 · AniSignal', description: '查看 AniSignal 的 GitHub 项目、贡献者与最近更新。' })
+useSeoMeta({ title: '开源与更新 · AniSignal', description: '查看 AniSignal 主仓库与 AstrBot 插件仓库的最近更新和贡献者。' })
 
 const { api } = usePublicApi()
 const { data, status, error } = await useLazyAsyncData('project-github',
   (_app, { signal }) => api<ProjectOverview>('/api/project/github', { signal }),
 )
-const repository = computed(() => data.value?.repository)
-const commits = computed(() => data.value?.commits ?? [])
+const now = useState('project-reference-time', () => Date.now())
+
+// 主仓库沿用品牌蓝，插件仓库用 AI 青，时间线里一眼分清来自哪个仓库。
+const TONES: Record<ProjectRepositoryKey, { dot: string; soft: string; ink: string }> = {
+  anisignal: { dot: 'bg-brand', soft: 'bg-brand-soft text-brand-ink', ink: 'text-brand-ink' },
+  plugin: { dot: 'bg-ai', soft: 'bg-ai-soft text-ai-ink', ink: 'text-ai-ink' },
+}
+
+type RepositoryView = ProjectRepository & { short: string; summary: string }
+const repositories = computed<RepositoryView[]>(() => PROJECT_REPOSITORIES.map(base => ({
+  name: base.full_name.split('/')[1] ?? base.full_name, url: `https://github.com/${base.full_name}`, description: null,
+  default_branch: null, stars: null, forks: null, version: null, release: null, commits: [],
+  ...base, ...data.value?.repositories?.find(repo => repo.key === base.key),
+})))
+const mainRepository = computed(() => repositories.value[0]!)
 const contributors = computed(() => data.value?.contributors ?? [])
-const repoUrl = computed(() => repository.value?.url ?? PROJECT_GITHUB_URL)
-const commitsUrl = computed(() => `${repoUrl.value}/commits/${encodeURIComponent(repository.value?.default_branch ?? 'main')}`)
+
+const filter = ref<'all' | ProjectRepositoryKey>('all')
+const filters = computed(() => [{ key: 'all' as const, label: '全部动态' },
+  ...repositories.value.map(repo => ({ key: repo.key, label: repo.role }))])
+const shownRepositories = computed(() => repositories.value.filter(repo => filter.value === 'all' || repo.key === filter.value))
+const timeline = computed<Array<ProjectCommit & { repo: RepositoryView }>>(() => shownRepositories.value
+  .flatMap(repo => repo.commits.map(commit => ({ ...commit, repo })))
+  .sort((a, b) => toTimestamp(b.committed_at) - toTimestamp(a.committed_at))
+  .slice(0, 15))
+
+const versionOf = (repo: RepositoryView) => repo.version ?? repo.release?.tag ?? null
+const commitsUrl = (repo: RepositoryView) => `${repo.url}/commits/${encodeURIComponent(repo.default_branch ?? 'main')}`
+const ago = (value: string) => relativeTime(toTimestamp(value), now.value)
 const count = (value?: number | null) => value == null ? '—' : value.toLocaleString('zh-CN')
 const failedAvatars = ref<string[]>([])
 const avatarFailed = (url: string) => { if (!failedAvatars.value.includes(url)) failedAvatars.value.push(url) }
@@ -22,53 +47,83 @@ const avatarFailed = (url: string) => { if (!failedAvatars.value.includes(url)) 
 <template>
   <div class="space-y-6">
     <header class="panel overflow-hidden">
-      <div class="flex flex-wrap items-start gap-5 p-5 sm:p-7">
-        <span class="grid size-14 shrink-0 place-items-center rounded-2xl border border-line bg-canvas text-ink" aria-hidden="true"><GitHubMark :size="31" /></span>
+      <div class="flex items-start gap-4 p-5 sm:gap-5 sm:p-7">
+        <span class="grid size-12 shrink-0 place-items-center rounded-2xl border border-line bg-canvas text-ink sm:size-14" aria-hidden="true"><GitHubMark :size="28" /></span>
         <div class="min-w-0 flex-1">
-          <p class="mono break-all text-xs text-muted">{{ repository?.full_name ?? PROJECT_REPOSITORY }}</p>
+          <p class="mono text-xs text-muted">github.com/tianyin231</p>
           <h1 class="mt-1 text-2xl font-bold tracking-tight text-ink sm:text-3xl">开源与更新</h1>
-          <p class="mt-2 max-w-2xl text-sm leading-relaxed text-muted">{{ repository?.description || '项目代码、最近更新与参与贡献的伙伴。' }}</p>
+          <p class="mt-2 max-w-2xl text-sm leading-relaxed text-muted">AniSignal 的代码分为两个公开仓库：主仓库包含网站、采集与推送服务；QQ 机器人用的 AstrBot 插件单独发布，方便在 AstrBot 中安装和更新。</p>
         </div>
-        <a :href="repoUrl" target="_blank" rel="noopener noreferrer" class="btn-primary inline-flex min-h-11 w-full items-center justify-center gap-2 px-4 text-sm sm:w-auto">
-          查看仓库 <ArrowUpRight :size="16" aria-hidden="true" />
-        </a>
       </div>
-      <dl class="grid grid-cols-3 border-t border-line-soft bg-canvas/40">
-        <div class="px-5 py-4 sm:px-7">
-          <dt class="flex items-center gap-1.5 text-xs text-muted"><Star :size="14" aria-hidden="true" /> Star</dt>
-          <dd class="num mt-1 text-2xl font-bold text-ink">{{ count(repository?.stars) }}</dd>
-        </div>
-        <div class="border-x border-line-soft px-5 py-4 sm:px-7">
-          <dt class="flex items-center gap-1.5 text-xs text-muted"><GitFork :size="14" aria-hidden="true" /> Fork</dt>
-          <dd class="num mt-1 text-2xl font-bold text-ink">{{ count(repository?.forks) }}</dd>
-        </div>
-        <div class="px-5 py-4 sm:px-7">
-          <dt class="flex items-center gap-1.5 text-xs text-muted"><Users :size="14" aria-hidden="true" /> 贡献者</dt>
-          <dd class="num mt-1 text-2xl font-bold text-ink">{{ data?.fetched_at || contributors.length ? `${contributors.length}${data?.contributors_has_more ? '+' : ''}` : '—' }}</dd>
-        </div>
-      </dl>
+
+      <div class="grid gap-3 border-t border-line-soft bg-canvas/40 p-4 sm:p-5 md:grid-cols-2">
+        <article v-for="repo in repositories" :key="repo.key" class="flex min-w-0 flex-col rounded-2xl border border-line bg-card p-4 sm:p-5" :aria-labelledby="`repo-${repo.key}`">
+          <div class="flex items-start gap-3">
+            <span class="grid size-10 shrink-0 place-items-center rounded-xl" :class="TONES[repo.key].soft" aria-hidden="true">
+              <GitHubMark v-if="repo.key === 'anisignal'" :size="20" />
+              <Bot v-else :size="20" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold">
+                <span :class="TONES[repo.key].ink">{{ repo.role }}</span>
+                <span v-if="versionOf(repo)" class="mono rounded-full bg-chip px-2 py-0.5 text-[11px] text-ink-2" :title="repo.version ? '当前版本' : '最新发布'">{{ versionOf(repo) }}</span>
+              </p>
+              <a :id="`repo-${repo.key}`" :href="repo.url" target="_blank" rel="noopener noreferrer" class="mono mt-1 block break-words text-sm font-bold text-ink transition-colors hover:text-brand-ink">{{ repo.full_name.split('/')[0] }}/<wbr>{{ repo.name }}</a>
+            </div>
+          </div>
+          <p class="mt-3 text-[13px] leading-relaxed text-muted">{{ repo.description || repo.summary }}</p>
+
+          <div class="mt-4 border-t border-line-soft pt-3">
+            <p class="flex items-center gap-1.5 text-[11px] text-muted">
+              <span class="size-1.5 rounded-full" :class="TONES[repo.key].dot" aria-hidden="true" />最近更新
+              <template v-if="repo.commits[0]"> · <time :datetime="repo.commits[0].committed_at" :title="fmtTime(repo.commits[0].committed_at)">{{ ago(repo.commits[0].committed_at) }}</time></template>
+            </p>
+            <a v-if="repo.commits[0]" :href="repo.commits[0].url" target="_blank" rel="noopener noreferrer" class="mt-1 line-clamp-2 break-words text-sm font-medium leading-snug text-ink transition-colors hover:text-brand-ink">{{ repo.commits[0].title }}</a>
+            <p v-else class="mt-1 text-sm text-faint">{{ status === 'pending' ? '正在读取提交记录…' : '暂时读不到提交记录' }}</p>
+          </div>
+
+          <div class="mt-auto flex items-center gap-4 pt-2 text-xs text-muted">
+            <span class="inline-flex items-center gap-1" title="Star"><Star :size="13" aria-hidden="true" /><span class="sr-only">Star</span><span class="num">{{ count(repo.stars) }}</span></span>
+            <span class="inline-flex items-center gap-1" title="Fork"><GitFork :size="13" aria-hidden="true" /><span class="sr-only">Fork</span><span class="num">{{ count(repo.forks) }}</span></span>
+            <a :href="repo.url" target="_blank" rel="noopener noreferrer" class="ml-auto inline-flex min-h-11 items-center gap-1 font-medium text-ink-2 transition-colors hover:text-brand-ink" :aria-label="`查看仓库 ${repo.full_name}`">查看仓库 <ArrowUpRight :size="14" aria-hidden="true" /></a>
+          </div>
+        </article>
+      </div>
     </header>
 
     <p v-if="error || data?.stale" role="status" class="rounded-xl border border-warn/25 bg-warn/5 px-4 py-3 text-sm text-ink-2">
-      GitHub 的部分数据暂时无法同步<span v-if="data?.fetched_at">，正在显示上次读取的记录</span>。也可以<a :href="repoUrl" target="_blank" rel="noopener noreferrer" class="link">直接访问仓库</a>。
+      GitHub 的部分数据暂时无法同步<span v-if="data?.fetched_at">，正在显示上次读取的记录</span>。也可以<a :href="PROJECT_GITHUB_URL" target="_blank" rel="noopener noreferrer" class="link">直接访问仓库</a>。
     </p>
 
     <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_310px]">
       <section class="panel min-w-0 overflow-hidden" aria-labelledby="updates-title" :aria-busy="status === 'pending'">
         <div class="flex flex-wrap items-center gap-3 border-b border-line px-5 py-4 sm:px-6">
-          <h2 id="updates-title" class="flex items-center gap-2 text-base font-bold text-ink"><GitCommitHorizontal :size="18" class="text-brand" aria-hidden="true" /> 最近更新</h2>
-          <span v-if="repository?.default_branch" class="mono ml-auto inline-flex items-center gap-1.5 rounded-full bg-chip px-2.5 py-1 text-[11px] text-ink-2"><GitBranch :size="12" aria-hidden="true" />{{ repository.default_branch }}</span>
+          <h2 id="updates-title" class="flex items-center gap-2 text-base font-bold text-ink"><GitCommitHorizontal :size="18" class="text-brand" aria-hidden="true" /> 最近动态</h2>
+          <div class="flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-full bg-chip/65 p-1 [scrollbar-width:none] sm:ml-auto sm:w-auto" role="group" aria-label="按仓库筛选">
+            <button
+              v-for="option in filters"
+              :key="option.key"
+              type="button"
+              class="inline-flex h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-3.5 text-[13px] transition-colors sm:h-9"
+              :class="filter === option.key ? 'bg-ink font-semibold text-card' : 'text-ink-2 hover:bg-card/60 hover:text-ink'"
+              :aria-pressed="filter === option.key"
+              @click="filter = option.key"
+            >
+              <span v-if="option.key !== 'all'" class="size-1.5 rounded-full" :class="TONES[option.key].dot" aria-hidden="true" />
+              {{ option.label }}
+            </button>
+          </div>
         </div>
 
         <div v-if="status === 'pending' && !data" role="status" class="space-y-5 px-5 py-7 sm:px-6">
           <span class="sr-only">正在加载 GitHub 更新记录…</span>
           <div v-for="i in 4" :key="i" class="space-y-2.5 motion-safe:animate-pulse" aria-hidden="true"><div class="h-4 w-3/4 rounded bg-chip" /><div class="h-3 w-1/2 rounded bg-chip" /></div>
         </div>
-        <ol v-else-if="commits.length" class="divide-y divide-line-soft">
-          <li v-for="(commit, index) in commits" :key="commit.sha" class="relative flex gap-3 px-5 py-5 sm:gap-4 sm:px-6">
+        <ol v-else-if="timeline.length" class="divide-y divide-line-soft">
+          <li v-for="(commit, index) in timeline" :key="`${commit.repo.key}-${commit.sha}`" class="relative flex gap-3 px-5 py-5 sm:gap-4 sm:px-6">
             <span class="relative mt-0.5 grid size-6 shrink-0 place-items-center" aria-hidden="true">
-              <span v-if="index !== commits.length - 1" class="absolute left-1/2 top-7 h-[calc(100%+3rem)] w-px bg-line-soft" />
-              <span class="relative grid size-6 place-items-center rounded-full" :class="index === 0 ? 'bg-brand-soft text-brand-ink' : 'bg-chip text-muted'"><GitCommitHorizontal :size="14" /></span>
+              <span v-if="index !== timeline.length - 1" class="absolute left-1/2 top-7 h-[calc(100%+3rem)] w-px bg-line-soft" />
+              <span class="relative grid size-6 place-items-center rounded-full" :class="TONES[commit.repo.key].soft"><GitCommitHorizontal :size="14" /></span>
             </span>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-start gap-x-2 gap-y-1">
@@ -76,7 +131,8 @@ const avatarFailed = (url: string) => { if (!failedAvatars.value.includes(url)) 
                 <span v-if="index === 0" class="mt-0.5 shrink-0 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] font-semibold text-brand-ink">最新</span>
               </div>
               <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-                <a :href="commit.url" target="_blank" rel="noopener noreferrer" class="mono inline-flex min-h-6 items-center rounded bg-chip px-1.5 text-[11px] text-ink-2 transition-colors hover:text-brand-ink" :aria-label="`查看提交 ${commit.sha.slice(0, 7)}`">{{ commit.sha.slice(0, 7) }}</a>
+                <span v-if="filter === 'all'" class="inline-flex min-h-6 items-center rounded px-1.5 text-[11px] font-medium" :class="TONES[commit.repo.key].soft">{{ commit.repo.role }}</span>
+                <a :href="commit.url" target="_blank" rel="noopener noreferrer" class="mono inline-flex min-h-6 items-center rounded bg-chip px-1.5 text-[11px] text-ink-2 transition-colors hover:text-brand-ink" :aria-label="`查看 ${commit.repo.name} 的提交 ${commit.sha.slice(0, 7)}`">{{ commit.sha.slice(0, 7) }}</a>
                 <component :is="commit.author.url ? 'a' : 'span'" :href="commit.author.url || undefined" :target="commit.author.url ? '_blank' : undefined" :rel="commit.author.url ? 'noopener noreferrer' : undefined" class="inline-flex items-center gap-1.5" :class="{ 'hover:text-ink': commit.author.url }">
                   <img v-if="commit.author.avatar_url && !failedAvatars.includes(commit.author.avatar_url)" :src="commit.author.avatar_url" alt="" class="size-4 rounded-full" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="avatarFailed(commit.author.avatar_url)">
                   {{ commit.author.name }}
@@ -91,17 +147,21 @@ const avatarFailed = (url: string) => { if (!failedAvatars.value.includes(url)) 
           </li>
         </ol>
         <p v-else class="px-5 py-10 text-center text-sm text-muted">暂时没有可展示的提交记录。</p>
-        <a :href="commitsUrl" target="_blank" rel="noopener noreferrer" class="flex min-h-12 items-center justify-center gap-1.5 border-t border-line-soft text-sm text-muted transition-colors hover:bg-chip hover:text-ink">查看完整提交记录 <ArrowUpRight :size="14" aria-hidden="true" /></a>
+        <div class="grid border-t border-line-soft" :class="shownRepositories.length > 1 ? 'grid-cols-2 divide-x divide-line-soft' : ''">
+          <a v-for="repo in shownRepositories" :key="repo.key" :href="commitsUrl(repo)" target="_blank" rel="noopener noreferrer" class="flex min-h-12 items-center justify-center gap-1.5 px-3 text-center text-sm text-muted transition-colors hover:bg-chip hover:text-ink">
+            {{ shownRepositories.length > 1 ? `${repo.short}提交记录` : '查看完整提交记录' }} <ArrowUpRight :size="14" class="shrink-0" aria-hidden="true" />
+          </a>
+        </div>
       </section>
 
       <aside class="space-y-5">
-        <section v-if="data?.release" class="panel p-5" aria-labelledby="release-title">
+        <section v-if="mainRepository.release" class="panel p-5" aria-labelledby="release-title">
           <h2 id="release-title" class="flex items-center gap-2 text-sm font-bold text-ink"><Tag :size="16" class="text-brand" aria-hidden="true" /> 最新发布</h2>
-          <a :href="data.release.url" target="_blank" rel="noopener noreferrer" class="mt-3 block break-words text-lg font-bold text-ink hover:text-brand-ink">{{ data.release.name }}</a>
-          <p class="mono mt-1 text-xs text-muted">{{ data.release.tag }} · {{ fmtTime(data.release.published_at) }}</p>
-          <details v-if="data.release.body" class="group mt-2">
+          <a :href="mainRepository.release.url" target="_blank" rel="noopener noreferrer" class="mt-3 block break-words text-lg font-bold text-ink hover:text-brand-ink">{{ mainRepository.release.name }}</a>
+          <p class="mono mt-1 text-xs text-muted">{{ mainRepository.release.tag }} · {{ fmtTime(mainRepository.release.published_at) }}</p>
+          <details v-if="mainRepository.release.body" class="group mt-2">
             <summary class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 text-xs text-muted hover:text-ink">发布说明<ChevronDown :size="13" class="transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
-            <pre class="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-ink-2">{{ data.release.body }}</pre>
+            <pre class="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-ink-2">{{ mainRepository.release.body }}</pre>
           </details>
         </section>
 
@@ -123,15 +183,15 @@ const avatarFailed = (url: string) => { if (!failedAvatars.value.includes(url)) 
             </li>
           </ul>
           <p v-else class="px-5 py-7 text-sm text-muted">{{ status === 'pending' ? '正在读取贡献记录…' : '贡献记录暂时不可用。' }}</p>
-          <a :href="`${repoUrl}/graphs/contributors`" target="_blank" rel="noopener noreferrer" class="flex min-h-12 items-center justify-center gap-1.5 border-t border-line-soft text-xs text-muted transition-colors hover:bg-chip hover:text-ink">在 GitHub 查看全部 <ArrowUpRight :size="13" aria-hidden="true" /></a>
+          <a :href="`${mainRepository.url}/graphs/contributors`" target="_blank" rel="noopener noreferrer" class="flex min-h-12 items-center justify-center gap-1.5 border-t border-line-soft text-xs text-muted transition-colors hover:bg-chip hover:text-ink">在 GitHub 查看全部 <ArrowUpRight :size="13" aria-hidden="true" /></a>
         </section>
 
         <section class="panel p-5">
           <h2 class="text-sm font-bold text-ink">一起完善 AniSignal</h2>
-          <p class="mt-2 text-[13px] leading-relaxed text-muted">反馈问题、提出建议，或提交代码。每一份贡献都能在这里留下记录。</p>
+          <p class="mt-2 text-[13px] leading-relaxed text-muted">反馈问题、提出建议，或提交代码。插件也在主仓库开发，问题统一在主仓库反馈。</p>
           <div class="mt-4 grid grid-cols-2 gap-2">
-            <a :href="`${repoUrl}/issues`" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[10px] border border-line text-xs font-medium text-ink-2 transition-colors hover:bg-chip"><MessageSquare :size="14" aria-hidden="true" /> 反馈问题</a>
-            <a :href="`${repoUrl}/pulls`" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[10px] border border-line text-xs font-medium text-ink-2 transition-colors hover:bg-chip"><GitBranch :size="14" aria-hidden="true" /> 参与贡献</a>
+            <a :href="`${mainRepository.url}/issues`" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[10px] border border-line text-xs font-medium text-ink-2 transition-colors hover:bg-chip"><MessageSquare :size="14" aria-hidden="true" /> 反馈问题</a>
+            <a :href="`${mainRepository.url}/pulls`" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-[10px] border border-line text-xs font-medium text-ink-2 transition-colors hover:bg-chip"><GitBranch :size="14" aria-hidden="true" /> 参与贡献</a>
           </div>
         </section>
         <p v-if="data?.fetched_at" class="px-1 text-[11px] leading-relaxed text-faint">数据同步于 <time :datetime="data.fetched_at" class="mono">{{ fmtTime(data.fetched_at) }}</time></p>
