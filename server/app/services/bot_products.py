@@ -16,12 +16,12 @@ AXES = ("official", "consumer", "quality")
 OFFICIAL = {"presale_open": "开启预售", "balance_open": "开启尾款", "delayed": "宣布延期",
             "shipping_started": "开始发货", "aftersales_notice": "发布售后说明"}
 QUALITY = {"isolated_issue": "出现质量反馈", "repeated_issue": "多个来源反馈质量问题"}
-# 详情只取商品档案的原文字段，不另行推断价格或日期。
+# 详情只取商品档案的原文字段，不另行推断价格或日期；按状态取，不依赖展示文字。
 DETAILS = {
-    "开启预售": (("price_note", "价格"), ("presale_at", "预售"), ("ship_note", "发货")),
-    "开启尾款": (("balance_window", "尾款"), ("ship_note", "发货")),
-    "宣布延期": (("original_ship_at", "原定发货"), ("ship_note", "发货")),
-    "开始发货": (("ship_note", "发货"),),
+    "presale_open": (("price_note", "价格"), ("presale_at", "预售"), ("ship_note", "发货")),
+    "balance_open": (("balance_window", "尾款"), ("ship_note", "发货")),
+    "delayed": (("original_ship_at", "原定发货"), ("ship_note", "发货")),
+    "shipping_started": (("ship_note", "发货"),),
 }
 
 
@@ -73,8 +73,8 @@ def _detail(value: str | None, label: str) -> str:
     return text if re.search(r"[：:]", text) else f"{label}：{text}"
 
 
-def product_details(product: Product, events: list[str]) -> list[str]:
-    fields = next((DETAILS[event] for event in events if event in DETAILS), ())
+def product_details(product: Product, official_state: str | None) -> list[str]:
+    fields = DETAILS.get(official_state or "", ())
     return list(dict.fromkeys(filter(None, (_detail(getattr(product, field), label) for field, label in fields))))
 
 
@@ -96,7 +96,8 @@ async def revision_item(session, revision):
                and raw.community == product.community}
     if (any(state[axis]["verified_count"] for axis in AXES) or state["sample_count"] or state["observation_count"]) and not visible:
         return None
-    events, notes, correction = describe_change(verified_fulfillment_state(revision.previous_snapshot), state, current)
+    previous = verified_fulfillment_state(revision.previous_snapshot)
+    events, notes, correction = describe_change(previous, state, current)
     if not events and not notes:
         # 同一状态只多了一条证据，对群聊不算新进展；商品页照常更新。
         return None
@@ -104,7 +105,9 @@ async def revision_item(session, revision):
     short = short_name(name, product.community)
     series = re.match(r"(?P<series>\S{2,20}系列)\s+(?P<item>\S.*)$", short)
     change = "、".join(events[:2]) if events else "履约判断有更正"
-    details = product_details(product, events)
+    official = state["official"]
+    official_changed = official["verified_count"] and official["state"] != previous["official"]["state"]
+    details = product_details(product, official["state"] if official_changed else None)
     summary = "。".join([*notes, "；".join(details)] if details else notes)
     summary = summary + "。" if summary else ""
     text = f"{name}{change}。{summary}"

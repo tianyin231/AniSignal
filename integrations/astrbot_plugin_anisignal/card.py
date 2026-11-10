@@ -23,6 +23,7 @@ def render_brief_card(brief: dict, output: str, font_path: str = "", detail_hint
     date = brief.get("date", "").split(" ", 1)[0]
     draw.text((78, 101), f"{brief.get('title', '今日速报')}  /  {date} · 北京时间", font=font(23), fill=muted)
     colors = {"wuwa": "#bc922f", "blhx": "#368fba", "hsr": "#8671b8", "arknights": "#c7803c"}
+    # 分区名优先用服务端随资料下发的 community_label，新增分区无需改插件；这里只是旧服务端的兜底。
     labels = {"wuwa": "鸣潮", "blhx": "碧蓝航线", "hsr": "星穹铁道", "arknights": "明日方舟"}
 
     def wrapped(text, max_width, face, lines=2):
@@ -49,7 +50,8 @@ def render_brief_card(brief: dict, output: str, font_path: str = "", detail_hint
         color = colors.get(item.get("community"), green)
         draw.line((52, y - 8, 908, y - 8), fill="#e7ebe3", width=2)
         draw.text((52, y + 14), f"0{index}", font=font(34), fill=color)
-        draw.text((127, y + 7), labels.get(item.get("community"), "情报"), font=font(20), fill=color)
+        label = item.get("community_label") or labels.get(item.get("community"), "情报")
+        draw.text((127, y + 7), label, font=font(20), fill=color)
         if item.get("published_label"):
             draw.text((907, y + 7), item["published_label"], font=font(18), fill=muted, anchor="ra")
         for n, line in enumerate(wrapped(item.get("title", "新动态"), 760, font(30), 1)):

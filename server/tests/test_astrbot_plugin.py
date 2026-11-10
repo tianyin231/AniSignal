@@ -31,6 +31,15 @@ def plugin(monkeypatch, request):
     def decorator(*args, **kwargs):
         return lambda fn: fn
 
+    class TextPart:
+        """与 AstrBot 4.28.2+ 相同：mark_as_temp 标记仅本次请求使用、不写入会话历史。"""
+        def __init__(self, text):
+            self.text, self.temp = text, False
+
+        def mark_as_temp(self):
+            self.temp = True
+            return self
+
     class Chain:
         def __init__(self):
             self.images = []
@@ -68,6 +77,8 @@ def plugin(monkeypatch, request):
         Reply=type('Reply', (), {'__init__': lambda self, sender_id=None: setattr(self, 'sender_id', sender_id)}),
         Plain=type('Plain', (), {'__init__': lambda self, text=None: setattr(self, 'text', text or '')}))
     module('astrbot.core')
+    module('astrbot.core.agent')
+    module('astrbot.core.agent.message', TextPart=TextPart)
     module('astrbot.core.provider')
     module('astrbot.core.provider.entities', ProviderRequest=object)
     module('astrbot.core.message')
@@ -506,12 +517,18 @@ async def test_notification_index_keeps_detail_reference_without_broadcast_body(
         'brief': {'items': [{'title': '活动截止提醒', 'summary': '10月10日截止', 'community': 'wuwa'}]},
     }]}
     req = SimpleNamespace(conversation=SimpleNamespace(persona_id='catgirl'),
-        system_prompt='猫娘', func_tool=None)
+        system_prompt='猫娘', func_tool=None, extra_user_content_parts=[])
     await plugin.add_instructions(event(umo), req)
-    assert '完整播报正文' not in req.system_prompt
-    assert '"id": 73' in req.system_prompt and '10月10日截止' in req.system_prompt
-    assert 'anisignal_expand' in req.system_prompt
-    assert 'sent_at只是推送时间' in req.system_prompt
+    [part] = req.extra_user_content_parts
+    assert part.temp and '完整播报正文' not in part.text
+    assert '"id": 73' in part.text and '10月10日截止' in part.text and '当前北京时间' in part.text
+    assert 'anisignal_expand' in req.system_prompt and 'sent_at只是推送时间' in req.system_prompt
+    # 时间和通知索引不进 system prompt，同一会话每次请求的 system prompt 完全相同，供应商缓存才能命中。
+    assert '"id": 73' not in req.system_prompt and '2026' not in req.system_prompt
+    plugin.api.return_value = {'recent_notifications': []}
+    again = SimpleNamespace(conversation=req.conversation, system_prompt='猫娘', func_tool=None, extra_user_content_parts=[])
+    await plugin.add_instructions(event(umo), again)
+    assert again.system_prompt == req.system_prompt and len(again.extra_user_content_parts) == 1
 
 
 async def test_notification_keeps_original_persona_actions_emoji_and_length(plugin):
@@ -531,14 +548,34 @@ async def test_notification_intro_is_one_short_line_and_varies_from_recent_ones(
     plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text=retold))
     row = delivery()
     assert (await type(plugin).render_delivery(plugin, row)).text == '猫猫刚扒拉到一条快讯！\n\n' + row['body']
-    prompt = plugin.context.llm_generate.await_args.kwargs['system_prompt']
-    assert '不要复述正文' in prompt and '最近几次的开场' not in prompt
+    first = plugin.context.llm_generate.await_args.kwargs
+    assert '不要复述正文' in first['system_prompt'] and '最近几次的开场' not in first['prompt']
+    # 插件不替人格设定身份或口吻，人格自己决定怎么说。
+    assert '群友' not in first['system_prompt'] and '30个字' not in first['system_prompt']
     plugin.context.llm_generate.return_value = SimpleNamespace(completion_text='这下维护前得赶紧收菜了。')
     await type(plugin).render_delivery(plugin, row)
-    prompt = plugin.context.llm_generate.await_args.kwargs['system_prompt']
-    assert '最近几次的开场' in prompt and '猫猫刚扒拉到一条快讯！' in prompt
+    second = plugin.context.llm_generate.await_args.kwargs
+    assert '最近几次的开场' in second['prompt'] and '猫猫刚扒拉到一条快讯！' in second['prompt']
+    # 时间和近期开场都在 prompt 里，同一会话的 system prompt 不随每次推送变化。
+    assert second['system_prompt'] == first['system_prompt'] and '当前北京时间' in second['prompt']
     plugin.context.llm_generate.return_value = SimpleNamespace(completion_text='哇' * 80)
     assert (await type(plugin).render_delivery(plugin, row)).text == row['body']
+
+
+async def test_notification_intro_trim_works_for_any_language_and_respects_session_length(plugin):
+    plugin._resolve_persona = AsyncMock(return_value=('model', 'An English-speaking persona.', 'en'))
+    row = delivery()
+    english = 'Oh nice, the maintenance window got moved up a bit, so plan your dailies early!'
+    plugin.context.llm_generate = AsyncMock(return_value=SimpleNamespace(completion_text=english))
+    assert (await type(plugin).render_delivery(plugin, row)).text == english + '\n\n' + row['body']
+    retold = ('Heads up, folks. The event ends on October 10 at 04:00 and the rewards include '
+              'a new outfit, 1600 currency and several upgrade materials for everyone who joins.')
+    plugin.context.llm_generate.return_value = SimpleNamespace(completion_text=retold)
+    assert (await type(plugin).render_delivery(plugin, row)).text == 'Heads up, folks.\n\n' + row['body']
+    # 会话写了自己的篇幅要求时，插件不再用默认长度截掉人格的话。
+    plugin.config['targets'] = [{'umo': row['umo'], 'presentation': {'instructions': '开场可以写两三句，带点分析'}}]
+    assert (await type(plugin).render_delivery(plugin, row)).text == retold + '\n\n' + row['body']
+    assert '篇幅以此为准' in plugin.context.llm_generate.await_args.kwargs['system_prompt']
 
 
 @pytest.mark.parametrize('conversation_persona',[None,'previous-persona'])
@@ -692,7 +729,8 @@ async def test_default_plugin_does_not_override_normal_chat_or_model(plugin):
     assert ev.get_extra('selected_provider') is None
     history=[{'role':'user','content':'原有聊天'}]
     req=SimpleNamespace(conversation=SimpleNamespace(persona_id='catgirl'),system_prompt='原有自定义人格',
-                        contexts=history,func_tool=Tools(['web_search','anisignal_query','anisignal_reminder']))
+                        contexts=history,func_tool=Tools(['web_search','anisignal_query','anisignal_reminder']),
+                        extra_user_content_parts=[])
     await plugin.add_instructions(ev,req)
     assert req.system_prompt.startswith('原有自定义人格') and '旧的固定角色' not in req.system_prompt
     assert '不顺带建议' not in req.system_prompt and req.contexts is history

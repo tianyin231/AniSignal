@@ -125,12 +125,15 @@ def _grounded_copy(title: str, summary: str, evidence: str) -> tuple[str, str] |
     if ("开放条件：" in evidence and "奖励内容：" in evidence
         and re.search(r"(?:做|完成|激活|达到|解锁).{0,45}(?:就能|即可|可)(?:获得|领取|拿|领)", output)
         and not _REWARD_CONDITION.search(evidence)):
-        # 参加门槛不等于领奖动作，例如激活四鸣井只是开放条件。
+        # 参加门槛不等于领奖动作，例如解锁某个系统只是开放条件。
         return None
-    if "片尾" in output and "片尾" not in evidence:
-        return None
-    counted_departments = re.search(r"[一二三四五六七八九十\d]+(?:地|个|家)文旅(?:部门|局)", output)
-    if counted_departments and counted_departments.group() not in evidence:
+    # 只有文字资料时不能描述视频里的位置细节。
+    for detail in ("片尾", "彩蛋", "结尾画面"):
+        if detail in output and detail not in evidence:
+            return None
+    # 名单只列了几个单位时，模型常自行合计成“N 地/N 家某某”；原文没有这个数就不采用。
+    counted = re.search(r"[一二三四五六七八九十两\d]+(?:地|个|家|所)[一-鿿]{0,4}(?:部门|局|单位|机构|政府|企业|品牌)", output)
+    if counted and counted.group() not in evidence:
         return None
     for claim, support in (
         (r"联动", r"联动|crossover|collab(?:oration)?"),
@@ -268,6 +271,8 @@ def _source(item: dict) -> dict:
         "source": item.get("source") or item.get("platform") or "原始来源",
         "platform": item.get("platform"), "content_type": item.get("content_type"),
         "identity": item.get("identity", "unknown"), "community": item.get("community", ""),
+        # 插件卡片直接显示这个名称，新增分区不必改插件。
+        "community_label": COMMUNITY_LABELS.get(item.get("community") or "", ""),
         "url": item.get("url") or "", "image": notification_image(item),
         "media": item.get("media") or [],
         "published_at": published.isoformat() if published else None,
@@ -393,7 +398,7 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
         "轻软、有一点可爱，但可爱融在事实句里，例如自然用一次‘啦’；不强行卖萌，不每条都加语气词，不自加猫娘或其他人设。"
         "不要先吐槽或感叹再念公告，不写固定开场、收尾、追问、催促或空泛感想，不用‘邀玩家’‘璀璨文化’等宣传套话。"
         "不加‘记得关注’‘快去看看’‘别错过’等建议和催促；说完具体信息就停。"
-        "只有公告文字时，不假装看过视频，不补片尾、镜头等位置细节。鸣谢名单里的单位保留原称呼，不自行统计数量或把政府和文旅局统称同一种机构。"
+        "只有公告文字时，不假装看过视频，不补片尾、镜头等位置细节。名单里的单位保留原称呼，不自行统计数量，也不把不同类型的单位归成同一类。"
         "可把明确标注同一游戏同一版本号的专题、PV、回顾合成一个主题；"
         "每条最多引用三个来源，官方来源和社区来源不能混合。没有共同版本号的内容保持独立。"
         "不同游戏、不同版本、线下活动、联动或商品事项不能误合并。indices 只能取输入编号且不能重复。"
@@ -406,10 +411,10 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
         "续报只能写新增信息或事实改动，不能复述旧奖励、旧活动介绍；原文仅换说法或重复宣传时不选该条。"
         "续报summary保留能识别主题的简短名称，直接说改动，不要另加开场或重播旧公告。程序会加‘补充’标记。"
         "只选最有用的一两个细节，不罗列全部奖励或角色。若写截止时间，保留具体时分或维护前后，不能把‘11月5日维护’改成‘11月5日维护结束’。未写清奖励发放方式时只说奖励含什么，不猜领取条件。"
-        "例如原文确认10月15日维护后活动开启、完成七日任务获得换装，可以写‘碧蓝航线这套女仆换装做七日任务就能拿，活动10月15日维护后开。’具体名称与细节只能取自本次资料。"
+        "句式参考：原文确认某日维护后活动开启、完成七日任务获得换装时，可以写‘〈游戏名〉这套〈换装名〉做七日任务就能拿，活动〈日期〉维护后开。’尖括号处只能填本次资料里的名称和时间。"
         "标题只用于早报卡片和索引，建议6到16字，不超过30字；卡片已有游戏标签，标题不重复游戏名；不要照搬角色台词或长英文副标题，保留具体主题即可。"
         "资料没有给出人名、地名或版本标题的中文译名时保留原名，不自行音译或杜撰官方译名。"
-        "鸣谢支持只表述为鸣谢，不能升级成联合制作或共同推出；PRE-LIVE倒计时是直播预热，不等同于版本前瞻节目。"
+        "鸣谢支持只表述为鸣谢，不能升级成联合制作或共同推出；直播前的倒计时、预热（如 PRE-LIVE）不等同于版本前瞻节目。"
         "不要硬截半句，不写#话题#、模板签名、标题：正文：或裸链接。summary不得用‘标题＋冒号＋解释’结构，不抄标题再解释。"
         "不要每条都以‘官方发布’开头，不写‘官方版本/活动信息’‘具体待后续’‘敬请期待’等无信息套话。优先保留资料里具体的名称、看点、时间或变化。"
         "只有预告/PV而没有具体内容时，准确说已发布预告，不能靠游戏常识补剧情。已经播出的前瞻不能说成刚定档。"

@@ -358,6 +358,19 @@ def test_acknowledgements_do_not_invent_video_placement_or_department_counts():
     assert briefs._grounded_copy('合作影像', '公告还列出了济南、襄阳相关单位的鸣谢。', evidence)
 
 
+def test_unit_counts_and_video_details_are_checked_for_any_kind_of_partner():
+    evidence = '本次线下展由甲公司、乙书店协办，现场设有主题打卡点。'
+    assert briefs._grounded_copy('线下展', '三家企业协办本次线下展。', evidence) is None
+    assert briefs._grounded_copy('线下展', '视频结尾还藏了彩蛋。', evidence) is None
+    assert briefs._grounded_copy('线下展', '甲公司、乙书店协办，现场有主题打卡点。', evidence)
+    assert briefs._grounded_copy('线下展', '两家企业协办。', '两家企业协办本次线下展。')
+
+
+def test_brief_items_carry_the_section_label_for_plugin_cards():
+    source = briefs._source({**content(1, community='blhx'), 'community': 'blhx'})
+    assert source['community_label'] == '碧蓝航线'
+
+
 @pytest.mark.parametrize('summary', ['', '这是一段没有句号的冗长公告' * 12, '免费送99999星琼。'])
 async def test_rejected_editor_copy_is_recorded_and_fallback_stays_short(session, monkeypatch, caplog, summary):
     monkeypatch.setattr(briefs, 'get_ai_config', AsyncMock(return_value={'api_key': 'fake', 'base_url': 'http://model', 'model': 'test'}))
