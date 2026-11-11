@@ -330,15 +330,15 @@ async def test_query_retains_useful_facts_after_long_announcement_intro(session)
     assert '完成七日任务，可获得限定换装' in result['items'][0]['sources'][0]['text']
 
 
-def test_search_terms_split_joined_queries_and_drop_filler():
+def test_search_terms_split_on_separators_and_registered_game_names_only():
     from app.services.bot_search import search_terms, split_communities
 
-    assert search_terms('明日方舟 名创优品 联动 秋意茶话会') == ['明日方舟', '名创优品', '秋意茶话会']
-    assert search_terms('明日方舟名创优品联动') == ['明日方舟', '名创优品']
+    assert search_terms('明日方舟 名创优品 联动 秋意茶话会') == ['明日方舟', '名创优品', '联动', '秋意茶话会']
     assert search_terms('明日方舟×名创优品「秋意茶话会」') == ['明日方舟', '名创优品', '秋意茶话会']
-    assert search_terms('最新活动') == ['活动']
-    assert search_terms('最新消息') == []
-    assert search_terms('爱弥斯') == ['爱弥斯']
+    # 只拆分区注册表里的游戏名，其余字不动，不会把「联动池」「信息差」削成单字。
+    assert search_terms('明日方舟名创优品联动') == ['明日方舟', '名创优品联动']
+    assert search_terms('联动池') == ['联动池'] and search_terms('信息差') == ['信息差']
+    assert search_terms('莉莉 莉莉') == ['莉莉']
     assert split_communities(['明日方舟', 'Star Rail', '名创优品']) == (['名创优品'], {'arknights', 'hsr'})
 
 
@@ -360,14 +360,20 @@ async def test_news_search_matches_every_term_beyond_latest_items_and_admits_mis
         session.add(ContentVersion(raw_content_id=raw.id, title=title, text=text, category='announcement'))
     await session.commit()
 
-    for query in ('明日方舟 名创优品 联动 秋意茶话会', '明日方舟名创优品联动', '秋意茶话会'):
+    for query in ('明日方舟 名创优品 联动 秋意茶话会', '秋意茶话会', '明日方舟×名创优品'):
         found = await bot.query_target(session, row, tool='news', query=query, now=now)
         assert [i['community'] for i in found['items']] == ['arknights'], query
     # 游戏名只限定分区：同样提到名创优品的原神联名不算明日方舟的结果。
     both = await bot.query_target(session, row, tool='news', query='名创优品', now=now)
     assert {i['community'] for i in both['items']} == {'arknights', 'genshin'}
 
-    miss = await bot.query_target(session, row, tool='news', query='明日方舟 肯德基', now=now)
-    assert miss['items'] == [] and miss['brief'] is None
-    assert '近 30 天订阅范围内的资讯里没有找到与「明日方舟 肯德基」相关的内容' in miss['text']
-    assert '暂时没有值得单独推送' not in miss['text'] and '联网搜索' in miss['grounding']
+    # 多个词凑不齐时不替模型丢词，只报告各词单独的命中数（仍限定在明日方舟内）。
+    partial = await bot.query_target(session, row, tool='news', query='明日方舟 名创优品 肯德基', now=now)
+    assert partial['items'] == [] and partial['brief'] is None
+    assert '近 30 天明日方舟的资讯里没有同时包含「名创优品」「肯德基」的内容' in partial['text']
+    assert '「名创优品」1 条，「肯德基」0 条' in partial['text']
+    assert '暂时没有值得单独推送' not in partial['text'] and '重新查询' in partial['grounding']
+
+    miss = await bot.query_target(session, row, tool='news', query='肯德基', now=now)
+    assert '近 30 天订阅范围内的资讯里没有找到与「肯德基」相关的内容' in miss['text']
+    assert '联网搜索' in miss['grounding']

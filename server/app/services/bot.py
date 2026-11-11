@@ -176,6 +176,19 @@ async def load_target_candidates(session, target, keywords, start_at, end_at, *,
     return candidates
 
 
+async def _term_counts(session, target, terms, communities, start_at, end_at) -> dict[str, int]:
+    """每个词单独检索的命中条数，走与正式查询相同的取数和订阅范围；单词上限沿用取数的 200 条。"""
+    counts = {}
+    for term in terms:
+        found = await load_target_candidates(session, target, [term], start_at, end_at, communities=communities, search=[term])
+        counts[term] = sum(1 for item in found if matches_terms(item, [term]) and matches_target_scope(target, item))
+    return counts
+
+
+def _count_label(count: int) -> str:
+    return "200 条以上" if count >= 200 else f"{count} 条"
+
+
 async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None,
                        *, shared_copy=False, notification=None) -> dict:
     now = now or utcnow()
@@ -357,9 +370,17 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
             if query and not items:
                 # 不能沿用推送的「暂时没有新消息」：模型会当成没有这件事，转而拿群聊内容硬答。
                 span = "近 24 小时" if tool == "digest" else f"近 {days} 天"
-                lines = [f"{span}订阅范围内的资讯里没有找到与「{query}」相关的内容。"]
+                where = " / ".join(COMMUNITY_LABELS[key] for key in selected if key in named) if named else "订阅范围内"
+                if len(text_terms) > 1:
+                    # 不替模型猜哪个词不重要：报告每个词各自的命中数，由模型决定换哪个词重查。
+                    counts = await _term_counts(session, target, text_terms, named, now - timedelta(days=days), now)
+                    lines = [f"{span}{where}的资讯里没有同时包含" + "".join(f"「{t}」" for t in text_terms) + "的内容。",
+                             "各词单独命中：" + "，".join(f"「{t}」{_count_label(n)}" for t, n in counts.items()) + "。"]
+                    grounding = SEARCH_MISS + "可以只用命中的词重新查询，再判断结果是否真是对方问的那件事。"
+                else:
+                    lines = [f"{span}{where}的资讯里没有找到与「{query}」相关的内容。"]
+                    grounding = SEARCH_MISS
                 brief = None
-                grounding = SEARCH_MISS
     return {"text": "\n".join(lines), "items": items,
             "brief": brief,
             "grounding": grounding}
