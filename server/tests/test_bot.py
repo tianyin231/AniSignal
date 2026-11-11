@@ -328,3 +328,46 @@ async def test_query_retains_useful_facts_after_long_announcement_intro(session)
     result = await bot.query_target(session, row, now=now)
     assert '完成七日任务，可获得限定换装' in result['text']
     assert '完成七日任务，可获得限定换装' in result['items'][0]['sources'][0]['text']
+
+
+def test_search_terms_split_joined_queries_and_drop_filler():
+    from app.services.bot_search import search_terms, split_communities
+
+    assert search_terms('明日方舟 名创优品 联动 秋意茶话会') == ['明日方舟', '名创优品', '秋意茶话会']
+    assert search_terms('明日方舟名创优品联动') == ['明日方舟', '名创优品']
+    assert search_terms('明日方舟×名创优品「秋意茶话会」') == ['明日方舟', '名创优品', '秋意茶话会']
+    assert search_terms('最新活动') == ['活动']
+    assert search_terms('最新消息') == []
+    assert search_terms('爱弥斯') == ['爱弥斯']
+    assert split_communities(['明日方舟', 'Star Rail', '名创优品']) == (['名创优品'], {'arknights', 'hsr'})
+
+
+async def test_news_search_matches_every_term_beyond_latest_items_and_admits_misses(session):
+    now = datetime(2026, 11, 11, 13)
+    row = await target(session, daily_enabled=False)
+    source = Source(platform='bilibili', external_id='official', name='官方', identity='official')
+    session.add(source)
+    await session.flush()
+    rows = [('明日方舟×名创优品二期联动开启', '「秋意茶话会，开心补给中」上海、广州快闪店 10 月 30 日开启。', 'arknights', 24 * 18)]
+    # 关键词以外的较新内容超过 200 条，旧实现只扫最新 200 条会漏掉目标。
+    rows += [(f'鸣潮日常动态 {n}', '活动预告已发布。', 'wuwa', 1 + n / 10) for n in range(210)]
+    rows += [('名创优品原神联名', '原神与名创优品的联名周边上架。', 'genshin', 30)]
+    for n, (title, text, community, age) in enumerate(rows):
+        raw = RawContent(platform='bilibili', content_type='dynamic', external_id=f'search-{n}', source_id=source.id,
+                         community=community, published_at=now - timedelta(hours=age), collected_at=now - timedelta(hours=age))
+        session.add(raw)
+        await session.flush()
+        session.add(ContentVersion(raw_content_id=raw.id, title=title, text=text, category='announcement'))
+    await session.commit()
+
+    for query in ('明日方舟 名创优品 联动 秋意茶话会', '明日方舟名创优品联动', '秋意茶话会'):
+        found = await bot.query_target(session, row, tool='news', query=query, now=now)
+        assert [i['community'] for i in found['items']] == ['arknights'], query
+    # 游戏名只限定分区：同样提到名创优品的原神联名不算明日方舟的结果。
+    both = await bot.query_target(session, row, tool='news', query='名创优品', now=now)
+    assert {i['community'] for i in both['items']} == {'arknights', 'genshin'}
+
+    miss = await bot.query_target(session, row, tool='news', query='明日方舟 肯德基', now=now)
+    assert miss['items'] == [] and miss['brief'] is None
+    assert '近 30 天订阅范围内的资讯里没有找到与「明日方舟 肯德基」相关的内容' in miss['text']
+    assert '暂时没有值得单独推送' not in miss['text'] and '联网搜索' in miss['grounding']

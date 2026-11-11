@@ -24,8 +24,14 @@ from app.services.bot_policy import delivery_congested, reserve_delivery
 from app.services import bot_channels, bot_custom
 from app.services.bot_preferences import resolve_target
 from app.services.bot_access import matches_keywords, target_error
+from app.services.bot_search import matches_terms, search_condition, search_terms, split_communities
 
 logger = logging.getLogger(__name__)
+
+SEARCH_DAYS = 30
+GROUNDING = "仅根据查询结果回答，保留来源和时间；待核验消息不得表述为已证实。检索不到不能凭记忆补写。"
+SEARCH_MISS = ("这只说明 AniSignal 没有收录，不代表没有这件事；需要时改用联网搜索核实，"
+               "不要把群聊里的说法或记忆当成查询结果。")
 
 TOOLS = {
     "digest": "今日速报",
@@ -142,13 +148,19 @@ def matches_target_scope(target: BotTarget, item: dict) -> bool:
     return community in subscribed_communities(target)
 
 
-async def load_target_candidates(session, target, keywords, start_at, end_at, *, collected_after=None):
+async def load_target_candidates(session, target, keywords, start_at, end_at, *, collected_after=None,
+                                 communities: set[str] | None = None, search: list[str] | None = None):
     selected = subscribed_communities(target)
+    if communities:
+        selected = [key for key in selected if key in communities]
     games = [key for key in selected if COMMUNITIES[key].domain == "game"]
     channels = target.config.get("channels") or []
+    conditions = (bot_channels.channel_condition(channels),) if channels else ()
+    if search:
+        conditions += (search_condition(search),)
     candidates = await load_candidates(session, keywords, start_at, end_at,
         preferences={"communities": games, "exclude_keywords": target.config.get("exclude_keywords", [])}, collected_after=collected_after, text_limit=None,
-        extra_conditions=(bot_channels.channel_condition(channels),) if channels else ()) if games else []
+        extra_conditions=conditions) if games else []
     if any(COMMUNITIES[key].domain == "news" for key in selected):
         from app.services.ai_news import load_bot_news
 
@@ -174,6 +186,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
     keywords = config.get("keywords", [])
     scope = ("全站" if len(selected) == len(COMMUNITIES) else " / ".join(COMMUNITY_LABELS[key] for key in selected)) or "定制订阅"
     brief = None
+    grounding = GROUNDING
     if tool == "trending":
         from app.services.curation import select_trending
 
@@ -263,7 +276,9 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if config.get("channels"):
             stmt = stmt.where(Product.community.in_([key.split(":", 1)[0] for key in config["channels"] if key.endswith(":product")]))
         products = list(await session.scalars(stmt))
-        products = [p for p in products if (not query or query.casefold() in (p.name + " " + " ".join(p.watch_terms or [])).casefold())
+        terms = search_terms(query) if query else []
+        products = [p for p in products
+                    if matches_terms({"title": p.name, "text": " ".join(p.watch_terms or []), "community": p.community}, terms)
                     and matches_keywords(config, {"title": p.name})]
         items = [(await product_to_out(session, p)).model_dump(mode="json") for p in products[:5]]
         lines = [f"{scope} · 商品进展"]
@@ -277,14 +292,21 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if not items:
             lines.append("没有找到匹配的商品档案，请使用商品名称或更短的关键词。")
     else:
+        terms = search_terms(query) if query else []
+        text_terms, named = split_communities(terms)
+        # 带正文关键词的检索按词在库里筛选，可以放宽到 30 天；不带时仍是最近资讯。
+        days = 1 if tool == "digest" else (SEARCH_DAYS if text_terms else 7)
+        load_keywords = text_terms or keywords or None
+        narrowing = {"communities": named, "search": text_terms}
         candidates = await load_target_candidates(
-            session, target, keywords or None, now - timedelta(hours=24 if tool == "digest" else 168), now,
-            collected_after=collected_after,
+            session, target, load_keywords, now - timedelta(days=days), now,
+            collected_after=collected_after, **narrowing,
         )
         if tool == "digest" and not collected_after:
             # 晚采到的官方资料最多补一条，发布时间仍取原文，不回灌即时推送。
-            supplements = await load_target_candidates(session, target, keywords or None, now - timedelta(days=7),
-                                                      now - timedelta(hours=24), collected_after=now - timedelta(hours=24))
+            supplements = await load_target_candidates(session, target, load_keywords, now - timedelta(days=7),
+                                                      now - timedelta(hours=24), collected_after=now - timedelta(hours=24),
+                                                      **narrowing)
             candidates = [c for c in candidates if is_recent_item(c, now)]
             candidates.extend({**c, "is_supplement": True} for c in supplements
                               if c.get("published_at") and c["collected_at"] < now and c["identity"] == "official")
@@ -293,10 +315,12 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
                 edition = await edition_bot_items(session, now=now, keywords=keywords)
                 if edition is not None:
                     candidates = [c for c in candidates if not c.get("news")] + edition
-        if query:
-            candidates = [c for c in candidates if query.casefold() in (c["title"] + c["text"]).casefold()]
+        if terms:
+            candidates = [c for c in candidates if matches_terms(c, terms)]
         candidates = [c for c in candidates if matches_target_scope(target, c)]
-        candidates = [c for c in candidates if c["strength"] == "strong"]
+        if not text_terms:
+            # 检索词命中正文同样算数；只有按订阅关键词取数时才要求标题命中。
+            candidates = [c for c in candidates if c["strength"] == "strong"]
         items = await group_candidates(session, [item for item in candidates if not item.get("news") and not item.get("fulfillment_revision") and not item.get("custom_feed")],
                                        use_event_summary=not bool(config.get("channels")))
         items += [item for item in candidates if item.get("news") or item.get("fulfillment_revision") or item.get("custom_feed")]
@@ -330,9 +354,15 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
                      await build_brief(session, items, now, mode=mode, use_ai=False))
             items = brief["items"]
             lines = [format_brief(brief)]
+            if query and not items:
+                # 不能沿用推送的「暂时没有新消息」：模型会当成没有这件事，转而拿群聊内容硬答。
+                span = "近 24 小时" if tool == "digest" else f"近 {days} 天"
+                lines = [f"{span}订阅范围内的资讯里没有找到与「{query}」相关的内容。"]
+                brief = None
+                grounding = SEARCH_MISS
     return {"text": "\n".join(lines), "items": items,
             "brief": brief,
-            "grounding": "仅根据查询结果回答，保留来源和时间；待核验消息不得表述为已证实。检索不到不能凭记忆补写。"}
+            "grounding": grounding}
 
 
 async def send_message(bridge: dict, umo: str, content: str) -> tuple[str, str | None]:
