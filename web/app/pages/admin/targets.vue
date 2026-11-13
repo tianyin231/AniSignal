@@ -414,7 +414,7 @@ async function runBatchTargets(action: 'enable' | 'disable' | 'delete', opts?: {
     selectedIds.value = []
     await Promise.all([refresh(), loadCommunities(), refreshRuns()])
   } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? exc?.message ?? '批量操作失败')
+    toast.err(apiErrorDetail(exc, '批量操作失败'))
   } finally {
     batchBusy.value = false
   }
@@ -429,7 +429,7 @@ const targetPlaceholder = computed(() => {
   if (form.platform === 'youtube') return 'YouTube 24 位频道 ID（UC 开头）'
   if (form.platform === 'x') return '@账号 或 https://x.com/账号'
   if (form.platform === 'game_official') return '仅支持 genshin / endfield / nikke'
-  if (form.platform === 'kuro_cn' || form.platform === 'kuro_global') return '官方公告标识（如 wuwa-official）'
+  if (form.platform === 'kuro_cn' || form.platform === 'kuro_global') return '固定填写 default'
   if (form.platform === 'bilibili' && form.target_type !== 'keyword_search') return 'B 站 UP 主数字 UID（如 1955897084）'
   return '搜索关键词（如 鸣潮 周边）'
 })
@@ -447,8 +447,11 @@ watch([() => form.target_type, () => form.community, supportsViews], () => {
   if (!editingId.value) form.min_views = defaultMinViews()
 })
 watch([() => form.platform, () => form.community], () => {
-  if (!editingId.value && form.platform === 'game_official' && ['genshin', 'endfield', 'nikke'].includes(form.community)) {
+  if (editingId.value) return
+  if (form.platform === 'game_official' && ['genshin', 'endfield', 'nikke'].includes(form.community)) {
     form.target_value = form.community
+  } else if (form.platform === 'kuro_cn' || form.platform === 'kuro_global') {
+    form.target_value = 'default'
   }
 })
 
@@ -526,7 +529,7 @@ async function create() {
     form.is_official = false
     await Promise.all([refresh(), loadCommunities()])
   } catch (exc: any) {
-    formError.value = exc?.statusCode === 409 ? '该分区下已存在相同的采集目标' : `保存失败：${apiErrorDetail(exc, '请求失败')}`
+    formError.value = apiErrorDetail(exc, exc?.statusCode === 409 ? '该分区下已存在相同的采集目标' : '保存失败，请重试')
   } finally {
     creating.value = false
   }
@@ -565,7 +568,7 @@ async function toggle(target: CollectTarget) {
     toast.ok(target.enabled ? '已停用' : '已启用')
     await refresh()
   } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? exc?.message ?? '操作失败，请重试')
+    toast.err(apiErrorDetail(exc, '操作失败，请重试'))
   } finally {
     busyId.value = null
   }
@@ -577,7 +580,7 @@ async function runNow(target: CollectTarget) {
     await api(`/api/admin/collect-targets/${target.id}/run`, { method: 'POST' })
     toast.info(`「${target.display_name || target.target_value}」已加入采集队列`)
   } catch (exc: any) {
-    error.value = `触发失败：${exc?.message ?? exc}`
+    error.value = `触发失败：${apiErrorDetail(exc, '请求失败')}`
   } finally {
     busyId.value = null
   }
@@ -595,7 +598,7 @@ async function toggleTier(target: CollectTarget) {
     target.tier = data.tier
     toast.ok(`${target.display_name || target.target_value} 已切换为${next === 'core' ? '核心关键词' : '泛关键词'}`)
   } catch (exc: any) {
-    toast.err(`切换失败：${exc?.message ?? exc}`)
+    toast.err(`切换失败：${apiErrorDetail(exc, '请求失败')}`)
   } finally {
     busyId.value = null
   }
@@ -681,7 +684,7 @@ async function remove(target: CollectTarget) {
         </div>
       </div>
 
-      <form class="grid gap-2.5 border-t border-line pt-4 sm:grid-cols-6" @submit.prevent="saveCommunity">
+      <form class="grid gap-2.5 border-t border-line pt-4 sm:grid-cols-4" @submit.prevent="saveCommunity">
         <input
           v-model="communityForm.key"
           :disabled="!!editingCommunityKey"
@@ -711,6 +714,12 @@ async function remove(target: CollectTarget) {
           placeholder="官方B站UID（可选）"
           aria-label="官方 B 站 UID"
           class="input mono px-3 py-2 text-sm"
+        >
+        <input
+          v-model="communityForm.aliases"
+          placeholder="关键词别名，逗号分隔（如 BA，Blue Archive）"
+          aria-label="关键词别名"
+          class="input px-3 py-2 text-sm sm:col-span-2"
         >
         <div class="flex items-center gap-2">
           <button type="submit" class="btn-primary flex-1 px-3 py-2 text-sm" :disabled="communityBusy || !communityForm.label.trim()">
@@ -804,7 +813,7 @@ async function remove(target: CollectTarget) {
       <AdminBilibiliWebLogin v-if="webLoginMode" :key="webLoginMode" :mode="webLoginMode" @close="webLoginMode = null" @login="biliSession = $event; webLoginMode = null" />
 
       <form v-if="showCookieForm" class="space-y-2 rounded-xl border border-line bg-chip/40 p-4" @submit.prevent="saveManualCookie">
-        <p class="text-xs text-muted">粘贴浏览器请求头中的 Cookie 字符串（需含 <code class="mono">SESSDATA</code>）：</p>
+        <p class="text-xs text-muted">支持粘贴浏览器请求头中的 Cookie 字符串或 JSON（需含 <code class="mono">SESSDATA</code>）：</p>
         <textarea
           v-model="cookieText"
           rows="2"

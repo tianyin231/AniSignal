@@ -46,7 +46,7 @@ async def test_excluding_last_visible_evidence_after_sibling_is_hidden(session):
     event = await session.scalar(select(Event).where(Event.product_id == product.id, Event.category == "unboxing"))
     ids = list(await session.scalars(select(Evidence.raw_content_id).where(Evidence.event_id == event.id)))
     assert len(ids) == 2
-    await set_content_visibility(ids[0], {"hidden": True}, session, None)
+    await set_content_visibility(ids[0], {"hidden": True}, session)
     await exclude_evidence(session, event.id, ids[1])
     await session.commit()
     assert not event.is_active

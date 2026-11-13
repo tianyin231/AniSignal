@@ -107,12 +107,12 @@ export function channelThemeClass(key?: string | null): string {
 
 export const PLATFORMS_BY_COMMUNITY: Record<string, string[]> = {
   wuwa: ['bilibili', 'youtube', 'kuro'],
-  blhx: ['bilibili'],
+  blhx: ['bilibili', 'youtube'],
   hsr: ['bilibili', 'youtube'],
   arknights: ['bilibili', 'youtube'],
   genshin: ['bilibili', 'youtube', 'game_official', 'x', 'miyoushe'],
   endfield: ['bilibili', 'youtube', 'game_official', 'x'],
-  zzz: ['bilibili'],
+  zzz: ['bilibili', 'miyoushe'],
   petitplanet: ['bilibili'],
   hna: ['bilibili'],
   roco: ['bilibili'],

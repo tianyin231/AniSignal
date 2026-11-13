@@ -21,10 +21,11 @@ export default defineEventHandler((event) => {
   if (!upstreamPath) return
 
   const base = String(useRuntimeConfig(event).apiSsrBase || 'http://127.0.0.1:8000').replace(/\/+$/, '')
-  const host = getRequestHeader(event, 'x-forwarded-host') || getRequestHeader(event, 'host')
   const trustProxy = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true'
+  const host = (trustProxy && getRequestHeader(event, 'x-forwarded-host')) || getRequestHeader(event, 'host')
+  const proto = (trustProxy && getRequestHeader(event, 'x-forwarded-proto')) || 'http'
   const clientIp = (trustProxy && getRequestHeader(event, 'x-real-ip')) || getRequestIP(event)
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = { 'x-forwarded-proto': proto }
   if (host) headers['x-forwarded-host'] = host
   if (clientIp) headers['x-forwarded-for'] = clientIp
   return proxyRequest(event, `${base}${upstreamPath}`, { headers })

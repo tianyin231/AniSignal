@@ -8,8 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
-from app.api.admin import get_queue
-from app.api.deps import require_admin
+from app.api.deps import get_queue, require_admin
 from app.db import get_session
 from app.models import CustomFeed, CustomFeedItem, CustomFeedSource, CustomCollectRun, User
 from app.clock import utcnow

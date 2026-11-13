@@ -9,8 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
-from app.api.admin import get_queue
-from app.api.deps import require_admin
+from app.api.deps import get_queue, require_admin
 from app.clock import utcnow
 from app.communities import COMMUNITY_REQUIRED_QUERY_DEP
 from app.db import get_session
@@ -140,8 +139,8 @@ async def put_config(body: dict, session: AsyncSession = Depends(get_session)):
         "api_key": api_key,
         "api_keys": api_keys,
         "model": str(body.get("model") or "").strip(),
-        "price_in": float(body.get("price_in") or 0),
-        "price_out": float(body.get("price_out") or 0),
+        "price_in": float(body.get("price_in") if body.get("price_in") is not None else stored.get("price_in") or 0),
+        "price_out": float(body.get("price_out") if body.get("price_out") is not None else stored.get("price_out") or 0),
     }
     await settings_service.set_setting(session, "ai", value)
     return _public_view(await get_ai_config(session))

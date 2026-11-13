@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import io
+import json
 import logging
 import re
 from pathlib import Path
@@ -22,21 +23,43 @@ PASSPORT_QR_BASE = "https://passport.bilibili.com/x/passport-login/web/qrcode/"
 
 
 def parse_cookie_text(content: str) -> dict[str, str]:
-    """解析纯 Cookie 请求头或 Netscape 格式文本；必须包含 SESSDATA。"""
-    parts = []
-    for line in (content or "").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.lower().startswith("cookie:"):
-            line = line[7:].strip()
-        fields = line.split("\t")
-        parts.append(f"{fields[5]}={fields[6]}" if len(fields) == 7 else line)
-    cookies = {}
-    for part in "; ".join(parts).split(";"):
-        name, sep, value = part.strip().partition("=")
-        if sep and re.fullmatch(r"[A-Za-z0-9_]+", name) and value:
-            cookies[name] = value
+    """解析纯 Cookie 请求头、Netscape 文本或 JSON 对象/数组；必须包含 SESSDATA。"""
+    stripped = (content or "").strip()
+    cookies: dict[str, str] = {}
+    if stripped.startswith(("{", "[")):
+        try:
+            parsed = json.loads(stripped)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            src = parsed.get("cookies") if isinstance(parsed.get("cookies"), dict) else parsed
+            cookies = {
+                str(k): str(v)
+                for k, v in src.items()
+                if re.fullmatch(r"[A-Za-z0-9_]+", str(k)) and str(v)
+            }
+        elif isinstance(parsed, list):
+            cookies = {
+                str(item["name"]): str(item["value"])
+                for item in parsed
+                if isinstance(item, dict)
+                and re.fullmatch(r"[A-Za-z0-9_]+", str(item.get("name") or ""))
+                and str(item.get("value") or "")
+            }
+    if not cookies:
+        parts = []
+        for line in stripped.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.lower().startswith("cookie:"):
+                line = line[7:].strip()
+            fields = line.split("\t")
+            parts.append(f"{fields[5]}={fields[6]}" if len(fields) == 7 else line)
+        for part in "; ".join(parts).split(";"):
+            name, sep, value = part.strip().partition("=")
+            if sep and re.fullmatch(r"[A-Za-z0-9_]+", name) and value:
+                cookies[name] = value
     if not cookies.get("SESSDATA"):
         raise ValueError("B站凭据文件缺少 SESSDATA，请重新登录")
     return cookies

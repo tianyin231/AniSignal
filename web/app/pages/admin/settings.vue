@@ -45,10 +45,9 @@ const onepush = reactive({ enabled: false, config_yaml: '' })
 const onepushInfo = ref<OnePushView | null>(null)
 const onepushTestResult = ref('')
 
-// ---------- AI（LLM） ----------
+// ---------- AI（LLM 只读摘要） ----------
 interface AiView { base_url: string; model: string; api_key_set: boolean }
-const ai = reactive({ base_url: '', model: '', api_key: '' })
-const aiTestResult = ref('')
+const ai = reactive({ base_url: '', model: '' })
 
 // ---------- 公告 ----------
 const announcement = reactive({ enabled: false, level: 'info', text: '', link: '' })
@@ -132,7 +131,6 @@ async function refresh() {
   onepush.config_yaml = ''
   ai.base_url = data.ai.base_url || ''
   ai.model = data.ai.model || ''
-  ai.api_key = ''
   Object.assign(announcement, data.announcement)
   texts.value = { ...data.texts }
   const mv = data.media_visibility ?? { default: { image: 'show', video: 'show' }, platforms: {} }
@@ -225,53 +223,6 @@ async function sendTest() {
   } catch (exc: any) {
     testResult.value = `${stamp()} · ${exc?.data?.detail ?? '发送失败'}`
     toast.err('测试发送失败')
-  } finally {
-    endBusy()
-  }
-}
-
-async function saveAi() {
-  if (!guardLoaded()) return
-  startBusy('saveAi')
-  error.value = notice.value = ''
-  try {
-    await api('/api/admin/settings/ai', { method: 'PUT', body: ai })
-    ai.api_key = ''
-    toast.ok('LLM 配置已保存')
-    await refresh()
-  } catch (exc: any) {
-    error.value = exc?.data?.detail ?? '保存失败'
-  } finally {
-    endBusy()
-  }
-}
-
-async function testAi() {
-  if (!guardLoaded()) return
-  if (busy.value) return
-  startBusy('testAi')
-  aiTestResult.value = ''
-  try {
-    const r = await api<{ ok: boolean; message: string }>('/api/admin/settings/ai/test', { method: 'POST' })
-    aiTestResult.value = `${stamp()} · ${r.message}`
-    r.ok ? toast.ok('LLM 连通正常') : toast.err('LLM 连通失败')
-  } catch (exc: any) {
-    aiTestResult.value = `${stamp()} · ${exc?.data?.detail ?? '测试失败'}`
-    toast.err('LLM 测试请求失败')
-  } finally {
-    endBusy()
-  }
-}
-
-async function summarizeAll() {
-  if (!guardLoaded()) return
-  if (!confirm('为缺少摘要或使用降级模板的事件补 AI 摘要？人工编辑和锁定的事件会保留。')) return
-  startBusy('summarizeAll')
-  try {
-    const r = await api<{ candidates: number; queued: number; remaining: number }>('/api/admin/settings/ai/summarize-all', { method: 'POST' })
-    toast.info(r.queued ? `已新增 ${r.queued} 条摘要任务，后台处理中；当前待补 ${r.remaining} 条（含队列中）` : r.remaining ? '本批摘要任务已在队列中，请稍后查看 AI 调用记录' : '无需补充摘要')
-  } catch (exc: any) {
-    error.value = exc?.data?.detail ?? '执行失败'
   } finally {
     endBusy()
   }

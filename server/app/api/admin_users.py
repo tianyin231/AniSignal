@@ -11,9 +11,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.admin import get_queue
 from app.api.auth import _current_user
-from app.api.deps import require_admin
+from app.api.deps import get_queue, require_admin
 from app.clock import utcnow
 from app.db import get_session
 from app.models import NotificationDelivery, User, UserKeyword

@@ -84,7 +84,7 @@ docker compose logs --tail=80 api web collector
 
 关键配置要点：
 1. 保持 `WEB_PORT=127.0.0.1:8090`，避免绕过 Nginx 与防火墙直接暴露 `:8090`；若前置 Cloudflare 等 CDN，建议在云安全组仅允许 CDN 回源 IP 段访问 `80/443`。
-2. 反代需透传 `Host`、`X-Real-IP`、`X-Forwarded-For` 与 **`X-Forwarded-Proto $scheme`**，并将 `.env` 中的 `ANISIGNAL_PUBLIC_BASE_URL` 设为 `https://你的域名`，以确保登录会话 Cookie 自动附带 `Secure` 标志。
+2. 反代需透传 `Host`、`X-Real-IP`、`X-Forwarded-For` 与 **`X-Forwarded-Proto $scheme`**，并在 `.env` 中设置 `ANISIGNAL_PUBLIC_BASE_URL=https://你的域名` 与 `TRUST_PROXY=1`，以确保真实访客 IP 透传且登录会话 Cookie 自动附带 `Secure` 标志。
 
 ---
 

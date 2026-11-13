@@ -83,6 +83,7 @@ services:
       PORT: "3000"
       NUXT_API_SSR_BASE: http://api:8000
       NUXT_PUBLIC_SITE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
       TZ: Asia/Shanghai
     depends_on:
       api:

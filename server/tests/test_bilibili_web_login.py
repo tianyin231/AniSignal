@@ -78,6 +78,7 @@ async def test_password_encrypted_and_only_session_saved(client, admin_headers, 
         assert decrypted.decode() == "salt-" + PASSWORD
         assert PASSWORD.encode() not in request.content
         assert form["username"] == ["player@example.com"]
+        assert form["keep"] == ["true"]
         assert all(form[key] == [value] for key, value in CAPTCHA.items())
         return login_response(request)
 
@@ -112,7 +113,7 @@ async def test_password_failure_preserves_old_credentials(client, admin_headers,
 async def test_sms_send_then_login(client, admin_headers, session, monkeypatch):
     def respond(request):
         form = parse_qs(request.content.decode())
-        assert form["cid"] == ["1"] and form["tel"] == ["13800138000"]
+        assert form["cid"] == ["86"] and form["tel"] == ["13800138000"]
         if request.url.path.endswith("/sms/send"):
             assert all(form[key] == [value] for key, value in CAPTCHA.items())
             return httpx.Response(200, json={"code": 0, "data": {"captcha_key": "sms-ticket"}})
@@ -121,13 +122,21 @@ async def test_sms_send_then_login(client, admin_headers, session, monkeypatch):
 
     mock_passport(monkeypatch, respond)
     sent = await client.post("/api/admin/bilibili-session/sms/send", headers=admin_headers,
-                             json={"cid": 1, "phone": "13800138000", **CAPTCHA})
+                             json={"phone": "13800138000", **CAPTCHA})
     assert sent.status_code == 200 and sent.json()["retry_after"] == 60
     response = await client.post("/api/admin/bilibili-session/login/sms", headers=admin_headers,
-                                 json={"cid": 1, "phone": "13800138000", "code": "123456", "captcha_key": sent.json()["captcha_key"]})
+                                 json={"cid": 86, "phone": "13800138000", "code": "123456", "captcha_key": sent.json()["captcha_key"]})
     assert response.status_code == 200 and response.json()["state"] == "saved"
     assert SESSDATA not in response.text
     assert "sms-ticket" not in json.dumps(await credentials.get_setting(session, credentials.CREDENTIAL_SETTING_KEY))
+
+
+async def test_client_carries_buvid3_and_json_cookie_paste():
+    async with login._client() as http_client:
+        assert "Chrome/" in http_client.headers["User-Agent"]
+        assert http_client.cookies.get("buvid3", domain=".bilibili.com", path="/").endswith("infoc")
+    assert credentials.parse_cookie_text('{"SESSDATA": "s1", "bili_jct": "c1"}') == {"SESSDATA": "s1", "bili_jct": "c1"}
+    assert credentials.parse_cookie_text('[{"name": "SESSDATA", "value": "s2"}]') == {"SESSDATA": "s2"}
 
 
 @pytest.mark.parametrize("url,expected", [

@@ -693,6 +693,65 @@ async def test_issue3_target_validation_official_flag_runs_and_seeds_cli(client,
         assert unset.status_code == 200 and unset.json()["is_official"] is False
         await session.refresh(src_own)
         assert src_own.identity == "unknown"
+
+        # 重新勾选 is_official 时立即同步存量 Source.identity，无需等下轮抓取
+        reset_on = await client.put(
+            f"/api/admin/collect-targets/{ba_x.json()['id']}",
+            headers=admin_headers,
+            json={"is_official": True},
+        )
+        assert reset_on.status_code == 200 and reset_on.json()["is_official"] is True
+        await session.refresh(src_own)
+        assert src_own.identity == "official"
+
+        # 同账号双目标（dynamics + videos）：取消其中一个不冲掉另一个的官方身份
+        bili_dyn = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={"platform": "bilibili", "target_type": "account_dynamics", "target_value": "99887766", "community": "ba", "is_official": True},
+        )
+        bili_vid = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={"platform": "bilibili", "target_type": "account_videos", "target_value": "99887766", "community": "ba", "is_official": True},
+        )
+        await ingest_items(
+            session,
+            "bilibili_dynamics",
+            [{"id": "998877660001", "author_mid": "99887766", "author_name": "BA官号", "text": "BA PV"}],
+            community="ba",
+            force_official="99887766",
+        )
+        bili_src = await session.scalar(select(Source).where(Source.platform == "bilibili", Source.external_id == "99887766"))
+        assert bili_src.identity == "official"
+        await client.put(f"/api/admin/collect-targets/{bili_dyn.json()['id']}", headers=admin_headers, json={"is_official": False})
+        await session.refresh(bili_src)
+        assert bili_src.identity == "official"
+        await client.delete(f"/api/admin/collect-targets/{bili_vid.json()['id']}", headers=admin_headers)
+        await session.refresh(bili_src)
+        assert bili_src.identity == "unknown"
+
+        # RSS 勾选官方一手：editorial_tier 保持 None，以便 news_editorial 按 identity == official 识别为一手来源
+        from app.collectors.rss import rss_id
+
+        feed_url = "https://bluearchive.example.com/rss.xml"
+        await ingest_items(
+            session,
+            "rss_feed",
+            [{
+                "feed_url": feed_url,
+                "source_name": "BA Official Blog",
+                "title": "Official Patch Notes",
+                "url": "https://bluearchive.example.com/posts/1",
+                "text": "Patch details",
+                "published": "2026-11-13T10:00:00Z",
+                "tier": "T2",
+            }],
+            community="ai",
+            force_official=rss_id(feed_url),
+        )
+        rss_src = await session.scalar(select(Source).where(Source.platform == "rss", Source.external_id == rss_id(feed_url)))
+        assert rss_src.identity == "official" and rss_src.editorial_tier is None
     finally:
         reset_communities()
 

@@ -9,7 +9,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.db import get_session
 from app.services.auth import SESSION_COOKIE, get_user_by_token
+from app.services.queue import ArqQueue, BaseQueue, LocalQueue
 from app.services.settings import get_admin_user_ids
+
+
+async def get_queue(request: Request) -> BaseQueue:
+    """任务队列：优先用 app.state 上已初始化的（本地模式由 lifespan 创建，
+    测试由 fixture 注入）；否则按 local_mode 懒创建 arq 或本地实现。"""
+    queue = getattr(request.app.state, "queue", None)
+    if queue is None:
+        if get_settings().local_mode:
+            queue = LocalQueue()
+        else:
+            from app.services.collect import get_redis_pool
+
+            queue = ArqQueue(await get_redis_pool())
+        request.app.state.queue = queue
+    return queue
 
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 

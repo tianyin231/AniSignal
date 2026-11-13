@@ -239,7 +239,7 @@ def build_custom_meta(raw: dict) -> CommunityMeta:
         key=key,
         label=label,
         en=en,
-        game_name=label if domain == "news" else f"《{label}》",
+        game_name=f"《{label}》",
         bare_name=label,
         game_note=note,
         other_games_examples="",

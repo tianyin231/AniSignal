@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
 from app.communities import DEFAULT_COMMUNITY, get_community
-from app.models import ContentVersion, MetricSnapshot, RawContent, Source
+from app.models import CollectTarget, ContentVersion, MetricSnapshot, RawContent, Source
 from app.models.enums import Identity
 from app.parsers.bilibili import PARSER_VERSION as BILIBILI_PARSER_VERSION
 from app.parsers.bilibili import parse_dynamic, parse_video
@@ -92,6 +92,57 @@ def target_source_external_id(platform: str, target_value: str) -> str:
     if platform == "x":
         return target_value.strip().removeprefix("@").lower()
     return target_value
+
+
+def _is_builtin_official(platform: str, external_id: str) -> bool:
+    if platform == "bilibili":
+        from app.parsers.bilibili import _official_mids
+
+        return external_id in _official_mids()
+    if platform == "youtube":
+        from app.parsers.youtube import _official_channels
+
+        return external_id in _official_channels()
+    if platform == "x":
+        from app.config import get_settings
+
+        accounts = {
+            part.split(":", 1)[0].strip().lower()
+            for part in get_settings().official_x_accounts.split(",")
+            if ":" in part
+        }
+        return external_id.lower() in accounts
+    return platform in ("game_official", "kuro_cn", "kuro_global", "miyoushe")
+
+
+async def sync_source_official_identity(
+    session: AsyncSession, platform: str, external_id: str
+) -> None:
+    """按当前启用中的采集目标与内置白名单，即时同步已有 Source 的官方身份。"""
+    if not external_id:
+        return
+    source = await session.scalar(
+        select(Source).where(Source.platform == platform, Source.external_id == external_id)
+    )
+    if source is None:
+        return
+    rows = (
+        await session.execute(
+            select(CollectTarget).where(
+                CollectTarget.platform == platform,
+                CollectTarget.enabled.is_(True),
+                CollectTarget.target_type.notin_(("keyword_search", "topic_search")),
+            )
+        )
+    ).scalars()
+    flagged = _is_builtin_official(platform, external_id) or any(
+        t.is_official and target_source_external_id(platform, t.target_value) == external_id
+        for t in rows
+    )
+    if flagged:
+        source.identity = Identity.OFFICIAL
+    elif not source.official_title and source.identity == Identity.OFFICIAL:
+        source.identity = Identity.UNKNOWN
 
 
 async def ingest_items(
@@ -330,7 +381,7 @@ async def _upsert_source(
         )
         if normalized.platform == "rss":
             source.owner_key = normalized.extra.get("owner_key")
-            source.editorial_tier = {"T1": "first_party", "T1_5": "near_source"}.get(normalized.extra.get("tier"), "media")
+            source.editorial_tier = {"T1": "first_party", "T1_5": "near_source"}.get(normalized.extra.get("tier"))
             source.raw_json = {**source.raw_json, "participation_mode": normalized.extra.get("participation_mode", "editorial")}
         session.add(source)
         await session.flush()
@@ -342,9 +393,9 @@ async def _upsert_source(
         existing.official_title = author.official_title
     if author.follower_count is not None:
         existing.follower_count = author.follower_count
-    if matched_official:
+    if matched_official or author.official_title or _is_builtin_official(str(normalized.platform), author.external_id):
         existing.identity = Identity.OFFICIAL
-    elif identity != Identity.UNKNOWN:
+    elif existing.identity != Identity.OFFICIAL and identity != Identity.UNKNOWN:
         existing.identity = identity
     return existing.id, str(existing.identity)
 

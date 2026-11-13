@@ -12,7 +12,7 @@ const toast = useAdminToast()
 const username = ref('')
 const password = ref('')
 const phone = ref('')
-const cid = ref(1)
+const cid = ref(86)
 const code = ref('')
 const captchaKey = ref('')
 const countries = ref([{ id: 1, name: '中国大陆', code: '86' }])
@@ -60,6 +60,13 @@ function finish(result: LoginResult) {
   }
 }
 
+function reportError(exc: unknown, fallback: string) {
+  if (disposed || controller?.signal.aborted) return
+  if (exc instanceof Error && exc.message === '已取消人机验证') return
+  error.value = apiErrorDetail(exc, exc instanceof Error ? exc.message : fallback)
+  toast.err(error.value)
+}
+
 async function submitPassword() {
   if (busy.value || !username.value.trim() || !password.value) return
   busy.value = 'password'
@@ -72,10 +79,7 @@ async function submitPassword() {
       body: { username: username.value.trim(), password: password.value, ...verification },
     }))
   } catch (exc) {
-    if (!disposed && !controller.signal.aborted) {
-      error.value = apiErrorDetail(exc, exc instanceof Error ? exc.message : '账号密码登录失败')
-      toast.err(error.value)
-    }
+    reportError(exc, '账号密码登录失败')
   } finally { password.value = ''; busy.value = '' }
 }
 
@@ -97,10 +101,7 @@ async function sendCode() {
     countdown = setInterval(() => { if (--remaining.value <= 0) clearInterval(countdown) }, 1000)
     toast.ok(result.message)
   } catch (exc) {
-    if (!disposed && !controller.signal.aborted) {
-      error.value = apiErrorDetail(exc, exc instanceof Error ? exc.message : '短信验证码发送失败')
-      toast.err(error.value)
-    }
+    reportError(exc, '短信验证码发送失败')
   } finally { busy.value = '' }
 }
 
@@ -115,10 +116,7 @@ async function submitSms() {
       body: { cid: cid.value, phone: phone.value.trim(), code: code.value.trim(), captcha_key: captchaKey.value },
     }))
   } catch (exc) {
-    if (!disposed && !controller.signal.aborted) {
-      error.value = apiErrorDetail(exc, exc instanceof Error ? exc.message : '短信验证码登录失败')
-      toast.err(error.value)
-    }
+    reportError(exc, '短信验证码登录失败')
   } finally { code.value = ''; busy.value = '' }
 }
 </script>
@@ -146,7 +144,7 @@ async function submitSms() {
     <form v-else class="grid max-w-xl gap-3 sm:grid-cols-[10rem_1fr]" @submit.prevent="submitSms">
       <label class="text-xs text-ink-2" for="bili-country">国家或地区
         <select id="bili-country" v-model="cid" :disabled="!!busy" class="select mt-1.5 w-full px-3 py-2 text-sm">
-          <option v-for="country in countries" :key="country.id" :value="country.id">{{ country.name }} +{{ country.code }}</option>
+          <option v-for="country in countries" :key="country.id" :value="Number(country.code)">{{ country.name }} +{{ country.code }}</option>
         </select>
       </label>
       <label class="text-xs text-ink-2" for="bili-phone">手机号码

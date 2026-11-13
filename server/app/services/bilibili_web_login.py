@@ -2,6 +2,7 @@
 
 import base64
 from urllib.parse import urlsplit
+import uuid
 
 import httpx
 from Crypto.Cipher import PKCS1_v1_5
@@ -10,7 +11,14 @@ from Crypto.PublicKey import RSA
 from app.services.bilibili_session import login_response_cookies, save_login_cookies
 
 PASSPORT = "https://passport.bilibili.com"
-HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://passport.bilibili.com/login", "Origin": PASSPORT}
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://passport.bilibili.com/login",
+    "Origin": PASSPORT,
+}
 ERRORS = {
     -105: "人机验证未通过，请重新验证",
     -629: "B站账号或密码不正确",
@@ -28,7 +36,9 @@ ERRORS = {
 
 
 def _client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=15, trust_env=False, headers=HEADERS)
+    cookies = httpx.Cookies()
+    cookies.set("buvid3", f"{str(uuid.uuid4()).upper()}infoc", domain=".bilibili.com")
+    return httpx.AsyncClient(timeout=15, trust_env=False, headers=HEADERS, cookies=cookies)
 
 
 def _data(response: httpx.Response) -> dict:
@@ -83,7 +93,7 @@ async def login_password(session, username: str, password: str, captcha: dict) -
             raise ValueError("B站登录密钥不可用或密码过长，请重新登录") from None
         data = _data(await client.post(PASSPORT + "/x/passport-login/web/login", data={
             "username": username, "password": base64.b64encode(encrypted).decode(),
-            "keep": "0", "source": "main_web", **captcha,
+            "keep": "true", "source": "main_web", **captcha,
         }))
         return await _finish_login(session, client, data)
 

@@ -11,7 +11,7 @@ from app.api.auth import get_current_user, sync_hidden_cookie
 from app.clock import utcnow
 from app.communities import COMMUNITIES, DEFAULT_COMMUNITY
 from app.db import get_session
-from app.api.admin import get_queue
+from app.api.deps import get_queue
 from app.models import (
     ContentVersion,
     CustomFeed,

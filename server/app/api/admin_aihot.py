@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_admin
+from app.api.deps import get_queue, require_admin
 from app.db import get_session
 from app.services import news_admin
 
@@ -28,8 +28,6 @@ async def admin_proxy(path: str, request: Request, session: AsyncSession = Depen
     if not re.fullmatch(allowed[request.method], path):
         raise HTTPException(404)
     body = await request.json() if request.method != "GET" else None
-    from app.api.admin import get_queue
-
     queue = await get_queue(request) if request.method == "POST" and path.endswith(("/fetch", "/rerun")) else None
     return await news_admin.request(
         session, path, method=request.method, params=dict(request.query_params), body=body or {}, queue=queue

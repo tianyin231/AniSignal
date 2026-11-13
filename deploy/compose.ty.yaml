@@ -12,11 +12,14 @@ services:
     logging: *bounded_logs
   redis:
     mem_limit: 64m
+    command: ["redis-server", "--maxmemory", "48mb", "--maxmemory-policy", "volatile-lru"]
     logging: *bounded_logs
   api:
     mem_limit: 512m
   web:
     mem_limit: 256m
+    environment:
+      TRUST_PROXY: "${TRUST_PROXY:-1}"
     ports: !override
       - "127.0.0.1:${TY_WEB_PORT:-8090}:3000"
   collector:

@@ -5,8 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_admin
-from app.api.admin import get_queue
+from app.api.deps import get_queue, require_admin
 from app.db import get_session
 from app.services import settings as settings_service
 from app.services.email_templates import notice_email
@@ -37,37 +36,10 @@ async def get_all_settings(session: AsyncSession = Depends(get_session)):
 
 @router.put("/ai")
 async def put_ai(body: dict, session: AsyncSession = Depends(get_session)):
-    """保存 LLM 配置（OpenAI 兼容）；api_key 与密钥池留空/缺省时保留旧值。"""
-    stored = (await settings_service.get_setting(session, "ai")) or {}
-    api_key = body.get("api_key")
-    if api_key is None or api_key == "":
-        api_key = stored.get("api_key") or ""
-    raw_keys = body.get("api_keys")
-    if raw_keys is None:
-        api_keys = stored.get("api_keys") or []
-    else:
-        if isinstance(raw_keys, str):
-            raw_keys = raw_keys.replace("，", ",").replace(",", "\n").split("\n")
-        api_keys = [str(k).strip() for k in raw_keys if str(k).strip()]
-    raw_base = str(body.get("base_url") or "").strip().rstrip("/")
-    base_url = safe_endpoint(raw_base) or ""
-    if raw_base and not base_url:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "base_url 必须是 http(s) 地址（自托管内网地址允许）",
-        )
-    value = {
-        "base_url": base_url,
-        "api_key": api_key,
-        "api_keys": api_keys,
-        "model": str(body.get("model") or "").strip(),
-        "price_in": float(body.get("price_in") if body.get("price_in") is not None else stored.get("price_in") or 0),
-        "price_out": float(body.get("price_out") if body.get("price_out") is not None else stored.get("price_out") or 0),
-    }
-    await settings_service.set_setting(session, "ai", value)
-    from app.services.ai import _public_view, get_ai_config
+    """保存 LLM 配置（OpenAI 兼容）；复用 admin_ai.put_config，缺省时保留原有密钥与定价。"""
+    from app.api.admin_ai import put_config
 
-    return _public_view(await get_ai_config(session))
+    return await put_config(body=body, session=session)
 
 
 @router.post("/ai/test")

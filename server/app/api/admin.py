@@ -20,7 +20,7 @@ from app.communities import (
     get_community,
     sync_communities,
 )
-from app.api.deps import require_admin
+from app.api.deps import get_queue, require_admin
 from app.api.public import invalidate_official_links_cache
 from app.config import get_settings
 from app.db import get_session
@@ -73,27 +73,12 @@ from app.schemas.api import (
     TargetBatchRequest,
     TargetImportPresetsRequest,
 )
-from app.services.queue import ArqQueue, BaseQueue, LocalQueue
+from app.services.queue import BaseQueue
 from app.services.views import events_to_out, product_to_out, products_to_out
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin), COMMUNITY_SYNC_DEP])
-
-
-async def get_queue(request: Request) -> BaseQueue:
-    """任务队列：优先用 app.state 上已初始化的（本地模式由 lifespan 创建，
-    测试由 fixture 注入）；否则按 local_mode 懒创建 arq 或本地实现。"""
-    queue = getattr(request.app.state, "queue", None)
-    if queue is None:
-        if get_settings().local_mode:
-            queue = LocalQueue()
-        else:
-            from app.services.collect import get_redis_pool
-
-            queue = ArqQueue(await get_redis_pool())
-        request.app.state.queue = queue
-    return queue
 
 
 # ---------- 分区与采集目标 ----------
@@ -267,64 +252,6 @@ async def batch_targets(body: TargetBatchRequest, session: AsyncSession = Depend
     return {"affected": int(res.rowcount or 0), "action": body.action}
 
 
-@router.get("/bilibili-session")
-async def bilibili_session_status(session: AsyncSession = Depends(get_session)):
-    from app.services.bilibili_session import get_status
-
-    return await get_status(session)
-
-
-@router.post("/bilibili-session/check")
-async def check_bilibili_session(session: AsyncSession = Depends(get_session)):
-    from app.services.bilibili_session import check_status
-
-    return await check_status(session)
-
-
-@router.post("/bilibili-session/qrcode")
-async def create_bilibili_qrcode():
-    import httpx
-    from app.services.bilibili_session import generate_qr_login
-
-    try:
-        return await generate_qr_login()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc) or "生成扫码会话失败") from exc
-
-
-@router.get("/bilibili-session/qrcode/{qrcode_key}")
-async def poll_bilibili_qrcode(qrcode_key: str, session: AsyncSession = Depends(get_session)):
-    import httpx
-    from app.services.bilibili_session import poll_qr_login
-
-    try:
-        return await poll_qr_login(session, qrcode_key)
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "查询扫码状态失败，请重试") from exc
-
-
-@router.put("/bilibili-session/cookie")
-async def set_bilibili_cookie(body: dict, session: AsyncSession = Depends(get_session)):
-    from app.services.bilibili_session import save_manual_cookie
-
-    raw_cookie = str(body.get("cookie") or "").strip()
-    if not raw_cookie:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请粘贴包含 SESSDATA 的 Cookie 内容")
-    try:
-        return await save_manual_cookie(session, raw_cookie)
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-
-
-@router.delete("/bilibili-session")
-async def delete_bilibili_session(session: AsyncSession = Depends(get_session)):
-    from app.services.bilibili_session import clear_credentials
-
-    return await clear_credentials(session)
-
-
 def _x_target_value(value: str, target_type: str, interval_minutes: int) -> str:
     from app.parsers.x import normalize_account
 
@@ -452,6 +379,13 @@ async def create_target(
         next_run_at=utcnow() if body.enabled else None,
     )
     session.add(target)
+    await session.flush()
+    if is_official:
+        from app.services.ingest import sync_source_official_identity, target_source_external_id
+
+        await sync_source_official_identity(
+            session, target.platform, target_source_external_id(target.platform, target.target_value)
+        )
     await session.commit()
     await session.refresh(target)
     return target
@@ -464,8 +398,7 @@ async def update_target(
     session: AsyncSession = Depends(get_session),
 ):
     from app.clock import utcnow
-    from app.models.enums import Identity
-    from app.services.ingest import target_source_external_id
+    from app.services.ingest import sync_source_official_identity, target_source_external_id
 
     target = await session.get(CollectTarget, target_id)
     if target is None:
@@ -525,15 +458,6 @@ async def update_target(
         else:
             next_cfg.pop("is_official", None)
         target.config = next_cfg
-    if old_official and (not target.is_official or value_changed):
-        await session.execute(
-            update(Source)
-            .where(
-                Source.platform == target.platform,
-                Source.external_id == target_source_external_id(target.platform, old_value),
-            )
-            .values(identity=Identity.UNKNOWN)
-        )
     if body.min_views is not None:
         target.min_views = body.min_views
     if get_community(target.community).domain == "news" or not supports_view_threshold(target.platform, target.target_type):
@@ -549,6 +473,13 @@ async def update_target(
             bound_product.monitor_status = "watching"
             bound_product.archived_at = None
             bound_product.monitor_started_at = utcnow()
+    await session.flush()
+    if value_changed or old_official != target.is_official or body.enabled is not None:
+        touched_ext_ids = {target_source_external_id(target.platform, target.target_value)}
+        if value_changed:
+            touched_ext_ids.add(target_source_external_id(target.platform, old_value))
+        for ext_id in touched_ext_ids:
+            await sync_source_official_identity(session, target.platform, ext_id)
     await session.commit()
     await session.refresh(target)
     return target
@@ -556,10 +487,18 @@ async def update_target(
 
 @router.delete("/collect-targets/{target_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_target(target_id: int, session: AsyncSession = Depends(get_session)):
+    from app.services.ingest import sync_source_official_identity, target_source_external_id
+
     target = await session.get(CollectTarget, target_id)
     if target is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "target not found")
+    platform, old_value, was_official = target.platform, target.target_value, target.is_official
     await session.delete(target)
+    await session.flush()
+    if was_official:
+        await sync_source_official_identity(
+            session, platform, target_source_external_id(platform, old_value)
+        )
     await session.commit()
 
 
@@ -755,7 +694,6 @@ async def set_content_visibility(
     content_id: int,
     body: dict,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ):
     """人工下架/恢复：公开侧立即排除 hidden 内容，AI 不会再自动改动人工状态。"""
     raw = await _get_content_or_404(session, content_id)
@@ -783,7 +721,6 @@ async def set_content_visibility(
 async def delete_content(
     content_id: int,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ):
     """彻底删除内容（版本/指标/审核/证据随 FK 级联清除；事件本身保留）。"""
     raw = await _get_content_or_404(session, content_id)
@@ -801,7 +738,6 @@ async def delete_content(
 async def content_edit_detail(
     content_id: int,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ):
     """编辑表单数据：最新版本的标题与正文。"""
     raw = await _get_content_or_404(session, content_id)
@@ -825,7 +761,6 @@ async def edit_content(
     content_id: int,
     body: dict,
     session: AsyncSession = Depends(get_session),
-    _: None = Depends(require_admin),
 ):
     """人工修订标题/正文：按设计原则产生新版本，不改写既有版本与原始数据。"""
     title = str(body.get("title") or "").strip() or None
@@ -866,7 +801,6 @@ async def rereview_content(
     content_id: int,
     session: AsyncSession = Depends(get_session),
     queue=Depends(get_queue),
-    _: None = Depends(require_admin),
 ):
     """手动重审：忽略既有判定，重新走多模态审核（结论会覆盖并重新计算下架状态）。"""
     await _get_content_or_404(session, content_id)
