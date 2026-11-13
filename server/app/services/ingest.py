@@ -85,7 +85,12 @@ class IngestStats:
 
 
 async def ingest_items(
-    session: AsyncSession, fetch_kind: str, items: list[dict], community: str = DEFAULT_COMMUNITY
+    session: AsyncSession,
+    fetch_kind: str,
+    items: list[dict],
+    community: str = DEFAULT_COMMUNITY,
+    *,
+    force_official: bool = False,
 ) -> IngestStats:
     if fetch_kind not in PARSERS:
         raise ValueError(f"no parser registered for fetch_kind={fetch_kind}")
@@ -108,7 +113,7 @@ async def ingest_items(
                 # 否则事务作废，同批其余内容和这轮的健康记录都写不进去。
                 async with session.begin_nested():
                     is_new, changed, content_id, identity = await _ingest_one(
-                        session, normalized, raw, parser_version, rules, community
+                        session, normalized, raw, parser_version, rules, community, force_official
                     )
             except IntegrityError:
                 # 撞唯一键说明对方已提交。可重复读的旧快照看不到那一行，重试前先提交换新快照，
@@ -116,7 +121,7 @@ async def ingest_items(
                 await session.commit()
                 async with session.begin_nested():
                     is_new, changed, content_id, identity = await _ingest_one(
-                        session, normalized, raw, parser_version, rules, community
+                        session, normalized, raw, parser_version, rules, community, force_official
                     )
             stats.items_new += int(is_new)
             stats.items_updated += int(changed)
@@ -147,11 +152,12 @@ async def _ingest_one(
     parser_version: str,
     rules: list,
     community: str = DEFAULT_COMMUNITY,
+    force_official: bool = False,
 ) -> tuple[bool, bool, int, str]:
     """返回 (is_new, fingerprint_changed, content_id, source_identity)。"""
     from app.services.statistics import record_content_stat
 
-    source_id, identity = await _upsert_source(session, normalized)
+    source_id, identity = await _upsert_source(session, normalized, force_official=force_official)
     fingerprint = content_fingerprint(normalized)
 
     existing = await session.scalar(
@@ -276,17 +282,22 @@ def _would_drop_dynamic_content(
 
 
 async def _upsert_source(
-    session: AsyncSession, normalized: NormalizedContent
+    session: AsyncSession, normalized: NormalizedContent, *, force_official: bool = False
 ) -> tuple[int | None, str]:
     author = normalized.author
     if not author or not author.external_id:
-        # 账号体系外的官方来源（如库洛官网公告）：用平台级伪 ID 建一条 Source，
+        # 账号体系外的官方来源（如库洛官网公告或手动标记官方的订阅源）：建一条 Source，
         # 保证身份过滤与统计可依赖统一的 sources.identity
-        if author and author.name and author.identity == Identity.OFFICIAL:
-            author = author.model_copy(update={"external_id": f"official-{normalized.platform}"})
+        if author and author.name and (author.identity == Identity.OFFICIAL or force_official):
+            pseudo_id = (
+                f"official-{normalized.platform}-{author.name}"
+                if force_official and author.identity != Identity.OFFICIAL
+                else f"official-{normalized.platform}"
+            )
+            author = author.model_copy(update={"external_id": pseudo_id})
         else:
-            return None, str(Identity.UNKNOWN)
-    identity = Identity.OFFICIAL if author.official_title else author.identity
+            return None, str(Identity.OFFICIAL if force_official else Identity.UNKNOWN)
+    identity = Identity.OFFICIAL if (force_official or author.official_title) else author.identity
     existing = await session.scalar(
         select(Source).where(
             Source.platform == normalized.platform,
@@ -317,7 +328,9 @@ async def _upsert_source(
         existing.official_title = author.official_title
     if author.follower_count is not None:
         existing.follower_count = author.follower_count
-    if identity != Identity.UNKNOWN:
+    if force_official:
+        existing.identity = Identity.OFFICIAL
+    elif identity != Identity.UNKNOWN:
         existing.identity = identity
     return existing.id, str(existing.identity)
 

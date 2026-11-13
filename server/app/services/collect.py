@@ -165,7 +165,6 @@ def filter_relevant(
     is_news = get_community(target.community).domain == "news"
     if is_news:
         from app.services.ai_news import is_news_candidate
-        from app.services import aihot
 
         kept = []
         for item in items:
@@ -174,7 +173,7 @@ def filter_relevant(
                 body = str(item.get("text") or "").casefold()
                 if co_terms and not any(term.casefold() in body for term in co_terms):
                     continue
-            elif target.platform != "rss" and not aihot.bridge_enabled() and not is_news_candidate(str(item.get("title") or "")):
+            elif target.platform != "rss" and not is_news_candidate(str(item.get("title") or "")):
                 continue
             item["_matched_keywords"] = [target.target_value]
             kept.append(item)
@@ -432,7 +431,11 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     target.id, filtered_out,
                 )
             stats = await ingest_items(
-                session, fetch_result.fetch_kind, fetch_result.items, community=target.community
+                session,
+                fetch_result.fetch_kind,
+                fetch_result.items,
+                community=target.community,
+                force_official=bool(target.is_official and target.target_type != "keyword_search"),
             )
             if is_news and hasattr(redis, "enqueue_job"):
                 from app.services.ai_news import pending_news_ids

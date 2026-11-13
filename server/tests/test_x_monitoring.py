@@ -64,9 +64,15 @@ async def test_admin_can_create_edit_pause_and_trigger_x_account(client, admin_h
     assert row["target_value"] == "openai" and row["min_views"] == 0
     path = f"/api/admin/collect-targets/{row['id']}"
     duplicate = await client.post("/api/admin/collect-targets", headers=admin_headers, json={
-        "platform": "x", "target_type": "account_dynamics", "target_value": "@OPENAI", "interval_minutes": 60,
+        "platform": "x", "target_type": "account_dynamics", "target_value": "@OPENAI",
+        "community": "ai", "interval_minutes": 60,
     })
     assert duplicate.status_code == 409
+    other_section = await client.post("/api/admin/collect-targets", headers=admin_headers, json={
+        "platform": "x", "target_type": "account_dynamics", "target_value": "@OPENAI",
+        "community": "wuwa", "interval_minutes": 60,
+    })
+    assert other_section.status_code == 201
     edited = await client.put(path, headers=admin_headers, json={
         "target_value": "@bcherny", "display_name": "Boris", "interval_minutes": 120, "enabled": False,
     })

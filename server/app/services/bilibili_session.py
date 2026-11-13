@@ -59,10 +59,18 @@ def credential_version(cookies: dict) -> str:
 
 
 def redact(text: str, cookies: dict) -> str:
-    # 先替换完整请求头，再覆盖原值/URL 编解码值；CLI 错误也可能回显请求信息。
+    # 先替换完整请求头与键值，再遮蔽长度足够的独立敏感值，避免 0/1 等短配置项污染普通数字报错。
     if cookies:
         text = text.replace(cookie_header(cookies), "[B站凭据已隐藏]")
-    secrets = {variant for value in cookies.values() for variant in (value, unquote(value), quote(value, safe="")) if value}
+        names = "|".join(re.escape(k) for k in cookies if k)
+        if names:
+            text = re.sub(rf"\b({names})\s*=\s*[^;\s\"']+", r"\1=***", text)
+    secrets = {
+        variant
+        for value in cookies.values()
+        for variant in (value, unquote(value), quote(value, safe=""))
+        if len(variant) >= 6
+    }
     for secret in sorted(secrets, key=len, reverse=True):
         text = text.replace(secret, "***")
     return re.sub(r"(?i)\b(SESSDATA|bili_jct|DedeUserID(?:__ckMd5)?|sid|buvid[34])\s*=\s*[^;\s\"']+", r"\1=***", text)

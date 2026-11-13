@@ -48,6 +48,13 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
 
 def validate_target_value(platform: object, target_type: object, value: object) -> str:
     """按平台与目标类型收敛 target_value；返回规整值，不合法抛 ValueError。"""
+    plat, ttype = str(platform), str(target_type)
+    if plat == "youtube" and ttype != "channel_rss":
+        raise ValueError("YouTube 目前仅支持频道 RSS")
+    if plat == "x" and ttype != "account_dynamics":
+        raise ValueError("X 目前仅支持账号动态监控")
+    if plat != "x" and (plat, ttype) not in _TARGET_VALUE_RULES:
+        raise ValueError(f"{plat} 不支持采集类型 {ttype}")
     text = str(value if value is not None else "").strip()
     if not text:
         raise ValueError("target_value 不能为空")
@@ -55,7 +62,7 @@ def validate_target_value(platform: object, target_type: object, value: object) 
         raise ValueError("target_value 不能以 - 开头（会被采集命令当作选项解析）")
     if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text):
         raise ValueError("target_value 不能包含制表符/换行等控制字符")
-    pattern = _TARGET_VALUE_RULES.get((str(platform), str(target_type)))
+    pattern = _TARGET_VALUE_RULES.get((plat, ttype))
     if pattern is not None and not pattern.fullmatch(text):
         raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")
     return text
@@ -68,6 +75,7 @@ class CollectTargetCreate(BaseModel):
     display_name: str | None = Field(default=None, max_length=255)
     interval_minutes: int = Field(default=30, ge=5, le=1440)
     enabled: bool = True
+    is_official: bool = False
     co_terms: list[str] = Field(default_factory=list)
     min_views: int = Field(default=0, ge=0, le=10_000_000)
     tier: str = Field(default="general", pattern="^(core|general)$")
@@ -91,6 +99,7 @@ class CollectTargetUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=255)
     interval_minutes: int | None = Field(default=None, ge=5, le=1440)
     enabled: bool | None = None
+    is_official: bool | None = None
     target_value: str | None = Field(default=None, min_length=1, max_length=255)
     co_terms: list[str] | None = None
     min_views: int | None = Field(default=None, ge=0, le=10_000_000)
@@ -142,6 +151,7 @@ class CollectTargetOut(BaseModel):
     display_name: str | None
     interval_minutes: int
     enabled: bool
+    is_official: bool = False
     co_terms: list[str] = []
     min_views: int = 0
     tier: str = "general"
@@ -154,6 +164,7 @@ class CollectTargetOut(BaseModel):
         return v or []
     last_run_at: datetime | None
     last_success_at: datetime | None
+    last_items_new: int | None = None
     consecutive_failures: int
     last_error: str | None
 

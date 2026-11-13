@@ -8,6 +8,7 @@ export interface CollectTarget {
   display_name: string | null
   interval_minutes: number
   enabled: boolean
+  is_official: boolean
   tier: 'core' | 'general'
   /** 游戏分区 key（合法值集合随分区注册表扩展，见 utils/admin-communities.ts） */
   community: string
@@ -16,6 +17,7 @@ export interface CollectTarget {
   next_run_at: string | null
   last_run_at: string | null
   last_success_at: string | null
+  last_items_new: number | null
   consecutive_failures: number
   last_error: string | null
 }

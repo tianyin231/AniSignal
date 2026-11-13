@@ -13,7 +13,7 @@ from app.models.enums import Platform
 from app.services.settings import get_setting
 
 SETTING_KEY = "collector_proxies"
-PLATFORMS = [p.value for p in Platform] + ["aihot"]
+PLATFORMS = [p.value for p in Platform]
 SCHEMES = {"http", "https", "socks5"}
 logger = logging.getLogger(__name__)
 

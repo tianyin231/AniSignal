@@ -68,7 +68,7 @@ async def test_route_priority_and_platform_opt_out(session):
     config = await pool.get_config(session)
     config['order'] = [entries[2]['id'], 'direct', entries[1]['id'], entries[0]['id']]
     await set_setting(session, pool.SETTING_KEY, config)
-    assert await pool.collection_routes(session, 'aihot') == [pool.proxy_url(entries[2]), None, pool.proxy_url(entries[0])]
+    assert await pool.collection_routes(session, 'rss') == [pool.proxy_url(entries[2]), None, pool.proxy_url(entries[0])]
 
 
 async def test_priority_api_persists_and_rejects_missing_routes(client, admin_headers):
@@ -129,17 +129,13 @@ async def test_fallback_final_error_does_not_leak_password(session):
     assert 'private-password' not in str(caught.value)
 
 
-async def test_admin_auth_and_internal_lease(client, admin_headers, monkeypatch):
-    from app.config import get_settings
-    assert (await client.get('/api/admin/proxies')).status_code in (401, 422)
-    assert (await client.post('/api/internal/collector-proxy/lease')).status_code == 401
+async def test_admin_auth_and_validation(client, admin_headers):
+    assert (await client.get('/api/admin/proxies')).status_code == 401
+    assert (await client.post('/api/internal/collector-proxy/lease')).status_code == 404
     assert (await client.put('/api/admin/proxies', headers=admin_headers, json={'enabled': True})).status_code == 400
     await client.post('/api/admin/proxies', headers=admin_headers, json={'text': 'proxy.example:8080:alice:secret'})
-    await client.put('/api/admin/proxies', headers=admin_headers, json={'enabled': True, 'platforms': {'aihot': True}})
-    monkeypatch.setattr(get_settings(), 'aihot_token', 'a' * 40)
-    response = await client.post('/api/internal/collector-proxy/lease', headers={'X-Anisignal-Key': 'a' * 40})
-    assert response.status_code == 200 and response.json()['routes'] == [None, 'http://alice:secret@proxy.example:8080']
-    assert response.headers['cache-control'] == 'no-store'
+    resp = await client.put('/api/admin/proxies', headers=admin_headers, json={'enabled': True, 'platforms': {'rss': True}})
+    assert resp.status_code == 200 and resp.json()['platforms']['rss'] is True
 
 
 async def test_connection_test_does_not_leak_password(client, admin_headers, monkeypatch):

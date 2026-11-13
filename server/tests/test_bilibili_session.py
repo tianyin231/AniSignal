@@ -36,6 +36,13 @@ def test_cli_file_formats_and_masking(cookie_file):
     assert auth.read_cookie_file(str(cookie_file)) == {"SESSDATA": "private%2Csession"}
     masked = auth.redact("SESSDATA=private%2Csession private,session private-csrf DedeUserID=123456789", cookies)
     assert all(secret not in masked for secret in ("private", "123456789"))
+    short_masked = auth.redact(
+        "HTTP 412 code -101 hit_dyn_v2=1 SESSDATA=private%2Csession",
+        {**cookies, "hit_dyn_v2": "1"},
+    )
+    assert "HTTP 412 code -101" in short_masked
+    assert "hit_dyn_v2=***" in short_masked
+    assert "private" not in short_masked
     cookie_file.write_text("not a cookie", encoding="utf-8")
     with pytest.raises(ValueError, match="SESSDATA"):
         auth.read_cookie_file(str(cookie_file))

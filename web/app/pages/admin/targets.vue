@@ -362,6 +362,7 @@ const form = reactive({
   min_views: 10000,
   tier: 'general',
   community: 'wuwa',
+  is_official: false,
 })
 const creating = ref(false)
 const formError = ref<string | null>(null)
@@ -373,7 +374,10 @@ const filteredTargets = computed(() =>
 )
 
 const selectedIds = ref<number[]>([])
-watch(communityFilter, () => { selectedIds.value = [] })
+watch(communityFilter, () => {
+  selectedIds.value = []
+  void refreshRuns()
+})
 const allFilteredSelected = computed(() =>
   filteredTargets.value.length > 0 && filteredTargets.value.every(t => selectedIds.value.includes(t.id)),
 )
@@ -431,8 +435,10 @@ watch(() => form.platform, () => {
   if (!editingId.value) {
     form.target_type = availableTypes.value[0] ?? 'keyword_search'
     form.interval_minutes = form.platform === 'x' ? 60 : 30
-    if (form.platform === 'x') form.community = 'ai'
   }
+})
+watch(() => form.target_type, (next) => {
+  if (next === 'keyword_search') form.is_official = false
 })
 watch([() => form.target_type, () => form.community, supportsViews], () => {
   if (!editingId.value) form.min_views = defaultMinViews()
@@ -452,13 +458,23 @@ async function refresh() {
   }
 }
 
+function formatLastError(err: string | null): string {
+  if (!err) return '—'
+  if (/BiliRiskControlError|风控|-352/.test(err)) {
+    return '未登录时动态接口常被风控，可在本页上方扫码登录提高成功率'
+  }
+  return err
+}
+
 const runs = ref<RunItem[]>([])
 const targetName = (targetId: number) =>
   targets.value.find(t => t.id === targetId)?.display_name || `#${targetId}`
 
 async function refreshRuns() {
   try {
-    runs.value = await api<RunItem[]>('/api/admin/runs', { query: { limit: 8 } })
+    runs.value = await api<RunItem[]>('/api/admin/runs', {
+      query: { limit: 8, community: communityFilter.value || undefined },
+    })
   } catch { /* 运行记录失败不影响主表 */ }
 }
 
@@ -494,6 +510,7 @@ async function create() {
         min_views: supportsViews.value ? Number(form.min_views) || 0 : 0,
         tier: form.tier,
         community: form.community,
+        is_official: form.target_type !== 'keyword_search' && form.is_official,
       },
     })
     editingId.value = null
@@ -503,9 +520,10 @@ async function create() {
     form.co_terms = ''
     form.min_views = defaultMinViews()
     form.tier = 'general'
+    form.is_official = false
     await Promise.all([refresh(), loadCommunities()])
   } catch (exc: any) {
-    formError.value = exc?.statusCode === 409 ? '该目标已存在' : `保存失败：${exc?.data?.detail ?? exc?.message ?? exc}`
+    formError.value = exc?.statusCode === 409 ? '该分区下已存在相同的采集目标' : `保存失败：${apiErrorDetail(exc, '请求失败')}`
   } finally {
     creating.value = false
   }
@@ -518,7 +536,7 @@ async function edit(target: CollectTarget) {
     platform: target.platform, target_type: target.target_type, target_value: target.target_value,
     display_name: target.display_name || '', interval_minutes: target.interval_minutes,
     co_terms: (target.co_terms || []).join('，'), min_views: target.min_views || 0,
-    tier: target.tier, community: target.community,
+    tier: target.tier, community: target.community, is_official: !!target.is_official,
   })
   await nextTick()
   form.min_views = target.min_views || 0
@@ -530,6 +548,7 @@ function cancelEdit() {
   form.target_value = ''
   form.display_name = ''
   form.co_terms = ''
+  form.is_official = false
   formError.value = null
 }
 
@@ -816,6 +835,10 @@ async function remove(target: CollectTarget) {
       <input v-model="form.display_name" aria-label="显示名称" placeholder="显示名称（可选，如 OpenAI 官方博客）" class="input px-3 py-2 text-sm sm:col-span-2">
       <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="input px-3 py-2 text-sm sm:col-span-2">
       <label class="text-xs text-muted">{{ supportsViews ? '最低播放量（0 不过滤）' : '此目标没有播放量门槛' }}<input v-model.number="form.min_views" type="number" min="0" :disabled="!supportsViews" class="input mono mt-1 w-full px-3 py-2 text-sm disabled:opacity-50"></label>
+      <label class="flex items-center gap-2 self-end py-2 text-xs text-ink-2" :class="form.target_type === 'keyword_search' ? 'opacity-50' : 'cursor-pointer'">
+        <input v-model="form.is_official" type="checkbox" class="checkbox" :disabled="form.target_type === 'keyword_search'">
+        <span>标记为官方账号（入库内容标为「官方」）</span>
+      </label>
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
         {{ creating ? '保存中…' : editingId ? '保存修改' : '新增目标' }}
       </button>
@@ -872,6 +895,8 @@ async function remove(target: CollectTarget) {
             <th class="px-2.5 py-2.5 font-medium">分级</th>
             <th class="px-2.5 py-2.5 font-medium">播放门槛</th>
             <th class="px-2.5 py-2.5 font-medium">频率</th>
+            <th class="px-2.5 py-2.5 font-medium">最近成功</th>
+            <th class="px-2.5 py-2.5 font-medium">入库</th>
             <th class="px-3 py-2.5 font-medium">最近错误</th>
             <th class="px-3 py-2.5 text-right font-medium">操作</th>
           </tr>
@@ -883,6 +908,7 @@ async function remove(target: CollectTarget) {
             </td>
             <td class="px-3 py-2.5">
               <span class="font-medium">{{ target.display_name && target.display_name !== target.target_value ? target.display_name : target.target_value }}</span>
+              <span v-if="target.is_official" class="ml-1.5 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">官方</span>
               <span v-if="target.display_name && target.display_name !== target.target_value" class="mono ml-1.5 text-xs text-faint">{{ target.target_value }}</span>
             </td>
             <td class="whitespace-nowrap px-2.5 py-2.5 text-ink-2">
@@ -909,8 +935,10 @@ async function remove(target: CollectTarget) {
             </td>
             <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
             <td class="mono whitespace-nowrap px-2.5 py-2.5 text-ink-2">{{ target.platform === 'x' ? '约 ' : '' }}{{ target.interval_minutes }}min{{ target.platform === 'x' ? ' · 随机' : '' }}</td>
-            <td class="max-w-40 truncate px-3 py-2.5 text-xs text-faint" :title="target.last_error ?? ''">
-              {{ target.last_error ?? '—' }}
+            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ fmtTime(target.last_success_at) }}</td>
+            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ target.last_items_new ?? '—' }}</td>
+            <td class="max-w-52 truncate px-3 py-2.5 text-xs text-faint" :title="target.last_error ?? ''">
+              {{ formatLastError(target.last_error) }}
             </td>
             <td class="whitespace-nowrap px-3 py-2.5 text-right">
               <button type="button" class="rounded px-1.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id || creating" @click="edit(target)">编辑</button>
@@ -922,7 +950,7 @@ async function remove(target: CollectTarget) {
             </td>
           </tr>
           <tr v-if="filteredTargets.length === 0">
-            <td colspan="9" class="px-4 py-10 text-center text-sm text-faint">
+            <td colspan="11" class="px-4 py-10 text-center text-sm text-faint">
               {{ targets.length === 0 ? '暂无采集目标，可点击上方「一键导入预设信源」或在表单中手动添加。' : '当前筛选分区下暂无目标。' }}
             </td>
           </tr>

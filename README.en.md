@@ -81,7 +81,7 @@ Also included:
 | AI News | First-party RSS feeds (OpenAI, Anthropic, Google AI, DeepMind, Hugging Face, etc.) & Bilibili search (X accounts disabled by default) |
 | Custom sections (admin-created) | Any Bilibili account/search, YouTube channel, RSS/Atom feed, Miyoushe, or X source |
 
-Navigation automatically shows only enabled sections that have active sources.
+Navigation shows all enabled sections, with one-click hiding for empty sections in the admin panel.
 
 ## Architecture
 
@@ -117,7 +117,7 @@ cp .env.example .env
 
 Edit `.env`:
 
-- `MYSQL_ROOT_PASSWORD`: strong random password for MySQL (special characters are URL-encoded automatically);
+- `MYSQL_ROOT_PASSWORD`: strong random password for MySQL (wrap in single quotes `'...'` if it contains `$` or `#`);
 - `ANISIGNAL_ADMIN_TOKEN`: initial bootstrap token for `/admin` (do not leave `change-me`; can be bound to your personal site account on first login);
 - `ANISIGNAL_PUBLIC_BASE_URL`: external site URL (`http://127.0.0.1:8090` for local testing, or `https://signal.example.com` behind HTTPS reverse proxy);
 - `WEB_PORT`: host bind address and port (defaults to `127.0.0.1:8090`; set `0.0.0.0:8090` for direct LAN access).

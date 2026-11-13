@@ -535,3 +535,122 @@ async def test_multiprocess_custom_community_lazy_sync(client, admin_headers):
         assert target_resp.status_code == 201
     finally:
         reset_communities()
+
+
+async def test_issue3_target_validation_official_flag_runs_and_seeds_cli(client, session, admin_headers):
+    from sqlalchemy import select
+    from app.clock import utcnow
+    from app.communities import reset_communities
+    from app.models import CollectRun, RawContent, Source
+    from app.services.ingest import ingest_items
+
+    try:
+        # F36: YouTube + keyword_search 在接口入口返回 422
+        bad_yt = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={"platform": "youtube", "target_type": "keyword_search", "target_value": "wuthering waves"},
+        )
+        assert bad_yt.status_code == 422
+        assert "频道 RSS" in bad_yt.text
+
+        # 创建自定义分区并验证 F38（跨分区同频道允许，同分区撞键 409）+ F40（is_official）
+        sec = await client.post(
+            "/api/admin/communities",
+            headers=admin_headers,
+            json={"key": "ba", "label": "蔚蓝档案", "color": "sky"},
+        )
+        assert sec.status_code == 201
+
+        chan = "UCabcdefghijklmnopqrstuv"
+        t1 = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={
+                "platform": "youtube",
+                "target_type": "channel_rss",
+                "target_value": chan,
+                "community": "wuwa",
+            },
+        )
+        t2 = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={
+                "platform": "youtube",
+                "target_type": "channel_rss",
+                "target_value": chan,
+                "community": "ba",
+                "is_official": True,
+            },
+        )
+        dup = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={
+                "platform": "youtube",
+                "target_type": "channel_rss",
+                "target_value": chan,
+                "community": "ba",
+            },
+        )
+        assert t1.status_code == 201 and t1.json()["is_official"] is False
+        assert t2.status_code == 201 and t2.json()["is_official"] is True
+        assert dup.status_code == 409
+        # PUT 跨分区迁入已有同源目标的分区也应拦截为 409
+        move_dup = await client.put(
+            f"/api/admin/collect-targets/{t1.json()['id']}",
+            headers=admin_headers,
+            json={"community": "ba"},
+        )
+        assert move_dup.status_code == 409
+
+        # F39: 运行记录按分区过滤，目标列表返回最近一轮 items_new
+        session.add_all([
+            CollectRun(target_id=t1.json()["id"], started_at=utcnow(), status="success", items_new=2),
+            CollectRun(target_id=t2.json()["id"], started_at=utcnow(), status="success", items_new=7),
+        ])
+        await session.commit()
+        ba_runs = (await client.get("/api/admin/runs", params={"community": "ba"}, headers=admin_headers)).json()
+        assert [r["target_id"] for r in ba_runs] == [t2.json()["id"]]
+        ba_targets = (await client.get("/api/admin/collect-targets", params={"community": "ba"}, headers=admin_headers)).json()
+        assert ba_targets[0]["last_items_new"] == 7
+
+        # F40: 未在写死白名单中的 X 账号开启 force_official 后，入库身份为 official
+        stats = await ingest_items(
+            session,
+            "x_posts",
+            [{
+                "id": "1900000000000000001",
+                "account": "en_bluearchive",
+                "author": "BlueArchiveEN",
+                "text": "Maintenance notice for Blue Archive.",
+                "url": "https://x.com/EN_BlueArchive/status/1900000000000000001",
+                "published_at": "2026-11-13T10:00:00+00:00",
+                "media": [],
+                "quoted_urls": [],
+            }],
+            community="ba",
+            force_official=True,
+        )
+        assert stats.official_items == 1
+        raw = await session.scalar(select(RawContent).where(RawContent.external_id == "1900000000000000001"))
+        source = await session.get(Source, raw.source_id)
+        assert source.identity == "official"
+    finally:
+        reset_communities()
+
+
+def test_seeds_cli_all_flag(monkeypatch):
+    import sys
+    from app.seeds import __main__ as seeds_cli
+
+    called = []
+
+    async def fake_run(selected):
+        called.append(selected)
+
+    monkeypatch.setattr(seeds_cli, "_run", fake_run)
+    monkeypatch.setattr(sys, "argv", ["app.seeds", "--all"])
+    seeds_cli.main()
+    assert called == [None]

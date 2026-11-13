@@ -50,3 +50,7 @@ class CollectTarget(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow
     )
+
+    @property
+    def is_official(self) -> bool:
+        return bool((self.config or {}).get("is_official"))

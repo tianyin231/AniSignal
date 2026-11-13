@@ -1,23 +1,20 @@
-"""管理员维护代理；内部租用接口仅供 AIHOT 使用，不向管理界面返回密码。"""
+"""管理员维护采集代理池，不向管理界面返回密码。"""
 
 import ipaddress
-import secrets
 import time
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
 from app.clock import utcnow
-from app.config import get_settings
 from app.db import get_session
 from app.services import collector_proxy as pool
 from app.services.settings import set_setting
 
 router = APIRouter(prefix="/api/admin/proxies", dependencies=[Depends(require_admin)])
-internal_router = APIRouter(prefix="/api/internal/collector-proxy")
 
 
 class PoolOptions(BaseModel):
@@ -145,15 +142,3 @@ async def test_proxy(entry_id: str, session: AsyncSession = Depends(get_session)
     entry["last_test"] = result
     await set_setting(session, pool.SETTING_KEY, config)
     return result
-
-
-async def require_bridge(x_anisignal_key: str = Header(default="")):
-    token = get_settings().aihot_token
-    if len(token) < 32 or not secrets.compare_digest(x_anisignal_key, token):
-        raise HTTPException(401, "invalid bridge token")
-
-
-@internal_router.post("/lease", dependencies=[Depends(require_bridge)])
-async def lease_proxy(response: Response, session: AsyncSession = Depends(get_session)):
-    response.headers["Cache-Control"] = "no-store"
-    return {"routes": await pool.collection_routes(session, "aihot")}

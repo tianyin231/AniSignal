@@ -1,4 +1,4 @@
-"""命令行导入预设采集目标：`uv run python -m app.seeds [--communities wuwa,ai]`。"""
+"""命令行导入预设采集目标：`python -m app.seeds [--all | --communities wuwa,ai]`。"""
 
 import argparse
 import asyncio
@@ -16,6 +16,11 @@ async def _run(communities: list[str] | None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="按分区幂等导入预设采集目标（已存在的目标不会覆盖）")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="导入全部预设分区的采集目标（默认行为）",
+    )
     parser.add_argument(
         "--communities",
         default="",

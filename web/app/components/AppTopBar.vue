@@ -183,7 +183,7 @@ async function handleLogout() {
         <WallpaperToggle />
         <ThemeToggle />
         <NuxtLink
-          v-if="!user"
+          v-if="!user && !route.path.startsWith('/admin')"
           :to="loginRoute(route.fullPath)"
           class="btn-primary ml-1 hidden h-9 items-center px-4 sm:inline-flex"
         >

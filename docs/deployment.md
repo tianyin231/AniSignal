@@ -12,7 +12,9 @@
 - **软件要求**：Git、Docker 24+ 与 Docker Compose v2。
 - **架构与系统**：
   - 官方预构建镜像 `ghcr.io/tianyin231/anisignal:latest` 原生提供 `linux/amd64` 与 `linux/arm64` 双架构（不支持 32 位 `armv7`）。
-  - Windows 用户请在 **WSL2** 文件系统内克隆仓库并运行（仓库已配置 [.gitattributes](../.gitattributes) 强制脚本使用 `LF` 换行符，避免挂载 NTFS 目录导致 MySQL 性能或权限异常）。
+  - **macOS（Apple Silicon / Intel）**：安装 Docker Desktop（或 OrbStack）并为其分配 ≥ 4 GB 内存即可直接执行 `docker compose up -d`。
+  - **Windows**：请在 **WSL2** 文件系统内克隆仓库并运行（仓库已配置 [.gitattributes](../.gitattributes) 强制脚本使用 `LF` 换行符，避免挂载 NTFS 目录导致 MySQL 性能或权限异常）。
+  - **RHEL / Rocky / Fedora（开启 SELinux）**：宿主机绑定挂载需要在 [compose.yaml](../compose.yaml) 的 `volumes` 路径末尾追加 `:z`（如 `${DATA_DIR:-./data}/mysql:/var/lib/mysql:z`，只读挂载改为 `:ro,z`），否则容器会报 `Permission denied`。
 
 ---
 
@@ -30,8 +32,8 @@ cp .env.example .env
 
 | 变量 | 必填 | 默认值 | 说明 |
 | :--- | :---: | :--- | :--- |
-| `MYSQL_ROOT_PASSWORD` | 是 | — | MySQL 密码（建议 `openssl rand -hex 24`；后端自动做 URL 编码，兼容任意特殊字符）。 |
-| `ANISIGNAL_ADMIN_TOKEN` | 是 | — | `/admin` 初始引导令牌（建议独立随机长字符串，禁止保留 `change-me`；首次登录后可绑定个人站点账号免口令直进）。 |
+| `MYSQL_ROOT_PASSWORD` | 是 | — | MySQL 密码（建议 `openssl rand -hex 24`；若含 `$` 或 `#`，请用单引号 `'...'` 包裹避免被 Compose 变量展开或当作注释截断）。 |
+| `ANISIGNAL_ADMIN_TOKEN` | 是 | — | `/admin` 初始引导令牌（建议独立随机长字符串，禁止保留 `change-me`；含 `$` 或 `#` 时同样请加单引号；首次登录后可绑定个人站点账号免口令直进）。 |
 | `ANISIGNAL_PUBLIC_BASE_URL` | 推荐 | `http://127.0.0.1:8090` | 对外完整访问基址（如 `https://signal.example.com`），自动同步至前端 Canonical/OG、Sitemap、robots.txt、RSS 与邮件链接。 |
 | `WEB_PORT` | 否 | `127.0.0.1:8090` | 宿主机监听绑定。默认仅监听本机回环供反代转发；局域网/NAS 直连可改为 `0.0.0.0:8090`。 |
 | `DATA_DIR` | 否 | `./data` | MySQL、Redis 与可选本地文件的持久化目录。 |
@@ -62,9 +64,9 @@ docker compose logs --tail=80 api web collector
 访问 `http://127.0.0.1:8090/admin`（或你的域名 `/admin`），输入 `ANISIGNAL_ADMIN_TOKEN`（推荐先注册登录个人站点账号，在 `/admin/login` 勾选 **「同时将当前登录账号设为管理员」**，后续点击顶栏头像菜单「管理看板」即可免输 Token 直进后台，也可在 `/admin/users` 随时设/撤管理员）：
 
 1. **分区与信源（`/admin/targets`）**
-   - **自定义分区**：在顶部「分区管理」面板可直接新建自定义分区（填写 1~16 位英文标识、名称、关键词别名），也可一键隐藏不需要的内置分区。顶栏导航仅展示已启用且存在活跃信源的分区。
-   - **一键导入 / 批量移除**：点击「导入预设信源」可按勾选分区导入鸣潮、原神、星铁、AI 快讯等预设源（X 账号默认停用）；列表支持全选批量启用、停用或一键删除。
-   - **命令行导入预设（可选）**：也可执行 `docker compose exec api python -m app.seeds --all`（或 `--communities wuwa,ai`）。
+   - **自定义分区**：在顶部「分区管理」面板可直接新建自定义分区（填写 1~16 位英文标识、名称、关键词别名），也可点击「一键隐藏无信源分区」或手动启停内置分区。顶栏导航展示所有已启用的分区。
+   - **一键导入 / 批量移除**：点击「导入预设信源」可按勾选分区导入鸣潮、原神、星铁、AI 快讯等预设源（X 账号默认停用）；列表支持标记「官方账号」、全选批量启用、停用或一键删除。
+   - **命令行导入预设（可选）**：也可执行 `docker compose exec api python -m app.seeds`（支持 `--all` 或 `--communities wuwa,ai`）。
    - **B 站登录态**：直接在同页点击「扫码登录」用手机 B 站 App 扫码，或粘贴 `SESSDATA` Cookie。凭据存入数据库并通过内存环境变量 `BILI_COOKIE` 传递给采集器，无需进服务器导文件。
 2. **AI 模型与无 AI 降级（`/admin/ai`）**
    - 填写任意 OpenAI 兼容接口（Base URL、API Key 池、主模型/轻量模型），保存后点击测试连接即可。
@@ -121,14 +123,14 @@ gunzip -c anisignal-2026-11-13.sql.gz | docker compose exec -T mysql sh -c 'MYSQ
 ```bash
 git pull
 docker compose pull
-docker compose up -d
+docker compose up -d --remove-orphans
 ```
 
-（若你基于本地修改构建镜像，改为执行 `docker compose up -d --build`。）
+（若你基于本地修改构建镜像，改为执行 `docker compose up -d --build --remove-orphans`。）
 
 ### 首次启动失败自救
 - 查看具体报错：`docker compose logs api web mysql`
-- 若*全新首次安装*因填错配置中断、尚未产生任何业务数据，可执行 `docker compose down && rm -rf ./data/mysql ./data/redis && docker compose up -d` 从干净状态重来（**已有数据的线上实例切勿删除 `./data`**）。
+- 若*全新首次安装*因填错配置中断、尚未产生任何业务数据，可执行 `docker compose down && sudo rm -rf ./data/mysql ./data/redis && docker compose up -d` 从干净状态重来（Linux 下数据目录归属容器内用户，删除需 `sudo`；**已有数据的线上实例切勿删除 `./data`**）。
 
 ---
 
@@ -147,7 +149,7 @@ npm ci
 npm run dev
 ```
 
-如需在本地模式调试 B 站采集，可从 [tamnd/bili Releases](https://github.com/tamnd/bili/releases) 下载对应平台（macOS / Linux / Windows，amd64 / arm64）的可执行文件放入 `PATH` 或设置 `ANISIGNAL_BILI_BIN`。
+如需在本地模式调试 B 站采集，可从 [tamnd/bilibili-cli Releases](https://github.com/tamnd/bilibili-cli/releases) 下载对应平台（macOS / Linux / Windows，amd64 / arm64）的可执行文件放入 `PATH` 或设置 `ANISIGNAL_BILI_BIN`。
 
 ### 运行测试
 ```bash

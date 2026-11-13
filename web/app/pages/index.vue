@@ -354,13 +354,10 @@ onBeforeUnmount(() => {
       <div class="panel min-h-[140px] animate-pulse" />
     </div>
     <!-- 精选缺位（无数据/加载失败）：不放大空框，右栏卡片双列补位 -->
-    <template v-else>
-      <p class="mb-3 text-xs text-muted">近 7 天暂无精选内容，先看进行中的活动与履约动态。</p>
-      <div class="grid items-start gap-5 md:grid-cols-2">
-        <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" />
-        <StatusCard embedded />
-      </div>
-    </template>
+    <div v-else class="grid items-start gap-5 md:grid-cols-2">
+      <UpNextCard :calendar="calendarData" :codes="codesData" :now="referenceTime" :calendar-scope="homeCommunity" />
+      <StatusCard embedded />
+    </div>
 
     <ActivityStrip
       :entries="calendarData?.ongoing ?? []"
@@ -391,7 +388,15 @@ onBeforeUnmount(() => {
         <p v-if="feedStatus === 'pending' && !feedItems.length" class="px-4 py-16 text-center text-sm text-muted">加载中…</p>
         <div v-else :class="{ 'opacity-60 transition-opacity': feedStatus === 'pending' }">
           <RawFeedRow v-for="row in feedItems" :key="row.id" :item="row" :show-community="aggregate" />
-          <p v-if="!feedItems.length" class="px-4 py-16 text-center text-sm text-muted">近 7 天暂无内容。</p>
+          <div v-if="!feedItems.length" class="px-4 py-16 text-center text-sm text-muted">
+            <template v-if="!enabledSources.length && sourcesRequest.status.value !== 'pending'">
+              <p>当前尚未启用采集信源。</p>
+              <NuxtLink to="/admin/targets" class="mt-2 inline-block font-medium text-brand-ink hover:underline">
+                前往管理后台添加信源或一键导入预设 →
+              </NuxtLink>
+            </template>
+            <p v-else>近 7 天暂无内容。</p>
+          </div>
         </div>
         <footer class="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-2.5 text-xs text-muted sm:px-5">
           <span>近 7 天共 <span class="num text-[13px] font-semibold text-ink-2">{{ feedTotal }}</span> 条</span>

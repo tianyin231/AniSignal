@@ -412,9 +412,6 @@ async def collapse_news_items(session, items: list[dict]) -> list[dict]:
 
 
 async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None = None) -> list[int]:
-    from app.services import aihot
-    if aihot.bridge_enabled():
-        return []
     from app.services.ai import retry_allowed
 
     fingerprint = ContentReview.news["content_hash"].as_string()

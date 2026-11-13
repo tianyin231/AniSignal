@@ -80,7 +80,7 @@
 | AI 快讯 | OpenAI / Anthropic / Google AI / DeepMind / Hugging Face 等一手 RSS、B 站搜索（X 源默认停用，按需开启） |
 | 自定义分区（后台自建） | 任意 B 站账号/搜索、YouTube 频道、标准 RSS、米游社、X 等监控源 |
 
-顶栏与侧栏仅展示已启用且有活跃信源的分区，也可在后台手动启停任意分区。
+顶栏展示所有已启用的分区，支持在后台一键隐藏无信源分区或手动启停任意分区。
 
 ## 架构
 
@@ -116,7 +116,7 @@ cp .env.example .env
 
 编辑 `.env`：
 
-- `MYSQL_ROOT_PASSWORD`：数据库密码（随机长字符串，支持特殊字符自动编码）；
+- `MYSQL_ROOT_PASSWORD`：数据库密码（随机长字符串；若含 `$` 或 `#` 请用单引号 `'...'` 包裹）；
 - `ANISIGNAL_ADMIN_TOKEN`：管理后台初始令牌（随机长字符串，不能保留 `change-me`；首次登录后可一键绑定个人站点账号免口令直进）；
 - `ANISIGNAL_PUBLIC_BASE_URL`：对外访问地址（本机试用保持 `http://127.0.0.1:8090`；绑定域名时填 `https://signal.example.com`）；
 - `WEB_PORT`：宿主机监听地址（默认 `127.0.0.1:8090` 仅本机反代访问；局域网直连可改为 `0.0.0.0:8090`）。

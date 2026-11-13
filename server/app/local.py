@@ -5,7 +5,7 @@
 - 采集任务在当前进程内执行（LocalQueue），调度循环由 API lifespan 启动；
 - 首次启动播种两个演示目标：
   * 鸣潮官网公告（kuro_cn，真实公开 CDN 数据，开箱即采）
-  * B 站关键词搜索（默认停用；如需本地测试 B 站采集，可从 github.com/tamnd/bili/releases 下载对应系统的 bili 二进制放入 PATH）
+  * B 站关键词搜索（默认停用；如需本地测试 B 站采集，可从 github.com/tamnd/bilibili-cli/releases 下载对应系统的 bili 二进制放入 PATH）
 
 启动后打开 web（npm run dev）访问 http://localhost:3000/admin，
 Token 默认 local-dev（可用 ANISIGNAL_ADMIN_TOKEN 覆盖）。

@@ -74,11 +74,8 @@ async def test_import_reuses_existing_raw_and_does_not_repeat_history(session, s
     assert await session.scalar(select(func.count(CollectTarget.id))) == 1
 
 
-async def test_old_public_urls_and_unknown_time_work_without_old_service(client, session, snapshot, unified, monkeypatch):
+async def test_old_public_urls_and_unknown_time_work_without_old_service(client, session, snapshot, unified):
     await import_news(session, snapshot)
-    def no_network(*args, **kwargs):
-        raise AssertionError("统一读取不应访问旧服务")
-    monkeypatch.setattr(aihot.httpx, "AsyncClient", no_network)
     feed = await client.get("/api/ai-news/events")
     assert feed.status_code == 200 and feed.json()["engine"] == "anisignal"
     assert feed.json()["total"] == 2

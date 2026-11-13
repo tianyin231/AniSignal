@@ -346,8 +346,24 @@ async def list_targets(
     query = select(CollectTarget).order_by(CollectTarget.platform, CollectTarget.id)
     if community:
         query = query.where(CollectTarget.community == community)
-    result = await session.execute(query)
-    return list(result.scalars())
+    targets = list((await session.execute(query)).scalars())
+    if not targets:
+        return []
+    latest_run_ids = (
+        select(func.max(CollectRun.id))
+        .where(CollectRun.target_id.in_([t.id for t in targets]))
+        .group_by(CollectRun.target_id)
+    )
+    run_rows = (
+        await session.execute(
+            select(CollectRun.target_id, CollectRun.items_new).where(CollectRun.id.in_(latest_run_ids))
+        )
+    ).all()
+    latest_new = {tid: items_new for tid, items_new in run_rows}
+    return [
+        CollectTargetOut.model_validate(t).model_copy(update={"last_items_new": latest_new.get(t.id)})
+        for t in targets
+    ]
 
 
 @router.post(
@@ -365,10 +381,11 @@ async def create_target(
             CollectTarget.platform == body.platform,
             CollectTarget.target_type == body.target_type,
             CollectTarget.target_value == body.target_value,
+            CollectTarget.community == body.community,
         )
     )
     if duplicate is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "该采集目标已存在；不同分区请使用包含游戏名称的独立搜索词")
+        raise HTTPException(status.HTTP_409_CONFLICT, "该分区下已存在相同的采集目标")
     min_views = (
         body.min_views
         if "min_views" in body.model_fields_set
@@ -376,11 +393,13 @@ async def create_target(
     )
     if get_community(body.community).domain == "news" or not supports_view_threshold(body.platform, body.target_type):
         min_views = 0
+    is_official = bool(body.is_official and body.target_type != "keyword_search")
     target = CollectTarget(
         platform=body.platform,
         target_type=body.target_type,
         target_value=body.target_value,
         display_name=body.display_name,
+        config={"is_official": True} if is_official else {},
         interval_minutes=body.interval_minutes,
         enabled=body.enabled,
         co_terms=body.co_terms,
@@ -418,25 +437,32 @@ async def update_target(
         target.display_name = body.display_name
     if body.interval_minutes is not None:
         target.interval_minutes = body.interval_minutes
+    next_community = body.community if body.community is not None else target.community
+    next_value = target.target_value
+    value_changed = False
     if body.target_value is not None and body.target_value != target.target_value:
         # 目标类型不能改，格式按既有的 (platform, target_type) 组合判
         try:
-            new_value = validate_target_value(
+            next_value = validate_target_value(
                 target.platform, target.target_type, body.target_value
             )
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+        value_changed = next_value != target.target_value
+    if value_changed or next_community != target.community:
         duplicate = await session.scalar(
             select(CollectTarget).where(
                 CollectTarget.platform == target.platform,
                 CollectTarget.target_type == target.target_type,
-                CollectTarget.target_value == new_value,
+                CollectTarget.target_value == next_value,
+                CollectTarget.community == next_community,
                 CollectTarget.id != target.id,
             )
         )
         if duplicate is not None:
-            raise HTTPException(status.HTTP_409_CONFLICT, "target already exists")
-        target.target_value = new_value
+            raise HTTPException(status.HTTP_409_CONFLICT, "该分区下已存在相同的采集目标")
+    if value_changed:
+        target.target_value = next_value
         target.last_success_at, target.last_error, target.consecutive_failures = None, None, 0
         if target.enabled:
             target.next_run_at = utcnow()
@@ -444,6 +470,13 @@ async def update_target(
         target.tier = body.tier
     if body.community is not None:
         target.community = body.community
+    if body.is_official is not None:
+        next_cfg = dict(target.config or {})
+        if body.is_official and target.target_type != "keyword_search":
+            next_cfg["is_official"] = True
+        else:
+            next_cfg.pop("is_official", None)
+        target.config = next_cfg
     if body.min_views is not None:
         target.min_views = body.min_views
     if get_community(target.community).domain == "news" or not supports_view_threshold(target.platform, target.target_type):
@@ -674,7 +707,6 @@ async def set_content_visibility(
     snapshots = await capture_content_fulfillment(session, content_id)
     raw.hidden = bool(body.get("hidden"))
     if raw.community == "ai":
-        from app.services.aihot_bridge import visibility
         session.add(
             NewsArchive(
                 kind="visibility",
@@ -684,7 +716,6 @@ async def set_content_visibility(
                 created_at=utcnow(),
             )
         )
-        await visibility(raw.id, raw.hidden)
     await refresh_content_fulfillment(session, snapshots, reaggregate=not raw.hidden)
     await session.commit()
     invalidate_official_links_cache()
@@ -702,9 +733,6 @@ async def delete_content(
     from app.services.fulfillment import capture_content_fulfillment, refresh_content_fulfillment
 
     snapshots = await capture_content_fulfillment(session, content_id)
-    if raw.community == "ai":
-        from app.services.aihot_bridge import visibility
-        await visibility(raw.id, True)
     await session.delete(raw)
     await session.flush()
     await refresh_content_fulfillment(session, snapshots)
@@ -798,12 +826,17 @@ async def rereview_content(
 @router.get("/runs")
 async def list_runs(
     target_id: int | None = Query(default=None),
+    community: str | None = COMMUNITY_OPTIONAL_QUERY_DEP,
     limit: int = Query(default=20, ge=1, le=100),
     session: AsyncSession = Depends(get_session),
 ):
     query = select(CollectRun).order_by(CollectRun.started_at.desc()).limit(limit)
     if target_id is not None:
         query = query.where(CollectRun.target_id == target_id)
+    if community:
+        query = query.join(CollectTarget, CollectTarget.id == CollectRun.target_id).where(
+            CollectTarget.community == community
+        )
     result = await session.execute(query)
     return [
         {
