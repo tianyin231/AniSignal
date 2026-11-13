@@ -38,7 +38,7 @@ COPY server/alembic.ini ./
 COPY server/alembic ./alembic
 COPY --from=webbuild /web/.output /app/web
 COPY deploy/*.sh ./deploy/
-RUN sed -i 's/\r$//' ./deploy/*.sh && chmod +x ./deploy/*.sh \
+RUN sed -i 's/\r$//' ./deploy/*.sh && chmod +x ./deploy/*.sh && chmod -R a+rX /app \
     && useradd -r -u 10001 -m -d /home/anisignal -s /usr/sbin/nologin anisignal
 
 USER anisignal
