@@ -6,18 +6,19 @@
 
 **Let what matters find you.**
 
-A self-hosted multi-section signal desk for game updates, industry news, and merchandise tracking. It gathers public updates from official accounts, site notices, videos, communities, and RSS feeds, merges them into traceable events, and delivers what you follow to the web, email, and QQ.
+A self-hosted, multi-section signal desk for game updates, industry news, and merchandise fulfillment.<br>
+It gathers scattered public updates across official accounts, site notices, videos, and RSS feeds, consolidates them into source-backed events, and delivers what you care about to the web, email, and QQ.
 
 <p>
 <a href="https://github.com/tianyin231/AniSignal/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
+<a href="https://github.com/tianyin231/AniSignal/actions/workflows/docker-publish.yml"><img alt="Docker Image" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/docker-publish.yml?branch=main&style=flat-square&logo=docker&logoColor=white&label=GHCR%20amd64%20%7C%20arm64"></a>
 <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square"></a>
 <img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?style=flat-square&logo=python&logoColor=white">
 <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white">
 <img alt="Nuxt 4" src="https://img.shields.io/badge/Nuxt-4-00DC82?style=flat-square&logo=nuxt&logoColor=white">
-<img alt="Docker Compose" src="https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white">
 </p>
 
-**[Live Demo](https://anisignal.xyz/)** · [Interactive Tour](https://anisignal.xyz/intro) · [Quick Start](#quick-start) · [Deployment](docs/deployment.md) · [Changelog](https://anisignal.xyz/project) · [Issues](https://github.com/tianyin231/AniSignal/issues)
+**[Live Demo](https://anisignal.xyz/)** · [Interactive Tour](https://anisignal.xyz/intro) · [Quick Start](#quick-start) · [Deployment](docs/deployment.md) · [Features](docs/features.md) · [Changelog](https://anisignal.xyz/project) · [Issues](https://github.com/tianyin231/AniSignal/issues)
 
 [简体中文](README.md) · **English**
 
@@ -30,84 +31,86 @@ A self-hosted multi-section signal desk for game updates, industry news, and mer
   </picture>
 </a>
 
-Following a game's next version, a figure's shipping status, or fast-moving AI releases usually means bouncing between official accounts, websites, videos, community boards, and RSS feeds. AniSignal watches those public sources for you: scattered posts about the same thing become one event with every source cited, merchandise is followed from pre-order to the first unboxings, and new hits on your keywords are pushed to you.
+---
 
-> The interface and most preset sources are in Chinese, while custom sections and RSS/YouTube/X sources work with any language.
+Keeping up with a game's next patch, a pre-ordered figure's real shipping status, or fast-moving AI releases usually means bouncing between Bilibili, YouTube, official notice boards, community threads, and a dozen RSS feeds—where identical news gets reposted ten times while critical schedule changes and early buyer reports sink out of sight.
 
-## Features
+**AniSignal replaces unread-count fatigue with a structured signal desk:** scattered posts about the same development are consolidated into a single traceable event; multi-month merchandise pre-orders are tracked from announcement to real buyer unboxings; and industry news runs through an independent editorial pipeline with deduplication, heat decay, and daily editions—always keeping a one-click path back to the primary source.
+
+> **Language note:** The web UI and built-in game presets default to Simplified Chinese, while custom sections, RSS/Atom feeds, YouTube channels, and X sources work with content in any language.
+
+## Core Experience
 
 <table>
   <tr>
     <td width="50%" valign="top">
       <img src="docs/assets/readme/event.webp" alt="Event page: key facts, current conclusion and evidence chain">
-      <p><b>Event tracking</b><br>Official posts, videos and reposts about the same thing are merged automatically, keeping the evidence chain, first-seen time and revision history, with a confidence level on the conclusion.</p>
+      <p><b>Event Consolidation &amp; Provenance</b><br>When official posts, patch notes, trailers, and community discussions point to the same story, AniSignal merges them into one event—preserving first-seen timestamps, revision history, and source links while separating confirmed statements from rumors.</p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/assets/readme/products.webp" alt="Merchandise page: product cards with tracking status, price and unboxing count">
-      <p><b>Merchandise fulfillment</b><br>Products are detected from official announcements, then followed through final payment, shipping, real unboxings and quality reports; tracking ends on its own once delivery is confirmed.</p>
+      <p><b>End-to-End Merch Fulfillment</b><br>Detects newly announced merchandise, then tracks final-payment windows, shipping notices, real unboxings, and quality feedback over months—distinguishing verified buyer units from sponsored review samples and closing tracking automatically once delivery settles.</p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <img src="docs/assets/readme/calendar.webp" alt="Event calendar: start, end and maintenance times grouped by game">
-      <p><b>Event calendar</b><br>Start and end times of events, banners and giveaways are extracted from announcements, filterable by section and one click away from your own calendar.</p>
+      <p><b>Structured Event Calendar</b><br>Extracts banner windows, limited-time events, maintenance schedules, and livestreams directly from announcements into monthly calendar and countdown views, filterable by section with one-click calendar export.</p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/assets/readme/mobile.webp" alt="Mobile layout: home, merchandise detail and calendar">
-      <p><b>Built for phones</b><br>Bottom navigation, touch-sized controls and light / dark themes laid out for small screens, so a shared link just works.</p>
+      <p><b>Crafted for Mobile Screens</b><br>Bottom navigation, touch-first targets, and adaptive light / dark themes are laid out specifically for phones—so links opened from morning emails or chat briefs read effortlessly.</p>
     </td>
   </tr>
 </table>
 
-Also included:
+## Built for Self-Hosting
 
-- **Custom sections & one-click source presets**: New instances start with a clean empty database; create custom sections, toggle built-in sections, import preset source packs per section in one click, or bulk enable/disable/remove monitored sources from `/admin/targets` without touching code.
-- **Zero-SSH web setup & Bilibili QR login**: Scan a QR code or paste cookies directly in `/admin/targets` for Bilibili collection; manage AI keys, proxies, and site branding in the web console.
-- **Graceful operation without AI or SMTP**: Without an LLM key, rule-based event merging works out of the box and `/ai` can display original raw feed items directly; without SMTP, admins can view pending registration codes, activate accounts, or reset passwords in `/admin/users`.
-- **Follows and delivery**: Keyword follows on the site, or standalone Bilibili UID / keyword custom monitors; a 08:00 (UTC+8) morning email digest and instant alerts.
-- **QQ bot**: Companion AstrBot plugin for QQ official groups and NapCat that pushes rich briefs and answers queries in chat.
+- **Clean Empty-DB Start & Custom Sections**: Fresh deployments boot with zero demo clutter. Create **custom sections** for any game, anime, open-source project, or beat right from `/admin/targets`—or import any of the 15 built-in preset source packs in one click, with bulk enable, disable, and cleanup controls.
+- **Progressive Dependencies (No LLM or SMTP Required)**: AI and email are *optional enhancements*, never hard boot requirements. Without an LLM key, rule-based event merging and multi-platform ingestion run normally, and `/ai` offers a one-click raw-feed view; without SMTP, admins can copy pending registration codes, activate users, or reset passwords directly in `/admin/users`.
+- **Zero-SSH Web Administration**: Log in to Bilibili via mobile QR scan or cookie paste in `/admin/targets`; manage OpenAI-compatible key pools, per-platform HTTP/SOCKS collector proxies, and site compliance links live in the browser. Every source tracks its own health score with automatic exponential backoff.
+- **Three-Tier Following & Multi-Channel Delivery**: Beyond public section sources curated by admins, users can subscribe to **title keywords** or run isolated **custom Bilibili UID / keyword monitors** (public or private), delivered via 08:00 (UTC+8) morning digests, instant alerts, or **QQ group / DM bots**.
 
-## Sections & Presets
+## Source Adapters & Built-In Presets
 
-14 built-in game sections plus AI News presets are ready for optional one-click import, and you can create **unlimited custom sections** in `/admin/targets`:
+Native collectors cover **Bilibili** (official dynamics, user videos, keyword search), **YouTube** (keyless channel RSS by default, optional Data API v3), **Miyoushe**, **official game notice boards**, **standard RSS / Atom**, and **public X (Twitter) accounts**.
 
-| Section | Preset sources |
-| :--- | :--- |
-| Wuthering Waves | Official Bilibili & merch account, Kuro official notices (CN/Global), YouTube, community search |
-| Genshin Impact · Arknights: Endfield | Official Bilibili, official notices, YouTube, community videos (Genshin also includes Miyoushe) |
-| Honkai: Star Rail · Arknights · Azur Lane | Official Bilibili, YouTube, community videos |
-| Goddess of Victory: NIKKE | Official notices, YouTube, community videos |
-| Zenless Zone Zero · Infinity Nikki · Petit Planet · Honkai: Nexus Anima · Roco Kingdom: World · Azur Promilia · Neverness to Everness | Official Bilibili, community videos |
-| AI News | First-party RSS feeds (OpenAI, Anthropic, Google AI, DeepMind, Hugging Face, etc.) & Bilibili search (X accounts disabled by default) |
-| Custom sections (admin-created) | Any Bilibili account/search, YouTube channel, RSS/Atom feed, Miyoushe, or X source |
+14 game section packs plus an AI News pack ship ready for optional one-click import alongside unlimited custom sections:
 
-Navigation shows all enabled sections, with one-click hiding for empty sections in the admin panel.
+| Category | Sections | Preset Sources |
+| :--- | :--- | :--- |
+| **Full Game Packs** | Wuthering Waves · Genshin Impact · Arknights: Endfield | Official Bilibili (incl. merch / Miyoushe), official site notices, YouTube channels, community video search |
+| **Multi-Source Packs** | Honkai: Star Rail · Arknights · Azur Lane · Goddess of Victory: NIKKE | Official Bilibili / site notices, YouTube channels, community video search |
+| **Lightweight Packs** | Zenless Zone Zero · Infinity Nikki · Petit Planet · Honkai: Nexus Anima · Roco Kingdom: World · Azur Promilia · Neverness to Everness | Official Bilibili posts & videos, curated community search |
+| **Editorial Newsroom** | AI News (`/ai`) | First-party RSS (OpenAI, Anthropic, Google AI, DeepMind, Hugging Face, etc.), Bilibili search & optional X accounts; 48h entity heat decay, dual-pass scoring & 08:00 daily editions |
+| **Custom Sections** | Unlimited admin-defined sections (slug, title, palette & aliases) | Any combination of Bilibili, YouTube, RSS/Atom, Miyoushe, or X targets, with per-target `Official` identity badges |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    S["Public sources<br/>Bilibili · YouTube · X<br/>Official notices · RSS"] --> Q["Collection scheduler<br/>arq + Redis"]
-    Q --> R[("Raw content<br/>MySQL")]
-    R --> E["Event merging<br/>Evidence · Revisions"]
-    R --> P["Merch tracking<br/>Unboxings · Quality"]
-    R --> A["AI review & summaries<br/>(raw fallback without LLM)"]
-    E --> W["Web signal desk<br/>Nuxt 4 SSR"]
-    P --> W
-    A --> W
-    E --> M["Morning digest<br/>Instant alerts"]
-    A --> M
-    E --> B["AstrBot plugin<br/>QQ groups · DMs"]
-    A --> B
+    S["Public Sources · Bilibili / YouTube / X / Notices / RSS"] --> C["Scheduler & Workers · collector (arq)"]
+    C --> DB[("Storage · MySQL 8.4 + Redis 7")]
+    DB --> E["Event Engine · Provenance & Revisions"]
+    DB --> P["Merch Tracker · Unboxings & Quality"]
+    DB --> N["News Editorial · Heat Decay & Scoring"]
+    E --> API["Async API · api (FastAPI)"]
+    P --> API
+    N --> API
+    API --> W["Web Signal Desk · web (Nuxt 4 SSR)"]
+    API --> M["Email Digests & Instant Alerts"]
+    API --> B["AstrBot Plugin · QQ Groups & DMs"]
 ```
 
-The backend is FastAPI + SQLAlchemy (async) + MySQL 8.4 with a Redis / arq task queue; the frontend is Nuxt 4 SSR + Tailwind CSS 4. Production runs with a single Docker Compose command, and local development can use SQLite alone.
+Production runs a clean **5-container topology** (`mysql`, `redis`, `api`, `web`, `collector`): `api`, `web`, and `collector` share a single multi-arch image without duplicating disk layers while isolating logs and scaling (`collector` uses Redis-backed leader election and per-target locks for safe horizontal scaling). For local development, the entire backend drops down to **SQLite + an in-process queue** with zero container dependencies.
 
 ## Quick Start
 
-### Production (Docker Compose)
+### Option 1: Docker Compose (Recommended)
 
-Requirements: Git, Docker 24+, Docker Compose v2, and **at least 2 GB RAM** (official pre-built multi-arch images at `ghcr.io/tianyin231/anisignal` support both `linux/amd64` and `linux/arm64` with zero on-server compilation).
+Requires Git, Docker 24+, Docker Compose v2, and **≥ 2 GB RAM**. Official pre-built images at `ghcr.io/tianyin231/anisignal` support both `linux/amd64` and `linux/arm64` out of the box—no on-server builds needed.
+
+**1. Configure `.env`**
 
 ```bash
 git clone https://github.com/tianyin231/AniSignal.git
@@ -115,74 +118,77 @@ cd AniSignal
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit the core settings in `.env`:
 
-- `MYSQL_ROOT_PASSWORD`: strong random password for MySQL (wrap in single quotes `'...'` if it contains `$` or `#`);
-- `ANISIGNAL_ADMIN_TOKEN`: initial bootstrap token for `/admin` (do not leave `change-me`; can be bound to your personal site account on first login);
-- `ANISIGNAL_PUBLIC_BASE_URL`: external site URL (`http://127.0.0.1:8090` for local testing, or `https://signal.example.com` behind HTTPS reverse proxy);
-- `WEB_PORT`: host bind address and port (defaults to `127.0.0.1:8090`; set `0.0.0.0:8090` for direct LAN access).
+| Variable | Required | Description |
+| :--- | :---: | :--- |
+| `MYSQL_ROOT_PASSWORD` | Yes | Strong random MySQL password (e.g. `openssl rand -hex 24`) |
+| `ANISIGNAL_ADMIN_TOKEN` | Yes | Initial bootstrap token for `/admin` (replace `change-me` with a random secret) |
+| `ANISIGNAL_PUBLIC_BASE_URL` | Recommended | External site URL (`http://127.0.0.1:8090` locally, or `https://signal.example.com` in production) |
+| `WEB_PORT` | No | Host bind address (`127.0.0.1:8090` behind a reverse proxy, or `0.0.0.0:8090` for direct LAN access) |
 
-Start the stack (append `--build` only if you modified local source files):
+**2. Launch the stack**
 
 ```bash
 docker compose up -d
 docker compose ps
 ```
 
-Open **`http://127.0.0.1:8090/admin`** with your `ANISIGNAL_ADMIN_TOKEN` (you can bind your logged-in site account as an admin in one click so future visits enter `/admin` directly without re-entering the token) and follow the 3-step onboarding card:
+**3. Complete 3-step onboarding in the browser**
 
-1. **Sections & Sources (`/admin/targets`)**: Create custom sections, import preset source packs in one click, or add/remove sources in bulk; scan a QR code or paste cookies for Bilibili if needed.
-2. **AI Models (optional, `/admin/ai`)**: Configure an OpenAI-compatible endpoint for summaries, calendar extraction, merch discovery, and curated AI News (or browse raw items directly without AI).
-3. **Users & Email (optional, `/admin/settings` & `/admin/users`)**: Configure SMTP for digests and password resets, or manage verification codes and user passwords directly in `/admin/users` without SMTP.
+Open **`http://127.0.0.1:8090/admin`** and enter `ANISIGNAL_ADMIN_TOKEN` (you can bind your personal site account as an admin on first login so future visits enter `/admin` directly from the avatar menu):
 
-> Using a Clash / mihomo TUN `fake-ip` proxy? Uncomment `ANISIGNAL_EGRESS_ALLOW_CIDRS=198.18.0.0/15` in `.env` so SSRF protection allows fake-ip ranges (`198.18.0.0/15`). See the [deployment guide](docs/deployment.md) for details.
+1. **Sections & Sources (`/admin/targets`)**: Create custom sections, import preset packs in one click, and optionally scan a QR code for Bilibili login.
+2. **AI Models (optional, `/admin/ai`)**: Connect any OpenAI-compatible endpoint to unlock summaries, calendar extraction, merch discovery, and curated AI News.
+3. **Email & Branding (optional, `/admin/settings` & `/admin/users`)**: Configure SMTP for digests and password resets, or manage verification codes directly in `/admin/users`.
 
-### Local development
+> **Environment tips:** Wrap `.env` passwords containing `$` or `#` in single quotes `'...'` so Compose does not interpolate or truncate them. If your host uses a Clash / mihomo TUN `fake-ip` proxy, set `ANISIGNAL_EGRESS_ALLOW_CIDRS=198.18.0.0/15` in `.env`. See the [Deployment & Operations Guide](docs/deployment.md) for Nginx HTTPS templates, SELinux/macOS volume notes, and backups.
 
-Locally the backend can run on SQLite with an in-process queue, without MySQL or Redis:
+### Option 2: Local Development (No Docker / MySQL / Redis)
+
+Requires **Python 3.12+ (`uv`)** and **Node.js 22 (`npm`)**:
 
 ```bash
-# Backend (Python 3.12+ / uv)
+# Terminal 1: Backend (SQLite ./server/local.db + in-process queue, default admin token: local-dev)
 cd server
 uv run python -m app.local
 
-# Frontend (Node.js 22 / npm, same as the build image)
+# Terminal 2: Frontend dev server (http://localhost:3000)
 cd web
 npm ci
 npm run dev
 ```
 
-See the [deployment guide](docs/deployment.md) for reverse proxy templates (`docs/examples/nginx.conf`), China mirror options, backups, and troubleshooting.
+## QQ Bot Integration (AstrBot)
 
-## QQ via AstrBot
+The companion plugin lives in [`integrations/astrbot_plugin_anisignal`](integrations/astrbot_plugin_anisignal) and is published to [AstrBot_Plugin_AniSignal](https://github.com/tianyin231/AstrBot_Plugin_AniSignal) for both official QQ bots and OneBot v11 (NapCat):
 
-The plugin source lives in `integrations/astrbot_plugin_anisignal` and is published to the standalone repository [AstrBot_Plugin_AniSignal](https://github.com/tianyin231/AstrBot_Plugin_AniSignal):
+1. In the AstrBot dashboard, open **Plugin Management → Install from Link** and enter `https://github.com/tianyin231/AstrBot_Plugin_AniSignal`;
+2. Configure your AniSignal URL and bot access key;
+3. Send `/情报订阅` or `/帮助` in a group or DM to subscribe to sections, illustrated morning briefs, instant alerts, and keyword queries.
 
-1. In the AstrBot panel, open "Plugin Management → Install from Link" and enter `https://github.com/tianyin231/AstrBot_Plugin_AniSignal`;
-2. fill in your AniSignal server URL and access key;
-3. send `/情报订阅` or `/帮助` in a group or private chat to choose sections and delivery.
-
-See the [plugin guide](integrations/astrbot_plugin_anisignal/README.md) for details.
+See the [plugin README](integrations/astrbot_plugin_anisignal/README.md) for full command reference.
 
 ## Documentation
 
-- [Deployment & operations](docs/deployment.md): Docker Compose, Nginx reverse proxy, fake-ip/mirrors, backups, and troubleshooting
-- [Features & architecture](docs/features.md): the three ways to follow, idempotent ingestion, and event merging
-- [Backend](server/README.md): FastAPI layout, Alembic migrations, and collector interfaces
-- [Frontend](web/README.md): Nuxt 4 structure and Signal Desk design tokens
-
-When filing an issue, please include the page path, reproduction steps, deployment mode, and sanitized logs.
+| Guide | Topics |
+| :--- | :--- |
+| [Deployment & Operations](docs/deployment.md) | 5-container topology, Nginx HTTPS template, proxy pools & fake-ip, backups, and recovery |
+| [Features & Architecture](docs/features.md) | Following tiers, idempotent ingestion, event merging, AI News scoring, and merch fulfillment |
+| [Backend Reference](server/README.md) | FastAPI layout, Alembic migrations, collector adapter interfaces, and test suite |
+| [Frontend Reference](web/README.md) | Nuxt 4 SSR layout, Signal Desk design tokens, and component conventions |
+| [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) | Local workflow, privacy & SSRF guardrails, and private vulnerability reporting |
 
 ## License
 
-Copyright © 2026 tianyin231 and contributors. AniSignal is released under the [GNU AGPL-3.0](LICENSE): you may use, modify, and redistribute it; if you run a modified version as a network service for others, you must also publish its complete source under AGPL-3.0 (configurable via `source_url` and `contact_email` in `/admin/settings`).
+Copyright © 2026 tianyin231 and contributors. Released under the [GNU AGPL-3.0](LICENSE): you are free to use, modify, and redistribute this software; if you run a modified version as a network service for others, you must make its complete source code available under AGPL-3.0 (configurable via `source_url` and `contact_email` in `/admin/settings`).
 
 ## Acknowledgements
 
-AniSignal was built by a human developer pairing with a number of large language models.
+AniSignal was built through iterative pair-programming between a human developer and large language models.
 
 <details>
-<summary>Models and tools</summary>
+<summary>Participating models and developer tools</summary>
 
 | Organization | Models |
 | :--- | :--- |
