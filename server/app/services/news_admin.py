@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 import re
+import time
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -163,7 +164,7 @@ async def request(session, path, *, method, params, body, queue=None):
             if not body.get("reason") or body.get("version") != version.version:
                 raise HTTPException(409, "请刷新内容版本并填写原因")
             raw.hidden = body.get("visibility") != "public"
-            session.add(NewsArchive(kind="visibility", key=uuid4().hex, raw_content_id=raw.id,
+            session.add(NewsArchive(kind="visibility", key=f"{time.time_ns():020d}-{uuid4().hex[:8]}", raw_content_id=raw.id,
                 payload={"hidden": raw.hidden, "reason": body["reason"], "content_version": version.version}, created_at=utcnow()))
             if not raw.hidden and review and review.news:
                 review.relevant, review.promotional, review.violation = True, False, False

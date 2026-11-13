@@ -136,16 +136,25 @@ async def logout(request: Request, response: Response, session: AsyncSession = D
     return {"message": "已退出"}
 
 
-def _user_payload(user: User) -> dict:
+def _user_payload(user: User, *, is_admin: bool = False) -> dict:
     return {
         "id": user.id,
         "email": user.email,
         "display_name": user.display_name,
         "avatar": user.avatar,
         "is_verified": user.is_verified,
+        "is_admin": is_admin,
         "created_at": user.created_at,
         "last_login_at": user.last_login_at,
     }
+
+
+async def _is_admin_user(session: AsyncSession, user: User | None) -> bool:
+    if user is None or user.status != "active" or not user.is_verified:
+        return False
+    from app.services.settings import get_admin_user_ids
+
+    return user.id in await get_admin_user_ids(session)
 
 
 @router.get("/me")
@@ -153,7 +162,7 @@ async def me(request: Request, session: AsyncSession = Depends(get_session)):
     user = await _current_user(request, session)
     if user is None:
         raise HTTPException(status_code=401, detail="未登录")
-    return _user_payload(user)
+    return _user_payload(user, is_admin=await _is_admin_user(session, user))
 
 
 @router.get("/session")
@@ -163,7 +172,8 @@ async def session_state(request: Request, response: Response, session: AsyncSess
     user = await _current_user(request, session)
     # 换账号、别处改了屏蔽或会话已失效时，在这里把浏览器中的屏蔽镜像校正为当前账号的设置。
     sync_hidden_cookie(request, response, user)
-    return {"user": _user_payload(user) if user else None}
+    is_admin = await _is_admin_user(session, user) if user else False
+    return {"user": _user_payload(user, is_admin=is_admin) if user else None}
 
 
 @router.put("/profile")

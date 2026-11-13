@@ -17,7 +17,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, community_conditions, get_community
+from app.communities import (
+    COMMUNITIES,
+    DEFAULT_COMMUNITY,
+    community_conditions,
+    ensure_communities_synced,
+    get_community,
+)
 from app.models import (
     ClassificationRule,
     CollectTarget,
@@ -99,6 +105,7 @@ async def missing_review_ids(session: AsyncSession, *, now: datetime | None = No
     """
     from app.services.ai import retry_allowed
 
+    await ensure_communities_synced(session)
     now = now or utcnow()
     games = [key for key, meta in COMMUNITIES.items() if meta.domain == "game"]
     query = (
@@ -141,6 +148,7 @@ async def review_contents(
         stats.skipped_reason = "ai_not_configured"
         return stats
 
+    await ensure_communities_synced(session)
     tracked_products = await _load_tracked_products(session)
     candidates = await _review_candidates(session, ids, tracked_products, force=force)
     stats.candidates = len(candidates)

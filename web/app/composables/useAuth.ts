@@ -10,6 +10,7 @@ export interface AuthUser {
   display_name?: string | null
   avatar?: string | null
   is_verified: boolean
+  is_admin?: boolean
   created_at: string | null
   last_login_at: string | null
 }

@@ -145,3 +145,38 @@ def onepush_public_view(onepush: dict) -> dict:
         "provider": provider,
         "fields": sorted(str(key) for key in config if key != "provider"),
     }
+
+
+async def get_admin_user_ids(session: AsyncSession) -> set[int]:
+    stored = await get_setting(session, "admin_users") or {}
+    raw_ids = stored.get("user_ids") if isinstance(stored, dict) else None
+    if not isinstance(raw_ids, list):
+        return set()
+    ids: set[int] = set()
+    for item in raw_ids:
+        try:
+            uid = int(item)
+        except (TypeError, ValueError):
+            continue
+        if uid > 0:
+            ids.add(uid)
+    return ids
+
+
+async def set_user_admin(
+    session: AsyncSession, user_id: int, is_admin: bool, *, commit: bool = True
+) -> set[int]:
+    ids = await get_admin_user_ids(session)
+    if is_admin:
+        ids.add(int(user_id))
+    else:
+        ids.discard(int(user_id))
+    row = await session.get(SiteSetting, "admin_users")
+    value = {"user_ids": sorted(ids)}
+    if row is None:
+        session.add(SiteSetting(key="admin_users", value=value))
+    else:
+        row.value = value
+    if commit:
+        await session.commit()
+    return ids

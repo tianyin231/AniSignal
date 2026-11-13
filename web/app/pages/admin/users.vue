@@ -253,6 +253,28 @@ async function toggleNotification(user: AdminUser) {
   }
 }
 
+async function toggleAdmin(user: AdminUser) {
+  if (busyId.value) return
+  const next = !user.is_admin
+  const msg = next
+    ? `确认将 ${user.email} 设为站点管理员？该账号登录后可直接进入管理后台。`
+    : `确认撤销 ${user.email} 的管理员权限？`
+  if (!confirm(msg)) return
+  busyId.value = user.id
+  try {
+    const updated = await api<AdminUser>(`/api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      body: { is_admin: next },
+    })
+    Object.assign(user, updated)
+    toast.ok(next ? `已将 ${user.email} 设为管理员` : `已撤销 ${user.email} 的管理员权限`)
+  } catch (exc: any) {
+    toast.err(`操作失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
+  } finally {
+    busyId.value = null
+  }
+}
+
 /* ---------- 广播邮件 ---------- */
 const broadcast = reactive({ subject: '', body: '', verified_only: true })
 const broadcastBusy = ref(false)
@@ -436,6 +458,7 @@ const deliveryStatusLabel: Record<string, string> = {
               <td class="px-3 py-2.5">
                 <span class="font-medium">{{ u.email }}</span>
                 <span v-if="u.display_name" class="ml-1.5 text-xs text-faint">{{ u.display_name }}</span>
+                <span v-if="u.is_admin" class="ml-1.5 rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-300">管理员</span>
               </td>
               <td class="px-3 py-2.5">
                 <span
@@ -469,6 +492,15 @@ const deliveryStatusLabel: Record<string, string> = {
                   <CheckCircle2 :size="12" class="mr-0.5 inline" />激活
                 </button>
                 <button class="min-h-9 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="openDetail(u)">详情</button>
+                <button
+                  v-if="u.status === 'active'"
+                  class="min-h-9 rounded px-2 text-xs hover:underline disabled:cursor-wait"
+                  :class="u.is_admin ? 'text-amber-600 dark:text-amber-400' : 'text-ink-2'"
+                  :disabled="busyId === u.id"
+                  @click="toggleAdmin(u)"
+                >
+                  {{ u.is_admin ? '撤管理' : '设管理' }}
+                </button>
                 <button class="min-h-9 rounded px-2 text-xs text-ink-2 hover:underline" @click="openReset(u)">
                   <KeyRound :size="12" class="mr-0.5 inline" />改密
                 </button>

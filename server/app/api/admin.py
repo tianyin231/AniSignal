@@ -1,17 +1,20 @@
 """Admin API：采集目标、事件复核/编辑/锁定/合并/重算、商品 CRUD、分类词典 CRUD、内容浏览。"""
 
 import logging
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow
 from app.communities import (
     BUILTIN_COMMUNITIES,
     COMMUNITIES,
     COMMUNITY_ALL,
     COMMUNITY_OPTIONAL_QUERY_DEP,
+    COMMUNITY_SYNC_DEP,
     DEFAULT_COMMUNITY,
     community_to_public_dict,
     get_community,
@@ -31,6 +34,7 @@ from app.models import (
     EventRevision,
     Evidence,
     MetricSnapshot,
+    NewsArchive,
     Platform,
     Product,
     RawContent,
@@ -74,7 +78,7 @@ from app.services.views import events_to_out, product_to_out, products_to_out
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
+router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin), COMMUNITY_SYNC_DEP])
 
 
 async def get_queue(request: Request) -> BaseQueue:
@@ -671,6 +675,15 @@ async def set_content_visibility(
     raw.hidden = bool(body.get("hidden"))
     if raw.community == "ai":
         from app.services.aihot_bridge import visibility
+        session.add(
+            NewsArchive(
+                kind="visibility",
+                key=f"{time.time_ns():020d}-{uuid.uuid4().hex[:8]}",
+                raw_content_id=raw.id,
+                payload={"hidden": raw.hidden, "reason": "admin_contents"},
+                created_at=utcnow(),
+            )
+        )
         await visibility(raw.id, raw.hidden)
     await refresh_content_fulfillment(session, snapshots, reaggregate=not raw.hidden)
     await session.commit()

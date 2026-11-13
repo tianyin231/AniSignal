@@ -8,14 +8,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import re
-from typing import Annotated
+import time
+from typing import Annotated, Any
 
-from fastapi import Depends, Query
+from fastapi import Depends, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import AfterValidator
 
+from app.db import get_session
+
 COMMUNITY_SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,15}$")
 VALID_COLORS = ("yellow", "sky", "violet", "orange", "cyan", "lime", "teal", "blue")
+_SYNC_TTL_SECONDS = 5.0
+_last_sync_at: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -273,17 +278,33 @@ def apply_community_overrides(payload: dict | None) -> None:
 
 
 def reset_communities() -> None:
+    global _last_sync_at
     COMMUNITIES.clear()
     COMMUNITIES.update(BUILTIN_COMMUNITIES)
+    _last_sync_at = 0.0
     _refresh_dependents()
 
 
 async def sync_communities(session) -> dict:
+    global _last_sync_at
     from app.services.settings import get_setting
 
     raw = await get_setting(session, "communities")
     apply_community_overrides(raw if isinstance(raw, dict) else None)
+    _last_sync_at = time.monotonic()
     return raw if isinstance(raw, dict) else {"disabled_builtins": [], "custom": []}
+
+
+async def ensure_communities_synced(session, *, force: bool = False) -> None:
+    if not force and _last_sync_at and (time.monotonic() - _last_sync_at) < _SYNC_TTL_SECONDS:
+        return
+    await sync_communities(session)
+
+
+async def _dep_sync_communities(request: Request, session: Any = Depends(get_session)) -> None:
+    await ensure_communities_synced(
+        session, force=request.method not in {"GET", "HEAD", "OPTIONS"}
+    )
 
 
 def community_to_public_dict(meta: CommunityMeta) -> dict:
@@ -328,27 +349,45 @@ def _bad_community_query(value: str) -> RequestValidationError:
     )
 
 
-def _dep_community(community: str = Query(default=DEFAULT_COMMUNITY, description="分区标识")) -> str:
+async def _dep_community(
+    community: str = Query(default=DEFAULT_COMMUNITY, description="分区标识"),
+    session: Any = Depends(get_session),
+) -> str:
+    await ensure_communities_synced(session, force=(community not in COMMUNITIES))
     if community not in COMMUNITIES:
         raise _bad_community_query(community)
     return community
 
 
-def _dep_community_required(community: str = Query(..., description="分区标识")) -> str:
+async def _dep_community_required(
+    community: str = Query(..., description="分区标识"),
+    session: Any = Depends(get_session),
+) -> str:
+    await ensure_communities_synced(session, force=(community not in COMMUNITIES))
     if community not in COMMUNITIES:
         raise _bad_community_query(community)
     return community
 
 
-def _dep_community_optional(community: str | None = Query(default=None, description="分区标识")) -> str | None:
-    if community is not None and community not in COMMUNITIES:
-        raise _bad_community_query(community)
+async def _dep_community_optional(
+    community: str | None = Query(default=None, description="分区标识"),
+    session: Any = Depends(get_session),
+) -> str | None:
+    if community is not None:
+        await ensure_communities_synced(session, force=(community not in COMMUNITIES))
+        if community not in COMMUNITIES:
+            raise _bad_community_query(community)
     return community
 
 
-def _dep_community_or_all(community: str = Query(default=DEFAULT_COMMUNITY, description="分区标识（all=跨分区聚合）")) -> str:
-    if community != COMMUNITY_ALL and community not in COMMUNITIES:
-        raise _bad_community_query(community)
+async def _dep_community_or_all(
+    community: str = Query(default=DEFAULT_COMMUNITY, description="分区标识（all=跨分区聚合）"),
+    session: Any = Depends(get_session),
+) -> str:
+    if community != COMMUNITY_ALL:
+        await ensure_communities_synced(session, force=(community not in COMMUNITIES))
+        if community not in COMMUNITIES:
+            raise _bad_community_query(community)
     return community
 
 
@@ -356,6 +395,7 @@ COMMUNITY_QUERY_DEP = Depends(_dep_community)
 COMMUNITY_REQUIRED_QUERY_DEP = Depends(_dep_community_required)
 COMMUNITY_OPTIONAL_QUERY_DEP = Depends(_dep_community_optional)
 COMMUNITY_AGGREGATE_QUERY_DEP = Depends(_dep_community_or_all)
+COMMUNITY_SYNC_DEP = Depends(_dep_sync_communities)
 
 
 def official_merch_bilibili_sources() -> dict[str, tuple[str, str]]:

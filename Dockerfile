@@ -1,4 +1,4 @@
-# 统一镜像：app（api+web）与 collector（调度+采集）共用
+# 统一镜像：api、web 与 collector 共用同一预构建产物（单镜像、按容器职责拆分单进程运行）
 # 构建上下文为仓库根目录（compose.yaml 所在处）
 FROM ghcr.io/tamnd/bili:0.3.0 AS bili
 
@@ -37,5 +37,5 @@ COPY server/app ./app
 COPY server/alembic.ini ./
 COPY server/alembic ./alembic
 COPY --from=webbuild /web/.output /app/web
-COPY deploy/start-app.sh deploy/start-collector.sh ./deploy/
+COPY deploy/*.sh ./deploy/
 RUN sed -i 's/\r$//' ./deploy/*.sh && chmod +x ./deploy/*.sh

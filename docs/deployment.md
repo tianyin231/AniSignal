@@ -2,16 +2,16 @@
 
 [返回首页](../README.md) · [功能指南](features.md) · [Nginx 反代模板](examples/nginx.conf)
 
-生产环境推荐使用 Docker Compose（4 容器形态）；本地开发可使用 SQLite 与进程内队列免容器启动。
+生产环境推荐使用 Docker Compose（5 容器单职责形态：`mysql` / `redis` / `api` / `web` / `collector`，共用官方多架构预构建镜像）；本地开发可使用 SQLite 与进程内队列免容器启动。
 
 ---
 
 ## 1. 环境要求与支持矩阵
 
-- **硬件基线**：建议内存 **≥ 2 GB**（运行态 MySQL + Redis + App + Collector 合计约 0.85 GiB，前端构建阶段与数据库缓冲需要额外余量），磁盘预留 ≥ 10 GB。
-- **软件要求**：Git、Docker 24+（需包含 `docker buildx`）与 Docker Compose v2。
+- **硬件基线**：建议内存 **≥ 2 GB**（默认直接拉取 GHCR 预构建镜像，运行态合计约 0.85 GiB；若在 2 GB 小内存机器上执行本地 `--build`，建议额外开启 2 GB Swap），磁盘预留 ≥ 10 GB。
+- **软件要求**：Git、Docker 24+ 与 Docker Compose v2。
 - **架构与系统**：
-  - 官方镜像链支持 `linux/amd64` 与 `linux/arm64`（前端构建阶段通过 `--platform=$BUILDPLATFORM` 在宿主机原生架构编译，避免跨架构卡死；不支持 32 位 `armv7`）。
+  - 官方预构建镜像 `ghcr.io/tianyin231/anisignal:latest` 原生提供 `linux/amd64` 与 `linux/arm64` 双架构（不支持 32 位 `armv7`）。
   - Windows 用户请在 **WSL2** 文件系统内克隆仓库并运行（仓库已配置 [.gitattributes](../.gitattributes) 强制脚本使用 `LF` 换行符，避免挂载 NTFS 目录导致 MySQL 性能或权限异常）。
 
 ---
@@ -26,15 +26,16 @@ cd AniSignal
 cp .env.example .env
 ```
 
-编辑 `.env`（[compose.yaml](../compose.yaml) 已通过 `env_file` 将 `.env` 注入 `app` 与 `collector`，所有 `ANISIGNAL_*` 配置项均可直接在 `.env` 中声明）：
+编辑 `.env`（[compose.yaml](../compose.yaml) 已通过 `env_file` 将 `.env` 注入 `api`、`web` 与 `collector`，所有 `ANISIGNAL_*` 配置项均可直接在 `.env` 中声明）：
 
 | 变量 | 必填 | 默认值 | 说明 |
 | :--- | :---: | :--- | :--- |
 | `MYSQL_ROOT_PASSWORD` | 是 | — | MySQL 密码（建议 `openssl rand -hex 24`；后端自动做 URL 编码，兼容任意特殊字符）。 |
-| `ANISIGNAL_ADMIN_TOKEN` | 是 | — | `/admin` 管理端访问令牌（建议独立随机长字符串，禁止保留 `change-me`）。 |
+| `ANISIGNAL_ADMIN_TOKEN` | 是 | — | `/admin` 初始引导令牌（建议独立随机长字符串，禁止保留 `change-me`；首次登录后可绑定个人站点账号免口令直进）。 |
 | `ANISIGNAL_PUBLIC_BASE_URL` | 推荐 | `http://127.0.0.1:8090` | 对外完整访问基址（如 `https://signal.example.com`），自动同步至前端 Canonical/OG、Sitemap、robots.txt、RSS 与邮件链接。 |
 | `WEB_PORT` | 否 | `127.0.0.1:8090` | 宿主机监听绑定。默认仅监听本机回环供反代转发；局域网/NAS 直连可改为 `0.0.0.0:8090`。 |
 | `DATA_DIR` | 否 | `./data` | MySQL、Redis 与可选本地文件的持久化目录。 |
+| `ANISIGNAL_IMAGE` | 否 | `ghcr.io/tianyin231/anisignal:latest` | 自定义镜像仓库地址或固定版本标签。 |
 | `ANISIGNAL_EGRESS_ALLOW_CIDRS` | 否 | 空 | 出站 SSRF 额外放行网段。宿主机开启 Clash / mihomo TUN `fake-ip` 时设为 `198.18.0.0/15`（云元数据 `169.254.169.254` 始终拦截）。 |
 | `ANISIGNAL_MAIL_HOURLY_LIMIT` | 否 | `100` | 配置 SMTP 后的全站每小时验证码发信上限，防止接口被刷信。 |
 | `ANISIGNAL_YOUTUBE_API_KEY` | 否 | 空 | 可选 YouTube Data API v3 密钥；不填默认走免密钥频道 RSS。 |
@@ -42,25 +43,28 @@ cp .env.example .env
 ### 2.2 启动与验活
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 docker compose ps
-docker compose logs --tail=80 app collector
+docker compose logs --tail=80 api web collector
 ```
 
-- `app` 启动时自动通过 MySQL `GET_LOCK` 互斥执行 `alembic upgrade head`（新库通过 `0057_baseline` 一步建齐全部数据表，不写入任何作者私站演示数据），随后拉起 FastAPI（`127.0.0.1:8000`）与 Nuxt SSR（`:3000`）。
-- 健康检查探测 `:3000/api/healthz`，同时验证前端 Nitro 代理与后端数据库连通性；公网内部路径 `/api/internal/**` 已在 Nitro 层直接拦截返回 `404`。
+> 若修改了本地前后端源码，执行 `docker compose up -d --build` 重新构建本地镜像即可。
+
+- `api`、`web` 与 `collector` 共用同一份镜像层（不额外占磁盘），但按单职责独立运行与独立输出日志：
+  - `api` 启动时自动通过 MySQL `GET_LOCK` 互斥执行 `alembic upgrade head`（新库通过 `0057_baseline` 一步建齐全部数据表，不写入任何作者私站演示数据），随后以前台单进程运行 FastAPI（内部 `:8000`）；
+  - `web` 在 `api` 健康就绪后启动 Nuxt 4 Nitro SSR（`:3000`），通过运行时环境变量 `NUXT_API_SSR_BASE=http://api:8000` 反代后端接口，并在入口层拦截 `/api/internal/**` 返回 `404`。
 - 如需水平扩展采集并发，可执行 `docker compose up -d --scale collector=2`（调度器自动通过 Redis 原子续租选举单主，单信源采集与每日早报均带分布式互斥锁）。
 
 ---
 
 ## 3. 浏览器内零 SSH 初始化（3 步闭环）
 
-访问 `http://127.0.0.1:8090/admin`（或你的域名 `/admin`），输入 `ANISIGNAL_ADMIN_TOKEN`：
+访问 `http://127.0.0.1:8090/admin`（或你的域名 `/admin`），输入 `ANISIGNAL_ADMIN_TOKEN`（推荐先注册登录个人站点账号，在 `/admin/login` 勾选 **「同时将当前登录账号设为管理员」**，后续点击顶栏头像菜单「管理看板」即可免输 Token 直进后台，也可在 `/admin/users` 随时设/撤管理员）：
 
 1. **分区与信源（`/admin/targets`）**
-   - **自定义分区**：在顶部「分区管理」面板可直接新建自定义分区（填写标识、名称、关键词别名），也可一键隐藏不需要的内置分区。顶栏导航仅展示已启用且存在活跃信源的分区。
+   - **自定义分区**：在顶部「分区管理」面板可直接新建自定义分区（填写 1~16 位英文标识、名称、关键词别名），也可一键隐藏不需要的内置分区。顶栏导航仅展示已启用且存在活跃信源的分区。
    - **一键导入 / 批量移除**：点击「导入预设信源」可按勾选分区导入鸣潮、原神、星铁、AI 快讯等预设源（X 账号默认停用）；列表支持全选批量启用、停用或一键删除。
-   - **命令行导入预设（可选）**：也可执行 `docker compose exec app uv run --project /app/server python -m app.seeds --all`（或 `--communities wuwa,ai`）。
+   - **命令行导入预设（可选）**：也可执行 `docker compose exec api python -m app.seeds --all`（或 `--communities wuwa,ai`）。
    - **B 站登录态**：直接在同页点击「扫码登录」用手机 B 站 App 扫码，或粘贴 `SESSDATA` Cookie。凭据存入数据库并通过内存环境变量 `BILI_COOKIE` 传递给采集器，无需进服务器导文件。
 2. **AI 模型与无 AI 降级（`/admin/ai`）**
    - 填写任意 OpenAI 兼容接口（Base URL、API Key 池、主模型/轻量模型），保存后点击测试连接即可。
@@ -116,11 +120,14 @@ gunzip -c anisignal-2026-11-13.sql.gz | docker compose exec -T mysql sh -c 'MYSQ
 
 ```bash
 git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
+（若你基于本地修改构建镜像，改为执行 `docker compose up -d --build`。）
+
 ### 首次启动失败自救
-- 查看具体报错：`docker compose logs app mysql`
+- 查看具体报错：`docker compose logs api web mysql`
 - 若*全新首次安装*因填错配置中断、尚未产生任何业务数据，可执行 `docker compose down && rm -rf ./data/mysql ./data/redis && docker compose up -d` 从干净状态重来（**已有数据的线上实例切勿删除 `./data`**）。
 
 ---

@@ -338,3 +338,200 @@ async def test_no_smtp_user_verify_reset_mail_cap_and_ai_test_fix(client, admin_
 
 async def _async_true() -> bool:
     return True
+
+
+async def test_unified_admin_session_cookie_and_csrf_guards(client, admin_headers):
+    # 普通账号注册、激活并登录：默认不具备管理员权限
+    await client.post("/api/auth/register", json={"email": "owner@example.com", "password": "password123"})
+    await client.post("/api/auth/register", json={"email": "member@example.com", "password": "password123"})
+    users = {u["email"]: u for u in (await client.get("/api/admin/users", headers=admin_headers)).json()["items"]}
+    owner_id = users["owner@example.com"]["id"]
+    member_id = users["member@example.com"]["id"]
+    await client.post(f"/api/admin/users/{owner_id}/verify", headers=admin_headers)
+    await client.post(f"/api/admin/users/{member_id}/verify", headers=admin_headers)
+
+    login_resp = await client.post("/api/auth/login", json={"email": "owner@example.com", "password": "password123"})
+    assert login_resp.status_code == 200
+    assert (await client.get("/api/auth/session")).json()["user"]["is_admin"] is False
+    assert (await client.get("/api/admin/collect-targets")).status_code == 401
+
+    # 凭 Token 一键绑定当前已登录账号为管理员后，免 Header 可直接访问管理后台
+    bind_resp = await client.post("/api/admin/users/bind-self", headers=admin_headers)
+    assert bind_resp.status_code == 200
+    assert bind_resp.json()["is_admin"] is True
+    assert (await client.get("/api/auth/session")).json()["user"]["is_admin"] is True
+    assert (await client.get("/api/admin/collect-targets")).status_code == 200
+
+    # 显式携带错误 X-Admin-Token 时不得回落到会话 Cookie（确保 /admin/login 校验准确）
+    assert (await client.get("/api/admin/collect-targets", headers={"X-Admin-Token": "wrong"})).status_code == 401
+
+    # Cookie 鉴权下的跨站写操作被拦截，同源写操作放行
+    csrf_site = await client.patch(
+        f"/api/admin/users/{member_id}",
+        headers={"Sec-Fetch-Site": "cross-site"},
+        json={"is_admin": True},
+    )
+    assert csrf_site.status_code == 401
+    csrf_origin = await client.patch(
+        f"/api/admin/users/{member_id}",
+        headers={"Origin": "https://evil.example"},
+        json={"is_admin": True},
+    )
+    assert csrf_origin.status_code == 401
+
+    grant = await client.patch(
+        f"/api/admin/users/{member_id}",
+        headers={"Origin": "http://test"},
+        json={"is_admin": True},
+    )
+    assert grant.status_code == 200
+    assert grant.json()["is_admin"] is True
+
+    # 当前 Cookie 会话禁止自我撤权或自我封禁，防止误操作锁死后台
+    self_demote = await client.patch(f"/api/admin/users/{owner_id}", json={"is_admin": False})
+    assert self_demote.status_code == 400
+    self_ban = await client.patch(f"/api/admin/users/{owner_id}", json={"banned": True})
+    assert self_ban.status_code == 400
+
+    # 封禁其他管理员会自动吊销其管理员权限
+    ban_member = await client.patch(f"/api/admin/users/{member_id}", json={"banned": True, "ban_reason": "test"})
+    assert ban_member.status_code == 200
+    assert ban_member.json()["is_admin"] is False
+    assert "admin_revoked" in ban_member.json()["actions"]
+
+
+async def test_raw_ai_news_respects_manual_withdrawal_and_visibility(client, session, admin_headers, monkeypatch):
+    from datetime import datetime, timezone
+    from app.config import get_settings
+    from app.models import ContentReview, ContentVersion, RawContent
+    from app.services.ingest import ingest_items
+    from sqlalchemy import select
+
+    monkeypatch.setattr(get_settings(), "news_unified_enabled", True)
+    now_rfc = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    await ingest_items(
+        session,
+        "rss_feed",
+        [
+            {
+                "url": "https://openai.com/index/unreviewed-post/",
+                "feed_url": "https://openai.com/news/rss.xml",
+                "title": "Unreviewed Raw Post",
+                "text": "<p>Unreviewed body.</p>",
+                "source_name": "OpenAI News",
+                "published": now_rfc,
+                "first_party": True,
+            },
+            {
+                "url": "https://anthropic.com/news/reviewed-post/",
+                "feed_url": "https://anthropic.com/rss.xml",
+                "title": "Reviewed Approved Post",
+                "text": "<p>Approved body.</p>",
+                "source_name": "Anthropic",
+                "published": now_rfc,
+                "first_party": True,
+            },
+        ],
+        community="ai",
+    )
+    await session.commit()
+
+    rows = list((await session.scalars(select(RawContent).order_by(RawContent.id.asc()))).all())
+    unreviewed_raw, reviewed_raw = rows[0], rows[1]
+    rev_ver = await session.scalar(
+        select(ContentVersion.version).where(ContentVersion.raw_content_id == reviewed_raw.id)
+    )
+    reviewed_raw.hidden = False
+    session.add(
+        ContentReview(
+            raw_content_id=reviewed_raw.id,
+            model="test",
+            relevant=True,
+            promotional=False,
+            violation=False,
+            quality_score=85,
+            news={
+                "content_hash": reviewed_raw.content_hash,
+                "content_version": rev_ver,
+                "newsworthy": True,
+                "headline": "已过审快讯标题",
+                "summary": "已过审摘要",
+                "kind": "report",
+                "topics": ["Claude"],
+            },
+        )
+    )
+    await session.commit()
+
+    # 两条在 include_raw=true 下初始均可见
+    feed0 = (await client.get("/api/ai-news/events", params={"include_raw": "true"})).json()
+    assert feed0["total"] == 2
+
+    # 1) 撤下已过审条目（/api/admin/aihot/content/.../visibility）：include_raw 与详情均不得再泄露
+    withdraw = await client.post(
+        f"/api/admin/aihot/content/as-{reviewed_raw.id}/visibility",
+        headers=admin_headers,
+        json={"visibility": "withdrawn", "version": rev_ver, "reason": "事实核查撤稿"},
+    )
+    assert withdraw.status_code == 200
+    feed1 = (await client.get("/api/ai-news/events", params={"include_raw": "true"})).json()
+    assert [it["id"] for it in feed1["items"]] == [unreviewed_raw.id]
+    assert (await client.get(f"/api/ai-news/engine/items/raw-{reviewed_raw.id}")).status_code == 404
+
+    # 2) 下架未审条目（/api/admin/contents/.../visibility）：同样从原文模式消失，恢复后重新出现
+    hide_unrev = await client.patch(
+        f"/api/admin/contents/{unreviewed_raw.id}/visibility",
+        headers=admin_headers,
+        json={"hidden": True},
+    )
+    assert hide_unrev.status_code == 200
+    feed2 = (await client.get("/api/ai-news/events", params={"include_raw": "true"})).json()
+    assert feed2["total"] == 0
+    assert (await client.get(f"/api/ai-news/engine/items/raw-{unreviewed_raw.id}")).status_code == 404
+
+    restore_unrev = await client.patch(
+        f"/api/admin/contents/{unreviewed_raw.id}/visibility",
+        headers=admin_headers,
+        json={"hidden": False},
+    )
+    assert restore_unrev.status_code == 200
+    feed3 = (await client.get("/api/ai-news/events", params={"include_raw": "true"})).json()
+    assert [it["id"] for it in feed3["items"]] == [unreviewed_raw.id]
+    assert (await client.get(f"/api/ai-news/engine/items/raw-{unreviewed_raw.id}")).status_code == 200
+
+
+async def test_multiprocess_custom_community_lazy_sync(client, admin_headers):
+    from app.communities import COMMUNITIES, reset_communities
+
+    try:
+        created = await client.post(
+            "/api/admin/communities",
+            headers=admin_headers,
+            json={"key": "gfl2", "label": "少女前线2", "color": "orange"},
+        )
+        assert created.status_code == 201
+
+        # 模拟另一台尚未加载新分区的 API / Collector 副本进程
+        reset_communities()
+        assert "gfl2" not in COMMUNITIES
+
+        # 直接请求公开接口与后台目标写入，均应自动从 DB 同步分区而不报 422
+        events_resp = await client.get("/api/events", params={"community": "gfl2"})
+        assert events_resp.status_code == 200
+        assert "gfl2" in COMMUNITIES
+
+        reset_communities()
+        target_resp = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={
+                "platform": "rss",
+                "target_type": "feed",
+                "target_value": "https://example.com/gfl2.xml",
+                "display_name": "少前2资讯",
+                "community": "gfl2",
+            },
+        )
+        assert target_resp.status_code == 201
+    finally:
+        reset_communities()

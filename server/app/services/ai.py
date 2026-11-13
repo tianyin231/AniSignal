@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import format_beijing, utcnow
-from app.communities import DEFAULT_COMMUNITY, crosstalk_names, get_community
+from app.communities import DEFAULT_COMMUNITY, crosstalk_names, ensure_communities_synced, get_community
 from app.config import get_settings
 from app.models import (
     AiUsage,
@@ -293,6 +293,7 @@ async def summarize_event(
     if used_fallback:
         summary = _fallback_summary(event, len(evidences))
     else:
+        await ensure_communities_synced(session)
         community = getattr(event, "community", None) or DEFAULT_COMMUNITY
         meta = get_community(community)
         game, game_note = meta.game_name, meta.game_note

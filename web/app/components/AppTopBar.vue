@@ -206,6 +206,9 @@ async function handleLogout() {
               <p class="truncate text-sm font-semibold text-ink">{{ displayName(user) }}</p>
               <p class="truncate text-xs text-muted">{{ user.email }}</p>
             </div>
+            <NuxtLink v-if="user.is_admin" to="/admin" class="block rounded-lg px-3 py-2 text-sm font-medium text-brand-ink hover:bg-chip" role="menuitem" @click="menuOpen = false">
+              管理看板
+            </NuxtLink>
             <NuxtLink to="/account" class="block rounded-lg px-3 py-2 text-sm text-ink-2 hover:bg-chip" role="menuitem" @click="menuOpen = false">
               账号中心
             </NuxtLink>

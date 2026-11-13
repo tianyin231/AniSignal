@@ -1,7 +1,8 @@
-# AniSignal 全栈：4 容器形态
+# AniSignal 全栈：5 容器单职责形态（共用官方多架构预构建镜像 ghcr.io/tianyin231/anisignal）
 #   mysql / redis：持久化数据默认落在 ./data（可通过 DATA_DIR 调整）
-#   app：FastAPI + Nuxt SSR 同容器，默认仅本机 127.0.0.1:8090 监听（Nitro 同源代理 API）
-#   collector：调度器 + 采集 worker；扩容 --scale collector=N
+#   api：数据库自动迁移 + FastAPI 单进程（仅内部网络暴露 :8000）
+#   web：Nuxt 4 Nitro SSR 单进程（运行时反代 http://api:8000，默认仅监听宿主机 127.0.0.1:8090）
+#   collector：调度器 + 采集 worker；水平扩容可执行 --scale collector=N
 services:
   mysql:
     image: mysql:8.4
@@ -31,8 +32,8 @@ services:
       timeout: 3s
       retries: 20
 
-  app:
-    image: anisignal:local
+  api:
+    image: ${ANISIGNAL_IMAGE:-ghcr.io/tianyin231/anisignal:latest}
     build: .
     init: true
     restart: unless-stopped
@@ -41,7 +42,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    command: ["bash", "/app/deploy/start-app.sh"]
+    command: ["bash", "/app/deploy/start-api.sh"]
     env_file: &app_env_file
       - path: .env
         required: false
@@ -51,7 +52,6 @@ services:
       ANISIGNAL_REDIS_URL: redis://redis:6379/0
       ANISIGNAL_ADMIN_TOKEN: ${ANISIGNAL_ADMIN_TOKEN:?请在 .env 中设置随机管理员令牌}
       ANISIGNAL_PUBLIC_BASE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
-      NUXT_PUBLIC_SITE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
       ANISIGNAL_NEWS_UNIFIED_ENABLED: ${ANISIGNAL_NEWS_UNIFIED_ENABLED:-true}
       ANISIGNAL_YOUTUBE_API_KEY: ${ANISIGNAL_YOUTUBE_API_KEY:-}
       ANISIGNAL_EGRESS_ALLOW_CIDRS: ${ANISIGNAL_EGRESS_ALLOW_CIDRS:-}
@@ -64,6 +64,29 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  web:
+    image: ${ANISIGNAL_IMAGE:-ghcr.io/tianyin231/anisignal:latest}
+    init: true
+    restart: unless-stopped
+    logging: *bounded_logs
+    command: ["node", "/app/web/server/index.mjs"]
+    env_file: *app_env_file
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      NUXT_API_SSR_BASE: http://api:8000
+      NUXT_PUBLIC_SITE_URL: ${ANISIGNAL_PUBLIC_BASE_URL:-}
+      TZ: Asia/Shanghai
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-127.0.0.1:8090}:3000"
     healthcheck:
@@ -71,10 +94,10 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 120s
+      start_period: 30s
 
   collector:
-    image: anisignal:local
+    image: ${ANISIGNAL_IMAGE:-ghcr.io/tianyin231/anisignal:latest}
     init: true
     restart: unless-stopped
     logging: *bounded_logs
@@ -87,7 +110,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      app:
+      api:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "arq", "app.worker.settings.WorkerSettings", "--check"]

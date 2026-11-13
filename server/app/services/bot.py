@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.communities import COMMUNITIES
+from app.communities import COMMUNITIES, ensure_communities_synced
 from app.models.enums import COMMUNITY_LABELS
 from app.models import BotDelivery, BotReminder, BotTarget, ContentMatch, ContentSchedule, ContentVersion, Event, Evidence, Product, RawContent, RedeemCode, Source
 from app.services.notifications import group_candidates, is_empty_dynamic_item, load_candidates
@@ -191,6 +191,7 @@ def _count_label(count: int) -> str:
 
 async def query_target(session: AsyncSession, target: BotTarget, tool: str = "digest", query: str = "", now=None, collected_after=None,
                        *, shared_copy=False, notification=None) -> dict:
+    await ensure_communities_synced(session)
     now = now or utcnow()
     target = await resolve_target(session, target, notification)
     config = target.config
@@ -852,6 +853,7 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
 
 
 async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
+    await ensure_communities_synced(session)
     now = now or utcnow()
     local = now + timedelta(hours=8)
     # 进程在发送中退出时无法判定远端结果，绝不盲目自动重发。

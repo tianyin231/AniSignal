@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.clock import utcnow
-from app.models import ContentReview, ContentVersion, Evidence, RawContent, Source
+from app.models import ContentReview, ContentVersion, Evidence, NewsArchive, RawContent, Source
 
 NEWS_TOPICS = ("OpenAI", "Codex", "Claude", "Gemini", "DeepSeek", "开源模型", "行业动态")
 _AI_SUBJECT = re.compile(
@@ -190,6 +190,14 @@ async def raw_news_feed(
         ContentReview.violation.is_(False),
         news["newsworthy"].as_boolean().is_(True),
     )
+    manual_hidden = (
+        select(NewsArchive.payload["hidden"].as_boolean())
+        .where(NewsArchive.kind == "visibility", NewsArchive.raw_content_id == RawContent.id)
+        .order_by(NewsArchive.created_at.desc(), NewsArchive.key.desc())
+        .limit(1)
+        .correlate(RawContent)
+        .scalar_subquery()
+    )
     ts = func.coalesce(RawContent.published_at, RawContent.collected_at)
     query = (
         select(RawContent, ContentVersion, Source, ContentReview)
@@ -205,7 +213,17 @@ async def raw_news_feed(
         .where(
             RawContent.community == "ai",
             ts >= utcnow() - timedelta(hours=hours),
-            or_(~review_current, approved),
+            or_(
+                and_(review_current, RawContent.hidden.is_(False), approved),
+                and_(
+                    ~review_current,
+                    or_(
+                        RawContent.hidden.is_(False),
+                        manual_hidden.is_(None),
+                        manual_hidden.is_(False),
+                    ),
+                ),
+            ),
             ~select(Evidence.raw_content_id)
             .where(Evidence.raw_content_id == RawContent.id, Evidence.role == "excluded")
             .exists(),

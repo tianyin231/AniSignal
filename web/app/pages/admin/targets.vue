@@ -2,6 +2,7 @@
 import type { CollectTarget } from '~/utils/admin-types'
 import { fmtTime, platformLabels, targetTypeLabels } from '~/utils/admin-types'
 import { useAdminCommunities } from '~/utils/admin-communities'
+import { apiErrorDetail } from '~/utils/api-errors'
 import type { SiteCommunityItem } from '~/composables/useSiteConfig'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
@@ -193,8 +194,8 @@ function startEditCommunity(row: AdminCommunityRow) {
 async function saveCommunity() {
   if (communityBusy.value || !communityForm.label.trim()) return
   const key = communityForm.key.trim().toLowerCase()
-  if (!editingCommunityKey.value && !/^[a-z][a-z0-9_-]{1,31}$/.test(key)) {
-    toast.err('分区标识需为 2~32 位小写字母、数字、下划线或短横线，且以字母开头')
+  if (!editingCommunityKey.value && !/^[a-z][a-z0-9_-]{0,15}$/.test(key)) {
+    toast.err('分区标识需为 1~16 位小写字母、数字、下划线或短横线，且以字母开头')
     return
   }
   communityBusy.value = true
@@ -219,7 +220,7 @@ async function saveCommunity() {
     resetCommunityForm()
     await Promise.all([loadCommunities(), refreshSiteConfig()])
   } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? exc?.message ?? '保存分区失败')
+    toast.err(apiErrorDetail(exc, '保存分区失败'))
   } finally {
     communityBusy.value = false
   }
@@ -237,7 +238,7 @@ async function toggleCommunityActive(row: AdminCommunityRow) {
     toast.ok(row.active ? `已隐藏分区「${row.label}」` : `已启用分区「${row.label}」`)
     await Promise.all([loadCommunities(), refreshSiteConfig()])
   } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? '分区状态更新失败')
+    toast.err(apiErrorDetail(exc, '分区状态更新失败'))
   } finally {
     communityBusy.value = false
   }
@@ -251,7 +252,7 @@ async function batchCommunities(keys: string[], action: 'enable' | 'disable') {
     toast.ok(action === 'enable' ? '已批量显示所选分区' : '已隐藏无信源的空分区')
     await Promise.all([loadCommunities(), refreshSiteConfig()])
   } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? '批量调整分区失败')
+    toast.err(apiErrorDetail(exc, '批量调整分区失败'))
   } finally {
     communityBusy.value = false
   }
@@ -662,7 +663,8 @@ async function remove(target: CollectTarget) {
         <input
           v-model="communityForm.key"
           :disabled="!!editingCommunityKey"
-          placeholder="分区标识（如 bluearchive）"
+          maxlength="16"
+          placeholder="分区标识（1~16位，如 bluearchive）"
           aria-label="分区英文标识"
           class="input mono px-3 py-2 text-sm disabled:opacity-50"
         >

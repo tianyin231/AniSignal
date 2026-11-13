@@ -7,11 +7,12 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import get_queue
+from app.api.auth import _current_user
 from app.api.deps import require_admin
 from app.clock import utcnow
 from app.db import get_session
@@ -20,7 +21,7 @@ from app.services.auth import revoke_all_sessions
 from app.services.email_templates import notice_email
 from app.services.notifications import beijing_today
 from app.services.queue import BaseQueue
-from app.services.settings import get_effective_smtp
+from app.services.settings import get_admin_user_ids, get_effective_smtp, set_user_admin
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +41,14 @@ async def _require_smtp(session: AsyncSession) -> None:
         )
 
 
-def _user_out(user: User, keyword_count: int | None = None) -> dict:
+def _user_out(user: User, keyword_count: int | None = None, *, is_admin: bool = False) -> dict:
     return {
         "id": user.id,
         "email": user.email,
         "display_name": user.display_name,
         "avatar": user.avatar,
         "is_verified": user.is_verified,
+        "is_admin": is_admin,
         "notification_enabled": user.notification_enabled,
         "status": user.status,
         "banned_reason": user.banned_reason,
@@ -105,14 +107,30 @@ async def list_users(
         .limit(page_size)
         .offset((page - 1) * page_size)
     )
-    items = [_user_out(user, cnt) for user, cnt in rows]
+    admin_ids = await get_admin_user_ids(session)
+    items = [_user_out(user, cnt, is_admin=user.id in admin_ids) for user, cnt in rows]
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.post("/bind-self")
+async def bind_self_admin(request: Request, session: AsyncSession = Depends(get_session)):
+    """将当前已登录的站点账号绑定为管理员，后续可直接凭账号会话访问管理后台。"""
+    user = await _current_user(request, session)
+    if user is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "当前未登录站点账号，请先登录个人账号后再绑定")
+    if user.status != "active":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "当前账号已被封禁，无法设为管理员")
+    if not user.is_verified:
+        user.is_verified = True
+    await set_user_admin(session, user.id, True)
+    return _user_out(user, is_admin=True)
 
 
 @router.get("/{user_id}")
 async def user_detail(user_id: int, session: AsyncSession = Depends(get_session)):
     """用户详情：资料、关键词订阅与最近邮件投递记录。"""
     user = await _get_user_or_404(session, user_id)
+    admin_ids = await get_admin_user_ids(session)
     keywords = list(
         (
             await session.execute(
@@ -139,7 +157,7 @@ async def user_detail(user_id: int, session: AsyncSession = Depends(get_session)
         )
     ) or 0
     return {
-        **_user_out(user, len(keywords)),
+        **_user_out(user, len(keywords), is_admin=user.id in admin_ids),
         "keywords": [
             {"id": k.id, "keyword": k.keyword, "enabled": k.enabled, "created_at": k.created_at}
             for k in keywords
@@ -164,11 +182,22 @@ async def user_detail(user_id: int, session: AsyncSession = Depends(get_session)
 async def update_user(
     user_id: int,
     body: dict,
+    request: Request,
+    x_admin_token: str | None = Header(default=None),
     session: AsyncSession = Depends(get_session),
 ):
-    """账号管理：封禁/解封（附原因）、邮件通知订阅开关。封禁即时吊销全部会话。"""
+    """账号管理：封禁/解封（附原因）、管理员授权、邮件通知订阅开关。封禁即时吊销全部会话。"""
     user = await _get_user_or_404(session, user_id)
     actions: list[str] = []
+    admin_ids = await get_admin_user_ids(session)
+
+    if (body.get("banned") is True) or (body.get("is_admin") is False):
+        current = await _current_user(request, session) if not x_admin_token else None
+        if current is not None and current.id == user.id:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "不能在当前账号会话下封禁自己或撤销自己的管理员权限",
+            )
 
     if "banned" in body:
         banned = bool(body["banned"])
@@ -179,6 +208,9 @@ async def update_user(
             user.banned_at = utcnow()
             await revoke_all_sessions(session, user.id)
             actions.append("banned")
+            if user.id in admin_ids:
+                admin_ids = await set_user_admin(session, user.id, False, commit=False)
+                actions.append("admin_revoked")
         elif not banned and user.status == "banned":
             user.status = "active"
             user.banned_reason = None
@@ -193,9 +225,23 @@ async def update_user(
         user.is_verified = True
         actions.append("verified")
 
+    if "is_admin" in body:
+        want_admin = bool(body["is_admin"])
+        if want_admin and user.id not in admin_ids:
+            if user.status != "active":
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "已封禁账号不能设为管理员")
+            if not user.is_verified:
+                user.is_verified = True
+                actions.append("verified")
+            admin_ids = await set_user_admin(session, user.id, True, commit=False)
+            actions.append("admin_granted")
+        elif not want_admin and user.id in admin_ids:
+            admin_ids = await set_user_admin(session, user.id, False, commit=False)
+            actions.append("admin_revoked")
+
     await session.commit()
     logger.info("admin updated user %s: %s", user_id, actions or "no-op")
-    return {**_user_out(user), "actions": actions}
+    return {**_user_out(user, is_admin=user.id in admin_ids), "actions": actions}
 
 
 @router.post("/{user_id}/verify")
@@ -212,7 +258,8 @@ async def verify_user_manually(user_id: int, session: AsyncSession = Depends(get
         .values(used_at=utcnow())
     )
     await session.commit()
-    return _user_out(user)
+    admin_ids = await get_admin_user_ids(session)
+    return _user_out(user, is_admin=user.id in admin_ids)
 
 
 @router.post("/{user_id}/reset-password")
@@ -235,7 +282,8 @@ async def reset_user_password(user_id: int, body: dict, session: AsyncSession = 
         .values(used_at=utcnow())
     )
     await revoke_all_sessions(session, user.id)
-    return _user_out(user)
+    admin_ids = await get_admin_user_ids(session)
+    return _user_out(user, is_admin=user.id in admin_ids)
 
 
 @router.post("/{user_id}/email", status_code=status.HTTP_202_ACCEPTED)

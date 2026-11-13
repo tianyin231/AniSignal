@@ -104,9 +104,9 @@ flowchart LR
 
 ## 快速开始
 
-### 生产部署（Docker Compose，5 分钟从零跑通）
+### 生产部署（Docker Compose，预构建镜像秒级拉起）
 
-环境要求：Git、Docker 24+（含 Buildx）与 Docker Compose v2，建议机器内存 **≥ 2 GB**（支持 `linux/amd64` 与 `linux/arm64`）。
+环境要求：Git、Docker 24+ 与 Docker Compose v2，建议机器内存 **≥ 2 GB**（官方预构建镜像 `ghcr.io/tianyin231/anisignal` 原生支持 `linux/amd64` 与 `linux/arm64`，服务器无需本地编译前端与 Python 环境）。
 
 ```bash
 git clone https://github.com/tianyin231/AniSignal.git
@@ -117,18 +117,18 @@ cp .env.example .env
 编辑 `.env`：
 
 - `MYSQL_ROOT_PASSWORD`：数据库密码（随机长字符串，支持特殊字符自动编码）；
-- `ANISIGNAL_ADMIN_TOKEN`：管理后台登录令牌（随机长字符串，不能保留 `change-me`）；
+- `ANISIGNAL_ADMIN_TOKEN`：管理后台初始令牌（随机长字符串，不能保留 `change-me`；首次登录后可一键绑定个人站点账号免口令直进）；
 - `ANISIGNAL_PUBLIC_BASE_URL`：对外访问地址（本机试用保持 `http://127.0.0.1:8090`；绑定域名时填 `https://signal.example.com`）；
 - `WEB_PORT`：宿主机监听地址（默认 `127.0.0.1:8090` 仅本机反代访问；局域网直连可改为 `0.0.0.0:8090`）。
 
-启动服务：
+启动服务（二次开发改过源码时追加 `--build`）：
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 docker compose ps
 ```
 
-打开 **`http://127.0.0.1:8090/admin`** 输入 `ANISIGNAL_ADMIN_TOKEN`，按后台首页的 **3 步初始化引导**即可在浏览器内完成全部配置（无需再登 SSH）：
+打开 **`http://127.0.0.1:8090/admin`** 输入 `ANISIGNAL_ADMIN_TOKEN`（若已登录站点账号，可勾选一键绑定为管理员账号，后续点击右上角头像菜单「管理看板」直进后台），按后台首页的 **3 步初始化引导**即可在浏览器内完成全部配置（无需再登 SSH）：
 
 1. **定制分区与信源（`/admin/targets`）**：新建自定义分区或开关内置分区，点击「导入预设信源」一键导入所需分区，或手动添加 / 批量移除监控源；如需采集 B 站动态，直接在同页扫码或粘贴 Cookie 登录。
 2. **AI 模型（可选，`/admin/ai`）**：填入任意 OpenAI 兼容接口（摘要、日历抽取、周边自动建档与 AI 快讯精炼依赖模型；暂不配置也可直接看规则归并事件与原文直出）。
@@ -187,14 +187,14 @@ Copyright © 2026 tianyin231 与贡献者。本项目以 [GNU AGPL-3.0](LICENSE)
 | :--- | :--- |
 | **Anthropic** | `Claude Opus 5.5` |
 | **OpenAI** | `GPT-6.1 Sol` · `GPT-6 Astra` · `GPT-5.6 Sol` |
-| **Google DeepMind** | `Gemini 3.8 Flash` |
+| **Google DeepMind** | `Gemini 4 Carbon` · `Gemini 3.8 Flash` |
 | **xAI** | `Grok 4.7` |
 | **StepFun** | `Step 5 Preview` |
 | **Zhipu AI** | `GLM-5.3` · `GLM-5.3 Flash` |
 | **Xiaomi** | `MiMo v2.6 Pro` |
 | **Agnes AI** | `agnes-3.0-flash` · `agnes-2.0-flash` |
 
-开发工具与 Agent 宿主：`ChatGPT(codex)` · `Claude Code` · `ZCode` · `Antigravity` · `GrokBot` · `Muse` · `GPTDots`
+开发工具与 Agent 宿主：`ChatGPT(codex)` · `Claude Code` · `ZCode` · `Antigravity` · `Ponytail` · `GrokBot` · `Muse` · `GPTDots`
 
 </details>
 

@@ -26,6 +26,7 @@ export interface AdminUser {
   display_name: string | null
   avatar: string | null
   is_verified: boolean
+  is_admin?: boolean
   notification_enabled: boolean
   status: 'active' | 'banned' | string
   banned_reason: string | null

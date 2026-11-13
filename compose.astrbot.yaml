@@ -1,8 +1,14 @@
 # 启用方式：COMPOSE_FILE=compose.yaml:compose.astrbot.yaml
-# 将 app 与 collector 接入外部机器人网络，便于容器间按服务名直连。
+# 将 api、web（保留旧服务别名 app:3000 兼容）与 collector 接入外部机器人网络。
 services:
-  app:
+  api:
     networks: [default, astrbot]
+  web:
+    networks:
+      default: {}
+      astrbot:
+        aliases:
+          - app
   collector:
     networks: [default, astrbot]
 networks:

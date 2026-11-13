@@ -263,10 +263,12 @@ async def on_startup(ctx) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    from app.communities import sync_communities
     from app.db import SessionLocal
     from app.services.collect import recover_stale_runs
 
     async with SessionLocal() as session:
+        await sync_communities(session)
         recovered = await recover_stale_runs(session)
     if recovered:
         logger.warning("recovered %s interrupted collection runs", recovered)

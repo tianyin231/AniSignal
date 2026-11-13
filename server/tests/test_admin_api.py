@@ -44,7 +44,7 @@ async def test_healthz_open(client):
 
 async def test_admin_requires_token(client):
     resp = await client.get("/api/admin/collect-targets")
-    assert resp.status_code == 422  # 缺 Header
+    assert resp.status_code == 401
     resp = await client.get("/api/admin/collect-targets", headers={"X-Admin-Token": "wrong"})
     assert resp.status_code == 401
 

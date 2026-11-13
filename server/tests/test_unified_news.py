@@ -126,7 +126,7 @@ async def test_public_archive_keeps_detail_after_leaving_pool(client, session, s
 
 async def test_admin_uses_main_database_and_keeps_shared_auth(client, session, snapshot, unified, admin_headers):
     await import_news(session, snapshot)
-    assert (await client.get("/api/admin/aihot/status")).status_code == 422
+    assert (await client.get("/api/admin/aihot/status")).status_code == 401
     response = await client.get("/api/admin/aihot/status", headers=admin_headers)
     assert response.status_code == 200 and response.json()["engine"] == "anisignal"
     assert response.json()["sources"]["totals"]["total"] == 1

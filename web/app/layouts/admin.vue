@@ -4,6 +4,7 @@ import AppShell from '~/components/AppShell.vue'
 // 管理功能使用独立导航，站点外壳、主题和壁纸与公开页面共用。
 const route = useRoute()
 const { token, logout } = useAdminApi()
+const { user } = useAuth()
 
 function handleLogout() {
   logout()
@@ -36,6 +37,9 @@ const showingLogin = computed(() => route.path === '/admin/login')
         <div class="flex flex-wrap items-center justify-between gap-3">
           <NuxtLink to="/admin" class="text-sm font-bold text-ink">管理看板</NuxtLink>
           <div class="flex items-center gap-3 text-sm">
+            <span v-if="!token && user?.is_admin" class="hidden text-xs text-muted sm:inline">
+              管理员账号：{{ user.email }}
+            </span>
             <NuxtLink to="/" class="text-muted transition-colors hover:text-ink">返回站点</NuxtLink>
             <button
               v-if="token"

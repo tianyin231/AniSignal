@@ -43,14 +43,32 @@ async def raw_article(session, raw_id: int) -> dict:
     )
     if excluded is not None:
         raise HTTPException(404, "资讯已撤下")
-    if (
+    is_review_current = bool(
         review
         and review.news
         and review.news.get("content_hash") == raw.content_hash
         and review.news.get("content_version") == version.version
-        and not (review.relevant and not review.promotional and not review.violation and review.news.get("newsworthy"))
-    ):
-        raise HTTPException(404, "资讯不符合收录标准")
+    )
+    if is_review_current:
+        is_approved = bool(
+            review.relevant
+            and not review.promotional
+            and not review.violation
+            and review.news.get("newsworthy")
+        )
+        if not is_approved:
+            raise HTTPException(404, "资讯不符合收录标准")
+        if raw.hidden:
+            raise HTTPException(404, "资讯已撤下")
+    elif raw.hidden:
+        latest_vis = await session.scalar(
+            select(NewsArchive)
+            .where(NewsArchive.kind == "visibility", NewsArchive.raw_content_id == raw.id)
+            .order_by(NewsArchive.created_at.desc(), NewsArchive.key.desc())
+            .limit(1)
+        )
+        if latest_vis is not None and latest_vis.payload.get("hidden"):
+            raise HTTPException(404, "资讯已撤下")
     text = version.text or ""
     html_body = _sanitize_html(text)
     if not html_body and text.strip():

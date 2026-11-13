@@ -107,7 +107,7 @@ The backend is FastAPI + SQLAlchemy (async) + MySQL 8.4 with a Redis / arq task 
 
 ### Production (Docker Compose)
 
-Requirements: Git, Docker 24+ (with Buildx), Docker Compose v2, and **at least 2 GB RAM** (`linux/amd64` and `linux/arm64` supported).
+Requirements: Git, Docker 24+, Docker Compose v2, and **at least 2 GB RAM** (official pre-built multi-arch images at `ghcr.io/tianyin231/anisignal` support both `linux/amd64` and `linux/arm64` with zero on-server compilation).
 
 ```bash
 git clone https://github.com/tianyin231/AniSignal.git
@@ -118,18 +118,18 @@ cp .env.example .env
 Edit `.env`:
 
 - `MYSQL_ROOT_PASSWORD`: strong random password for MySQL (special characters are URL-encoded automatically);
-- `ANISIGNAL_ADMIN_TOKEN`: strong random token for `/admin` (do not leave `change-me`);
+- `ANISIGNAL_ADMIN_TOKEN`: initial bootstrap token for `/admin` (do not leave `change-me`; can be bound to your personal site account on first login);
 - `ANISIGNAL_PUBLIC_BASE_URL`: external site URL (`http://127.0.0.1:8090` for local testing, or `https://signal.example.com` behind HTTPS reverse proxy);
 - `WEB_PORT`: host bind address and port (defaults to `127.0.0.1:8090`; set `0.0.0.0:8090` for direct LAN access).
 
-Start the stack:
+Start the stack (append `--build` only if you modified local source files):
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 docker compose ps
 ```
 
-Open **`http://127.0.0.1:8090/admin`** with your `ANISIGNAL_ADMIN_TOKEN` and follow the 3-step onboarding card:
+Open **`http://127.0.0.1:8090/admin`** with your `ANISIGNAL_ADMIN_TOKEN` (you can bind your logged-in site account as an admin in one click so future visits enter `/admin` directly without re-entering the token) and follow the 3-step onboarding card:
 
 1. **Sections & Sources (`/admin/targets`)**: Create custom sections, import preset source packs in one click, or add/remove sources in bulk; scan a QR code or paste cookies for Bilibili if needed.
 2. **AI Models (optional, `/admin/ai`)**: Configure an OpenAI-compatible endpoint for summaries, calendar extraction, merch discovery, and curated AI News (or browse raw items directly without AI).
@@ -188,14 +188,14 @@ AniSignal was built by a human developer pairing with a number of large language
 | :--- | :--- |
 | **Anthropic** | `Claude Opus 5.5` |
 | **OpenAI** | `GPT-6.1 Sol` · `GPT-6 Astra` · `GPT-5.6 Sol` |
-| **Google DeepMind** | `Gemini 3.8 Flash` |
+| **Google DeepMind** | `Gemini 4 Carbon` · `Gemini 3.8 Flash` |
 | **xAI** | `Grok 4.7` |
 | **StepFun** | `Step 5 Preview` |
 | **Zhipu AI** | `GLM-5.3` · `GLM-5.3 Flash` |
 | **Xiaomi** | `MiMo v2.6 Pro` |
 | **Agnes AI** | `agnes-3.0-flash` · `agnes-2.0-flash` |
 
-Developer tools and agent hosts: `ChatGPT(codex)` · `Claude Code` · `ZCode` · `Antigravity` · `GrokBot` · `Muse` · `GPTDots`
+Developer tools and agent hosts: `ChatGPT(codex)` · `Claude Code` · `ZCode` · `Antigravity` · `Ponytail` · `GrokBot` · `Muse` · `GPTDots`
 
 </details>
 

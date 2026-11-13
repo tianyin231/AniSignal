@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 
-// 默认连本机 8000。预览生产数据时用 ANISIGNAL_API_PROXY 指到另一条隧道，避免挤掉已占用的 8000。
-const apiProxy = process.env.ANISIGNAL_API_PROXY || 'http://127.0.0.1:8000'
+// 默认连本机 8000；容器化拆分部署在运行时通过 NUXT_API_SSR_BASE（如 http://api:8000）覆盖，无需重新构建镜像。
+const apiProxy = process.env.NUXT_API_SSR_BASE || process.env.ANISIGNAL_API_PROXY || 'http://127.0.0.1:8000'
 
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
@@ -11,23 +11,14 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   nitro: { compressPublicAssets: true },
   runtimeConfig: {
-    // SSR 服务端直连 FastAPI（app 容器内同网络命名空间）
+    // SSR 与 Nitro API 反代运行时直连 FastAPI（由 NUXT_API_SSR_BASE 注入）
     apiSsrBase: apiProxy,
     public: {
-      // 浏览器端走同源（默认空串），由 Nitro 代理到 FastAPI，不再暴露 API 端口
+      // 浏览器端走同源（默认空串），由 Nitro 运行时中间件代理到 FastAPI
       apiBase: '',
       // 规范地址和分享卡片用的公开域名，可用 NUXT_PUBLIC_SITE_URL 覆盖；留空自动取当前请求源
       siteUrl: '',
     },
-  },
-  routeRules: {
-    // 后端所有 HTTP API 都在 /api/** 下（含 /api/admin 管理接口）；
-    // /admin/** 是 Nuxt 页面路由，不代理
-    '/api/**': { proxy: `${apiProxy}/api/**` },
-    // RSS / Sitemap / robots：后端动态生成，映射到站点根路径
-    '/rss.xml': { proxy: `${apiProxy}/api/rss.xml` },
-    '/sitemap.xml': { proxy: `${apiProxy}/api/sitemap.xml` },
-    '/robots.txt': { proxy: `${apiProxy}/api/robots.txt` },
   },
   vite: {
     plugins: [tailwindcss()],

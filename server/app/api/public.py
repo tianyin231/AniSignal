@@ -409,7 +409,7 @@ def public_site_base(request: Request | None = None) -> str:
     if (
         proto in {"http", "https"}
         and host
-        and host not in {"127.0.0.1:8000", "localhost:8000"}
+        and host not in {"127.0.0.1:8000", "localhost:8000", "api:8000"}
         and re.fullmatch(r"[A-Za-z0-9._:\[\]-]{1,255}", host)
     ):
         return f"{proto}://{host}".rstrip("/")
