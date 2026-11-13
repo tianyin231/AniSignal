@@ -16,7 +16,7 @@ services:
     volumes:
       - ${DATA_DIR:-./data}/mysql:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h localhost -uroot --silent"]
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 --protocol=tcp -uroot --silent"]
       interval: 5s
       timeout: 3s
       retries: 20

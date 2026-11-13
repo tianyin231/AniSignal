@@ -164,7 +164,7 @@ class CollectTargetOut(BaseModel):
         return v or []
     last_run_at: datetime | None
     last_success_at: datetime | None
-    last_items_new: int | None = None
+    total_items_new: int | None = None
     consecutive_failures: int
     last_error: str | None
 

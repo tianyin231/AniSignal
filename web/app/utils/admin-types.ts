@@ -17,7 +17,7 @@ export interface CollectTarget {
   next_run_at: string | null
   last_run_at: string | null
   last_success_at: string | null
-  last_items_new: number | null
+  total_items_new: number | null
   consecutive_failures: number
   last_error: string | null
 }

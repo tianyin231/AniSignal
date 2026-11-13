@@ -24,6 +24,7 @@ interface RunItem {
   target_id: number
   started_at: string | null
   status: string
+  error: string | null
   items_found: number | null
   items_new: number | null
   items_fetched: number | null
@@ -835,8 +836,8 @@ async function remove(target: CollectTarget) {
       <input v-model="form.display_name" aria-label="显示名称" placeholder="显示名称（可选，如 OpenAI 官方博客）" class="input px-3 py-2 text-sm sm:col-span-2">
       <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="input px-3 py-2 text-sm sm:col-span-2">
       <label class="text-xs text-muted">{{ supportsViews ? '最低播放量（0 不过滤）' : '此目标没有播放量门槛' }}<input v-model.number="form.min_views" type="number" min="0" :disabled="!supportsViews" class="input mono mt-1 w-full px-3 py-2 text-sm disabled:opacity-50"></label>
-      <label class="flex items-center gap-2 self-end py-2 text-xs text-ink-2" :class="form.target_type === 'keyword_search' ? 'opacity-50' : 'cursor-pointer'">
-        <input v-model="form.is_official" type="checkbox" class="checkbox" :disabled="form.target_type === 'keyword_search'">
+      <label class="flex items-center gap-2 self-end py-2 text-xs text-ink-2" :class="['keyword_search', 'topic_search'].includes(form.target_type) ? 'opacity-50' : 'cursor-pointer'">
+        <input v-model="form.is_official" type="checkbox" class="checkbox" :disabled="['keyword_search', 'topic_search'].includes(form.target_type)">
         <span>标记为官方账号（入库内容标为「官方」）</span>
       </label>
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
@@ -896,7 +897,7 @@ async function remove(target: CollectTarget) {
             <th class="px-2.5 py-2.5 font-medium">播放门槛</th>
             <th class="px-2.5 py-2.5 font-medium">频率</th>
             <th class="px-2.5 py-2.5 font-medium">最近成功</th>
-            <th class="px-2.5 py-2.5 font-medium">入库</th>
+            <th class="px-2.5 py-2.5 font-medium">累计入库</th>
             <th class="px-3 py-2.5 font-medium">最近错误</th>
             <th class="px-3 py-2.5 text-right font-medium">操作</th>
           </tr>
@@ -936,7 +937,7 @@ async function remove(target: CollectTarget) {
             <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
             <td class="mono whitespace-nowrap px-2.5 py-2.5 text-ink-2">{{ target.platform === 'x' ? '约 ' : '' }}{{ target.interval_minutes }}min{{ target.platform === 'x' ? ' · 随机' : '' }}</td>
             <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ fmtTime(target.last_success_at) }}</td>
-            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ target.last_items_new ?? '—' }}</td>
+            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ target.total_items_new ?? '—' }}</td>
             <td class="max-w-52 truncate px-3 py-2.5 text-xs text-faint" :title="target.last_error ?? ''">
               {{ formatLastError(target.last_error) }}
             </td>
@@ -969,10 +970,11 @@ async function remove(target: CollectTarget) {
             <td class="px-4 py-2 text-ink-2">{{ targetName(run.target_id) }}</td>
             <td class="mono px-4 py-2 text-faint">{{ fmtTime(run.started_at) }}</td>
             <td class="px-4 py-2">
-              <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-chip text-muted'">{{ run.status === 'skipped' ? '冷却跳过' : run.status }}</span>
+              <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : run.status === 'failed' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-chip text-muted'">{{ run.status === 'skipped' ? '冷却跳过' : run.status }}</span>
             </td>
-            <td class="mono px-4 py-2 text-muted">
-              抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 入库 {{ run.items_new ?? 0 }}
+            <td class="px-4 py-2 text-muted" :title="run.error ?? ''">
+              <span class="mono">抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 入库 {{ run.items_new ?? 0 }}</span>
+              <span v-if="run.error" class="ml-2 text-red-600 dark:text-red-400">{{ formatLastError(run.error) }}</span>
             </td>
           </tr>
           <tr v-if="!runs.length">

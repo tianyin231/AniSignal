@@ -84,13 +84,23 @@ class IngestStats:
     touched_content_ids: list[int] = field(default_factory=list)
 
 
+def target_source_external_id(platform: str, target_value: str) -> str:
+    if platform == "rss":
+        from app.collectors.rss import rss_id
+
+        return rss_id(target_value)
+    if platform == "x":
+        return target_value.strip().removeprefix("@").lower()
+    return target_value
+
+
 async def ingest_items(
     session: AsyncSession,
     fetch_kind: str,
     items: list[dict],
     community: str = DEFAULT_COMMUNITY,
     *,
-    force_official: bool = False,
+    force_official: bool | str = False,
 ) -> IngestStats:
     if fetch_kind not in PARSERS:
         raise ValueError(f"no parser registered for fetch_kind={fetch_kind}")
@@ -152,7 +162,7 @@ async def _ingest_one(
     parser_version: str,
     rules: list,
     community: str = DEFAULT_COMMUNITY,
-    force_official: bool = False,
+    force_official: bool | str = False,
 ) -> tuple[bool, bool, int, str]:
     """返回 (is_new, fingerprint_changed, content_id, source_identity)。"""
     from app.services.statistics import record_content_stat
@@ -282,22 +292,26 @@ def _would_drop_dynamic_content(
 
 
 async def _upsert_source(
-    session: AsyncSession, normalized: NormalizedContent, *, force_official: bool = False
+    session: AsyncSession, normalized: NormalizedContent, *, force_official: bool | str = False
 ) -> tuple[int | None, str]:
     author = normalized.author
+    matched_official = force_official is True or (
+        isinstance(force_official, str)
+        and bool(author and author.external_id and author.external_id == force_official)
+    )
     if not author or not author.external_id:
         # 账号体系外的官方来源（如库洛官网公告或手动标记官方的订阅源）：建一条 Source，
         # 保证身份过滤与统计可依赖统一的 sources.identity
-        if author and author.name and (author.identity == Identity.OFFICIAL or force_official):
+        if author and author.name and (author.identity == Identity.OFFICIAL or matched_official):
             pseudo_id = (
                 f"official-{normalized.platform}-{author.name}"
-                if force_official and author.identity != Identity.OFFICIAL
+                if matched_official and author.identity != Identity.OFFICIAL
                 else f"official-{normalized.platform}"
             )
             author = author.model_copy(update={"external_id": pseudo_id})
         else:
-            return None, str(Identity.OFFICIAL if force_official else Identity.UNKNOWN)
-    identity = Identity.OFFICIAL if (force_official or author.official_title) else author.identity
+            return None, str(Identity.OFFICIAL if matched_official else Identity.UNKNOWN)
+    identity = Identity.OFFICIAL if (matched_official or author.official_title) else author.identity
     existing = await session.scalar(
         select(Source).where(
             Source.platform == normalized.platform,
@@ -328,7 +342,7 @@ async def _upsert_source(
         existing.official_title = author.official_title
     if author.follower_count is not None:
         existing.follower_count = author.follower_count
-    if force_official:
+    if matched_official:
         existing.identity = Identity.OFFICIAL
     elif identity != Identity.UNKNOWN:
         existing.identity = identity

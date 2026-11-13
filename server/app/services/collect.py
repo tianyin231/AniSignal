@@ -430,12 +430,18 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     "target %s: %s items filtered by relevance rules",
                     target.id, filtered_out,
                 )
+            from app.services.ingest import target_source_external_id
+
             stats = await ingest_items(
                 session,
                 fetch_result.fetch_kind,
                 fetch_result.items,
                 community=target.community,
-                force_official=bool(target.is_official and target.target_type != "keyword_search"),
+                force_official=(
+                    target_source_external_id(target.platform, target.target_value)
+                    if (target.is_official and target.target_type not in ("keyword_search", "topic_search"))
+                    else False
+                ),
             )
             if is_news and hasattr(redis, "enqueue_job"):
                 from app.services.ai_news import pending_news_ids

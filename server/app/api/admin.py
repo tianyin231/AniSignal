@@ -338,6 +338,50 @@ def _x_target_value(value: str, target_type: str, interval_minutes: int) -> str:
         raise HTTPException(422, str(exc)) from exc
 
 
+def _splits_by_co_terms(community: str, platform: str, tier: str, co_terms: list[str] | None) -> bool:
+    return (
+        get_community(community).domain == "game"
+        and platform != "rss"
+        and tier == "general"
+        and bool(co_terms)
+    )
+
+
+async def _ensure_no_target_conflict(
+    session: AsyncSession,
+    *,
+    platform: str,
+    target_type: str,
+    target_value: str,
+    community: str,
+    tier: str,
+    co_terms: list[str] | None,
+    exclude_id: int | None = None,
+) -> None:
+    await sync_communities(session)
+    stmt = select(CollectTarget).where(
+        CollectTarget.platform == platform,
+        CollectTarget.target_type == target_type,
+        CollectTarget.target_value == target_value,
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(CollectTarget.id != exclude_id)
+    others = list((await session.execute(stmt)).scalars())
+    if not others:
+        return
+    if any(row.community == community for row in others):
+        raise HTTPException(status.HTTP_409_CONFLICT, "该分区下已存在相同的采集目标")
+    if not (
+        _splits_by_co_terms(community, platform, tier, co_terms)
+        and all(_splits_by_co_terms(r.community, r.platform, r.tier, r.co_terms) for r in others)
+    ):
+        label = get_community(others[0].community).label
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"已在「{label}」分区采集；同一来源的内容全站只入库一次",
+        )
+
+
 @router.get("/collect-targets", response_model=list[CollectTargetOut])
 async def list_targets(
     community: str | None = COMMUNITY_OPTIONAL_QUERY_DEP,
@@ -349,19 +393,19 @@ async def list_targets(
     targets = list((await session.execute(query)).scalars())
     if not targets:
         return []
-    latest_run_ids = (
-        select(func.max(CollectRun.id))
-        .where(CollectRun.target_id.in_([t.id for t in targets]))
-        .group_by(CollectRun.target_id)
+    totals = dict(
+        (
+            await session.execute(
+                select(CollectRun.target_id, func.coalesce(func.sum(CollectRun.items_new), 0))
+                .where(CollectRun.target_id.in_([t.id for t in targets]))
+                .group_by(CollectRun.target_id)
+            )
+        ).all()
     )
-    run_rows = (
-        await session.execute(
-            select(CollectRun.target_id, CollectRun.items_new).where(CollectRun.id.in_(latest_run_ids))
-        )
-    ).all()
-    latest_new = {tid: items_new for tid, items_new in run_rows}
     return [
-        CollectTargetOut.model_validate(t).model_copy(update={"last_items_new": latest_new.get(t.id)})
+        CollectTargetOut.model_validate(t).model_copy(
+            update={"total_items_new": int(totals[t.id]) if t.id in totals else None}
+        )
         for t in targets
     ]
 
@@ -376,16 +420,15 @@ async def create_target(
 
     if body.platform == "x":
         body.target_value = _x_target_value(body.target_value, body.target_type, body.interval_minutes)
-    duplicate = await session.scalar(
-        select(CollectTarget).where(
-            CollectTarget.platform == body.platform,
-            CollectTarget.target_type == body.target_type,
-            CollectTarget.target_value == body.target_value,
-            CollectTarget.community == body.community,
-        )
+    await _ensure_no_target_conflict(
+        session,
+        platform=body.platform,
+        target_type=body.target_type,
+        target_value=body.target_value,
+        community=body.community,
+        tier=body.tier,
+        co_terms=body.co_terms,
     )
-    if duplicate is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "该分区下已存在相同的采集目标")
     min_views = (
         body.min_views
         if "min_views" in body.model_fields_set
@@ -393,7 +436,7 @@ async def create_target(
     )
     if get_community(body.community).domain == "news" or not supports_view_threshold(body.platform, body.target_type):
         min_views = 0
-    is_official = bool(body.is_official and body.target_type != "keyword_search")
+    is_official = bool(body.is_official and body.target_type not in ("keyword_search", "topic_search"))
     target = CollectTarget(
         platform=body.platform,
         target_type=body.target_type,
@@ -421,6 +464,8 @@ async def update_target(
     session: AsyncSession = Depends(get_session),
 ):
     from app.clock import utcnow
+    from app.models.enums import Identity
+    from app.services.ingest import target_source_external_id
 
     target = await session.get(CollectTarget, target_id)
     if target is None:
@@ -433,11 +478,15 @@ async def update_target(
     bound_product = await session.scalar(select(Product).where(Product.monitor_target_id == target.id))
     if bound_product and body.community is not None and body.community != bound_product.community:
         raise HTTPException(status.HTTP_409_CONFLICT, "该目标已关联商品，请从商品管理修改所属分区")
+    old_value = target.target_value
+    old_official = target.is_official
     if body.display_name is not None:
         target.display_name = body.display_name
     if body.interval_minutes is not None:
         target.interval_minutes = body.interval_minutes
     next_community = body.community if body.community is not None else target.community
+    next_tier = body.tier if body.tier is not None else target.tier
+    next_co_terms = body.co_terms if body.co_terms is not None else target.co_terms
     next_value = target.target_value
     value_changed = False
     if body.target_value is not None and body.target_value != target.target_value:
@@ -449,18 +498,17 @@ async def update_target(
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
         value_changed = next_value != target.target_value
-    if value_changed or next_community != target.community:
-        duplicate = await session.scalar(
-            select(CollectTarget).where(
-                CollectTarget.platform == target.platform,
-                CollectTarget.target_type == target.target_type,
-                CollectTarget.target_value == next_value,
-                CollectTarget.community == next_community,
-                CollectTarget.id != target.id,
-            )
+    if value_changed or next_community != target.community or body.tier is not None or body.co_terms is not None:
+        await _ensure_no_target_conflict(
+            session,
+            platform=target.platform,
+            target_type=target.target_type,
+            target_value=next_value,
+            community=next_community,
+            tier=next_tier,
+            co_terms=next_co_terms,
+            exclude_id=target.id,
         )
-        if duplicate is not None:
-            raise HTTPException(status.HTTP_409_CONFLICT, "该分区下已存在相同的采集目标")
     if value_changed:
         target.target_value = next_value
         target.last_success_at, target.last_error, target.consecutive_failures = None, None, 0
@@ -472,11 +520,20 @@ async def update_target(
         target.community = body.community
     if body.is_official is not None:
         next_cfg = dict(target.config or {})
-        if body.is_official and target.target_type != "keyword_search":
+        if body.is_official and target.target_type not in ("keyword_search", "topic_search"):
             next_cfg["is_official"] = True
         else:
             next_cfg.pop("is_official", None)
         target.config = next_cfg
+    if old_official and (not target.is_official or value_changed):
+        await session.execute(
+            update(Source)
+            .where(
+                Source.platform == target.platform,
+                Source.external_id == target_source_external_id(target.platform, old_value),
+            )
+            .values(identity=Identity.UNKNOWN)
+        )
     if body.min_views is not None:
         target.min_views = body.min_views
     if get_community(target.community).domain == "news" or not supports_view_threshold(target.platform, target.target_type):

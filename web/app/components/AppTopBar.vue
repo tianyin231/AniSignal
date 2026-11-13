@@ -189,7 +189,7 @@ async function handleLogout() {
         >
           登录
         </NuxtLink>
-        <div v-else ref="menuRoot" class="relative">
+        <div v-else-if="user" ref="menuRoot" class="relative">
           <button
             class="flex h-10 items-center gap-2 rounded-[10px] px-2 text-sm transition-colors hover:bg-chip"
             :aria-expanded="menuOpen"

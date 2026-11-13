@@ -51,7 +51,7 @@ async function submit() {
         <span>同时将当前登录账号（<span class="font-medium text-ink">{{ user.email }}</span>）设为管理员，后续免输 Token</span>
       </label>
       <p v-else class="mt-3 text-xs text-muted">
-        提示：先在右上角
+        提示：先
         <NuxtLink :to="loginRoute('/admin/login')" class="text-brand-ink hover:underline">登录站点账号</NuxtLink>
         再验证 Token，可一键绑定为管理员账号。
       </p>

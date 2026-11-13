@@ -554,7 +554,7 @@ async def test_issue3_target_validation_official_flag_runs_and_seeds_cli(client,
         assert bad_yt.status_code == 422
         assert "频道 RSS" in bad_yt.text
 
-        # 创建自定义分区并验证 F38（跨分区同频道允许，同分区撞键 409）+ F40（is_official）
+        # 创建自定义分区并验证 F42/F38（全量同源跨分区返回 409 并指明已有分区；泛关键词+共现词综合频道允许跨分区分流）
         sec = await client.post(
             "/api/admin/communities",
             headers=admin_headers,
@@ -571,72 +571,128 @@ async def test_issue3_target_validation_official_flag_runs_and_seeds_cli(client,
                 "target_type": "channel_rss",
                 "target_value": chan,
                 "community": "wuwa",
-            },
-        )
-        t2 = await client.post(
-            "/api/admin/collect-targets",
-            headers=admin_headers,
-            json={
-                "platform": "youtube",
-                "target_type": "channel_rss",
-                "target_value": chan,
-                "community": "ba",
-                "is_official": True,
-            },
-        )
-        dup = await client.post(
-            "/api/admin/collect-targets",
-            headers=admin_headers,
-            json={
-                "platform": "youtube",
-                "target_type": "channel_rss",
-                "target_value": chan,
-                "community": "ba",
+                "tier": "core",
             },
         )
         assert t1.status_code == 201 and t1.json()["is_official"] is False
-        assert t2.status_code == 201 and t2.json()["is_official"] is True
-        assert dup.status_code == 409
-        # PUT 跨分区迁入已有同源目标的分区也应拦截为 409
-        move_dup = await client.put(
-            f"/api/admin/collect-targets/{t1.json()['id']}",
+        cross_dup = await client.post(
+            "/api/admin/collect-targets",
             headers=admin_headers,
-            json={"community": "ba"},
+            json={
+                "platform": "youtube",
+                "target_type": "channel_rss",
+                "target_value": chan,
+                "community": "ba",
+                "tier": "core",
+            },
         )
-        assert move_dup.status_code == 409
+        assert cross_dup.status_code == 409 and "鸣潮" in cross_dup.text
 
-        # F39: 运行记录按分区过滤，目标列表返回最近一轮 items_new
+        # 泛关键词 + 共现词的综合频道允许跨分区共享；若事后把其中一侧改为 core 则 409 拦截
+        shared_chan = "UCsharedcreator0000000001"
+        s1 = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={
+                "platform": "youtube",
+                "target_type": "channel_rss",
+                "target_value": shared_chan,
+                "community": "wuwa",
+                "tier": "general",
+                "co_terms": ["鸣潮"],
+            },
+        )
+        s2 = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={
+                "platform": "youtube",
+                "target_type": "channel_rss",
+                "target_value": shared_chan,
+                "community": "ba",
+                "tier": "general",
+                "co_terms": ["蔚蓝档案"],
+            },
+        )
+        assert s1.status_code == 201 and s2.status_code == 201
+        hog = await client.put(
+            f"/api/admin/collect-targets/{s1.json()['id']}",
+            headers=admin_headers,
+            json={"tier": "core"},
+        )
+        assert hog.status_code == 409
+
+        # F40 + F46: 官方开关仅作用于目标账号自身（不误标转推作者），取消勾选后重置身份为 unknown
+        ba_x = await client.post(
+            "/api/admin/collect-targets",
+            headers=admin_headers,
+            json={
+                "platform": "x",
+                "target_type": "account_dynamics",
+                "target_value": "@EN_BlueArchive",
+                "community": "ba",
+                "interval_minutes": 60,
+                "is_official": True,
+            },
+        )
+        assert ba_x.status_code == 201 and ba_x.json()["is_official"] is True
+
+        # F39: 运行记录按分区过滤，目标列表返回累计入库数（第 2 轮新增 0 时仍保留累计 7）
         session.add_all([
             CollectRun(target_id=t1.json()["id"], started_at=utcnow(), status="success", items_new=2),
-            CollectRun(target_id=t2.json()["id"], started_at=utcnow(), status="success", items_new=7),
+            CollectRun(target_id=ba_x.json()["id"], started_at=utcnow(), status="success", items_new=7),
+            CollectRun(target_id=ba_x.json()["id"], started_at=utcnow(), status="success", items_new=0),
         ])
         await session.commit()
         ba_runs = (await client.get("/api/admin/runs", params={"community": "ba"}, headers=admin_headers)).json()
-        assert [r["target_id"] for r in ba_runs] == [t2.json()["id"]]
+        assert {r["target_id"] for r in ba_runs} == {ba_x.json()["id"]}
         ba_targets = (await client.get("/api/admin/collect-targets", params={"community": "ba"}, headers=admin_headers)).json()
-        assert ba_targets[0]["last_items_new"] == 7
+        ba_x_row = next(r for r in ba_targets if r["id"] == ba_x.json()["id"])
+        assert ba_x_row["total_items_new"] == 7
 
-        # F40: 未在写死白名单中的 X 账号开启 force_official 后，入库身份为 official
         stats = await ingest_items(
             session,
             "x_posts",
-            [{
-                "id": "1900000000000000001",
-                "account": "en_bluearchive",
-                "author": "BlueArchiveEN",
-                "text": "Maintenance notice for Blue Archive.",
-                "url": "https://x.com/EN_BlueArchive/status/1900000000000000001",
-                "published_at": "2026-11-13T10:00:00+00:00",
-                "media": [],
-                "quoted_urls": [],
-            }],
+            [
+                {
+                    "id": "1900000000000000001",
+                    "account": "en_bluearchive",
+                    "author": "EN_BlueArchive",
+                    "text": "Maintenance notice for Blue Archive.",
+                    "url": "https://x.com/EN_BlueArchive/status/1900000000000000001",
+                    "published_at": "2026-11-13T10:00:00+00:00",
+                    "media": [],
+                    "quoted_urls": [],
+                },
+                {
+                    "id": "1900000000000000002",
+                    "account": "en_bluearchive",
+                    "author": "SomeFanArtist",
+                    "text": "Fan art retweeted on official timeline.",
+                    "url": "https://x.com/SomeFanArtist/status/1900000000000000002",
+                    "published_at": "2026-11-13T10:05:00+00:00",
+                    "media": [],
+                    "quoted_urls": [],
+                },
+            ],
             community="ba",
-            force_official=True,
+            force_official="en_bluearchive",
         )
-        assert stats.official_items == 1
-        raw = await session.scalar(select(RawContent).where(RawContent.external_id == "1900000000000000001"))
-        source = await session.get(Source, raw.source_id)
-        assert source.identity == "official"
+        assert stats.official_items == 1 and stats.community_items == 1
+        raw_own = await session.scalar(select(RawContent).where(RawContent.external_id == "1900000000000000001"))
+        raw_rt = await session.scalar(select(RawContent).where(RawContent.external_id == "1900000000000000002"))
+        src_own = await session.get(Source, raw_own.source_id)
+        src_rt = await session.get(Source, raw_rt.source_id)
+        assert src_own.identity == "official" and src_rt.identity == "user"
+
+        unset = await client.put(
+            f"/api/admin/collect-targets/{ba_x.json()['id']}",
+            headers=admin_headers,
+            json={"is_official": False},
+        )
+        assert unset.status_code == 200 and unset.json()["is_official"] is False
+        await session.refresh(src_own)
+        assert src_own.identity == "unknown"
     finally:
         reset_communities()
 

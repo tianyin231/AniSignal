@@ -68,3 +68,15 @@ jobs:
       - run: npm ci --replace-registry-host=always
       - run: npm test
       - run: npx nuxt build
+      - name: SSR smoke check (anonymous & token-only admin)
+        run: |
+          PORT=3199 node .output/server/index.mjs &
+          SERVER_PID=$!
+          trap "kill $SERVER_PID 2>/dev/null || true" EXIT
+          for _ in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:3199/admin/login >/dev/null 2>&1 && break
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:3199/ >/dev/null
+          curl -fsS http://127.0.0.1:3199/admin/login >/dev/null
+          curl -fsS -H "Cookie: anisignal_admin_token=smoke-token" http://127.0.0.1:3199/admin/targets >/dev/null
