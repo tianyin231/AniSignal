@@ -81,12 +81,27 @@ async def login(cookie_file: Path, qr_image: Path) -> bool:
     return False
 
 
+async def import_credentials(cookie_file: Path) -> None:
+    from app.db import SessionLocal
+    from app.services.bilibili_session import import_file_credentials
+
+    async with SessionLocal() as session:
+        result = await import_file_credentials(session, str(cookie_file))
+    print(json.dumps(result, ensure_ascii=False), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="B站官方网页扫码授权，不输出会话凭据")
     parser.add_argument("--cookie-file", type=Path, required=True)
-    parser.add_argument("--qr-image", type=Path, required=True)
+    parser.add_argument("--qr-image", type=Path)
+    parser.add_argument("--import-to-db", action="store_true", help="将原有凭据文件一次性迁入后台，不覆盖已有凭据")
     args = parser.parse_args()
+    if not args.import_to_db and args.qr_image is None:
+        parser.error("扫码登录需指定 --qr-image；迁移原有凭据请使用 --import-to-db")
     try:
+        if args.import_to_db:
+            asyncio.run(import_credentials(args.cookie_file))
+            return
         success = asyncio.run(login(args.cookie_file, args.qr_image))
     except (httpx.HTTPError, OSError, ValueError, KeyError) as exc:
         # 网络异常的 URL/响应可能携带授权信息，控制台只给操作提示。

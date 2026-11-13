@@ -59,7 +59,8 @@ export const ADMIN_COMMUNITY_BADGE: Record<string, string> = {
 }
 
 export function useAdminCommunities() {
-  const { data: siteConfig, refresh: refreshSiteConfig } = useNuxtData<PublicSiteConfig>('site-config')
+  const { data: siteConfig } = useNuxtData<PublicSiteConfig>('site-config')
+  const refreshSiteConfig = () => refreshNuxtData('site-config')
 
   const communities = computed<SiteCommunityItem[]>(() => {
     if (siteConfig.value?.all_communities?.length) {

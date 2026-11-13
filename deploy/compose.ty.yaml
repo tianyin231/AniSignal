@@ -1,0 +1,24 @@
+# ty 的 4 GB 内存配置。升级时替换旧覆盖文件，不要同时叠加仓库根目录的 compose.ty.yaml。
+# docker compose -p anisignal -f compose.yaml -f deploy/compose.ty.yaml up -d --no-build --remove-orphans --wait
+# 所有业务容器继承主配置的 ANISIGNAL_IMAGE，部署前固定为同一个提交标签。
+x-logging: &bounded_logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+services:
+  mysql:
+    mem_limit: 1536m
+    logging: *bounded_logs
+  redis:
+    mem_limit: 64m
+    logging: *bounded_logs
+  api:
+    mem_limit: 512m
+  web:
+    mem_limit: 256m
+    ports: !override
+      - "127.0.0.1:${TY_WEB_PORT:-8090}:3000"
+  collector:
+    mem_limit: 768m
+    stop_grace_period: 180s

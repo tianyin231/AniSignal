@@ -15,6 +15,7 @@ from app.api.admin_users import router as admin_users_router
 from app.api.admin_custom import router as admin_custom_router
 from app.api.admin_settings import router as admin_settings_router
 from app.api.admin_proxies import router as admin_proxies_router
+from app.api.admin_bilibili import router as admin_bilibili_router
 from app.api.auth import router as auth_router
 from app.api.public import router as public_router
 from app.api.project import router as project_router
@@ -82,6 +83,7 @@ from app.api.account_bot import router as account_bot_router
 app.include_router(account_bot_router)
 app.include_router(admin_settings_router)
 app.include_router(admin_proxies_router)
+app.include_router(admin_bilibili_router)
 app.include_router(admin_ai_router)
 app.include_router(admin_users_router)
 app.include_router(admin_custom_router)

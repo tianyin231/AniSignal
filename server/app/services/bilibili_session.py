@@ -120,6 +120,18 @@ async def load_credentials(session) -> tuple[dict, dict[str, str]]:
     return local_status()
 
 
+async def import_file_credentials(session, path: str) -> dict:
+    """升级到非 root 容器前/后，以有读取权限的用户执行一次；已有后台凭据不覆盖。"""
+    if await get_db_cookies(session):
+        return {"state": "skipped", "message": "后台已有B站凭据，未覆盖"}
+    cookies = read_cookie_file(path)
+    if not cookies.get("SESSDATA"):
+        raise ValueError("凭据文件中没有B站登录态")
+    await set_setting(session, CREDENTIAL_SETTING_KEY, {"cookies": cookies, "updated_at": utcnow().isoformat()})
+    await set_setting(session, SETTING_KEY, {})
+    return {"state": "imported", "message": "B站凭据已迁入后台，可在采集目标页检测登录态"}
+
+
 async def get_status(session) -> dict:
     state, _ = await load_credentials(session)
     stored = await get_setting(session, SETTING_KEY) or {}
@@ -153,6 +165,27 @@ async def check_status(session) -> dict:
     if state["state"] in {"expired", "invalid", "missing"} and previous.get("state") != state["state"]:
         logger.warning("%s", state["message"])
     return state
+
+
+async def save_login_cookies(session, cookies: dict[str, str], message: str) -> dict:
+    """各登录方式共用凭据落库；失败时不覆盖现有会话。"""
+    if not cookies.get("SESSDATA"):
+        raise ValueError("登录响应缺少会话凭据，请重试")
+    await set_setting(session, CREDENTIAL_SETTING_KEY, {"cookies": cookies, "updated_at": utcnow().isoformat()})
+    state = {
+        "state": "logged_in", "message": "B站登录态有效", "source": "database",
+        "credential_version": credential_version(cookies), "checked_at": utcnow().isoformat(),
+    }
+    await set_setting(session, SETTING_KEY, state)
+    return {"state": "saved", "message": message, "session": state}
+
+
+def login_response_cookies(client: httpx.AsyncClient) -> dict[str, str]:
+    return {
+        cookie.name: cookie.value for cookie in client.cookies.jar
+        if cookie.domain.lstrip(".") in {"bilibili.com", "passport.bilibili.com"}
+        and re.fullmatch(r"[A-Za-z0-9_]+", cookie.name) and cookie.value
+    }
 
 
 async def generate_qr_login() -> dict:
@@ -193,29 +226,7 @@ async def poll_qr_login(session, qrcode_key: str) -> dict:
             raise ValueError("B站拒绝登录状态查询，请重新生成二维码")
         code = (payload.get("data") or {}).get("code")
         if code == 0:
-            cookies = {
-                cookie.name: cookie.value
-                for cookie in client.cookies.jar
-                if cookie.domain.lstrip(".") in {"bilibili.com", "passport.bilibili.com"}
-                and re.fullmatch(r"[A-Za-z0-9_]+", cookie.name)
-                and cookie.value
-            }
-            if not cookies.get("SESSDATA"):
-                raise ValueError("登录响应缺少会话凭据，请重试")
-            await set_setting(
-                session,
-                CREDENTIAL_SETTING_KEY,
-                {"cookies": cookies, "updated_at": utcnow().isoformat()},
-            )
-            status_out = {
-                "state": "logged_in",
-                "message": "B站登录态有效",
-                "credential_version": credential_version(cookies),
-                "source": "database",
-                "checked_at": utcnow().isoformat(),
-            }
-            await set_setting(session, SETTING_KEY, status_out)
-            return {"state": "saved", "message": "扫码登录成功，凭据已保存", "session": status_out}
+            return await save_login_cookies(session, login_response_cookies(client), "扫码登录成功，凭据已保存")
     if code == 86090:
         return {"state": "scanned", "message": "已扫码，请在 B 站手机客户端确认登录"}
     if code == 86101:

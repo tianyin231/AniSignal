@@ -57,6 +57,7 @@ const qrSession = ref<{ qrcode_key: string; qr_image: string; state: string; mes
 const showCookieForm = ref(false)
 const cookieText = ref('')
 const cookieSaving = ref(false)
+const webLoginMode = ref<'password' | 'sms' | null>(null)
 let qrTimer: ReturnType<typeof setInterval> | undefined
 
 function stopQrPoll() {
@@ -86,6 +87,7 @@ async function loadBiliSession(check = false) {
 async function startQrLogin() {
   stopQrPoll()
   showCookieForm.value = false
+  webLoginMode.value = null
   checkingBili.value = true
   try {
     const res = await api<{ qrcode_key: string; qr_image: string }>('/api/admin/bilibili-session/qrcode', { method: 'POST' })
@@ -769,7 +771,13 @@ async function remove(target: CollectTarget) {
           <button type="button" class="btn-primary px-3 py-2 text-sm" :disabled="checkingBili" @click="startQrLogin">
             B 站扫码登录
           </button>
-          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" @click="showCookieForm = !showCookieForm; closeQrLogin()">
+          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'password'; showCookieForm = false; closeQrLogin()">
+            账号密码登录
+          </button>
+          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'sms'; showCookieForm = false; closeQrLogin()">
+            短信验证码登录
+          </button>
+          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" @click="showCookieForm = !showCookieForm; webLoginMode = null; closeQrLogin()">
             粘贴 Cookie
           </button>
           <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="loadBiliSession(true)">
@@ -785,7 +793,7 @@ async function remove(target: CollectTarget) {
         <img :src="qrSession.qr_image" alt="B 站登录二维码" class="size-36 rounded-lg bg-white p-1.5">
         <div class="space-y-1.5 text-sm">
           <p class="font-medium text-ink">{{ qrSession.message }}</p>
-          <p class="text-xs text-muted">打开哔哩哔哩手机 App 扫一扫确认登录，成功后凭据会自动加密写入数据库，重启容器不丢失。</p>
+          <p class="text-xs text-muted">打开哔哩哔哩手机 App 扫一扫确认登录，成功后保存登录凭据，重启容器不丢失。</p>
           <div class="flex gap-3 pt-1 text-xs">
             <button v-if="qrSession.state === 'expired'" type="button" class="text-brand-ink hover:underline" @click="startQrLogin">重新生成二维码</button>
             <button type="button" class="text-muted hover:underline" @click="closeQrLogin">关闭</button>
@@ -793,8 +801,10 @@ async function remove(target: CollectTarget) {
         </div>
       </div>
 
+      <AdminBilibiliWebLogin v-if="webLoginMode" :key="webLoginMode" :mode="webLoginMode" @close="webLoginMode = null" @login="biliSession = $event; webLoginMode = null" />
+
       <form v-if="showCookieForm" class="space-y-2 rounded-xl border border-line bg-chip/40 p-4" @submit.prevent="saveManualCookie">
-        <p class="text-xs text-muted">支持直接粘贴浏览器请求头中的 Cookie 字符串（需含 <code class="mono">SESSDATA</code>）或 JSON 对象：</p>
+        <p class="text-xs text-muted">粘贴浏览器请求头中的 Cookie 字符串（需含 <code class="mono">SESSDATA</code>）：</p>
         <textarea
           v-model="cookieText"
           rows="2"

@@ -55,7 +55,8 @@ export const TEXT_DEFAULTS: Record<string, string> = {
 
 export function useSiteConfig() {
   // app.vue 统一取数；内容行只订阅，避免 SSR 每渲染一行就重发配置请求。
-  const { data, refresh: refreshSiteConfig } = useNuxtData<PublicSiteConfig>('site-config')
+  const { data } = useNuxtData<PublicSiteConfig>('site-config')
+  const refreshSiteConfig = () => refreshNuxtData('site-config')
   const announcement = computed<SiteAnnouncement>(
     () => data.value?.announcement ?? { enabled: false, level: 'info', text: '', link: '' },
   )
