@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Settings2 } from 'lucide-vue-next'
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Settings2 } from 'lucide-vue-next'
+import { apiErrorDetail } from '~/utils/api-errors'
 import { customFeedBadge, customKindLabel } from '~/utils/custom-feeds'
 import { imageSrcset, imageUrl } from '~/utils/image'
 import { fmtShort, relativeTime, toTimestamp } from '~/utils/schedule'
@@ -72,7 +73,22 @@ useSeoMeta({ title: () => `${data.value?.name ?? '定制监控'} · 定制化 ·
 const badge = computed(() => customFeedBadge(data.value?.platform ?? ''))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 const goPage = (value: number) => router.replace({ query: { ...route.query, page: value > 1 ? value : undefined } })
-const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', x: 'X', game_official: '官网' }
+const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', rss: 'RSS', x: 'X', game_official: '官网' }
+const triggering = ref(false)
+const triggerMsg = ref('')
+async function triggerCollect() {
+  if (!data.value || triggering.value) return
+  triggering.value = true
+  triggerMsg.value = ''
+  try {
+    await $fetch(`/api/account/custom-feeds/${data.value.id}/collect`, { method: 'POST' })
+    triggerMsg.value = '已加入采集队列，稍后刷新查看最新条目'
+  } catch (exc) {
+    triggerMsg.value = apiErrorDetail(exc, '手动刷新失败')
+  } finally {
+    triggering.value = false
+  }
+}
 const rows = computed(() => (data.value?.items ?? []).map((item) => {
   const ts = toTimestamp(item.published_at)
   return {
@@ -136,13 +152,23 @@ const emptyText = computed(() => {
         </div>
         <div class="flex flex-wrap gap-2">
           <a v-if="data.source_url" :href="data.source_url" target="_blank" rel="noopener" class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 transition-colors hover:text-ink">
-            <ExternalLink :size="14" /> 官方主页
+            <ExternalLink :size="14" /> 源地址
           </a>
+          <button
+            v-if="data.is_owner && data.enabled && data.status === 'active'"
+            type="button"
+            class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 transition-colors hover:bg-chip hover:text-ink disabled:opacity-50"
+            :disabled="triggering"
+            @click="triggerCollect"
+          >
+            <RefreshCw :size="14" /> {{ triggering ? '排队中…' : '立即抓取' }}
+          </button>
           <NuxtLink v-if="data.is_owner" to="/account?tab=custom" class="btn-primary inline-flex h-9 items-center gap-1.5 px-3.5">
             <Settings2 :size="15" /> 管理监控
           </NuxtLink>
         </div>
       </section>
+      <p v-if="triggerMsg" class="mb-4 rounded-xl bg-chip px-3.5 py-2 text-xs text-ink-2">{{ triggerMsg }}</p>
 
       <div class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section class="panel min-w-0 overflow-hidden" aria-label="监控内容">

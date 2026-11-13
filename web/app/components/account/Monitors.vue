@@ -1,18 +1,31 @@
 <script setup lang="ts">
-import { Eye, EyeOff, Mail, MailX, Pause, Pencil, Play, Plus, Trash2 } from 'lucide-vue-next'
+import { Eye, EyeOff, Mail, MailX, Pause, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import type { CustomFeedRow } from '~/composables/useAccountCenter'
+import { customKindLabel } from '~/utils/custom-feeds'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
-// 定制监控：自建 B 站 UID / 关键词抓取源。公开的会出现在"定制化"频道，私有的仅自己可见。
+// 定制监控：自建 B 站关键词 / UP 主、RSS/Atom 订阅、YouTube 频道抓取源。公开的会出现在"定制监控"频道，私有的仅自己可见。
+const route = useRoute()
 const center = useAccountCenter()
 const { customFeeds, customQuota, customBusy, customError, customMessage, loading, errors } = center
 const now = ref(Date.now())
-const creating = ref(false)
+const creating = ref(route.query.create === '1')
 
-const blank = () => ({ name: '', kind: 'keyword' as 'keyword' | 'uid', target_value: '', min_views: 0, interval_minutes: 60, includeText: '', excludeText: '', push_enabled: false, is_public: false })
+const KINDS = [
+  { key: 'keyword', platform: 'bilibili', label: 'B 站关键词', fieldLabel: '搜索关键词', placeholder: '例如：独立游戏 发售、机械键盘 评测' },
+  { key: 'uid', platform: 'bilibili', label: 'B 站 UP 主', fieldLabel: 'UP 主 UID', placeholder: '纯数字，空间主页地址里的那串数字' },
+  { key: 'feed', platform: 'rss', label: 'RSS / Atom', fieldLabel: 'RSS / Atom 地址', placeholder: 'https://example.com/feed.xml' },
+  { key: 'channel_rss', platform: 'youtube', label: 'YouTube 频道', fieldLabel: '频道 ID 或主页链接', placeholder: 'UC... 或 https://www.youtube.com/channel/UC...' },
+] as const
+type MonitorKind = typeof KINDS[number]['key']
+
+const blank = () => ({ name: '', kind: 'keyword' as MonitorKind, target_value: '', min_views: 0, interval_minutes: 60, includeText: '', excludeText: '', push_enabled: false, is_public: false })
 const form = reactive(blank())
 const editing = ref<number | null>(null)
 const draft = reactive({ name: '', target_value: '', min_views: 0, interval_minutes: 30, includeText: '', excludeText: '' })
+
+const activeKindMeta = computed(() => KINDS.find(k => k.key === form.kind) ?? KINDS[0])
+const kindFieldLabel = (kind: string) => KINDS.find(k => k.key === kind)?.fieldLabel ?? '监控目标'
 
 const words = (value: string) => value.split(/[,，\n]+/).map(v => v.trim()).filter(Boolean)
 const quotaFull = computed(() => customQuota.value.used >= customQuota.value.max_feeds)
@@ -29,6 +42,7 @@ async function create() {
   const { includeText, excludeText, ...rest } = form
   const ok = await center.createCustom({
     ...rest,
+    platform: activeKindMeta.value.platform,
     name: rest.name.trim(),
     target_value: rest.target_value.trim(),
     min_views: rest.kind === 'keyword' ? Number(rest.min_views) || 0 : 0,
@@ -66,7 +80,6 @@ function lastCollected(row: CustomFeedRow) {
   const ts = toTimestamp(row.last_collected_at)
   return Number.isFinite(ts) ? `${relativeTime(ts, now.value)}采集` : '等待首次采集'
 }
-const KINDS = [{ key: 'keyword', label: '关键词' }, { key: 'uid', label: 'B 站 UP 主' }] as const
 const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] text-muted transition-colors hover:bg-chip hover:text-ink'
 </script>
 
@@ -79,7 +92,7 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
             定制监控 <span class="rounded bg-brand-soft px-1.5 py-0.5 text-[11px] font-semibold text-brand-ink">公测</span>
           </h2>
           <p class="mt-1 text-xs leading-relaxed text-muted">
-            跟踪 B 站 UP 主或关键词。公开的监控会出现在<NuxtLink to="/custom" class="link">定制化频道</NuxtLink>，私有的仅自己可见。
+            跟踪任意你感兴趣的内容：B 站关键词 / UP 主、RSS / Atom 订阅源或 YouTube 频道。公开的监控会展示在<NuxtLink to="/custom" class="link">定制监控频道</NuxtLink>，私有的仅自己可见。
           </p>
         </div>
         <button v-if="!creating" type="button" class="btn-primary inline-flex h-9 items-center gap-1 px-3.5" :disabled="!canCreate || loading.custom" @click="openCreate">
@@ -99,14 +112,14 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
       <UiNotice v-if="!loading.custom && !errors.custom && !customQuota.admitted" tone="warn" class="mt-4">当前账号还没有开通公测名额，请联系管理员。</UiNotice>
 
       <form v-if="creating" class="mt-5 rounded-xl border border-line bg-canvas/60 p-4" @submit.prevent="create">
-        <div class="grid grid-cols-2 gap-1 rounded-xl bg-chip p-1 text-sm sm:w-72" role="radiogroup" aria-label="监控类型">
+        <div class="grid grid-cols-2 gap-1 rounded-xl bg-chip p-1 text-xs sm:grid-cols-4 sm:text-sm" role="radiogroup" aria-label="监控类型">
           <button
             v-for="kind in KINDS"
             :key="kind.key"
             type="button"
             role="radio"
             :aria-checked="form.kind === kind.key"
-            class="h-8 rounded-[9px] transition-colors"
+            class="h-8 rounded-[9px] px-2 transition-colors"
             :class="form.kind === kind.key ? 'bg-card font-semibold text-ink shadow-card' : 'text-muted hover:text-ink'"
             @click="form.kind = kind.key"
           >
@@ -114,19 +127,20 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
           </button>
         </div>
         <div class="mt-4 grid gap-3 sm:grid-cols-2">
-          <label class="text-xs font-medium text-ink-2">{{ form.kind === 'uid' ? 'UP 主 UID' : '搜索关键词' }}
+          <label class="text-xs font-medium text-ink-2">{{ activeKindMeta.fieldLabel }}
             <input
               v-model="form.target_value"
               required
               maxlength="128"
+              :type="form.kind === 'feed' ? 'url' : 'text'"
               :inputmode="form.kind === 'uid' ? 'numeric' : undefined"
               :pattern="form.kind === 'uid' ? '[0-9]+' : undefined"
-              :placeholder="form.kind === 'uid' ? '纯数字，主页地址里的那串数字' : '例如：鸣潮 手办'"
+              :placeholder="activeKindMeta.placeholder"
               class="input mt-1.5 h-10 w-full font-normal"
             >
           </label>
           <label class="text-xs font-medium text-ink-2">监控名称
-            <input v-model="form.name" required maxlength="64" placeholder="例如：某 UP 主动态" class="input mt-1.5 h-10 w-full font-normal">
+            <input v-model="form.name" required maxlength="64" placeholder="例如：独立游戏资讯 / 某博客订阅" class="input mt-1.5 h-10 w-full font-normal">
           </label>
           <label v-if="form.kind === 'keyword'" class="text-xs font-medium text-ink-2">最低播放量 <span class="font-normal text-faint">（可选）</span>
             <input v-model.number="form.min_views" type="number" min="0" max="10000000" step="1" class="input mt-1.5 h-10 w-full font-normal">
@@ -162,13 +176,13 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
     </UiNotice>
     <div v-else-if="!customFeeds.length" class="rounded-2xl border border-dashed border-line px-5 py-10 text-center">
       <p class="text-sm text-muted">还没有定制监控。</p>
-      <p class="mt-1 text-xs text-faint">{{ customQuota.admitted ? '点「新建监控」跟踪一个 UP 主或关键词。' : '开通公测名额后即可创建。' }}</p>
+      <p class="mt-1 text-xs text-faint">{{ customQuota.admitted ? '点「新建监控」跟踪任意关键词、UP 主、RSS 订阅或 YouTube 频道。' : '开通公测名额后即可创建。' }}</p>
     </div>
     <ul v-else class="grid gap-4 md:grid-cols-2">
       <li v-for="row in customFeeds" :key="row.id" class="panel flex flex-col p-4">
         <template v-if="editing !== row.id">
           <div class="flex items-center gap-2 text-xs">
-            <span class="rounded bg-chip px-1.5 py-0.5 font-medium text-ink-2">{{ row.kind === 'uid' ? 'UP 主' : '关键词' }}</span>
+            <span class="rounded bg-chip px-1.5 py-0.5 font-medium text-ink-2">{{ customKindLabel(row.kind) }}</span>
             <span class="rounded px-1.5 py-0.5 font-medium" :class="row.is_public ? 'bg-brand-soft text-brand-ink' : 'bg-chip text-muted'">{{ row.is_public ? '公开' : '私有' }}</span>
             <span class="ml-auto flex items-center gap-1.5 text-muted">
               <span class="size-1.5 rounded-full" :class="statusOf(row).dot" aria-hidden="true" />{{ statusOf(row).label }}
@@ -188,8 +202,9 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
           </p>
           <div class="min-h-3 flex-1" aria-hidden="true" />
           <div class="flex flex-wrap items-center gap-0.5 border-t border-line-soft pt-2">
+            <button type="button" :class="action" :disabled="customBusy || row.status !== 'active' || !row.enabled" :title="row.enabled ? '立即刷新采集' : '恢复监控后可手动抓取'" @click="center.triggerCustom(row)"><RefreshCw :size="13" />抓取</button>
             <button type="button" :class="action" :disabled="customBusy" @click="startEdit(row)"><Pencil :size="13" />编辑</button>
-            <button type="button" :class="action" :disabled="customBusy" :aria-label="`${row.is_public ? '设为私有' : '公开'}：${row.name}`" @click="center.patchCustom(row, { is_public: !row.is_public }, row.is_public ? '已设为私有。' : '已公开到定制化频道。')">
+            <button type="button" :class="action" :disabled="customBusy" :aria-label="`${row.is_public ? '设为私有' : '公开'}：${row.name}`" @click="center.patchCustom(row, { is_public: !row.is_public }, row.is_public ? '已设为私有。' : '已公开到定制监控频道。')">
               <EyeOff v-if="row.is_public" :size="13" /><Eye v-else :size="13" />{{ row.is_public ? '设为私有' : '公开' }}
             </button>
             <button type="button" :class="action" :disabled="customBusy" :aria-label="`${row.push_enabled ? '关闭' : '开启'}邮件推送：${row.name}`" @click="center.patchCustom(row, { push_enabled: !row.push_enabled }, row.push_enabled ? '邮件推送已关闭。' : '邮件推送已开启。')">
@@ -205,7 +220,7 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
         <form v-else class="grid gap-3" @submit.prevent="saveEdit(row)">
           <p class="text-sm font-bold text-ink">编辑监控</p>
           <label class="text-xs font-medium text-ink-2">监控名称<input v-model="draft.name" required maxlength="64" class="input mt-1.5 h-9 w-full font-normal"></label>
-          <label class="text-xs font-medium text-ink-2">{{ row.kind === 'uid' ? 'UP 主 UID' : '搜索关键词' }}<input v-model="draft.target_value" required maxlength="128" :pattern="row.kind === 'uid' ? '[0-9]+' : undefined" class="input mt-1.5 h-9 w-full font-normal"></label>
+          <label class="text-xs font-medium text-ink-2">{{ kindFieldLabel(row.kind) }}<input v-model="draft.target_value" required maxlength="128" :type="row.kind === 'feed' ? 'url' : 'text'" :pattern="row.kind === 'uid' ? '[0-9]+' : undefined" class="input mt-1.5 h-9 w-full font-normal"></label>
           <div class="grid grid-cols-2 gap-3">
             <label v-if="row.kind === 'keyword'" class="text-xs font-medium text-ink-2">最低播放量<input v-model.number="draft.min_views" type="number" required min="0" max="10000000" class="input mt-1.5 h-9 w-full font-normal"></label>
             <label class="text-xs font-medium text-ink-2">采集间隔（分钟）<input v-model.number="draft.interval_minutes" type="number" required :min="Math.min(row.interval_minutes, customQuota.min_interval_minutes)" max="1440" class="input mt-1.5 h-9 w-full font-normal"></label>

@@ -8,15 +8,22 @@
  */
 
 import type { PublicSiteConfig } from '~/composables/useSiteConfig'
+import {
+  type CommunityColorValue,
+  type NamedCommunityColor,
+  hexChannelThemeClass,
+  hexCommunityClasses,
+  parseHex6,
+} from '~/utils/community-palette'
 
-export type CommunityColor = 'blue' | 'yellow' | 'sky' | 'violet' | 'orange' | 'cyan' | 'lime' | 'teal'
+export type CommunityColor = CommunityColorValue
 
 export interface GameCommunity {
   key: string
   label: string
   /** 频道头图上的英文名 */
   en: string
-  /** 分区语义色键，映射 COMMUNITY_CLASSES 的 Tailwind 类组（不用动态拼接，避免被 purge） */
+  /** 分区主题色：支持 8 种语义色键或任意 #RRGGBB 十六进制色 */
   color: CommunityColor
   domain?: 'game' | 'news'
   platforms?: string[]
@@ -47,8 +54,11 @@ export type GameCommunityKey = string
 const DEFAULT_COMMUNITY = 'wuwa'
 const STORAGE_KEY = 'anisignal-community'
 const BUILTIN_KEYS = new Set(GAME_COMMUNITIES.map(item => item.key))
+const DEFAULT_BUILTIN_COLORS: Record<string, string> = Object.fromEntries(
+  GAME_COMMUNITIES.map(item => [item.key, item.color]),
+)
 
-const COLOR_TO_THEME_CLASS: Record<CommunityColor, string> = {
+const COLOR_TO_THEME_CLASS: Record<NamedCommunityColor, string> = {
   blue: '',
   yellow: 'ch-wuwa',
   sky: 'ch-blhx',
@@ -59,21 +69,22 @@ const COLOR_TO_THEME_CLASS: Record<CommunityColor, string> = {
   teal: 'ch-ai',
 }
 
-function readSiteCommunities(): { active: GameCommunity[]; all: GameCommunity[] } {
+function readSiteCommunities(): { active: GameCommunity[]; all: GameCommunity[]; loaded: boolean } {
   try {
     const { data } = useNuxtData<PublicSiteConfig>('site-config')
-    const all = data.value?.all_communities?.length ? data.value.all_communities : GAME_COMMUNITIES
-    const active = data.value?.communities !== undefined
-      ? (data.value.communities.length ? data.value.communities : all.slice(0, 1))
-      : GAME_COMMUNITIES
-    return { active, all }
+    if (data.value?.all_communities !== undefined) {
+      const all = data.value.all_communities
+      const active = data.value.communities?.length ? data.value.communities : all.slice(0, 1)
+      return { active, all, loaded: true }
+    }
+    return { active: GAME_COMMUNITIES, all: GAME_COMMUNITIES, loaded: false }
   } catch {
-    return { active: GAME_COMMUNITIES, all: GAME_COMMUNITIES }
+    return { active: GAME_COMMUNITIES, all: GAME_COMMUNITIES, loaded: false }
   }
 }
 
 const COMMUNITY_CLASSES: Record<
-  CommunityColor,
+  NamedCommunityColor,
   { chip: string; nav: string; dot: string; text: string }
 > = {
   blue: { chip: 'bg-brand-soft text-brand-ink', nav: 'border-brand text-ink', dot: 'bg-brand', text: 'text-brand-ink' },
@@ -87,22 +98,26 @@ const COMMUNITY_CLASSES: Record<
 }
 
 export function communityClasses(color: string) {
-  return COMMUNITY_CLASSES[color as CommunityColor] ?? COMMUNITY_CLASSES.blue
+  const hex6 = parseHex6(color)
+  if (hex6) return hexCommunityClasses(hex6)
+  return COMMUNITY_CLASSES[color as NamedCommunityColor] ?? COMMUNITY_CLASSES.blue
 }
 
-/** 分区 key → 元数据（支持自定义分区；未知 key 返回 undefined）。 */
+/** 分区 key → 元数据（支持自定义分区；已删除分区或未知 key 返回 undefined）。 */
 export function communityMeta(key?: string | null): GameCommunity | undefined {
   if (!key) return undefined
-  const { all } = readSiteCommunities()
-  return all.find(c => c.key === key) ?? GAME_COMMUNITIES.find(c => c.key === key)
+  const { all, loaded } = readSiteCommunities()
+  return all.find(c => c.key === key) ?? (loaded ? undefined : GAME_COMMUNITIES.find(c => c.key === key))
 }
 
-/** 频道主题类：内置分区走专属 .ch-*，自定义分区按颜色映射对应品牌色令牌。 */
+/** 频道主题类：十六进制色走动态 .ch-hex-*，未改色内置分区走专属 .ch-*，其余按语义色映射。 */
 export function channelThemeClass(key?: string | null): string {
   const meta = communityMeta(key)
   if (!meta) return ''
-  if (BUILTIN_KEYS.has(meta.key)) return `ch-${meta.key}`
-  return COLOR_TO_THEME_CLASS[meta.color] ?? ''
+  const hex6 = parseHex6(meta.color)
+  if (hex6) return hexChannelThemeClass(hex6)
+  if (BUILTIN_KEYS.has(meta.key) && meta.color === DEFAULT_BUILTIN_COLORS[meta.key]) return `ch-${meta.key}`
+  return COLOR_TO_THEME_CLASS[meta.color as NamedCommunityColor] ?? ''
 }
 
 export const PLATFORMS_BY_COMMUNITY: Record<string, string[]> = {

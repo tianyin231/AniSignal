@@ -19,8 +19,19 @@ from app.db import get_session
 
 COMMUNITY_SLUG_RE = re.compile(r"^[a-z][a-z0-9_-]{0,15}$")
 VALID_COLORS = ("yellow", "sky", "violet", "orange", "cyan", "lime", "teal", "blue")
+HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+COLOR_PATTERN = r"^(%s|#[0-9a-fA-F]{6})$" % "|".join(VALID_COLORS)
 _SYNC_TTL_SECONDS = 5.0
 _last_sync_at: float = 0.0
+
+
+def normalize_community_color(value: str | None, default: str = "blue") -> str:
+    raw = str(value or "").strip()
+    if raw in VALID_COLORS:
+        return raw
+    if HEX_COLOR_RE.fullmatch(raw):
+        return raw.lower()
+    return default
 
 
 @dataclass(frozen=True)
@@ -228,9 +239,7 @@ def build_custom_meta(raw: dict) -> CommunityMeta:
     en = str(raw.get("en") or label).strip()[:64]
     # 自定义分区统一走通用内容流（/?community=<key>），确保无 AI 时 RSS/视频/动态也能直接展示。
     domain = "game"
-    color = str(raw.get("color") or "blue")
-    if color not in VALID_COLORS:
-        color = "blue"
+    color = normalize_community_color(raw.get("color"), default="blue")
     bili_mid = str(raw.get("official_bili_mid") or "").strip() or None
     aliases = tuple(dict.fromkeys(str(x).strip() for x in (raw.get("aliases") or []) if str(x).strip()))
     platforms = tuple(raw.get("platforms") or ("bilibili", "youtube", "rss", "x"))
@@ -255,14 +264,42 @@ def build_custom_meta(raw: dict) -> CommunityMeta:
     )
 
 
+def _apply_builtin_override(meta: CommunityMeta, ov: dict | None, active: bool) -> CommunityMeta:
+    if not isinstance(ov, dict):
+        return replace(meta, active=active)
+    label = str(ov.get("label") or meta.label).strip()[:32] or meta.label
+    en = str(ov["en"]).strip()[:64] if "en" in ov and ov["en"] is not None else meta.en
+    color = normalize_community_color(ov.get("color"), default=meta.color)
+    bili_mid = (str(ov["official_bili_mid"]).strip() or None) if "official_bili_mid" in ov else meta.official_bili_mid_default
+    aliases = (
+        tuple(dict.fromkeys(str(x).strip() for x in ov["aliases"] if str(x).strip()))
+        if isinstance(ov.get("aliases"), list)
+        else meta.extra_names
+    )
+    return replace(
+        meta,
+        label=label,
+        bare_name=label,
+        en=en,
+        color=color,
+        official_bili_mid_default=bili_mid,
+        extra_names=aliases,
+        source_aliases=aliases or meta.source_aliases,
+        active=active,
+    )
+
+
 def apply_community_overrides(payload: dict | None) -> None:
     """将数据库中的分区配置原地同步到 COMMUNITIES（所有引用方即时可见）。"""
     disabled = set((payload or {}).get("disabled_builtins") or [])
+    deleted = set((payload or {}).get("deleted_builtins") or [])
+    overrides = (payload or {}).get("builtin_overrides") or {}
     custom_list = (payload or {}).get("custom") or []
 
     next_map: dict[str, CommunityMeta] = {
-        key: replace(meta, active=(key not in disabled))
+        key: _apply_builtin_override(meta, overrides.get(key) if isinstance(overrides, dict) else None, key not in disabled)
         for key, meta in BUILTIN_COMMUNITIES.items()
+        if key not in deleted
     }
     for item in custom_list:
         if not isinstance(item, dict):
@@ -272,9 +309,21 @@ def apply_community_overrides(payload: dict | None) -> None:
             continue
         next_map[key] = build_custom_meta(item)
 
+    if not next_map:
+        next_map[DEFAULT_COMMUNITY] = BUILTIN_COMMUNITIES[DEFAULT_COMMUNITY]
+
     COMMUNITIES.clear()
     COMMUNITIES.update(next_map)
     _refresh_dependents()
+
+
+def active_default_community() -> str:
+    if DEFAULT_COMMUNITY in COMMUNITIES and COMMUNITIES[DEFAULT_COMMUNITY].active:
+        return DEFAULT_COMMUNITY
+    for key, meta in COMMUNITIES.items():
+        if meta.active:
+            return key
+    return next(iter(COMMUNITIES), DEFAULT_COMMUNITY)
 
 
 def reset_communities() -> None:
@@ -292,7 +341,7 @@ async def sync_communities(session) -> dict:
     raw = await get_setting(session, "communities")
     apply_community_overrides(raw if isinstance(raw, dict) else None)
     _last_sync_at = time.monotonic()
-    return raw if isinstance(raw, dict) else {"disabled_builtins": [], "custom": []}
+    return raw if isinstance(raw, dict) else {"disabled_builtins": [], "deleted_builtins": [], "builtin_overrides": {}, "custom": []}
 
 
 async def ensure_communities_synced(session, *, force: bool = False) -> None:
@@ -350,13 +399,14 @@ def _bad_community_query(value: str) -> RequestValidationError:
 
 
 async def _dep_community(
-    community: str = Query(default=DEFAULT_COMMUNITY, description="分区标识"),
+    community: str | None = Query(default=None, description="分区标识"),
     session: Any = Depends(get_session),
 ) -> str:
-    await ensure_communities_synced(session, force=(community not in COMMUNITIES))
-    if community not in COMMUNITIES:
-        raise _bad_community_query(community)
-    return community
+    await ensure_communities_synced(session, force=bool(community and community not in COMMUNITIES))
+    resolved = community or active_default_community()
+    if resolved not in COMMUNITIES:
+        raise _bad_community_query(resolved)
+    return resolved
 
 
 async def _dep_community_required(
@@ -381,14 +431,17 @@ async def _dep_community_optional(
 
 
 async def _dep_community_or_all(
-    community: str = Query(default=DEFAULT_COMMUNITY, description="分区标识（all=跨分区聚合）"),
+    community: str | None = Query(default=None, description="分区标识（all=跨分区聚合）"),
     session: Any = Depends(get_session),
 ) -> str:
-    if community != COMMUNITY_ALL:
-        await ensure_communities_synced(session, force=(community not in COMMUNITIES))
-        if community not in COMMUNITIES:
-            raise _bad_community_query(community)
-    return community
+    if community == COMMUNITY_ALL:
+        await ensure_communities_synced(session)
+        return COMMUNITY_ALL
+    await ensure_communities_synced(session, force=bool(community and community not in COMMUNITIES))
+    resolved = community or active_default_community()
+    if resolved not in COMMUNITIES:
+        raise _bad_community_query(resolved)
+    return resolved
 
 
 COMMUNITY_QUERY_DEP = Depends(_dep_community)
@@ -427,11 +480,18 @@ def is_all_community(value: str | None) -> bool:
 def community_conditions(column, community: str | None, hidden=()) -> list:
     if not is_all_community(community):
         return [column == community]
-    return [column.notin_(tuple(hidden))] if hidden else []
+    blocked = set(hidden or ())
+    active_keys = [k for k, m in COMMUNITIES.items() if m.active and k not in blocked]
+    return [column.in_(active_keys)] if active_keys else [column == "__none__"]
 
 
 def get_community(key: str | None) -> CommunityMeta:
-    return COMMUNITIES.get(key or "", COMMUNITIES[DEFAULT_COMMUNITY])
+    if key and key in COMMUNITIES:
+        return COMMUNITIES[key]
+    if key and key in BUILTIN_COMMUNITIES:
+        return BUILTIN_COMMUNITIES[key]
+    fallback = active_default_community()
+    return COMMUNITIES.get(fallback) or BUILTIN_COMMUNITIES[DEFAULT_COMMUNITY]
 
 
 def crosstalk_names(community_key: str) -> tuple[str, ...]:

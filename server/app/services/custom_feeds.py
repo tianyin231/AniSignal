@@ -14,9 +14,11 @@ from app.clock import to_naive_utc, utcnow
 from app.collectors.base import CollectorDeferred, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.nikke import NikkeCollector, parse_notice
+from app.collectors.rss import RssCollector
 from app.collectors.x import XCollector
 from app.collectors.youtube_api import YoutubeApiCollector
 from app.custom_presets import CUSTOM_PRESETS, custom_preset
+from app.parsers.rss import parse_item as parse_rss_feed_item
 from app.parsers.x import parse_post
 from app.parsers.youtube import parse_rss_item
 from app.models import CustomFeed, CustomFeedItem, CustomFeedSource, CustomSourceItem, CustomCollectRun, NotificationDelivery, User
@@ -30,13 +32,21 @@ logger = logging.getLogger(__name__)
 
 SWEEP_BATCH = 20
 PUSH_MAX_ITEMS = 5
-CUSTOM_KINDS = {"uid", "keyword"}
-CUSTOM_PLATFORMS = {"bilibili"}
+CUSTOM_SPECS = {
+    ("bilibili", "uid"),
+    ("bilibili", "keyword"),
+    ("rss", "feed"),
+    ("youtube", "channel_rss"),
+}
+CUSTOM_KINDS = {k for _, k in CUSTOM_SPECS}
+CUSTOM_PLATFORMS = {p for p, _ in CUSTOM_SPECS}
 
 
 def _collector(platform: str):
     if platform == "bilibili":
         return BilibiliCollector()
+    if platform == "rss":
+        return RssCollector()
     if platform == "game_official":
         return NikkeCollector()
     if platform == "youtube":
@@ -54,17 +64,18 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
 
         collector.set_cookies(await get_db_cookies(session))
     preset = custom_preset(source.platform, source.kind, source.target_value)
-    if not preset and (source.platform not in CUSTOM_PLATFORMS or source.kind not in CUSTOM_KINDS):
-        raise ValueError(f"unsupported custom kind: {source.kind}")
+    if not preset and (source.platform, source.kind) not in CUSTOM_SPECS:
+        raise ValueError(f"unsupported custom kind: {source.platform}/{source.kind}")
     if source.platform == "x":
         collector.redis = redis
+    use_fetch_result = bool(preset) or source.platform in {"rss", "youtube"}
     async def fetch():
         if source.platform == "x":
             # X 自己按全局 30–90 秒间隔读取，主页/全文共用冷却；不叠加一个宽松槽位。
             return await collector.fetch(source.kind, source.target_value, 10)
         async with platform_slot(redis, source.platform, 5.0):
-            if preset:
-                return await collector.fetch(source.kind, source.target_value, 30)
+            if use_fetch_result:
+                return await collector.fetch(source.kind, source.target_value, 30 if preset else 20)
             if source.kind == "uid":
                 return await collector.user_dynamics(source.target_value, 20)
             return await collector.search_videos(source.target_value, 30)
@@ -73,8 +84,8 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
         from app.services.custom_policy import record_collection_requests
 
         await record_collection_requests(session, source.platform, getattr(collector, "request_count", 0))
-    if preset:
-        parse = {"game_official": parse_notice, "youtube": parse_rss_item, "x": parse_post}[source.platform]
+    if use_fetch_result:
+        parse = {"game_official": parse_notice, "youtube": parse_rss_item, "x": parse_post, "rss": parse_rss_feed_item}[source.platform]
         items = [parse(item) for item in raw_items.items]
         return sorted(items, key=lambda item: item.published_at.timestamp() if item.published_at else 0, reverse=True)
     parse = parse_dynamic if source.kind == "uid" else parse_video
@@ -90,17 +101,18 @@ async def distribute_custom_feed(session: AsyncSession, feed: CustomFeed) -> int
     new_count = 0
     for n in normalized_list:
         view = int(n.metrics.get("view") or 0)
+        ext_id = n.external_id[:64]
         values = {
-            "platform": n.platform.value,
-            "content_type": n.content_type.value,
-            "title": (n.title or n.external_id)[:255],
-            "url": n.url,
-            "cover": n.media[0] if n.media else None,
-            "author_name": n.author.name if n.author else None,
+            "platform": n.platform.value[:16],
+            "content_type": n.content_type.value[:16],
+            "title": (n.title or ext_id)[:255],
+            "url": n.url[:512] if n.url else None,
+            "cover": n.media[0][:512] if n.media and n.media[0] else None,
+            "author_name": n.author.name[:64] if n.author and n.author.name else None,
             "view": view,
             "published_at": to_naive_utc(n.published_at) if n.published_at else None,
         }
-        if item := existing.get(n.external_id):
+        if item := existing.get(ext_id):
             # 同步更正与指标，不改变首次采集时间，也不重复计入新内容推送。
             for key, value in values.items():
                 setattr(item, key, value)
@@ -113,9 +125,9 @@ async def distribute_custom_feed(session: AsyncSession, feed: CustomFeed) -> int
             continue
         if any(term.casefold() in text for term in filters.get("exclude", [])):
             continue
-        item = CustomFeedItem(feed_id=feed.id, external_id=n.external_id, **values)
+        item = CustomFeedItem(feed_id=feed.id, external_id=ext_id, **values)
         session.add(item)
-        existing[n.external_id] = item
+        existing[ext_id] = item
         new_count += 1
     feed.last_collected_at = utcnow()
     feed.next_run_at = feed.last_collected_at + timedelta(minutes=feed.interval_minutes)
@@ -175,7 +187,7 @@ def _active_feeds():
     presets = [(p["platform"], p["kind"], p["target_value"]) for p in CUSTOM_PRESETS.values()]
     return select(CustomFeed).outerjoin(User, User.id == CustomFeed.user_id).where(
         CustomFeed.enabled.is_(True), CustomFeed.status == "active",
-        or_(CustomFeed.platform == "bilibili", tuple_(CustomFeed.platform, CustomFeed.kind, CustomFeed.target_value).in_(presets)),
+        or_(tuple_(CustomFeed.platform, CustomFeed.kind).in_(CUSTOM_SPECS), tuple_(CustomFeed.platform, CustomFeed.kind, CustomFeed.target_value).in_(presets)),
         or_(CustomFeed.user_id.is_(None), (User.status == "active") & User.is_verified.is_(True)))
 
 

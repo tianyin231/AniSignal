@@ -633,10 +633,17 @@ async def get_redis_pool():
 
 
 async def load_due_targets(session: AsyncSession, now, limit: int = 50) -> list[CollectTarget]:
+    from app.communities import ensure_communities_synced
+
+    await ensure_communities_synced(session)
+    active_keys = [k for k, m in COMMUNITIES.items() if m.active]
+    if not active_keys:
+        return []
     result = await session.execute(
         select(CollectTarget)
         .where(
             CollectTarget.enabled.is_(True),
+            CollectTarget.community.in_(active_keys),
             (CollectTarget.next_run_at.is_(None)) | (CollectTarget.next_run_at <= now),
         )
         .order_by(CollectTarget.next_run_at.asc())

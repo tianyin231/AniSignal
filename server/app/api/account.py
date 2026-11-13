@@ -480,23 +480,70 @@ def _excerpt(text: str) -> str | None:
     return text[:140] + ("…" if len(text) > 140 else "")
 
 
-# ---------- 定制监控（用户自建 UID/关键词抓取源） ----------
+# ---------- 定制监控（用户自建 B站关键词/UP主、RSS/Atom、YouTube 频道抓取源） ----------
 
-def _validate_custom_payload(body: dict, *, partial: bool = False) -> dict:
+import re as _re
+
+_KIND_DEFAULT_PLATFORM = {
+    "uid": "bilibili",
+    "keyword": "bilibili",
+    "feed": "rss",
+    "channel_rss": "youtube",
+}
+_YT_CHANNEL_RE = _re.compile(r"^UC[A-Za-z0-9_-]{20,30}$")
+_YT_URL_RE = _re.compile(r"youtube\.com/channel/(UC[A-Za-z0-9_-]{20,30})")
+
+
+def _normalize_youtube_channel(raw: str) -> str:
+    m = _YT_URL_RE.search(raw)
+    return m.group(1) if m else raw
+
+
+def _validate_custom_target(kind: str, target: str) -> str:
+    if kind == "uid":
+        if not target.isdigit():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
+        return target
+    if kind == "channel_rss":
+        chan = _normalize_youtube_channel(target)
+        if not _YT_CHANNEL_RE.fullmatch(chan):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请填写以 UC 开头的 YouTube 频道 ID（或包含 /channel/UC... 的频道链接）")
+        return chan
+    return target
+
+
+async def _ensure_safe_custom_target(kind: str, target: str) -> None:
+    if kind == "feed":
+        from app.collectors.base import CollectorError
+        from app.collectors.rss import public_feed_url
+
+        try:
+            await public_feed_url(target)
+        except CollectorError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+def _validate_custom_payload(body: dict, *, partial: bool = False, default_kind: str = "") -> dict:
+    from app.services.custom_feeds import CUSTOM_SPECS
+
     kind = str(body.get("kind") or "").strip()
-    if kind and kind not in {"uid", "keyword"}:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控类型只支持 uid / keyword")
-    platform = str(body.get("platform") or "bilibili").strip()
-    if platform and platform not in {"bilibili"}:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "定制平台当前仅支持 B 站")
+    if kind and kind not in _KIND_DEFAULT_PLATFORM:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控类型只支持 keyword / uid / feed / channel_rss")
+    effective_kind = kind or default_kind
+    raw_platform = body.get("platform")
+    platform = str(raw_platform).strip() if raw_platform is not None else (_KIND_DEFAULT_PLATFORM.get(kind, "bilibili") if not partial else "")
+    if kind and platform and (platform, kind) not in CUSTOM_SPECS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"不支持的平台与监控类型组合：{platform}/{kind}")
+    if not kind and platform and platform not in {"bilibili", "rss", "youtube"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "定制平台仅支持 bilibili / rss / youtube")
     name = str(body.get("name") or "").strip()
     if ("name" in body or not partial) and not 1 <= len(name) <= 64:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控名称需为 1 至 64 字")
     target = str(body.get("target_value") or "").strip()
+    if effective_kind and target:
+        target = _validate_custom_target(effective_kind, target)
     if ("target_value" in body or not partial) and not 1 <= len(target) <= 128:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控目标需为 1 至 128 字")
-    if kind == "uid" and target and not target.isdigit():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
     min_views = body.get("min_views")
     if min_views is not None:
         try:
@@ -584,12 +631,14 @@ async def custom_quota(user: User = Depends(get_current_user), session: AsyncSes
 async def create_custom_feed(
     body: dict,
     user: User = Depends(get_current_user),
+    queue: BaseQueue = Depends(get_queue),
     session: AsyncSession = Depends(get_session),
 ):
     """新建定制监控；额度与最短周期由账号公测配置决定。"""
     payload = _validate_custom_payload(body)
     if not payload["name"] or not payload["kind"] or not payload["target_value"]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "名称、监控类型与目标均不能为空")
+    await _ensure_safe_custom_target(payload["kind"], payload["target_value"])
     from app.services.custom_policy import check_admission, shared_source, user_quota, request_interval
     quota = await user_quota(session, user.id)
     interval = payload["interval_minutes"] or quota["min_interval_minutes"]
@@ -600,9 +649,9 @@ async def create_custom_feed(
         user_id=user.id,
         name=payload["name"],
         kind=payload["kind"],
-        platform=payload["platform"] or "bilibili",
+        platform=payload["platform"] or _KIND_DEFAULT_PLATFORM[payload["kind"]],
         target_value=payload["target_value"],
-        min_views=payload["min_views"] or 0,
+        min_views=(payload["min_views"] or 0) if payload["kind"] == "keyword" else 0,
         push_enabled=bool(payload["push_enabled"]),
         is_public=bool(payload["is_public"]),
         source_id=source.id,
@@ -611,6 +660,10 @@ async def create_custom_feed(
     )
     session.add(feed)
     await session.commit()
+    try:
+        await queue.enqueue_custom_sweep()
+    except Exception:  # noqa: BLE001 - 队列暂不可用不阻断入库，下轮轮询自动补采
+        logger.debug("enqueue_custom_sweep skipped after create", exc_info=True)
     return {"id": feed.id, "name": feed.name}
 
 
@@ -624,14 +677,14 @@ async def update_custom_feed(
     feed = await session.get(CustomFeed, feed_id)
     if feed is None or feed.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
-    payload = _validate_custom_payload(body, partial=True)
+    payload = _validate_custom_payload(body, partial=True, default_kind=feed.kind)
     if ("kind" in body and payload["kind"] != feed.kind) or (
         "platform" in body and payload["platform"] != feed.platform
     ):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控类型与平台创建后不可修改")
     from app.services.custom_policy import check_admission, shared_source, request_interval
-    if feed.kind == "uid" and payload["target_value"] and not payload["target_value"].isdigit():
-        raise HTTPException(400, "UID 只能是数字")
+    if payload["target_value"]:
+        await _ensure_safe_custom_target(feed.kind, payload["target_value"])
     if payload["target_value"] or payload["interval_minutes"] is not None or payload["enabled"] is True:
         await check_admission(session, user.id, feed.platform, feed.kind,
             payload["target_value"] or feed.target_value, payload["interval_minutes"] or feed.interval_minutes, exclude_id=feed.id)
@@ -670,7 +723,36 @@ async def update_custom_feed(
         source = await session.get(CustomFeedSource, feed.source_id)
         request_interval(source, feed.interval_minutes)
     await session.commit()
-    return {"id": feed.id, "updated": True}
+    return {"id": feed.id, "updated": True, "target_value": feed.target_value}
+
+
+@router.post("/custom-feeds/{feed_id}/collect", status_code=status.HTTP_202_ACCEPTED)
+async def collect_my_custom_feed_now(
+    feed_id: int,
+    user: User = Depends(get_current_user),
+    queue: BaseQueue = Depends(get_queue),
+    session: AsyncSession = Depends(get_session),
+):
+    """用户手动触发一次定制监控采集（5 分钟冷却保护）。"""
+    feed = await session.get(CustomFeed, feed_id)
+    if feed is None or feed.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
+    if feed.status != "active" or not feed.enabled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控处于暂停或停用状态，请先恢复后再抓取")
+    now = utcnow()
+    if feed.last_collected_at and (now - feed.last_collected_at) < timedelta(minutes=5):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "刚刚采集过，请至少间隔 5 分钟再手动刷新")
+    feed.next_run_at = None
+    if feed.source_id:
+        from app.models import CustomFeedSource
+        source = await session.get(CustomFeedSource, feed.source_id)
+        if source and not source.last_error:
+            source.next_run_at = None
+    await session.commit()
+    job_id = await queue.enqueue_custom_sweep()
+    if job_id is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "任务队列暂时不可用")
+    return {"id": feed.id, "status": "queued"}
 
 
 @router.delete("/custom-feeds/{feed_id}", status_code=status.HTTP_204_NO_CONTENT)

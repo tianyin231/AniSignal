@@ -13,6 +13,8 @@ const { rememberRouteCommunity, communities } = useGameSection()
 const brand = communityClasses('blue')
 const allChannels = computed(() => [
   { key: 'home', label: '首页', nav: brand.nav, dot: brand.dot, to: '/' as RouteLocationRaw },
+  // 定制监控紧邻首页，避免被大量分区挤进「更多」折叠菜单
+  { key: 'custom', label: '定制监控', nav: brand.nav, dot: brand.dot, to: '/custom' as RouteLocationRaw },
   ...communities.value.map(c => ({
     key: c.key,
     label: c.key === 'ai' ? 'AI 快讯' : c.label,
@@ -20,8 +22,6 @@ const allChannels = computed(() => [
     dot: communityClasses(c.color).dot,
     to: (c.key === 'ai' ? '/ai' : { path: '/', query: { community: c.key } }) as RouteLocationRaw,
   })),
-  // 定制化频道固定最后：用户自建监控（UID/关键词）的公开目录
-  { key: 'custom', label: '定制化', nav: brand.nav, dot: brand.dot, to: '/custom' as RouteLocationRaw },
 ])
 
 onMounted(rememberRouteCommunity)

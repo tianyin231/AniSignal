@@ -2,6 +2,8 @@
  * 站点配置：全服公告 + 文案区域 + 动态分区 + 服务就绪状态（管理端可改；默认值与后端一致）。
  */
 
+import type { CommunityColorValue } from '~/utils/community-palette'
+
 export interface SiteAnnouncement {
   enabled: boolean
   level: 'info' | 'warning'
@@ -23,7 +25,7 @@ export interface SiteCommunityItem {
   key: string
   label: string
   en: string
-  color: 'blue' | 'yellow' | 'sky' | 'violet' | 'orange' | 'cyan' | 'lime' | 'teal'
+  color: CommunityColorValue
   domain: 'game' | 'news'
   platforms: string[]
   active: boolean

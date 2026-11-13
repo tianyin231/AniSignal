@@ -2,6 +2,7 @@
  * 管理端分区选项（同步支持内置分区与自定义分区）。
  */
 import type { PublicSiteConfig, SiteCommunityItem } from '~/composables/useSiteConfig'
+import { hexCommunityClasses, parseHex6 } from '~/utils/community-palette'
 
 export const ADMIN_COMMUNITIES = [
   { key: 'wuwa', label: '鸣潮', short: '鸣潮', color: 'yellow' },
@@ -90,11 +91,18 @@ export function useAdminCommunities() {
     return ADMIN_COMMUNITY_SHORT[key] ?? communities.value.find(c => c.key === key)?.label ?? key
   }
 
+  const defaultColors: Record<string, string> = Object.fromEntries(ADMIN_COMMUNITIES.map(c => [c.key, c.color]))
+
   const badgeOf = (key?: string | null): string => {
     if (!key) return 'bg-chip text-muted'
-    if (ADMIN_COMMUNITY_BADGE[key]) return ADMIN_COMMUNITY_BADGE[key]
-    const color = communities.value.find(c => c.key === key)?.color
-    return (color && COLOR_BADGES[color]) || 'bg-chip text-muted'
+    const item = communities.value.find(c => c.key === key)
+    if (item) {
+      const hex6 = parseHex6(item.color)
+      if (hex6) return hexCommunityClasses(hex6).chip
+      if (ADMIN_COMMUNITY_BADGE[key] && item.color === defaultColors[key]) return ADMIN_COMMUNITY_BADGE[key]!
+      if (COLOR_BADGES[item.color]) return COLOR_BADGES[item.color]!
+    }
+    return ADMIN_COMMUNITY_BADGE[key] || 'bg-chip text-muted'
   }
 
   return { communities, activeCommunities, labelOf, shortOf, badgeOf, refreshSiteConfig }

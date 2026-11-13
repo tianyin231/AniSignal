@@ -272,9 +272,12 @@ export function createAccountCenter() {
     await fetchCustom()
   }, '创建失败，请检查后重试。', '监控已创建，后台会开始采集。')
   const patchCustom = (row: CustomFeedRow, body: Record<string, unknown>, okText: string) => mutateCustom(async () => {
-    await $fetch(`/api/account/custom-feeds/${row.id}`, { method: 'PATCH', body })
-    Object.assign(row, body)
+    const res = await $fetch<{ target_value?: string }>(`/api/account/custom-feeds/${row.id}`, { method: 'PATCH', body })
+    Object.assign(row, body, res?.target_value ? { target_value: res.target_value } : {})
   }, '操作失败，请重试。', okText)
+  const triggerCustom = (row: CustomFeedRow) => mutateCustom(async () => {
+    await $fetch(`/api/account/custom-feeds/${row.id}/collect`, { method: 'POST' })
+  }, '手动刷新失败，请稍后重试。', `「${row.name}」已加入采集队列，稍后自动更新。`)
   const removeCustom = (row: CustomFeedRow) => mutateCustom(async () => {
     await $fetch(`/api/account/custom-feeds/${row.id}`, { method: 'DELETE' })
     customFeeds.value = customFeeds.value.filter(f => f.id !== row.id)
@@ -296,7 +299,7 @@ export function createAccountCenter() {
     feed, feedPage, feedKeywordId, feedTotalPages, fetchFeed, filterFeed, feedGoPage,
     notifyBusy, notifyMessage, notifyError, fetchNotifications, notificationReady, aiReady, notificationBlockReason,
     toggleEmail, toggleInstant, sendNotification,
-    customBusy, customError, customMessage, fetchCustom, createCustom, patchCustom, removeCustom,
+    customBusy, customError, customMessage, fetchCustom, createCustom, patchCustom, triggerCustom, removeCustom,
     loadAll, dispose,
   }
 }

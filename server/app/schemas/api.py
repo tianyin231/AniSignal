@@ -13,11 +13,11 @@ def _none_to_list(v):
     return v if v is not None else []
 
 from app.communities import (
+    COLOR_PATTERN,
     COMMUNITY_SLUG_RE,
     CommunitySlug,
     DEFAULT_COMMUNITY as _DEFAULT_COMMUNITY,
     OptionalCommunitySlug,
-    VALID_COLORS,
     community_pattern as _community_pattern,
 )
 from app.models.enums import Platform, TargetType
@@ -111,7 +111,7 @@ class CommunityCreate(BaseModel):
     key: str = Field(min_length=1, max_length=16, pattern=COMMUNITY_SLUG_RE.pattern)
     label: str = Field(min_length=1, max_length=32)
     en: str = Field(default="", max_length=64)
-    color: str = Field(default="blue", pattern="^(%s)$" % "|".join(VALID_COLORS))
+    color: str = Field(default="blue", pattern=COLOR_PATTERN)
     domain: str = Field(default="game", pattern="^(game|news)$")
     official_bili_mid: str | None = Field(default=None, max_length=24, pattern=r"^(\d{1,20})?$")
     aliases: list[str] = Field(default_factory=list, max_length=16)
@@ -121,7 +121,7 @@ class CommunityCreate(BaseModel):
 class CommunityUpdate(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=32)
     en: str | None = Field(default=None, max_length=64)
-    color: str | None = Field(default=None, pattern="^(%s)$" % "|".join(VALID_COLORS))
+    color: str | None = Field(default=None, pattern=COLOR_PATTERN)
     domain: str | None = Field(default=None, pattern="^(game|news)$")
     official_bili_mid: str | None = Field(default=None, max_length=24, pattern=r"^(\d{1,20})?$")
     aliases: list[str] | None = Field(default=None, max_length=16)
@@ -129,8 +129,9 @@ class CommunityUpdate(BaseModel):
 
 
 class CommunityBatchRequest(BaseModel):
-    action: str = Field(pattern="^(enable|disable)$")
+    action: str = Field(pattern="^(enable|disable|delete)$")
     keys: list[str] = Field(min_length=1, max_length=100)
+    purge_targets: bool = False
 
 
 class TargetImportPresetsRequest(BaseModel):

@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import type { PublicSiteConfig } from '~/composables/useSiteConfig'
+import { buildDynamicColorCss } from '~/utils/community-palette'
 
 const { api } = usePublicApi()
-await useAsyncData('site-config', (_app, { signal }) => api<PublicSiteConfig>('/api/site-config', { signal }))
+const { data: siteConfig } = await useAsyncData('site-config', (_app, { signal }) => api<PublicSiteConfig>('/api/site-config', { signal }))
+const dynamicPaletteCss = computed(() =>
+  buildDynamicColorCss((siteConfig.value?.all_communities ?? []).map(c => c.color)),
+)
 
 const route = useRoute()
 const requestUrl = useRequestURL()
@@ -16,6 +20,7 @@ const canonical = computed(() => {
 useHead({
   titleTemplate: title => !title ? 'AniSignal · 让重要的变化，找到你' : title.includes('AniSignal') ? title : `${title} · AniSignal`,
   link: [{ rel: 'canonical', href: canonical }],
+  style: [{ key: 'community-palette', innerHTML: dynamicPaletteCss }],
 })
 useSeoMeta({
   ogSiteName: 'AniSignal',

@@ -35,6 +35,9 @@ class _FakeQueue:
         self.admin_emails.extend(delivery_ids)
         return "fake-admin-email-job"
 
+    async def enqueue_custom_sweep(self) -> str | None:
+        return "fake-custom-sweep"
+
 
 async def test_healthz_open(client):
     resp = await client.get("/api/healthz")

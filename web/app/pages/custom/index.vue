@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, Plus, Radar } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Pause, Play, Plus, Radar, RefreshCw } from 'lucide-vue-next'
 import type { CustomFeedRow, CustomQuota } from '~/composables/useAccountCenter'
+import { apiErrorDetail } from '~/utils/api-errors'
 import { customFeedBadge, customKindLabel } from '~/utils/custom-feeds'
 import { loginRoute } from '~/utils/safe-redirect'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
-useSeoMeta({ title: '定制化 · AniSignal', description: '用户与站点维护的专属监控：B 站 UP 主、关键词与海外官方账号，持续抓取。' })
+useSeoMeta({ title: '定制监控 · AniSignal', description: '自由监控任意感兴趣的内容：B 站关键词、UP 主、RSS/Atom 订阅与 YouTube 频道，随时启停管理。' })
 
 interface CustomFeedCard {
   id: number
@@ -73,6 +74,39 @@ watch(user, async (value) => {
   }
 }, { immediate: import.meta.client })
 const manageTo = '/account?tab=custom'
+const createTo = '/account?tab=custom&create=1'
+const mineBusyId = ref<number | null>(null)
+const mineNotice = ref<{ tone: 'ok' | 'error'; text: string } | null>(null)
+
+async function toggleMine(row: CustomFeedRow) {
+  if (mineBusyId.value || row.status !== 'active') return
+  mineBusyId.value = row.id
+  mineNotice.value = null
+  try {
+    await $fetch(`/api/account/custom-feeds/${row.id}`, { method: 'PATCH', body: { enabled: !row.enabled } })
+    row.enabled = !row.enabled
+    mineNotice.value = { tone: 'ok', text: row.enabled ? `已恢复「${row.name}」` : `已暂停「${row.name}」` }
+  } catch (exc) {
+    mineNotice.value = { tone: 'error', text: apiErrorDetail(exc, '状态切换失败') }
+  } finally {
+    mineBusyId.value = null
+  }
+}
+
+async function refreshMine(row: CustomFeedRow) {
+  if (mineBusyId.value || !row.enabled || row.status !== 'active') return
+  mineBusyId.value = row.id
+  mineNotice.value = null
+  try {
+    await $fetch(`/api/account/custom-feeds/${row.id}/collect`, { method: 'POST' })
+    mineNotice.value = { tone: 'ok', text: `「${row.name}」已加入采集队列` }
+  } catch (exc) {
+    mineNotice.value = { tone: 'error', text: apiErrorDetail(exc, '手动刷新失败') }
+  } finally {
+    mineBusyId.value = null
+  }
+}
+
 const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:items-baseline sm:gap-1.5 sm:px-4'
 </script>
 
@@ -80,8 +114,8 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
   <div>
     <section class="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div class="wall-heading">
-        <p class="mono mb-1.5 text-xs tracking-wide text-muted">用户与站点维护的专属监控 · 持续抓取</p>
-        <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">定制化</h1>
+        <p class="mono mb-1.5 text-xs tracking-wide text-muted">自建任意关键词 · UP 主 · RSS 订阅 · YouTube 频道 · 随时管理</p>
+        <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">定制监控</h1>
       </div>
       <div class="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:gap-2.5">
         <div :class="pill">
@@ -150,35 +184,63 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
           <header class="flex items-center gap-3">
             <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-arknights-soft text-arknights-ink" aria-hidden="true"><Radar :size="19" /></span>
             <div class="min-w-0 flex-1">
-              <h2 id="mine-title" class="text-base font-bold text-ink">我的监控</h2>
+              <h2 id="mine-title" class="text-base font-bold text-ink">我的监控源</h2>
               <p v-if="quota" class="text-xs text-muted">{{ quota.admitted ? `已用 ${quota.used}/${quota.max_feeds} 个` : '尚未开通公测名额' }}</p>
-              <p v-else class="text-xs text-muted">公测中 · 跟踪 B 站 UP 主或关键词</p>
+              <p v-else class="text-xs text-muted">支持关键词 / UP 主 / RSS / YouTube</p>
             </div>
           </header>
 
           <template v-if="loaded && user">
+            <p v-if="mineNotice" class="mt-3 rounded-lg px-2.5 py-1.5 text-xs" :class="mineNotice.tone === 'ok' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-red-500/10 text-red-600 dark:text-red-400'">
+              {{ mineNotice.text }}
+            </p>
             <ul v-if="mine?.length" class="mt-4 divide-y divide-line-soft border-y border-line-soft">
-              <li v-for="row in mine.slice(0, 6)" :key="row.id">
-                <NuxtLink :to="`/custom/${row.id}`" class="group flex items-center gap-2 py-2.5 text-sm">
+              <li v-for="row in mine.slice(0, 6)" :key="row.id" class="flex items-center gap-1.5 py-2 text-sm">
+                <NuxtLink :to="`/custom/${row.id}`" class="group flex min-w-0 flex-1 items-center gap-2">
                   <span class="size-1.5 shrink-0 rounded-full" :class="row.status !== 'active' ? 'bg-hot' : row.enabled ? 'bg-ok' : 'bg-faint'" aria-hidden="true" />
                   <span class="min-w-0 flex-1 truncate text-ink-2 group-hover:text-brand-ink">{{ row.name }}</span>
                   <span v-if="!row.is_public" class="shrink-0 rounded bg-chip px-1.5 text-[11px] text-muted">私有</span>
                   <span class="num shrink-0 text-xs text-faint">{{ row.item_count }}</span>
                 </NuxtLink>
+                <button
+                  type="button"
+                  class="grid size-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-chip hover:text-ink disabled:opacity-40"
+                  :disabled="mineBusyId === row.id || !row.enabled || row.status !== 'active'"
+                  :title="`立即刷新：${row.name}`"
+                  :aria-label="`立即刷新：${row.name}`"
+                  @click="refreshMine(row)"
+                >
+                  <RefreshCw :size="13" />
+                </button>
+                <button
+                  type="button"
+                  class="grid size-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-chip hover:text-ink disabled:opacity-40"
+                  :disabled="mineBusyId === row.id || row.status !== 'active'"
+                  :title="`${row.enabled ? '暂停' : '恢复'}：${row.name}`"
+                  :aria-label="`${row.enabled ? '暂停' : '恢复'}：${row.name}`"
+                  @click="toggleMine(row)"
+                >
+                  <Pause v-if="row.enabled" :size="13" /><Play v-else :size="13" />
+                </button>
               </li>
             </ul>
-            <p v-else-if="mine" class="mt-4 text-sm text-muted">还没有创建监控。</p>
-            <NuxtLink :to="manageTo" class="btn-primary mt-4 inline-flex h-9 w-full items-center justify-center gap-1">
-              <Plus v-if="!mine?.length" :size="15" />{{ mine?.length ? '管理我的监控' : '新建监控' }}
-            </NuxtLink>
+            <p v-else-if="mine" class="mt-4 text-sm text-muted">还没有创建监控源。</p>
+            <div class="mt-4 flex gap-2">
+              <NuxtLink :to="createTo" class="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1 text-sm">
+                <Plus :size="15" />新建监控
+              </NuxtLink>
+              <NuxtLink v-if="mine?.length" :to="manageTo" class="inline-flex h-9 items-center justify-center rounded-[10px] border border-line px-3 text-sm text-ink-2 transition-colors hover:bg-chip hover:text-ink">
+                管理全部
+              </NuxtLink>
+            </div>
           </template>
           <template v-else>
             <ul class="mt-4 space-y-2 text-[13px] text-ink-2">
-              <li>· 跟踪站内没有收录的 UP 主或话题</li>
-              <li>· 设播放量门槛、包含词与排除词</li>
-              <li>· 可设为私有，或公开到这里与大家共享</li>
+              <li>· 自建任意关键词、UP 主、RSS 订阅或 YouTube 频道</li>
+              <li>· 随时一键启停、立即抓取、设置包含词与排除词</li>
+              <li>· 可设为私有独享，或公开到这里与大家共享</li>
             </ul>
-            <NuxtLink :to="loginRoute(manageTo)" class="btn-primary mt-4 inline-flex h-9 w-full items-center justify-center">登录后创建</NuxtLink>
+            <NuxtLink :to="loginRoute(createTo)" class="btn-primary mt-4 inline-flex h-9 w-full items-center justify-center">登录后创建监控</NuxtLink>
           </template>
         </section>
         <p class="px-1 text-xs leading-relaxed text-faint">标"站点维护"的监控由 AniSignal 维护，保留原始发布时间与原文链接。</p>

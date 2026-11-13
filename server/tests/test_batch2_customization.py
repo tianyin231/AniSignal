@@ -769,3 +769,233 @@ def test_seeds_cli_all_flag(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["app.seeds", "--all"])
     seeds_cli.main()
     assert called == [None]
+
+
+async def test_builtin_edit_delete_restore_hex_palette_and_schedule_gating(client, admin_headers, session):
+    from app.communities import reset_communities
+    from app.models import CollectTarget
+    from app.services.collect import load_due_targets
+
+    try:
+        bad_color = await client.post(
+            "/api/admin/communities",
+            headers=admin_headers,
+            json={"key": "steam", "label": "Steam", "color": "#12345"},
+        )
+        assert bad_color.status_code == 422
+
+        created = await client.post(
+            "/api/admin/communities",
+            headers=admin_headers,
+            json={"key": "steam", "label": "Steam 独游", "en": "Steam Indie", "color": "#EF4444"},
+        )
+        assert created.status_code == 201
+        assert created.json()["color"] == "#ef4444"
+
+        edited_builtin = await client.put(
+            "/api/admin/communities/blhx",
+            headers=admin_headers,
+            json={"label": "碧蓝航线定制", "color": "#10B981"},
+        )
+        assert edited_builtin.status_code == 200
+        assert edited_builtin.json()["label"] == "碧蓝航线定制"
+        assert edited_builtin.json()["color"] == "#10b981"
+
+        # 删除默认内置分区 wuwa 后，缺省 ?community= 自动回退到首个启用分区，不再 500/KeyError
+        del_wuwa = await client.delete("/api/admin/communities/wuwa", headers=admin_headers)
+        assert del_wuwa.status_code == 204
+
+        admin_list = (await client.get("/api/admin/communities", headers=admin_headers)).json()
+        assert "wuwa" not in {c["key"] for c in admin_list["items"]}
+        assert "wuwa" in {c["key"] for c in admin_list["deleted_builtins"]}
+
+        default_feed = await client.get("/api/contents")
+        assert default_feed.status_code == 200
+        assert (await client.get("/api/contents", params={"community": "wuwa"})).status_code == 422
+
+        # 隐藏 hsr 后，到期采集目标不再调度，且 /?community=all 不混入隐藏分区内容
+        await client.put("/api/admin/communities/hsr", headers=admin_headers, json={"active": False})
+        session.add_all([
+            CollectTarget(platform="rss", target_type="feed", target_value="https://example.com/hsr.xml", community="hsr", enabled=True),
+            CollectTarget(platform="rss", target_type="feed", target_value="https://example.com/steam.xml", community="steam", enabled=True),
+        ])
+        now_rfc = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        await ingest_items(
+            session,
+            "rss_feed",
+            [{"url": "https://example.com/hsr/1", "feed_url": "https://example.com/hsr.xml", "title": "隐藏分区动态", "published": now_rfc}],
+            community="hsr",
+        )
+        await ingest_items(
+            session,
+            "rss_feed",
+            [{"url": "https://example.com/steam/1", "feed_url": "https://example.com/steam.xml", "title": "Steam 新品节开启", "published": now_rfc}],
+            community="steam",
+        )
+        await session.commit()
+
+        from app.clock import utcnow
+
+        due_communities = {t.community for t in await load_due_targets(session, utcnow())}
+        assert "steam" in due_communities
+        assert "hsr" not in due_communities
+
+        all_feed = (await client.get("/api/contents", params={"community": "all"})).json()
+        titles = [item["title"] for item in all_feed["items"]]
+        assert "Steam 新品节开启" in titles
+        assert "隐藏分区动态" not in titles
+
+        # 批量移除空内置分区 + 恢复预设分区（手动 batch enable 与导入预设包自动恢复）
+        batch_del = await client.post(
+            "/api/admin/communities/batch",
+            headers=admin_headers,
+            json={"keys": ["ai", "zzz"], "action": "delete"},
+        )
+        assert batch_del.status_code == 200
+        assert {"wuwa", "ai", "zzz"} <= {d["key"] for d in batch_del.json()["deleted_builtins"]}
+
+        restore_wuwa = await client.post(
+            "/api/admin/communities/batch",
+            headers=admin_headers,
+            json={"keys": ["wuwa"], "action": "enable"},
+        )
+        assert restore_wuwa.status_code == 200
+        assert "wuwa" in {c["key"] for c in restore_wuwa.json()["items"] if c["active"]}
+
+        imp_ai = await client.post(
+            "/api/admin/collect-targets/import-presets",
+            headers=admin_headers,
+            json={"communities": ["ai"]},
+        )
+        assert imp_ai.status_code == 200
+        cfg = (await client.get("/api/site-config")).json()
+        assert "ai" in {c["key"] for c in cfg["communities"]}
+    finally:
+        reset_communities()
+
+
+async def test_user_custom_feeds_rss_youtube_ssrf_and_manual_collect(client, admin_headers, session, monkeypatch):
+    from app.collectors.rss import RssCollector
+    from app.collectors.youtube_api import YoutubeApiCollector
+    from app.models.enums import Platform
+    from app.schemas.content import FetchResult
+    from app.services.custom_feeds import sweep_custom_feeds
+
+    # 创建并激活测试用户，开启全员公测
+    await client.post("/api/auth/register", json={"email": "custom@example.com", "password": "password123"})
+    uid = (await client.get("/api/admin/users", headers=admin_headers)).json()["items"][0]["id"]
+    await client.post(f"/api/admin/users/{uid}/verify", headers=admin_headers)
+
+    cap = (await client.get("/api/admin/custom-feeds/capacity", headers=admin_headers)).json()["policy"]
+    cap["open_beta"] = True
+    await client.put("/api/admin/custom-feeds/policy", headers=admin_headers, json=cap)
+
+    login = await client.post("/api/auth/login", json={"email": "custom@example.com", "password": "password123"})
+    assert login.status_code == 200
+
+    # SSRF 内网地址被拒绝
+    ssrf_resp = await client.post(
+        "/api/account/custom-feeds",
+        json={"name": "内网探测", "kind": "feed", "platform": "rss", "target_value": "http://127.0.0.1:8080/feed.xml"},
+    )
+    assert ssrf_resp.status_code == 400
+
+    async def _allow_public_url(url: str) -> str:
+        return url
+
+    monkeypatch.setattr("app.collectors.rss.public_feed_url", _allow_public_url)
+
+    rss_create = await client.post(
+        "/api/account/custom-feeds",
+        json={
+            "name": "独立游戏博客",
+            "kind": "feed",
+            "platform": "rss",
+            "target_value": "https://indie.example.com/feed.xml",
+            "is_public": True,
+        },
+    )
+    assert rss_create.status_code == 201
+    rss_feed_id = rss_create.json()["id"]
+
+    yt_create = await client.post(
+        "/api/account/custom-feeds",
+        json={
+            "name": "官方频道跟踪",
+            "kind": "channel_rss",
+            "platform": "youtube",
+            "target_value": "https://www.youtube.com/channel/UC1234567890123456789012/videos?view=0",
+            "is_public": True,
+        },
+    )
+    assert yt_create.status_code == 201
+    yt_feed_id = yt_create.json()["id"]
+
+    yt_detail = (await client.get(f"/api/custom/feeds/{yt_feed_id}")).json()
+    assert yt_detail["target_value"] == "UC1234567890123456789012"
+    assert yt_detail["source_url"] == "https://www.youtube.com/channel/UC1234567890123456789012"
+
+    # 手动触发抓取成功（首次未采集过）
+    trig_ok = await client.post(f"/api/account/custom-feeds/{rss_feed_id}/collect")
+    assert trig_ok.status_code == 202
+
+    # 真实跑通 sweep_custom_feeds：同时覆盖 RSS 与 YouTube 频道抓取与分发落库
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    async def _fake_rss_fetch(self, target_type: str, feed_url: str, limit: int):
+        return FetchResult(
+            platform=Platform.RSS,
+            fetch_kind="rss_feed",
+            items=[{
+                "id": "rss_item_1",
+                "feed_url": feed_url,
+                "source_name": "Indie Blog",
+                "author": "Team Cherry",
+                "title": "Hollow Silksong Devlog",
+                "url": "https://indie.example.com/posts/silksong",
+                "text": "Release window announced.",
+                "html": "<p>Release window announced.</p>",
+                "published": now_iso,
+                "media": [],
+            }],
+        )
+
+    async def _fake_yt_fetch(self, target_type: str, channel_id: str, limit: int):
+        return FetchResult(
+            platform=Platform.YOUTUBE,
+            fetch_kind="youtube_rss",
+            items=[{
+                "id": "dQw4w9WgXcQ",
+                "channel_id": channel_id,
+                "title": "Official Launch Trailer",
+                "link": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                "published": now_iso,
+                "updated": now_iso,
+                "author": "Indie Studio",
+                "thumbnail": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+                "summary": "Trailer out now.",
+            }],
+        )
+
+    from app.services.queue import LocalRedis
+
+    monkeypatch.setattr(RssCollector, "fetch", _fake_rss_fetch)
+    monkeypatch.setattr(YoutubeApiCollector, "fetch", _fake_yt_fetch)
+
+    stats = await sweep_custom_feeds(session, LocalRedis())
+    assert stats["sources"] == 2
+    assert stats["new_items"] == 2
+
+    rss_detail = (await client.get(f"/api/custom/feeds/{rss_feed_id}")).json()
+    assert rss_detail["total"] == 1
+    assert rss_detail["items"][0]["title"] == "Hollow Silksong Devlog"
+    assert rss_detail["items"][0]["platform"] == "rss"
+
+    yt_after = (await client.get(f"/api/custom/feeds/{yt_feed_id}")).json()
+    assert yt_after["total"] == 1
+    assert yt_after["items"][0]["title"] == "Official Launch Trailer"
+    assert yt_after["items"][0]["platform"] == "youtube"
+
+    # 刚采集完 5 分钟冷却内再次手动触发返回 429
+    trig_cooldown = await client.post(f"/api/account/custom-feeds/{rss_feed_id}/collect")
+    assert trig_cooldown.status_code == 429

@@ -84,8 +84,36 @@ router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin), CO
 # ---------- 分区与采集目标 ----------
 
 
+def _unpack_communities_raw(raw: dict | None) -> tuple[set[str], set[str], dict[str, dict], list[dict]]:
+    data = raw if isinstance(raw, dict) else {}
+    disabled = set(data.get("disabled_builtins") or [])
+    deleted = set(data.get("deleted_builtins") or [])
+    overrides = {
+        k: dict(v)
+        for k, v in (data.get("builtin_overrides") or {}).items()
+        if k in BUILTIN_COMMUNITIES and isinstance(v, dict)
+    }
+    custom = [dict(x) for x in (data.get("custom") or []) if isinstance(x, dict)]
+    return disabled, deleted, overrides, custom
+
+
+def _pack_communities_raw(
+    disabled: set[str],
+    deleted: set[str],
+    overrides: dict[str, dict],
+    custom: list[dict],
+) -> dict:
+    return {
+        "disabled_builtins": sorted(disabled - deleted),
+        "deleted_builtins": sorted(deleted),
+        "builtin_overrides": {k: v for k, v in overrides.items() if k not in deleted and v},
+        "custom": custom,
+    }
+
+
 async def _admin_communities_payload(session: AsyncSession) -> dict:
     raw = await sync_communities(session)
+    _, deleted, _, _ = _unpack_communities_raw(raw)
     counts = dict(
         (await session.execute(select(CollectTarget.community, func.count(CollectTarget.id)).group_by(CollectTarget.community))).all()
     )
@@ -96,13 +124,18 @@ async def _admin_communities_payload(session: AsyncSession) -> dict:
         row["aliases"] = list(meta.extra_names)
         row["target_count"] = int(counts.get(meta.key, 0))
         items.append(row)
-    return {"items": items, "raw": raw}
+    deleted_builtins = [
+        {"key": k, "label": BUILTIN_COMMUNITIES[k].label}
+        for k in BUILTIN_COMMUNITIES
+        if k in deleted
+    ]
+    return {"items": items, "deleted_builtins": deleted_builtins, "raw": raw}
 
 
 @router.get("/communities")
 async def list_communities_admin(session: AsyncSession = Depends(get_session)):
     data = await _admin_communities_payload(session)
-    return {"items": data["items"]}
+    return {"items": data["items"], "deleted_builtins": data["deleted_builtins"]}
 
 
 @router.post("/communities", status_code=status.HTTP_201_CREATED)
@@ -110,22 +143,27 @@ async def create_community_admin(body: CommunityCreate, session: AsyncSession = 
     from app.services.settings import set_setting
 
     raw = await sync_communities(session)
+    disabled, deleted, overrides, custom = _unpack_communities_raw(raw)
     key = body.key.strip().lower()
     if key == COMMUNITY_ALL or key in COMMUNITIES:
         raise HTTPException(status.HTTP_409_CONFLICT, f"分区标识 {key} 已存在或为系统保留字")
-    custom = list(raw.get("custom") or [])
     entry = {
-        "key": key,
         "label": body.label.strip(),
         "en": body.en.strip(),
-        "color": body.color,
-        "domain": body.domain,
+        "color": body.color.lower() if body.color.startswith("#") else body.color,
         "official_bili_mid": (body.official_bili_mid or "").strip(),
         "aliases": [x.strip() for x in body.aliases if x.strip()],
-        "active": body.active,
     }
-    custom.append(entry)
-    await set_setting(session, "communities", {"disabled_builtins": list(raw.get("disabled_builtins") or []), "custom": custom})
+    if key in BUILTIN_COMMUNITIES:
+        deleted.discard(key)
+        if body.active:
+            disabled.discard(key)
+        else:
+            disabled.add(key)
+        overrides[key] = entry
+    else:
+        custom.append({"key": key, "domain": body.domain, "active": body.active, **entry})
+    await set_setting(session, "communities", _pack_communities_raw(disabled, deleted, overrides, custom))
     data = await _admin_communities_payload(session)
     return next(item for item in data["items"] if item["key"] == key)
 
@@ -137,14 +175,26 @@ async def update_community_admin(key: str, body: CommunityUpdate, session: Async
     raw = await sync_communities(session)
     if key not in COMMUNITIES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "分区不存在")
-    disabled = set(raw.get("disabled_builtins") or [])
-    custom = list(raw.get("custom") or [])
+    if body.active is False and COMMUNITIES[key].active:
+        if sum(1 for k, m in COMMUNITIES.items() if k != key and m.active) == 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "全站至少保留一个启用分区")
+    disabled, deleted, overrides, custom = _unpack_communities_raw(raw)
+    color = (body.color.lower() if body.color.startswith("#") else body.color) if body.color is not None else None
     if key in BUILTIN_COMMUNITIES:
+        ov = dict(overrides.get(key) or {})
+        if body.label is not None:
+            ov["label"] = body.label.strip()
+        if body.en is not None:
+            ov["en"] = body.en.strip()
+        if color is not None:
+            ov["color"] = color
+        if body.official_bili_mid is not None:
+            ov["official_bili_mid"] = body.official_bili_mid.strip()
+        if body.aliases is not None:
+            ov["aliases"] = [x.strip() for x in body.aliases if x.strip()]
+        overrides[key] = ov
         if body.active is not None:
-            if body.active:
-                disabled.discard(key)
-            else:
-                disabled.add(key)
+            disabled.discard(key) if body.active else disabled.add(key)
     else:
         for item in custom:
             if item.get("key") == key:
@@ -152,8 +202,8 @@ async def update_community_admin(key: str, body: CommunityUpdate, session: Async
                     item["label"] = body.label.strip()
                 if body.en is not None:
                     item["en"] = body.en.strip()
-                if body.color is not None:
-                    item["color"] = body.color
+                if color is not None:
+                    item["color"] = color
                 if body.domain is not None:
                     item["domain"] = body.domain
                 if body.official_bili_mid is not None:
@@ -163,7 +213,7 @@ async def update_community_admin(key: str, body: CommunityUpdate, session: Async
                 if body.active is not None:
                     item["active"] = body.active
                 break
-    await set_setting(session, "communities", {"disabled_builtins": sorted(disabled), "custom": custom})
+    await set_setting(session, "communities", _pack_communities_raw(disabled, deleted, overrides, custom))
     data = await _admin_communities_payload(session)
     return next(item for item in data["items"] if item["key"] == key)
 
@@ -173,19 +223,44 @@ async def batch_communities_admin(body: CommunityBatchRequest, session: AsyncSes
     from app.services.settings import set_setting
 
     raw = await sync_communities(session)
-    disabled = set(raw.get("disabled_builtins") or [])
-    custom = list(raw.get("custom") or [])
+    disabled, deleted, overrides, custom = _unpack_communities_raw(raw)
     wanted = set(body.keys)
-    enable = body.action == "enable"
-    for key in wanted:
-        if key in BUILTIN_COMMUNITIES:
-            disabled.discard(key) if enable else disabled.add(key)
-    for item in custom:
-        if item.get("key") in wanted:
-            item["active"] = enable
-    await set_setting(session, "communities", {"disabled_builtins": sorted(disabled), "custom": custom})
+    if body.action == "enable":
+        for key in wanted:
+            if key in BUILTIN_COMMUNITIES:
+                deleted.discard(key)
+                disabled.discard(key)
+        for item in custom:
+            if item.get("key") in wanted:
+                item["active"] = True
+    elif body.action == "disable":
+        if sum(1 for k, m in COMMUNITIES.items() if k not in wanted and m.active) == 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "全站至少保留一个启用分区")
+        for key in wanted:
+            if key in BUILTIN_COMMUNITIES and key not in deleted:
+                disabled.add(key)
+        for item in custom:
+            if item.get("key") in wanted:
+                item["active"] = False
+    else:
+        existing_wanted = wanted & set(COMMUNITIES)
+        if sum(1 for k, m in COMMUNITIES.items() if k not in existing_wanted and m.active) == 0:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "全站至少保留一个启用分区，请先新建或启用其他分区后再删除")
+        if existing_wanted:
+            count = await session.scalar(select(func.count(CollectTarget.id)).where(CollectTarget.community.in_(existing_wanted))) or 0
+            if count and not body.purge_targets:
+                raise HTTPException(status.HTTP_409_CONFLICT, f"所选分区下仍有 {count} 个采集目标，请勾选同时清理目标后再删除")
+            if count and body.purge_targets:
+                await session.execute(delete(CollectTarget).where(CollectTarget.community.in_(existing_wanted)))
+        for key in existing_wanted:
+            if key in BUILTIN_COMMUNITIES:
+                deleted.add(key)
+                disabled.discard(key)
+                overrides.pop(key, None)
+        custom = [item for item in custom if item.get("key") not in existing_wanted]
+    await set_setting(session, "communities", _pack_communities_raw(disabled, deleted, overrides, custom))
     data = await _admin_communities_payload(session)
-    return {"items": data["items"]}
+    return {"items": data["items"], "deleted_builtins": data["deleted_builtins"]}
 
 
 @router.delete("/communities/{key}", status_code=status.HTTP_204_NO_CONTENT)
@@ -197,17 +272,23 @@ async def delete_community_admin(
     from app.services.settings import set_setting
 
     raw = await sync_communities(session)
-    if key in BUILTIN_COMMUNITIES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "内置分区不支持删除，请使用停用隐藏")
     if key not in COMMUNITIES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "分区不存在")
+    if sum(1 for k, m in COMMUNITIES.items() if k != key and m.active) == 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "全站至少保留一个启用分区，请先新建或启用其他分区后再删除")
     count = await session.scalar(select(func.count(CollectTarget.id)).where(CollectTarget.community == key)) or 0
     if count and not purge_targets:
         raise HTTPException(status.HTTP_409_CONFLICT, f"该分区下仍有 {count} 个采集目标，请勾选同时清理目标后再删除")
     if count and purge_targets:
         await session.execute(delete(CollectTarget).where(CollectTarget.community == key))
-    custom = [item for item in (raw.get("custom") or []) if item.get("key") != key]
-    await set_setting(session, "communities", {"disabled_builtins": list(raw.get("disabled_builtins") or []), "custom": custom})
+    disabled, deleted, overrides, custom = _unpack_communities_raw(raw)
+    if key in BUILTIN_COMMUNITIES:
+        deleted.add(key)
+        disabled.discard(key)
+        overrides.pop(key, None)
+    else:
+        custom = [item for item in custom if item.get("key") != key]
+    await set_setting(session, "communities", _pack_communities_raw(disabled, deleted, overrides, custom))
     await sync_communities(session)
 
 
@@ -221,9 +302,22 @@ async def list_target_presets(session: AsyncSession = Depends(get_session)):
 
 @router.post("/collect-targets/import-presets")
 async def import_target_presets(body: TargetImportPresetsRequest, session: AsyncSession = Depends(get_session)):
-    from app.seeds import import_preset_targets
+    from app.seeds import import_preset_targets, load_preset_packs
+    from app.services.settings import set_setting
 
-    await sync_communities(session)
+    raw = await sync_communities(session)
+    disabled, deleted, overrides, custom = _unpack_communities_raw(raw)
+    packs = load_preset_packs()
+    wanted = [c for c in (body.communities if body.communities is not None else list(packs.keys())) if c in packs]
+    restored = False
+    for key in wanted:
+        if key in deleted or key in disabled:
+            deleted.discard(key)
+            disabled.discard(key)
+            restored = True
+    if restored:
+        await set_setting(session, "communities", _pack_communities_raw(disabled, deleted, overrides, custom))
+        await sync_communities(session)
     return await import_preset_targets(session, body.communities)
 
 

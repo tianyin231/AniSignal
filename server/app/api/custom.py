@@ -36,6 +36,16 @@ async def _optional_user(request: Request, session: AsyncSession) -> User | None
     return await get_user_by_token(session, token)
 
 
+def _default_source_url(feed: CustomFeed) -> str | None:
+    if feed.platform == "bilibili" and feed.kind == "uid" and feed.target_value.isdigit():
+        return f"https://space.bilibili.com/{feed.target_value}"
+    if feed.platform == "youtube" and feed.kind == "channel_rss":
+        return safe_link(f"https://www.youtube.com/channel/{feed.target_value}")
+    if feed.platform == "rss" and feed.kind == "feed":
+        return safe_link(feed.target_value)
+    return None
+
+
 def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None = None) -> dict:
     preset = custom_preset(feed.platform, feed.kind, feed.target_value) if feed.user_id is None else {}
     return {
@@ -54,7 +64,7 @@ def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None =
         "community": preset.get("community"),
         "target_label": preset.get("target_label", feed.target_value),
         "description": preset.get("description", ""),
-        "source_url": preset.get("source_url"),
+        "source_url": preset.get("source_url") or _default_source_url(feed),
         "item_count": item_count,
         "created_at": feed.created_at,
     }

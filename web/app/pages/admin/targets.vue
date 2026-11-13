@@ -3,13 +3,18 @@ import type { CollectTarget } from '~/utils/admin-types'
 import { fmtTime, platformLabels, targetTypeLabels } from '~/utils/admin-types'
 import { useAdminCommunities } from '~/utils/admin-communities'
 import { apiErrorDetail } from '~/utils/api-errors'
+import { colorToHex } from '~/utils/community-palette'
 import type { SiteCommunityItem } from '~/composables/useSiteConfig'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
-useSeoMeta({ title: '采集目标与分区 · AniSignal 管理看板' })
+useSeoMeta({ title: '分区与信源定制 · AniSignal 管理看板' })
 
 interface AdminCommunityRow extends SiteCommunityItem {
   target_count: number
+}
+interface DeletedBuiltinItem {
+  key: string
+  label: string
 }
 interface PresetItem {
   community: string
@@ -30,17 +35,6 @@ interface RunItem {
   items_fetched: number | null
   items_filtered: number | null
 }
-
-const COLOR_OPTIONS = [
-  { value: 'yellow', label: '琥珀黄' },
-  { value: 'sky', label: '天空蓝' },
-  { value: 'violet', label: '星穹紫' },
-  { value: 'orange', label: '活力橙' },
-  { value: 'cyan', label: '青碧色' },
-  { value: 'lime', label: '荧光绿' },
-  { value: 'teal', label: '青绿色' },
-  { value: 'blue', label: '品牌蓝' },
-] as const
 
 const { api } = useAdminApi()
 const toast = useAdminToast()
@@ -155,9 +149,10 @@ async function clearBiliLogin() {
   }
 }
 
-/* ---------- 分区管理（新建 / 编辑 / 启停 / 删除） ---------- */
-const showCommunityPanel = ref(false)
+/* ---------- 分区管理（新建 / 编辑 / 启停 / 删除 / 恢复预设） ---------- */
+const showCommunityPanel = ref(true)
 const communityRows = ref<AdminCommunityRow[]>([])
+const deletedBuiltins = ref<DeletedBuiltinItem[]>([])
 const communityBusy = ref(false)
 const editingCommunityKey = ref<string | null>(null)
 const communityForm = reactive({
@@ -165,20 +160,22 @@ const communityForm = reactive({
   label: '',
   en: '',
   color: 'blue' as SiteCommunityItem['color'],
+  domain: 'game' as 'game' | 'news',
   official_bili_mid: '',
   aliases: '',
 })
 
 async function loadCommunities() {
   try {
-    const res = await api<{ items: AdminCommunityRow[] }>('/api/admin/communities')
+    const res = await api<{ items: AdminCommunityRow[]; deleted_builtins?: DeletedBuiltinItem[] }>('/api/admin/communities')
     communityRows.value = res.items
+    deletedBuiltins.value = res.deleted_builtins ?? []
   } catch { /* 静默回退 site-config */ }
 }
 
 function resetCommunityForm() {
   editingCommunityKey.value = null
-  Object.assign(communityForm, { key: '', label: '', en: '', color: 'blue', official_bili_mid: '', aliases: '' })
+  Object.assign(communityForm, { key: '', label: '', en: '', color: 'blue', domain: 'game', official_bili_mid: '', aliases: '' })
 }
 
 function startEditCommunity(row: AdminCommunityRow) {
@@ -189,6 +186,7 @@ function startEditCommunity(row: AdminCommunityRow) {
     label: row.label,
     en: row.en,
     color: row.color,
+    domain: row.domain || 'game',
     official_bili_mid: row.official_bili_mid || '',
     aliases: (row.aliases || []).join('，'),
   })
@@ -202,14 +200,15 @@ async function saveCommunity() {
     return
   }
   communityBusy.value = true
+  const editingRow = editingCommunityKey.value ? communityRows.value.find(c => c.key === editingCommunityKey.value) : null
   const payload = {
     label: communityForm.label.trim(),
     en: communityForm.en.trim() || communityForm.label.trim(),
     color: communityForm.color,
-    domain: 'game',
+    domain: communityForm.domain,
     official_bili_mid: communityForm.official_bili_mid.trim() || null,
     aliases: communityForm.aliases.split(/[,，]/).map(s => s.trim()).filter(Boolean),
-    active: true,
+    active: editingRow ? editingRow.active : true,
   }
   try {
     if (editingCommunityKey.value) {
@@ -217,7 +216,7 @@ async function saveCommunity() {
       toast.ok(`分区「${payload.label}」已更新`)
     } else {
       await api('/api/admin/communities', { method: 'POST', body: { key, ...payload } })
-      toast.ok(`自定义分区「${payload.label}」已创建，可直接为其添加采集源`)
+      toast.ok(`分区「${payload.label}」已创建，可直接为其添加监控信源`)
       form.community = key
     }
     resetCommunityForm()
@@ -238,7 +237,7 @@ async function toggleCommunityActive(row: AdminCommunityRow) {
   communityBusy.value = true
   try {
     await api(`/api/admin/communities/${row.key}`, { method: 'PUT', body: { active: !row.active } })
-    toast.ok(row.active ? `已隐藏分区「${row.label}」` : `已启用分区「${row.label}」`)
+    toast.ok(row.active ? `已隐藏分区「${row.label}」（后台已同步暂停其采集调度）` : `已启用分区「${row.label}」`)
     await Promise.all([loadCommunities(), refreshSiteConfig()])
   } catch (exc: any) {
     toast.err(apiErrorDetail(exc, '分区状态更新失败'))
@@ -247,12 +246,17 @@ async function toggleCommunityActive(row: AdminCommunityRow) {
   }
 }
 
-async function batchCommunities(keys: string[], action: 'enable' | 'disable') {
+async function batchCommunities(keys: string[], action: 'enable' | 'disable' | 'delete', purgeTargets = false) {
   if (!keys.length || communityBusy.value) return
   communityBusy.value = true
   try {
-    await api('/api/admin/communities/batch', { method: 'POST', body: { keys, action } })
-    toast.ok(action === 'enable' ? '已批量显示所选分区' : '已隐藏无信源的空分区')
+    await api('/api/admin/communities/batch', { method: 'POST', body: { keys, action, purge_targets: purgeTargets } })
+    const msg = action === 'delete'
+      ? `已移除 ${keys.length} 个分区`
+      : action === 'enable'
+        ? '已启用/恢复所选分区'
+        : '已隐藏无信源的空分区'
+    toast.ok(msg)
     await Promise.all([loadCommunities(), refreshSiteConfig()])
   } catch (exc: any) {
     toast.err(apiErrorDetail(exc, '批量调整分区失败'))
@@ -274,11 +278,37 @@ function hideEmptyCommunities() {
   void batchCommunities(emptyKeys, 'disable')
 }
 
-async function deleteCustomCommunity(row: AdminCommunityRow) {
-  if (row.builtin || communityBusy.value) return
+function deleteEmptyCommunities() {
+  const emptyKeys = communityRows.value.filter(c => c.target_count === 0).map(c => c.key)
+  if (!emptyKeys.length) {
+    toast.info('当前没有无信源的空分区')
+    return
+  }
+  const activeCount = communityRows.value.filter(c => c.active).length
+  const activeRemoving = communityRows.value.filter(c => c.active && emptyKeys.includes(c.key)).length
+  if (activeRemoving >= activeCount) {
+    const keepKey = communityRows.value.find(c => c.active)?.key
+    const idx = keepKey ? emptyKeys.indexOf(keepKey) : -1
+    if (idx >= 0) emptyKeys.splice(idx, 1)
+  }
+  if (!emptyKeys.length) {
+    toast.info('全站至少保留一个启用分区，请先新建分区后再移除最后一个分区')
+    return
+  }
+  if (!confirm(`确认移除 ${emptyKeys.length} 个无信源分区？预设分区移除后仍可随时一键恢复。`)) return
+  void batchCommunities(emptyKeys, 'delete')
+}
+
+async function deleteCommunity(row: AdminCommunityRow) {
+  if (communityBusy.value) return
+  if (row.active && communityRows.value.filter(c => c.active).length <= 1) {
+    toast.err('全站至少保留一个启用分区，请先新建或启用其他分区后再删除')
+    return
+  }
+  const kindText = row.builtin ? '预设分区' : '自定义分区'
   const msg = row.target_count > 0
-    ? `删除自定义分区「${row.label}」并同时移除其下 ${row.target_count} 个采集目标？已入库历史内容仍会保留。`
-    : `确认删除自定义分区「${row.label}」？`
+    ? `删除${kindText}「${row.label}」并同时移除其下 ${row.target_count} 个采集目标？已入库历史内容仍会保留。`
+    : `确认删除${kindText}「${row.label}」？${row.builtin ? '（预设分区删除后仍可随时恢复）' : ''}`
   if (!confirm(msg)) return
   communityBusy.value = true
   try {
@@ -287,10 +317,11 @@ async function deleteCustomCommunity(row: AdminCommunityRow) {
       query: { purge_targets: row.target_count > 0 },
     })
     toast.ok(`分区「${row.label}」已删除`)
+    if (editingCommunityKey.value === row.key) resetCommunityForm()
     if (communityFilter.value === row.key) communityFilter.value = ''
     await Promise.all([loadCommunities(), refreshSiteConfig(), refresh()])
   } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? '删除分区失败')
+    toast.err(apiErrorDetail(exc, '删除分区失败'))
   } finally {
     communityBusy.value = false
   }
@@ -433,6 +464,12 @@ const targetPlaceholder = computed(() => {
   if (form.platform === 'bilibili' && form.target_type !== 'keyword_search') return 'B 站 UP 主数字 UID（如 1955897084）'
   return '搜索关键词（如 鸣潮 周边）'
 })
+
+watch(adminCommunities, (list) => {
+  if (!editingId.value && list.length && !list.some(c => c.key === form.community)) {
+    form.community = (list.find(c => c.active) ?? list[0])!.key
+  }
+}, { immediate: true })
 
 watch(() => form.platform, () => {
   if (!editingId.value) {
@@ -624,9 +661,9 @@ async function remove(target: CollectTarget) {
   <div class="space-y-6">
     <div class="wall-heading flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 class="text-2xl font-bold">采集目标与分区定制</h1>
+        <h1 class="text-2xl font-bold">分区与监控信源定制</h1>
         <p class="mt-0.5 text-sm text-muted">
-          支持自建任意分区、一键导入预设信源、批量启停/移除及后台 B 站扫码登录。
+          自由增删改任意分区（含内置预设）、调色板定色、随时启停监控信源与后台 B 站登录态管理。
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -635,7 +672,7 @@ async function remove(target: CollectTarget) {
           class="rounded-md border border-line px-3 py-2 text-sm transition-colors hover:bg-chip"
           @click="showCommunityPanel = !showCommunityPanel"
         >
-          {{ showCommunityPanel ? '收起分区管理' : `分区管理（${adminCommunities.length}）` }}
+          {{ showCommunityPanel ? '收起分区管理' : `展开分区管理（${adminCommunities.length}）` }}
         </button>
         <button
           type="button"
@@ -651,15 +688,18 @@ async function remove(target: CollectTarget) {
     <section v-if="showCommunityPanel" class="panel space-y-4 p-5">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 class="text-sm font-semibold">站点分区管理</h2>
-          <p class="mt-0.5 text-xs text-muted">可随时隐藏不需要的内置分区，或自建全新的游戏/话题/行业分区（即时同步到前台顶栏）。</p>
+          <h2 class="text-sm font-semibold">站点分区定制</h2>
+          <p class="mt-0.5 text-xs text-muted">所有分区（含预设）均可编辑名称与调色板颜色、隐藏或彻底删除；隐藏/删除后自动停止对应采集并移出首页聚合。</p>
         </div>
         <div class="flex flex-wrap gap-2 text-xs">
           <button type="button" class="rounded-md border border-line px-2.5 py-1.5 hover:bg-chip" :disabled="communityBusy" @click="hideEmptyCommunities">
             一键隐藏无信源分区
           </button>
+          <button type="button" class="rounded-md border border-red-500/30 px-2.5 py-1.5 text-red-600 hover:bg-red-500/10 dark:text-red-300" :disabled="communityBusy" @click="deleteEmptyCommunities">
+            一键移除无信源分区
+          </button>
           <button type="button" class="rounded-md border border-line px-2.5 py-1.5 hover:bg-chip" :disabled="communityBusy" @click="batchCommunities(communityRows.map(c => c.key), 'enable')">
-            全部显示
+            全部启用
           </button>
         </div>
       </div>
@@ -668,20 +708,42 @@ async function remove(target: CollectTarget) {
         <div
           v-for="row in communityRows"
           :key="row.key"
-          class="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs"
-          :class="row.active ? 'border-line bg-card text-ink' : 'border-line-soft bg-chip/50 text-faint opacity-70'"
+          class="inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs transition-colors"
+          :class="row.active ? 'border-line bg-card text-ink' : 'border-line-soft bg-chip/50 text-faint opacity-75'"
         >
+          <span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: colorToHex(row.color) }" aria-hidden="true" />
           <span class="font-medium">{{ row.label }}</span>
           <span class="mono text-[11px] text-faint">({{ row.target_count }})</span>
           <span v-if="!row.builtin" class="rounded bg-blue-500/10 px-1 py-0.5 text-[10px] text-blue-600 dark:text-blue-300">自建</span>
           <button type="button" class="ml-1 text-brand-ink hover:underline" :disabled="communityBusy" @click="toggleCommunityActive(row)">
             {{ row.active ? '隐藏' : '启用' }}
           </button>
-          <template v-if="!row.builtin">
-            <button type="button" class="text-muted hover:text-ink hover:underline" :disabled="communityBusy" @click="startEditCommunity(row)">编辑</button>
-            <button type="button" class="text-red-500 hover:underline" :disabled="communityBusy" @click="deleteCustomCommunity(row)">删除</button>
-          </template>
+          <button type="button" class="text-muted hover:text-ink hover:underline" :disabled="communityBusy" @click="startEditCommunity(row)">编辑</button>
+          <button type="button" class="text-red-500 hover:underline" :disabled="communityBusy" @click="deleteCommunity(row)">删除</button>
         </div>
+      </div>
+
+      <div v-if="deletedBuiltins.length" class="flex flex-wrap items-center gap-1.5 rounded-xl bg-chip/50 px-3 py-2 text-xs text-muted">
+        <span>已移除预设分区：</span>
+        <button
+          v-for="item in deletedBuiltins"
+          :key="item.key"
+          type="button"
+          class="rounded-md border border-line bg-card px-2 py-0.5 text-ink-2 transition-colors hover:border-brand hover:text-brand-ink"
+          :disabled="communityBusy"
+          @click="batchCommunities([item.key], 'enable')"
+        >
+          + 恢复 {{ item.label }}
+        </button>
+        <button
+          v-if="deletedBuiltins.length > 1"
+          type="button"
+          class="ml-auto text-brand-ink hover:underline"
+          :disabled="communityBusy"
+          @click="batchCommunities(deletedBuiltins.map(d => d.key), 'enable')"
+        >
+          恢复全部预设
+        </button>
       </div>
 
       <form class="grid gap-2.5 border-t border-line pt-4 sm:grid-cols-4" @submit.prevent="saveCommunity">
@@ -689,13 +751,13 @@ async function remove(target: CollectTarget) {
           v-model="communityForm.key"
           :disabled="!!editingCommunityKey"
           maxlength="16"
-          placeholder="分区标识（1~16位，如 bluearchive）"
+          placeholder="分区标识（1~16位，如 steam / tech）"
           aria-label="分区英文标识"
           class="input mono px-3 py-2 text-sm disabled:opacity-50"
         >
         <input
           v-model="communityForm.label"
-          placeholder="分区名称（如 蔚蓝档案）"
+          placeholder="分区名称（如 Steam 独游 / 数码硬件）"
           aria-label="分区中文名称"
           required
           class="input px-3 py-2 text-sm"
@@ -706,20 +768,18 @@ async function remove(target: CollectTarget) {
           aria-label="英文副标题"
           class="input px-3 py-2 text-sm"
         >
-        <select v-model="communityForm.color" aria-label="主题色" class="select px-3 py-2 text-sm">
-          <option v-for="c in COLOR_OPTIONS" :key="c.value" :value="c.value">主题色：{{ c.label }}</option>
-        </select>
         <input
           v-model="communityForm.official_bili_mid"
           placeholder="官方B站UID（可选）"
           aria-label="官方 B 站 UID"
           class="input mono px-3 py-2 text-sm"
         >
+        <AdminCommunityColorPicker v-model="communityForm.color" class="sm:col-span-4" />
         <input
           v-model="communityForm.aliases"
-          placeholder="关键词别名，逗号分隔（如 BA，Blue Archive）"
+          placeholder="关键词别名，逗号分隔（如 BA，Blue Archive；用于跨源搜索聚合）"
           aria-label="关键词别名"
-          class="input px-3 py-2 text-sm sm:col-span-2"
+          class="input px-3 py-2 text-sm sm:col-span-3"
         >
         <div class="flex items-center gap-2">
           <button type="submit" class="btn-primary flex-1 px-3 py-2 text-sm" :disabled="communityBusy || !communityForm.label.trim()">
