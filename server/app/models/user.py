@@ -26,7 +26,7 @@ class User(Base):
     instant_notification_cursor: Mapped[int | None] = mapped_column(Integer)
     instant_fulfillment_cursor: Mapped[int | None] = mapped_column(Integer)
     feed_preferences: Mapped[dict | None] = mapped_column(JSON)
-    status: Mapped[str] = mapped_column(String(16), default="active")  # active/banned
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active/banned
     banned_reason: Mapped[str | None] = mapped_column(Text)
     banned_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

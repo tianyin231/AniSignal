@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { Check, Copy, Rss } from 'lucide-vue-next'
-import { GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { copyText } from '~/utils/clipboard'
 
 // RSS 订阅：选范围 → 复制地址到阅读器。不需要登录。
 withDefaults(defineProps<{ compact?: boolean }>(), { compact: false })
+const { communities } = useGameSection()
 const community = ref('all')
 const origin = ref('')
 onMounted(() => { origin.value = window.location.origin })
@@ -12,12 +13,11 @@ const url = computed(() => `${origin.value}${path.value}`)
 const copied = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
 async function copy() {
-  try {
-    await navigator.clipboard.writeText(url.value)
+  if (await copyText(url.value)) {
     copied.value = true
     clearTimeout(timer)
     timer = setTimeout(() => { copied.value = false }, 2000)
-  } catch {
+  } else {
     copied.value = false
   }
 }
@@ -35,8 +35,8 @@ onBeforeUnmount(() => clearTimeout(timer))
     </header>
     <div class="mt-4 flex flex-wrap gap-2" :class="compact ? '' : 'sm:flex-nowrap'">
       <select v-model="community" aria-label="RSS 范围" class="select h-10 shrink-0">
-        <option value="all">全部游戏</option>
-        <option v-for="c in GAME_COMMUNITIES" :key="c.key" :value="c.key">{{ c.key === 'ai' ? 'AI 快讯' : c.label }}</option>
+        <option value="all">全部分区</option>
+        <option v-for="c in communities" :key="c.key" :value="c.key">{{ c.key === 'ai' ? 'AI 快讯' : c.label }}</option>
       </select>
       <input :value="url || path" readonly aria-label="RSS 地址" class="input mono h-10 min-w-0 flex-1 text-xs" @focus="($event.target as HTMLInputElement).select()">
     </div>

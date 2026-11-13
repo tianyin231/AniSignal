@@ -30,7 +30,7 @@ class NewsItem(BaseModel):
     platform: str
     source_name: str
     source_role: str
-    verification: Literal["pending"] = "pending"
+    verification: Literal["pending", "unreviewed"] = "pending"
     published_at: datetime | None
     url: str | None
     references: list[dict]
@@ -63,12 +63,26 @@ async def list_news(
     topic: str = Query(default="", max_length=30),
     kind: Literal["all", "report", "rumor"] = "all",
     hours: int = Query(default=168, ge=1, le=720),
+    include_raw: bool = Query(default=False),
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
     from app.services import aihot
     blocked = _blocked_platforms(request)
+    if include_raw:
+        from app.services.ai_news import raw_news_feed
+
+        raw_items, total = await raw_news_feed(
+            session, q=q, topic=topic, kind=kind, hours=hours,
+            limit=limit, offset=offset, exclude_platforms=blocked,
+        )
+        return NewsList(
+            items=[NewsItem.model_validate(item) for item in raw_items],
+            total=total,
+            topics=list(NEWS_TOPICS),
+            sources=await source_status(session),
+        )
     if aihot.enabled():
         result = await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, limit=limit, offset=offset,
                                   exclude_platforms=blocked)
@@ -155,12 +169,27 @@ async def news_events(
     hours: int = Query(default=168, ge=1, le=720),
     sort: Literal["time", "hot"] = "time",
     selected: bool = False,
+    include_raw: bool = Query(default=False),
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
     from app.services import aihot
     blocked = _blocked_platforms(request)
+    if include_raw and not selected and sort != "hot":
+        from app.services.ai_news import raw_news_feed
+
+        raw_items, total = await raw_news_feed(
+            session, q=q, topic=topic, kind=kind, hours=hours,
+            limit=limit, offset=offset, exclude_platforms=blocked,
+        )
+        return {
+            "items": raw_items,
+            "total": total,
+            "topics": list(NEWS_TOPICS),
+            "sources": await source_status(session),
+            "engine": "anisignal",
+        }
     if aihot.enabled():
         result = await aihot.feed(q=q, topic=topic, kind=kind, hours=hours, sort=sort, selected=selected, limit=limit,
                                   offset=offset, exclude_platforms=blocked)
@@ -185,7 +214,7 @@ async def news_edition(day: date | None = None, session: AsyncSession = Depends(
 
 
 @router.get("/rss.xml")
-async def news_rss(session: AsyncSession = Depends(get_session)):
+async def news_rss(request: Request, session: AsyncSession = Depends(get_session)):
     from app.services import aihot
     if aihot.enabled():
         result = await aihot.request("/feed.xml", raw=True)
@@ -198,10 +227,10 @@ async def news_rss(session: AsyncSession = Depends(get_session)):
     from email.utils import format_datetime
     from datetime import timezone
     from xml.etree.ElementTree import Element, SubElement, tostring
-    from app.config import get_settings
+    from app.api.public import public_site_base
     from app.services.news_publication import list_stories
 
-    base = get_settings().public_base_url.rstrip("/")
+    base = public_site_base(request)
     root = Element("rss", version="2.0")
     channel = SubElement(root, "channel")
     SubElement(channel, "title").text = "AniSignal · AI 精选"
@@ -220,11 +249,21 @@ async def news_rss(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/engine/{path:path}")
-async def engine_public(path: str, request: Request):
+async def engine_public(
+    path: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
     """只代理公开读接口；内部接口和上游管理端永不对外开放。"""
     import re
     from fastapi import HTTPException
     from app.services import aihot
+
+    raw_match = re.fullmatch(r"items/raw-(\d+)(?:/original)?", path)
+    if raw_match:
+        from app.services.news_details import raw_article
+
+        return await raw_article(session, int(raw_match[1]))
     if not aihot.enabled():
         raise HTTPException(404)
     if not re.fullmatch(r"(?:items/[A-Za-z0-9_-]+(?:/original)?|stories/[A-Za-z0-9_-]+(?:/followups)?|groups/[A-Za-z0-9_-]+/reports|reports/(?:daily|weekly|monthly)(?:/[A-Za-z0-9_-]+)?|topics(?:/[A-Za-z0-9_-]+)?|hot)", path):

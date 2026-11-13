@@ -129,7 +129,23 @@ async def test_texts_whitelist_and_defaults(client, admin_headers):
     resp = await client.get("/api/site-config")
     texts = resp.json()["texts"]
     assert texts["footer_note"] == "自定义页脚 · AniSignal"
-    assert set(texts) == {"footer_note"}
+    assert set(texts) == {"footer_note", "contact_email", "source_url"}
+
+    # 联系邮箱与开源仓库地址做格式/协议白名单校验
+    assert (await client.put(
+        "/api/admin/settings/texts", json={"contact_email": "not-an-email"}, headers=admin_headers
+    )).status_code == 400
+    assert (await client.put(
+        "/api/admin/settings/texts", json={"source_url": "javascript:alert(1)"}, headers=admin_headers
+    )).status_code == 400
+    resp = await client.put(
+        "/api/admin/settings/texts",
+        json={"contact_email": "ops@example.com", "source_url": ""},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["contact_email"] == "ops@example.com"
+    assert resp.json()["source_url"] == ""
 
 
 async def test_ai_settings_masked_and_test(client, admin_headers):

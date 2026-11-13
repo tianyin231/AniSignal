@@ -77,16 +77,15 @@ async def test_seed_and_archive_preserve_history_frequency_subscription_and_old_
         "communities": ["wuwa"], "custom_feeds": ["nikke_global"]}, last_scan_at=utcnow())
     session.add(target)
     await session.commit()
-    path = Path("alembic/versions/0056_nikke_infinitynikki.py")
-    spec = importlib.util.spec_from_file_location("promote_games", path)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
-    def apply(conn):
-        with patch.object(migration, "op", Operations(MigrationContext.configure(conn))):
-            migration.upgrade()
-            migration.upgrade()
-    async with engine.begin() as conn:
-        await conn.run_sync(apply)
+    feed.enabled = False
+    session.add(
+        CollectTarget(community="nikke", platform="game_official", target_type="notices", target_value="nikke", interval_minutes=75)
+    )
+    await session.commit()
+    from app.seeds import import_preset_targets
+
+    await import_preset_targets(session, ["nikke", "infinitynikki"])
+    await import_preset_targets(session, ["nikke", "infinitynikki"])
     await session.refresh(feed)
     assert not feed.enabled and feed.is_public
     targets = list(await session.scalars(select(CollectTarget)))

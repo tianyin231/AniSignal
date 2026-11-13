@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ContentList, ContentItem } from '~/utils/admin-types'
 import { contentTypeLabels, fmtTime, platformLabels } from '~/utils/admin-types'
-import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_BADGE, ADMIN_COMMUNITY_SHORT } from '~/utils/admin-communities'
+import { useAdminCommunities } from '~/utils/admin-communities'
 import { Pencil, RotateCw, Trash2 } from 'lucide-vue-next'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
@@ -9,6 +9,7 @@ useSeoMeta({ title: '内容浏览 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
 const toast = useAdminToast()
+const { communities: adminCommunities, labelOf, shortOf, badgeOf } = useAdminCommunities()
 const items = ref<ContentItem[]>([])
 const total = ref(0)
 const platform = ref<string>('')
@@ -70,7 +71,7 @@ const metricText = (metrics: Record<string, number> | null) => {
 const rereviewBusy = ref(false)
 async function rereviewCommunity() {
   if (!communityFilter.value || rereviewBusy.value) return
-  const label = ADMIN_COMMUNITIES.find(c => c.key === communityFilter.value)?.label ?? communityFilter.value
+  const label = labelOf(communityFilter.value)
   if (!confirm(`重审「${label}」分区的全部内容？将清除既有 AI 判定并重新审核（下架状态会按新判定更新）。`)) return
   rereviewBusy.value = true
   try {
@@ -210,7 +211,7 @@ async function rereview(item: ContentItem) {
           class="select px-3 py-2 text-sm"
         >
           <option value="">全部分区</option>
-          <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
+          <option v-for="c in adminCommunities" :key="c.key" :value="c.key">{{ c.label }}</option>
         </select>
         <select
           v-model="reviewFilter"
@@ -273,7 +274,7 @@ async function rereview(item: ContentItem) {
             </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-ink-2">
               {{ platformLabels[item.platform] ?? item.platform }}
-              <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[item.community] ?? 'bg-chip text-muted'">{{ ADMIN_COMMUNITY_SHORT[item.community] ?? '鸣潮' }}</span>
+              <span class="chip ml-1 whitespace-nowrap" :class="badgeOf(item.community)">{{ shortOf(item.community) }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <span

@@ -6,9 +6,11 @@ definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '总览 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
+const { aiConfigured, smtpConfigured } = useSiteConfig()
 const data = ref<Overview | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(false)
+const showOnboarding = computed(() => Boolean(data.value && ((data.value.targets?.length ?? 0) === 0 || !aiConfigured.value)))
 
 async function refresh() {
   loading.value = true
@@ -58,6 +60,27 @@ const stats = computed(() => {
     </div>
 
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+
+    <section v-if="showOnboarding" class="panel border-blue-500/30 bg-blue-500/5 p-5">
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-sm font-semibold text-ink">新站点初始化引导</h2>
+        <span class="text-xs text-muted">无需登录服务器，全部在网页后台完成</span>
+      </div>
+      <div class="mt-3 grid gap-3 sm:grid-cols-3">
+        <NuxtLink to="/admin/targets" class="rounded-xl border border-line bg-card p-3.5 transition-colors hover:border-blue-500/50">
+          <p class="text-xs font-semibold text-blue-600 dark:text-blue-300">1. 分区与信源定制 · {{ (data?.targets.length ?? 0) > 0 ? '已接入' : '待导入' }}</p>
+          <p class="mt-1 text-xs leading-relaxed text-muted">新建或隐藏任意分区，一键按分区导入预设信源，或批量移除不需要的监控源。</p>
+        </NuxtLink>
+        <NuxtLink to="/admin/ai" class="rounded-xl border border-line bg-card p-3.5 transition-colors hover:border-blue-500/50">
+          <p class="text-xs font-semibold text-blue-600 dark:text-blue-300">2. AI 模型（可选） · {{ aiConfigured ? '已配置' : '当前原文直出' }}</p>
+          <p class="mt-1 text-xs leading-relaxed text-muted">配置 OpenAI 兼容接口开启多源聚合与摘要；未配时前台自动直接展示原文。</p>
+        </NuxtLink>
+        <NuxtLink :to="smtpConfigured ? '/admin/targets' : '/admin/users'" class="rounded-xl border border-line bg-card p-3.5 transition-colors hover:border-blue-500/50">
+          <p class="text-xs font-semibold text-blue-600 dark:text-blue-300">3. B 站登录与发信 · {{ smtpConfigured ? 'SMTP 已配' : '无 SMTP 托管模式' }}</p>
+          <p class="mt-1 text-xs leading-relaxed text-muted">B 站搜索可在「采集目标」扫码登录；未配 SMTP 时可在「用户管理」查看注册码与重置密码。</p>
+        </NuxtLink>
+      </div>
+    </section>
 
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
       <div v-for="stat in stats" :key="stat.label" class="panel px-4 py-3">

@@ -112,23 +112,20 @@ async def test_official_target_cannot_be_assigned_to_another_game(client, admin_
     assert (await client.put(f"/api/admin/collect-targets/{response.json()['id']}", headers=admin_headers, json={"community": "endfield"})).status_code == 422
 
 
-async def test_seed_is_idempotent_and_preserves_existing_frequency(engine):
-    path = Path("alembic/versions/0047_genshin_endfield.py")
-    spec = importlib.util.spec_from_file_location("seed_new_games", path)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+async def test_seed_is_idempotent_and_preserves_existing_frequency(session):
+    from app.seeds import import_preset_targets
 
-    def upgrade(conn):
-        from unittest.mock import patch
-        with patch.object(migration.op, "get_bind", return_value=conn):
-            migration.upgrade()
+    first = await import_preset_targets(session, ["genshin", "endfield"])
+    assert first["added"] == 13
+    target = await session.scalar(select(CollectTarget).where(CollectTarget.target_value == "401742377"))
+    target.interval_minutes = 75
+    await session.commit()
 
-    async with engine.begin() as conn:
-        await conn.run_sync(upgrade)
-        await conn.execute(CollectTarget.__table__.update().where(CollectTarget.target_value == "401742377").values(interval_minutes=75))
-        await conn.run_sync(upgrade)
-        rows = (await conn.execute(select(CollectTarget.__table__))).mappings().all()
-    assert len(rows) == 11
-    assert next(row for row in rows if row["target_value"] == "401742377")["interval_minutes"] == 75
+    second = await import_preset_targets(session, ["genshin", "endfield"])
+    assert second["added"] == 0 and second["skipped"] == 13
+    rows = list(await session.scalars(select(CollectTarget)))
+    assert len(rows) == 13
+    assert next(row for row in rows if row.target_value == "401742377").interval_minutes == 75
     for community in ("genshin", "endfield"):
-        assert {row["platform"] for row in rows if row["community"] == community} >= {"bilibili", "game_official", "youtube"}
+        assert {row.platform for row in rows if row.community == community} >= {"bilibili", "game_official", "youtube"}
+    assert all(not row.enabled for row in rows if row.platform == "x")

@@ -99,17 +99,19 @@ async def test_unapproved_social_account_is_not_collected(session,monkeypatch):
     assert stats["sources"]==0
 
 
-async def test_social_seed_preserves_existing_official_feed_and_is_idempotent(engine,session):
-    source=await shared_source(session,"game_official","notices","nikke_global")
-    original=CustomFeed(source_id=source.id,name="NIKKE 国际服",platform="game_official",kind="notices",target_value="nikke_global",interval_minutes=75,is_public=True)
-    session.add(original);await session.commit()
-    path=Path("alembic/versions/0051_nikke_official_social.py")
-    spec=importlib.util.spec_from_file_location("social_seed",path);migration=importlib.util.module_from_spec(spec);spec.loader.exec_module(migration)
-    def apply(conn):
-        with patch.object(migration,"op",Operations(MigrationContext.configure(conn))):migration.upgrade();migration.upgrade()
-    async with engine.begin() as conn:await conn.run_sync(apply)
-    await session.refresh(original)
-    assert original.interval_minutes==75
-    feeds=list(await session.scalars(select(CustomFeed)))
-    assert len(feeds)==3 and {feed.platform for feed in feeds}=={"game_official","youtube","x"}
-    assert next(feed for feed in feeds if feed.platform=="x").interval_minutes==120
+async def test_social_seed_preserves_existing_official_target_and_is_idempotent(session):
+    from app.models import CollectTarget
+    from app.seeds import import_preset_targets
+
+    existing = CollectTarget(community="nikke", platform="game_official", target_type="notices", target_value="nikke", interval_minutes=75)
+    session.add(existing)
+    await session.commit()
+
+    await import_preset_targets(session, ["nikke"])
+    await import_preset_targets(session, ["nikke"])
+    await session.refresh(existing)
+    assert existing.interval_minutes == 75
+    targets = list(await session.scalars(select(CollectTarget).where(CollectTarget.community == "nikke")))
+    assert len(targets) == 3 and {t.platform for t in targets} == {"game_official", "youtube", "x"}
+    x_target = next(t for t in targets if t.platform == "x")
+    assert x_target.interval_minutes == 120 and not x_target.enabled

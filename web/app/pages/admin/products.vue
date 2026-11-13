@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { ApiProduct, ApiProductList, ApiProductSignal, ApiProductSignalList } from '~/composables/usePublicApi'
-import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_BADGE, ADMIN_COMMUNITY_LABELS } from '~/utils/admin-communities'
+import { useAdminCommunities } from '~/utils/admin-communities'
 import { productSignalReviewLabel } from '~/utils/product-utils'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '商品管理 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
+const { communities: adminCommunities, labelOf, badgeOf } = useAdminCommunities()
 
 const fulfillmentKindLabels: Record<string, string> = {
   self_purchase: '自购开箱',
@@ -75,7 +76,8 @@ const goodsNoun = /机械键盘|鼠标垫|亚克力|键盘|键帽|手办|立牌|
 function suggestedTerms(name: string) {
   const full = name.replace(/\s+/g, '').trim()
   const compact = full.replace(/联名|机械|限定|周边/g, '')
-  return [...new Set([full, compact])].filter(term => term.length >= 4 && goodsNoun.test(term))
+  const matched = [...new Set([full, compact])].filter(term => term.length >= 4 && goodsNoun.test(term))
+  return matched.length ? matched : (full.length >= 2 ? [full] : [])
 }
 
 watch(
@@ -303,7 +305,7 @@ async function saveSignal() {
           <div class="min-w-0">
             <p class="font-medium">{{ item.name }}</p>
             <p class="mt-1 text-xs text-muted">
-              {{ ADMIN_COMMUNITY_LABELS[item.community] ?? item.community }}
+              {{ labelOf(item.community) }}
               · 搜索「{{ item.search_keyword }}」
               · 匹配 {{ item.watch_terms.join(' / ') }}
             </p>
@@ -348,7 +350,7 @@ async function saveSignal() {
             <span class="mt-1 block text-[11px] text-faint">已按商品名自动生成；避免改成角色名等过宽词。</span>
           </label>
           <select v-model="form.community" class="select px-3 py-2 text-sm" title="所属游戏分区：履约证据从对应分区的内容池匹配">
-            <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
+            <option v-for="c in adminCommunities" :key="c.key" :value="c.key">分区：{{ c.label }}</option>
           </select>
           <input v-model="form.slug" :disabled="!!editing" placeholder="URL 标识，留空自动生成" class="input px-3 py-2 text-sm disabled:opacity-50">
           <input v-model="form.publisher" placeholder="发行方" class="input px-3 py-2 text-sm">
@@ -459,7 +461,7 @@ async function saveSignal() {
         class="select px-3 py-2 text-sm"
       >
         <option value="">全部分区</option>
-        <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
+        <option v-for="c in adminCommunities" :key="c.key" :value="c.key">{{ c.label }}</option>
       </select>
     </div>
     <div class="panel overflow-x-auto">
@@ -479,7 +481,7 @@ async function saveSignal() {
             <td class="px-4 py-3">
               <span class="font-medium">{{ p.name }}</span>
               <span class="mono ml-2 text-xs text-faint">{{ p.slug }}</span>
-              <span class="chip ml-1 whitespace-nowrap" :class="ADMIN_COMMUNITY_BADGE[p.community ?? ''] ?? 'bg-chip text-muted'">{{ ADMIN_COMMUNITY_LABELS[p.community ?? ''] ?? '鸣潮' }}</span>
+              <span class="chip ml-1 whitespace-nowrap" :class="badgeOf(p.community)">{{ labelOf(p.community) }}</span>
               <span v-if="p.monitor_status === 'archived'" class="chip ml-1">窗口已结束</span>
             </td>
             <td class="max-w-48 truncate px-3 py-3 text-xs text-muted">{{ p.watch_terms.join(' / ') || '—' }}</td>

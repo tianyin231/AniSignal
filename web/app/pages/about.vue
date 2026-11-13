@@ -1,5 +1,7 @@
 <script setup lang="ts">
 useSeoMeta({ title: '关于' })
+const { t } = useSiteConfig()
+const contactEmail = computed(() => t('contact_email').trim())
 
 const steps = [
   { n: '01', t: '采集', d: '只接入可公开访问的官方账号与公开内容；每个来源的健康状态公开可查。' },
@@ -24,7 +26,7 @@ const boundaries = [
         帮你减少跨平台搜集、翻译、去重和判断信息的成本——订阅一个关注目标后，不再每天蹲评论区。
       </p>
       <p class="mt-2 text-sm leading-relaxed text-slate-500 dark:text-zinc-400">
-        当前覆盖《鸣潮》《碧蓝航线》《崩坏：星穹铁道》分区（持续扩展更多游戏）：官方情报、社区线索与商品履约追踪按分区独立组织，账号与订阅全分区通用。全站事件与时间线免费浏览，订阅提供邮件送达。
+        支持多游戏与专题资讯分区独立组织：官方情报、社区线索与商品履约追踪按分区隔离，管理员可在后台按需管理分区与信源；账号与订阅全站通用。
       </p>
     </section>
 
@@ -57,7 +59,7 @@ const boundaries = [
         <NuxtLink to="/legal" class="link">条款与隐私</NuxtLink>
         <NuxtLink to="/copyright" class="link">版权与下架</NuxtLink>
         <NuxtLink to="/bot-rules" class="link">机器人守则</NuxtLink>
-        <a href="mailto:admin@anisignal.nanamiyako.cn" class="link">权利人投诉</a>
+        <a v-if="contactEmail" :href="`mailto:${contactEmail}`" class="link">权利人投诉</a>
       </div>
     </section>
   </div>

@@ -122,6 +122,7 @@ class BilibiliCollector:
         self._timeout = settings.bili_timeout_seconds
         self._max_retries = settings.bili_max_retries
         self._cookie_file = settings.bili_cookie_file
+        self._use_env_cookie = False
         try:
             self._cookies = read_cookie_file(self._cookie_file)
         except (OSError, ValueError, UnicodeError):
@@ -131,6 +132,11 @@ class BilibiliCollector:
         self.search_by_date = False
         self.detail_filter = None
         self.request_count = 0
+
+    def set_cookies(self, cookies: dict[str, str] | None) -> None:
+        if cookies and cookies.get("SESSDATA"):
+            self._cookies = dict(cookies)
+            self._use_env_cookie = True
 
     async def _run(self, *args: str) -> object:
         """执行 bili 命令并解析 stdout JSON，带指数退避重试。
@@ -170,10 +176,12 @@ class BilibiliCollector:
             env.pop(name, None)
         if getattr(self, "proxy_url", None):
             env["BILI_PROXY"] = self.proxy_url
+        if self._cookies and self._use_env_cookie:
+            env["BILI_COOKIE"] = cookie_header(self._cookies)
         proc = await asyncio.create_subprocess_exec(
             self._bin,
             *args,
-            *(["--cookie-file", self._cookie_file] if self._cookies else []),
+            *(["--cookie-file", self._cookie_file] if self._cookies and not self._use_env_cookie else []),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,

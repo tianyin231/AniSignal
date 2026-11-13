@@ -14,7 +14,7 @@ if (import.meta.client) {
 
 <template>
   <div v-if="active" class="pointer-events-none fixed inset-0 -z-10" aria-hidden="true">
-    <div class="absolute inset-0 bg-cover bg-center bg-no-repeat" :style="{ backgroundImage: `url('${src}')` }" />
+    <img :src="src" alt="" referrerpolicy="no-referrer" class="absolute inset-0 size-full object-cover object-center">
     <!-- 壁纸只做轻量明暗适配，文字可读性交给各层毛玻璃表面。 -->
     <div class="wallpaper-veil absolute inset-0" />
   </div>

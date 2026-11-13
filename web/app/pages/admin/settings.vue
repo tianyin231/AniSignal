@@ -5,6 +5,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '站点设置 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
+const { refreshSiteConfig } = useSiteConfig()
 const busy = ref(false)
 const busyWhat = ref('')
 const startBusy = (name: string) => { busy.value = true; busyWhat.value = name }
@@ -100,6 +101,8 @@ async function saveMediaVisibility() {
 // ---------- 文案 ----------
 const TEXT_LABELS: Record<string, string> = {
   footer_note: '页脚说明',
+  contact_email: '公开联系邮箱（用于关于/协议/隐私/版权页，留空则不显示邮箱链接）',
+  source_url: '开源仓库地址（页脚 GitHub 链接，修改版可指向自身仓库）',
 }
 const texts = ref<Record<string, string>>({})
 
@@ -197,6 +200,7 @@ async function saveSmtp() {
   try {
     smtpInfo.value = await api<SmtpView>('/api/admin/settings/smtp', { method: 'PUT', body: smtp })
     smtp.password = ''
+    await refreshSiteConfig()
     toast.ok('SMTP 配置已保存')
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '保存失败'
@@ -279,6 +283,7 @@ async function saveAnnouncement() {
   error.value = notice.value = ''
   try {
     await api('/api/admin/settings/announcement', { method: 'PUT', body: announcement })
+    await refreshSiteConfig()
     toast.ok('公告已保存' + (announcement.enabled ? '并启用' : '（当前关闭）'))
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '保存失败'
@@ -293,6 +298,7 @@ async function saveTexts() {
   error.value = notice.value = ''
   try {
     texts.value = await api('/api/admin/settings/texts', { method: 'PUT', body: texts.value })
+    await refreshSiteConfig()
     toast.ok('文案已保存并全站生效')
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '保存失败'
@@ -322,7 +328,7 @@ async function saveTexts() {
     <section class="panel p-5">
       <h2 class="flex items-center gap-2 text-sm font-semibold"><Mail :size="15" /> 邮件发送（SMTP）</h2>
       <p class="mt-1 text-xs leading-relaxed text-muted">
-        未配置时验证码只落库：管理端「验证码」列表可查注册码，密码重置码不再回传（等于账号接管凭证），所以找回密码需要配置 SMTP。
+        未配置时验证码自动留存在后台：管理员可在「用户管理」查看待核验注册码、一键激活用户或重置密码。
         <template v-if="smtpInfo?.password_set">
           当前密码：已设置（来源 {{ smtpInfo.password_source === 'db' ? '本页' : '环境变量' }}），留空保存则保留。
         </template>
@@ -478,33 +484,18 @@ async function saveTexts() {
       </div>
     </section>
 
-    <!-- AI / LLM -->
-    <section class="panel p-5">
-      <h2 class="text-sm font-semibold">AI 层（LLM）</h2>
-      <p class="mt-1 text-xs leading-relaxed text-muted">
-        OpenAI 兼容接口。配置后自动为事件生成中文摘要与关键事实、翻译国际服公告；
-        未配置时这些任务安全跳过，不影响采集。
-      </p>
-      <div class="mt-4 grid gap-3 sm:grid-cols-2">
-        <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-muted">Base URL（如 https://api.deepseek.com/v1）</label>
-          <input v-model="ai.base_url" placeholder="https://api.example.com/v1" class="input mt-1 w-full px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-muted">模型名（如 deepseek-chat）</label>
-          <input v-model="ai.model" class="input mt-1 w-full px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-muted">API Key（留空 = 保留已存）</label>
-          <input v-model="ai.api_key" type="password" placeholder="sk-…" class="input mt-1 w-full px-3 py-2 text-sm">
-        </div>
+    <!-- AI / LLM 统一入口 -->
+    <section class="panel flex flex-wrap items-center justify-between gap-3 p-5">
+      <div>
+        <h2 class="text-sm font-semibold">AI 层（LLM）</h2>
+        <p class="mt-1 text-xs leading-relaxed text-muted">
+          当前模型：<span class="mono font-medium text-ink-2">{{ ai.model || '未配置（前台自动原文直出）' }}</span>
+          <template v-if="ai.base_url"> · <span class="mono">{{ ai.base_url }}</span></template>
+          <br>
+          接口地址、API Key 池、单价估算、连通测试与批量摘要/翻译统一在「AI 层」页面管理。
+        </p>
       </div>
-      <div class="mt-4 flex flex-wrap items-center gap-2">
-        <button class="btn-primary px-4 py-2" :disabled="busy || !loaded || loadFailed" @click="saveAi">{{ busyWhat === 'saveAi' ? '保存中…' : '保存 LLM 配置' }}</button>
-        <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy || !loaded || loadFailed" @click="testAi">{{ busyWhat === 'testAi' ? '测试中…' : '连通测试' }}</button>
-        <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy || !loaded || loadFailed" @click="summarizeAll">{{ busyWhat === 'summarizeAll' ? '执行中…' : '批量补事件摘要' }}</button>
-        <span v-if="aiTestResult" class="text-xs" :class="aiTestResult.includes('失败') || aiTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ aiTestResult }}</span>
-      </div>
+      <NuxtLink to="/admin/ai" class="btn-primary shrink-0 px-4 py-2 text-sm">前往 AI 层配置 →</NuxtLink>
     </section>
 
     <!-- 全服公告 -->

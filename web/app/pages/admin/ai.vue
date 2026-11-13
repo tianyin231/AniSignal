@@ -5,6 +5,7 @@ definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: 'AI 层 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
+const { refreshSiteConfig } = useSiteConfig()
 const toast = useAdminToast()
 const busy = ref(false)
 const busyWhat = ref('')
@@ -72,10 +73,27 @@ async function saveConfig() {
       body: { ...config, api_keys: config.api_keys.trim() ? config.api_keys : null },
     })
     config.api_key = ''
+    config.api_keys = ''
     toast.ok('LLM 配置已保存')
-    await loadConfig()
+    await Promise.all([loadConfig(), refreshSiteConfig()])
   } catch (exc: any) {
     toast.err(exc?.data?.detail ?? '保存失败')
+  } finally { busy.value = false; busyWhat.value = '' }
+}
+
+async function clearKeyPool() {
+  if (!confirm('确认清空已保存的 API 密钥池？单独配置的 API Key 不受影响。')) return
+  busy.value = true; busyWhat.value = 'clearPool'
+  try {
+    await api('/api/admin/ai/config', {
+      method: 'PUT',
+      body: { ...config, api_keys: [] },
+    })
+    config.api_keys = ''
+    toast.ok('密钥池已清空')
+    await Promise.all([loadConfig(), refreshSiteConfig()])
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? '清空失败')
   } finally { busy.value = false; busyWhat.value = '' }
 }
 
@@ -190,6 +208,7 @@ async function translateMissing() {
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveConfig">{{ busyWhat === 'save' ? '保存中…' : '保存配置' }}</button>
         <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy" @click="runTest">{{ busyWhat === 'test' ? '测试中…' : '连通测试' }}</button>
+        <button v-if="configView?.api_keys_count" type="button" class="rounded-md border border-red-500/30 px-3 py-2 text-xs text-red-600 hover:bg-red-500/10 dark:text-red-300" :disabled="busy" @click="clearKeyPool">{{ busyWhat === 'clearPool' ? '清空中…' : '清空密钥池' }}</button>
         <span v-if="testResult" class="text-xs" :class="testResult.includes('失败') || testResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ testResult }}</span>
       </div>
     </section>

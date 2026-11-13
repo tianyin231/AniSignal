@@ -232,13 +232,29 @@ async def send_admin_emails(ctx, delivery_ids: list[int]) -> dict:
 
 async def send_morning_notifications(ctx) -> dict:
     """北京时间 08:00 的全站早报批次。"""
+    import secrets
     from app.db import SessionLocal
     from app.services.notifications import run_scheduled_morning
 
-    async with SessionLocal() as session:
-        result = await run_scheduled_morning(session)
-        logger.info("morning notifications -> %s", result)
-        return result
+    redis = ctx.get("redis") if isinstance(ctx, dict) else None
+    key = "anisignal:morning-notifications-lock"
+    token = secrets.token_hex(16)
+    if redis is not None and not await redis.set(key, token, nx=True, ex=1900):
+        return {"status": "busy"}
+    try:
+        async with SessionLocal() as session:
+            result = await run_scheduled_morning(session)
+            logger.info("morning notifications -> %s", result)
+            return result
+    finally:
+        if redis is not None:
+            if hasattr(redis, "eval"):
+                await redis.eval(
+                    "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0",
+                    1, key, token,
+                )
+            elif hasattr(redis, "release_if_match"):
+                await redis.release_if_match(key, token)
 
 
 async def on_startup(ctx) -> None:
@@ -297,4 +313,6 @@ class WorkerSettings:
     max_jobs = 4
     job_timeout = 1800
     keep_result = 3600
+    health_check_interval = 60
+    health_check_key = f"anisignal:worker-health:{__import__('socket').gethostname()}"
     on_startup = on_startup

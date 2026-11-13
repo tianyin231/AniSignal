@@ -1,8 +1,10 @@
 """Application configuration, driven by environment variables (prefix ANISIGNAL_)."""
 
 from functools import lru_cache
+import ipaddress
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -11,7 +13,29 @@ class Settings(BaseSettings):
     )
 
     database_url: str = "mysql+asyncmy://root@localhost:3306/anisignal"
+    database_password: str = ""
     redis_url: str = "redis://localhost:6379/0"
+
+    # fake-ip 等透明代理场景可显式放行的出站网段（逗号分隔，如 198.18.0.0/15；回环与云元数据永远禁止）
+    egress_allow_cidrs: str = ""
+
+    @property
+    def resolved_database_url(self) -> str:
+        if not self.database_password:
+            return self.database_url
+        parsed = make_url(self.database_url)
+        if parsed.password is not None:
+            return self.database_url
+        return parsed.set(password=self.database_password).render_as_string(hide_password=False)
+
+    @property
+    def egress_allow_networks(self) -> tuple[ipaddress._BaseNetwork, ...]:
+        nets = []
+        for raw in self.egress_allow_cidrs.split(","):
+            raw = raw.strip()
+            if raw:
+                nets.append(ipaddress.ip_network(raw, strict=False))
+        return tuple(nets)
 
     # 单管理员 Token；生产必须通过环境变量覆盖
     admin_token: str = ""
@@ -111,6 +135,8 @@ class Settings(BaseSettings):
     smtp_from: str = "AniSignal <noreply@anisignal.local>"
     smtp_starttls: bool = True
     smtp_tls_mode: str = ""
+    # 全站验证码邮件每小时真实发信上限（防止随机邮箱刷爆发信配额；0 表示不限）
+    mail_hourly_limit: int = 100
 
     # 账号会话有效期（天）
     session_days: int = 30

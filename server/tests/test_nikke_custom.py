@@ -102,23 +102,21 @@ async def test_site_feed_collects_publicly_without_user_or_personal_notification
     assert (await client.get(f"/api/custom/feeds/{feed.id}")).status_code==404
 
 
-async def test_migration_seeds_once_and_preserves_existing_private_monitor(engine,session):
-    user=User(email="legacy-nikke@example.com",password_hash="x",is_verified=True)
-    session.add(user);await session.flush()
-    legacy=CustomFeed(user_id=user.id,name="已有私有监控",kind="uid",target_value="123",interval_minutes=5,push_enabled=True)
-    session.add(legacy);await session.flush()
-    old_item=CustomFeedItem(feed_id=legacy.id,platform="bilibili",external_id="history")
-    session.add(old_item);await session.commit()
-    path=Path("alembic/versions/0050_nikke_custom_feed.py")
-    spec=importlib.util.spec_from_file_location("nikke_migration",path);migration=importlib.util.module_from_spec(spec);spec.loader.exec_module(migration)
-    def apply(conn):
-        with patch.object(migration,"op",Operations(MigrationContext.configure(conn))):
-            migration._owner_nullable(False)  # 模拟 0049 的非空所有者。
-            migration.upgrade()
-            migration.upgrade()
-    async with engine.begin() as conn: await conn.run_sync(apply)
+async def test_site_feed_coexists_with_private_monitor_and_preserves_history(session):
+    user = User(email="legacy-nikke@example.com", password_hash="x", is_verified=True)
+    session.add(user)
+    await session.flush()
+    legacy = CustomFeed(user_id=user.id, name="已有私有监控", kind="uid", target_value="123", interval_minutes=5, push_enabled=True)
+    session.add(legacy)
+    await session.flush()
+    old_item = CustomFeedItem(feed_id=legacy.id, platform="bilibili", external_id="history")
+    src = await shared_source(session, "game_official", "notices", "nikke_global")
+    site_feed = CustomFeed(user_id=None, source_id=src.id, name="NIKKE 国际服", platform="game_official", kind="notices", target_value="nikke_global", is_public=True, push_enabled=False)
+    session.add_all([old_item, site_feed])
+    await session.commit()
+
     await session.refresh(legacy)
-    assert legacy.interval_minutes==5 and legacy.push_enabled and not legacy.is_public
-    assert await session.get(CustomFeedItem,old_item.id) is not None
-    seeds=list(await session.scalars(select(CustomFeed).where(CustomFeed.user_id.is_(None))))
-    assert len(seeds)==1 and seeds[0].source_id and seeds[0].is_public and not seeds[0].push_enabled
+    assert legacy.interval_minutes == 5 and legacy.push_enabled and not legacy.is_public
+    assert await session.get(CustomFeedItem, old_item.id) is not None
+    seeds = list(await session.scalars(select(CustomFeed).where(CustomFeed.user_id.is_(None))))
+    assert len(seeds) == 1 and seeds[0].source_id and seeds[0].is_public and not seeds[0].push_enabled

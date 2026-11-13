@@ -1,13 +1,39 @@
 <script setup lang="ts">
 import type { AdminDelivery, AdminUser, AdminUserDetail, AdminUserList } from '~/utils/admin-types'
 import { fmtTime } from '~/utils/admin-types'
-import { Ban, Mail, RotateCw, Search, Send } from 'lucide-vue-next'
+import { copyText } from '~/utils/clipboard'
+import { Ban, CheckCircle2, Copy, KeyRound, Mail, RotateCw, Search, Send } from 'lucide-vue-next'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '用户管理 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
+const { smtpConfigured } = useSiteConfig()
 const toast = useAdminToast()
+
+/* ---------- 待用注册验证码（无 SMTP 或发信失败时留存） ---------- */
+interface EmailCodeItem {
+  id: number
+  email: string
+  code: string | null
+  attempts: number
+  expires_at: string
+  used: boolean
+  sent_via_smtp: boolean
+}
+const emailCodes = ref<EmailCodeItem[]>([])
+const unusedPlainCodes = computed(() => emailCodes.value.filter(c => !c.used && c.code))
+
+async function refreshEmailCodes() {
+  try {
+    emailCodes.value = await api<EmailCodeItem[]>('/api/admin/email-codes', { query: { limit: 20 } })
+  } catch { /* 不阻塞用户列表 */ }
+}
+onMounted(refreshEmailCodes)
+
+async function copyRegCode(code: string) {
+  if (await copyText(code)) toast.ok(`已复制验证码 ${code}`)
+}
 
 /* ---------- 用户快查（万级规模：服务端分页 + 显式查询） ---------- */
 const items = ref<AdminUser[]>([])
@@ -121,7 +147,8 @@ async function sendMail() {
 
 function onModalKeydown(ev: KeyboardEvent) {
   if (ev.key === 'Escape') {
-    if (showMail.value) closeMail()
+    if (showReset.value) closeReset()
+    else if (showMail.value) closeMail()
     else if (showDetail.value) closeDetail()
   }
 }
@@ -151,6 +178,61 @@ async function setBanned(user: AdminUser, banned: boolean) {
     toast.err(`操作失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
   } finally {
     busyId.value = null
+  }
+}
+
+async function verifyUser(user: AdminUser) {
+  if (busyId.value) return
+  if (!confirm(`直接激活验证 ${user.email}？适用于未配置 SMTP 时的管理员代核验。`)) return
+  busyId.value = user.id
+  try {
+    const updated = await api<AdminUser>(`/api/admin/users/${user.id}/verify`, { method: 'POST' })
+    Object.assign(user, updated)
+    toast.ok(`已激活 ${user.email}`)
+    await refreshEmailCodes()
+  } catch (exc: any) {
+    toast.err(`激活失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
+  } finally {
+    busyId.value = null
+  }
+}
+
+/* ---------- 管理员重置密码模态框 ---------- */
+const showReset = ref(false)
+const resetTarget = ref<AdminUser | null>(null)
+const resetPassword = ref('')
+const resetBusy = ref(false)
+
+function openReset(user: AdminUser) {
+  resetTarget.value = user
+  resetPassword.value = ''
+  showReset.value = true
+}
+
+function closeReset() {
+  showReset.value = false
+}
+
+async function submitResetPassword() {
+  if (!resetTarget.value || resetBusy.value) return
+  if (resetPassword.value.length < 8) {
+    toast.err('新密码至少 8 位')
+    return
+  }
+  resetBusy.value = true
+  try {
+    const updated = await api<AdminUser>(`/api/admin/users/${resetTarget.value.id}/reset-password`, {
+      method: 'POST',
+      body: { password: resetPassword.value, verify: true },
+    })
+    Object.assign(resetTarget.value, updated)
+    toast.ok(`已重置 ${resetTarget.value.email} 的密码并踢出旧会话`)
+    showReset.value = false
+    resetPassword.value = ''
+  } catch (exc: any) {
+    toast.err(`重置失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
+  } finally {
+    resetBusy.value = false
   }
 }
 
@@ -236,6 +318,31 @@ const deliveryStatusLabel: Record<string, string> = {
       <h1 class="text-2xl font-bold text-ink">用户管理</h1>
       <p class="mt-0.5 text-sm text-muted">快查、封禁、订阅管理与邮件触达。</p>
     </div>
+
+    <!-- 待用注册验证码（未配置 SMTP 或发信失败时展示） -->
+    <section v-if="unusedPlainCodes.length || !smtpConfigured" class="panel p-4">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-sm font-semibold text-ink">待核验注册验证码</h2>
+        <button type="button" class="text-xs text-brand-ink hover:underline" @click="refreshEmailCodes">刷新验证码</button>
+      </div>
+      <p class="mt-1 text-xs text-muted">
+        未配置 SMTP 或发信失败时，新注册账号的 6 位注册码会暂存于此；也可直接在下方用户列表点击「激活」免码开通。
+      </p>
+      <ul v-if="unusedPlainCodes.length" class="mt-3 divide-y divide-line-soft text-xs">
+        <li v-for="item in unusedPlainCodes" :key="item.id" class="flex flex-wrap items-center gap-3 py-2">
+          <span class="font-medium text-ink">{{ item.email }}</span>
+          <button
+            type="button"
+            class="mono inline-flex items-center gap-1 rounded bg-brand-soft px-2 py-0.5 font-semibold text-brand-ink hover:bg-brand/20"
+            @click="copyRegCode(item.code!)"
+          >
+            {{ item.code }} <Copy :size="11" />
+          </button>
+          <span class="mono text-faint">有效至 {{ fmtTime(item.expires_at) }}</span>
+        </li>
+      </ul>
+      <p v-else class="mt-2 text-xs text-faint">当前没有待用的未发信注册码。</p>
+    </section>
 
     <!-- 广播邮件 -->
     <section class="panel p-4">
@@ -353,7 +460,18 @@ const deliveryStatusLabel: Record<string, string> = {
               <td class="mono px-3 py-2.5 text-xs text-faint">{{ fmtTime(u.created_at) }}</td>
               <td class="mono px-3 py-2.5 text-xs text-faint">{{ u.last_login_at ? fmtTime(u.last_login_at) : '—' }}</td>
               <td class="whitespace-nowrap px-3 py-2.5 text-right">
+                <button
+                  v-if="!u.is_verified"
+                  class="min-h-9 rounded px-2 text-xs text-emerald-700 hover:underline disabled:cursor-wait dark:text-emerald-300"
+                  :disabled="busyId === u.id"
+                  @click="verifyUser(u)"
+                >
+                  <CheckCircle2 :size="12" class="mr-0.5 inline" />激活
+                </button>
                 <button class="min-h-9 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="openDetail(u)">详情</button>
+                <button class="min-h-9 rounded px-2 text-xs text-ink-2 hover:underline" @click="openReset(u)">
+                  <KeyRound :size="12" class="mr-0.5 inline" />改密
+                </button>
                 <button class="min-h-9 rounded px-2 text-xs text-ink-2 hover:underline" @click="openMail(u)">
                   <Mail :size="12" class="mr-0.5 inline" />邮件
                 </button>
@@ -473,6 +591,32 @@ const deliveryStatusLabel: Record<string, string> = {
             </div>
           </div>
         </div>
+      </div>
+    </Teleport>
+    <!-- 管理员重置密码模态框 -->
+    <Teleport to="body">
+      <div v-if="showReset && resetTarget" class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[16vh]">
+        <div class="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" @click="closeReset" />
+        <form class="popover relative w-full max-w-md p-5" @submit.prevent="submitResetPassword">
+          <h2 class="text-sm font-semibold text-ink">重置密码 → {{ resetTarget.email }}</h2>
+          <p class="mt-1 text-xs text-muted">保存后将立即踢出该账号所有已登录设备，并自动标记邮箱已验证。</p>
+          <input
+            v-model="resetPassword"
+            type="password"
+            minlength="8"
+            maxlength="128"
+            required
+            autocomplete="new-password"
+            placeholder="输入新密码（至少 8 位）"
+            class="input mt-3 w-full px-3 py-2 text-sm"
+          >
+          <div class="mt-4 flex items-center justify-end gap-2">
+            <button type="button" class="rounded-md border border-line px-4 py-2 text-sm text-ink-2 transition-colors hover:bg-chip" @click="closeReset">取消</button>
+            <button type="submit" class="btn-primary px-4 py-2 text-sm" :disabled="resetBusy || resetPassword.length < 8">
+              {{ resetBusy ? '重置中…' : '确认重置' }}
+            </button>
+          </div>
+        </form>
       </div>
     </Teleport>
   </div>

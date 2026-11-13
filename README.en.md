@@ -6,8 +6,7 @@
 
 **Let what matters find you.**
 
-A self-hosted signal desk for game news and merchandise tracking. It gathers public updates from official accounts,
-site notices, videos and communities, merges them into events with traceable sources, and delivers what you follow to the web, email and QQ.
+A self-hosted multi-section signal desk for game updates, industry news, and merchandise tracking. It gathers public updates from official accounts, site notices, videos, communities, and RSS feeds, merges them into traceable events, and delivers what you follow to the web, email, and QQ.
 
 <p>
 <a href="https://github.com/tianyin231/AniSignal/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
@@ -31,9 +30,9 @@ site notices, videos and communities, merges them into events with traceable sou
   </picture>
 </a>
 
-Following a game's next version or a figure's shipping status usually means bouncing between official accounts, websites, videos and community boards, and telling real news apart from reposts. AniSignal watches those public sources for you: scattered posts about the same thing become one event with every source cited, merchandise is followed from pre-order to the first unboxings, and new hits on your keywords are pushed to you.
+Following a game's next version, a figure's shipping status, or fast-moving AI releases usually means bouncing between official accounts, websites, videos, community boards, and RSS feeds. AniSignal watches those public sources for you: scattered posts about the same thing become one event with every source cited, merchandise is followed from pre-order to the first unboxings, and new hits on your keywords are pushed to you.
 
-> The interface and most of the collected content are in Chinese.
+> The interface and most preset sources are in Chinese, while custom sections and RSS/YouTube/X sources work with any language.
 
 ## Features
 
@@ -51,7 +50,7 @@ Following a game's next version or a figure's shipping status usually means boun
   <tr>
     <td width="50%" valign="top">
       <img src="docs/assets/readme/calendar.webp" alt="Event calendar: start, end and maintenance times grouped by game">
-      <p><b>Event calendar</b><br>Start and end times of events, banners and giveaways are extracted from announcements, filterable by game and one click away from your own calendar.</p>
+      <p><b>Event calendar</b><br>Start and end times of events, banners and giveaways are extracted from announcements, filterable by section and one click away from your own calendar.</p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/assets/readme/mobile.webp" alt="Mobile layout: home, merchandise detail and calendar">
@@ -62,26 +61,27 @@ Following a game's next version or a figure's shipping status usually means boun
 
 Also included:
 
-- **Multi-platform collection**: official Bilibili posts and videos, YouTube, X, official game site notices and RSS; every source has its own health record and backs off automatically on failure.
-- **Follows and delivery**: keyword follows on the site, or standalone Bilibili UID / keyword monitors; a morning email digest at 08:00 and instant alerts for important news.
-- **QQ bot**: a companion AstrBot plugin for QQ official groups and NapCat that pushes rich briefs and answers queries in chat.
-- **AI News**: model releases and industry news, scored in two passes, translated into Chinese and grouped, browsed separately from the game sections.
-- **Admin console**: `/admin` manages sources, review, classification rules, users and broadcast emails, with live accounting of model cost and token usage.
+- **Custom sections & one-click source presets**: New instances start with a clean empty database; create custom sections, toggle built-in sections, import preset source packs per section in one click, or bulk enable/disable/remove monitored sources from `/admin/targets` without touching code.
+- **Zero-SSH web setup & Bilibili QR login**: Scan a QR code or paste cookies directly in `/admin/targets` for Bilibili collection; manage AI keys, proxies, and site branding in the web console.
+- **Graceful operation without AI or SMTP**: Without an LLM key, rule-based event merging works out of the box and `/ai` can display original raw feed items directly; without SMTP, admins can view pending registration codes, activate accounts, or reset passwords in `/admin/users`.
+- **Follows and delivery**: Keyword follows on the site, or standalone Bilibili UID / keyword custom monitors; a 08:00 (UTC+8) morning email digest and instant alerts.
+- **QQ bot**: Companion AstrBot plugin for QQ official groups and NapCat that pushes rich briefs and answers queries in chat.
 
-## Sections
+## Sections & Presets
 
-14 game sections plus AI News. Open a single game, or see everything on the home page.
+14 built-in game sections plus AI News presets are ready for optional one-click import, and you can create **unlimited custom sections** in `/admin/targets`:
 
-| Section | Main sources |
+| Section | Preset sources |
 | :--- | :--- |
-| Wuthering Waves | Official Bilibili, Kuro official notices, YouTube, popular community videos |
-| Genshin Impact · Arknights: Endfield | Official Bilibili, official notices, X, YouTube, community videos (Genshin also includes Miyoushe) |
+| Wuthering Waves | Official Bilibili & merch account, Kuro official notices (CN/Global), YouTube, community search |
+| Genshin Impact · Arknights: Endfield | Official Bilibili, official notices, YouTube, community videos (Genshin also includes Miyoushe) |
 | Honkai: Star Rail · Arknights · Azur Lane | Official Bilibili, YouTube, community videos |
-| Goddess of Victory: NIKKE | Official notices, X, YouTube |
-| Zenless Zone Zero · Infinity Nikki · Petit Planet · Honkai: Nexus Anima · Roco Kingdom: World · Azur Promilia · Neverness to Everness | Official Bilibili, popular community videos |
-| AI News | RSS news feeds, AI-related accounts on X, Bilibili search |
+| Goddess of Victory: NIKKE | Official notices, YouTube, community videos |
+| Zenless Zone Zero · Infinity Nikki · Petit Planet · Honkai: Nexus Anima · Roco Kingdom: World · Azur Promilia · Neverness to Everness | Official Bilibili, community videos |
+| AI News | First-party RSS feeds (OpenAI, Anthropic, Google AI, DeepMind, Hugging Face, etc.) & Bilibili search (X accounts disabled by default) |
+| Custom sections (admin-created) | Any Bilibili account/search, YouTube channel, RSS/Atom feed, Miyoushe, or X source |
 
-Sources can be added or removed from the admin console at any time; the table reflects the public site's current setup.
+Navigation automatically shows only enabled sections that have active sources.
 
 ## Architecture
 
@@ -91,7 +91,7 @@ flowchart LR
     Q --> R[("Raw content<br/>MySQL")]
     R --> E["Event merging<br/>Evidence · Revisions"]
     R --> P["Merch tracking<br/>Unboxings · Quality"]
-    R --> A["AI review & summaries<br/>Usage accounting"]
+    R --> A["AI review & summaries<br/>(raw fallback without LLM)"]
     E --> W["Web signal desk<br/>Nuxt 4 SSR"]
     P --> W
     A --> W
@@ -107,7 +107,7 @@ The backend is FastAPI + SQLAlchemy (async) + MySQL 8.4 with a Redis / arq task 
 
 ### Production (Docker Compose)
 
-Requirements: Git, Docker 24+ and Docker Compose v2.
+Requirements: Git, Docker 24+ (with Buildx), Docker Compose v2, and **at least 2 GB RAM** (`linux/amd64` and `linux/arm64` supported).
 
 ```bash
 git clone https://github.com/tianyin231/AniSignal.git
@@ -117,18 +117,25 @@ cp .env.example .env
 
 Edit `.env`:
 
-- set `ANISIGNAL_ADMIN_TOKEN` to a long random string (the admin console's access token);
-- set `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD`;
-- adjust the listening port if needed (default `WEB_PORT=127.0.0.1:8090`).
+- `MYSQL_ROOT_PASSWORD`: strong random password for MySQL (special characters are URL-encoded automatically);
+- `ANISIGNAL_ADMIN_TOKEN`: strong random token for `/admin` (do not leave `change-me`);
+- `ANISIGNAL_PUBLIC_BASE_URL`: external site URL (`http://127.0.0.1:8090` for local testing, or `https://signal.example.com` behind HTTPS reverse proxy);
+- `WEB_PORT`: host bind address and port (defaults to `127.0.0.1:8090`; set `0.0.0.0:8090` for direct LAN access).
 
-Start it:
+Start the stack:
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-Open **`http://127.0.0.1:8090`** to browse. Go to `/admin` with the admin token to start configuring sources, rules and AI.
+Open **`http://127.0.0.1:8090/admin`** with your `ANISIGNAL_ADMIN_TOKEN` and follow the 3-step onboarding card:
+
+1. **Sections & Sources (`/admin/targets`)**: Create custom sections, import preset source packs in one click, or add/remove sources in bulk; scan a QR code or paste cookies for Bilibili if needed.
+2. **AI Models (optional, `/admin/ai`)**: Configure an OpenAI-compatible endpoint for summaries, calendar extraction, merch discovery, and curated AI News (or browse raw items directly without AI).
+3. **Users & Email (optional, `/admin/settings` & `/admin/users`)**: Configure SMTP for digests and password resets, or manage verification codes and user passwords directly in `/admin/users` without SMTP.
+
+> Using a Clash / mihomo TUN `fake-ip` proxy? Uncomment `ANISIGNAL_EGRESS_ALLOW_CIDRS=198.18.0.0/15` in `.env` so SSRF protection allows fake-ip ranges (`198.18.0.0/15`). See the [deployment guide](docs/deployment.md) for details.
 
 ### Local development
 
@@ -145,32 +152,30 @@ npm ci
 npm run dev
 ```
 
-See the [deployment guide](docs/deployment.md) for full configuration and environment variables.
+See the [deployment guide](docs/deployment.md) for reverse proxy templates (`docs/examples/nginx.conf`), China mirror options, backups, and troubleshooting.
 
 ## QQ via AstrBot
 
 The plugin source lives in `integrations/astrbot_plugin_anisignal` and is published to the standalone repository [AstrBot_Plugin_AniSignal](https://github.com/tianyin231/AstrBot_Plugin_AniSignal):
 
-1. In the AstrBot panel, open "Plugin Management → Install from Link" and enter the plugin repository `https://github.com/tianyin231/AstrBot_Plugin_AniSignal`;
+1. In the AstrBot panel, open "Plugin Management → Install from Link" and enter `https://github.com/tianyin231/AstrBot_Plugin_AniSignal`;
 2. fill in your AniSignal server URL and access key;
 3. send `/情报订阅` or `/帮助` in a group or private chat to choose sections and delivery.
 
-It supports morning digests, instant alerts for important news, rich briefs, session persona inheritance and keyword queries. See the [plugin guide](integrations/astrbot_plugin_anisignal/README.md).
+See the [plugin guide](integrations/astrbot_plugin_anisignal/README.md) for details.
 
 ## Documentation
 
-- [Features & architecture](docs/features.md): the three ways to follow, idempotent ingestion and event merging
-- [Deployment & operations](docs/deployment.md): containers, server updates and proxy setup
-- [Backend](server/README.md): FastAPI layout, Alembic migrations and collector interfaces
+- [Deployment & operations](docs/deployment.md): Docker Compose, Nginx reverse proxy, fake-ip/mirrors, backups, and troubleshooting
+- [Features & architecture](docs/features.md): the three ways to follow, idempotent ingestion, and event merging
+- [Backend](server/README.md): FastAPI layout, Alembic migrations, and collector interfaces
 - [Frontend](web/README.md): Nuxt 4 structure and Signal Desk design tokens
 
-When filing an issue, please include the page path, reproduction steps, deployment mode and sanitized logs.
+When filing an issue, please include the page path, reproduction steps, deployment mode, and sanitized logs.
 
 ## License
 
-Copyright © 2026 tianyin231 and contributors. AniSignal is released under the [GNU AGPL-3.0](LICENSE): you may use, modify and redistribute it; if you run a modified version as a network service for others, you must also publish its complete source under AGPL-3.0.
-
-`integrations/aihot` contains the third-party project [AIHOT](https://github.com/KKKKhazix/AIHOT), distributed under its original MIT License (see `LICENSE` and `NOTICE` in that directory). The "AIHOT" name and logo are not covered by that license.
+Copyright © 2026 tianyin231 and contributors. AniSignal is released under the [GNU AGPL-3.0](LICENSE): you may use, modify, and redistribute it; if you run a modified version as a network service for others, you must also publish its complete source under AGPL-3.0 (configurable via `source_url` and `contact_email` in `/admin/settings`).
 
 ## Acknowledgements
 

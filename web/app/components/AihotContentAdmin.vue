@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { safeRandomId } from '~/utils/clipboard'
+
 interface Row { id: string; title: string; source: string; processing_state: string; visibility: string | null; selected: boolean | null }
 interface Chain { article: { id: string; title: string; processing_state: string; processing_error: string | null }; publication: { title: string; summary: string; visibility: string } | null; override: { version: number } | null; analyses: { id: number; score: number; relevance: string; receipts: { id: number; status: string }[] }[] }
 const { api } = useAdminApi()
@@ -29,7 +31,7 @@ async function visibility(hidden: boolean) {
 async function rerun(step: string) {
   if (!chain.value) return
   busy.value = true
-  try { await api(`/api/admin/aihot/content/${chain.value.article.id}/rerun`, { method: 'POST', body: { step, requestId: crypto.randomUUID() } }); toast.ok('任务已入队') }
+  try { await api(`/api/admin/aihot/content/${chain.value.article.id}/rerun`, { method: 'POST', body: { step, requestId: safeRandomId() } }); toast.ok('任务已入队') }
   catch { toast.err('任务提交失败') }
   finally { busy.value = false }
 }

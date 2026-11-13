@@ -23,6 +23,8 @@ _local_custom_sweep_at = None
 _local_fulfillment_sweep_at = None
 _local_editorial_sweep_at = None
 _local_product_monitor_at = None
+_local_news_review_at = None
+_local_extract_sweep_at = None
 _CUSTOM_SWEEP_INTERVAL = timedelta(minutes=5)
 
 
@@ -81,6 +83,22 @@ async def local_loop(queue) -> None:
                     result = await run_product_monitor_loop(session, now=now)
                     _local_product_monitor_at = now + _CUSTOM_SWEEP_INTERVAL
                     logger.info("local product monitor -> %s", result)
+                global _local_news_review_at
+                if _local_news_review_at is None or now >= _local_news_review_at:
+                    from app.services.ai_news import pending_news_ids
+                    from app.services.curation import missing_review_ids
+
+                    news_ids = await pending_news_ids(session)
+                    missing_ids = await missing_review_ids(session)
+                    if news_ids or missing_ids:
+                        await queue.enqueue_review(list(dict.fromkeys([*news_ids, *missing_ids])))
+                    _local_news_review_at = now + _CUSTOM_SWEEP_INTERVAL
+                global _local_extract_sweep_at
+                if _local_extract_sweep_at is None or now >= _local_extract_sweep_at:
+                    from app.services.extract import sweep_extractions
+
+                    await sweep_extractions(session)
+                    _local_extract_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
         except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
             logger.exception("local scheduler tick failed")
         await asyncio.sleep(settings.scheduler_poll_seconds)
@@ -104,6 +122,12 @@ async def _is_leader(redis) -> bool:
     got = await redis.set(_LEADER_KEY, instance, nx=True, px=_LEADER_TTL_MS)
     if got:
         return True
+    if hasattr(redis, "eval"):
+        renewed = await redis.eval(
+            "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('pexpire',KEYS[1],ARGV[2]) else return 0 end",
+            1, _LEADER_KEY, instance, _LEADER_TTL_MS,
+        )
+        return bool(renewed)
     current = await redis.get(_LEADER_KEY)
     if isinstance(current, bytes):
         current = current.decode()

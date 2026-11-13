@@ -3,15 +3,17 @@ import { avatarGradient, displayName } from '~/utils/avatars'
 import { loginRoute } from '~/utils/safe-redirect'
 import { PROJECT_GITHUB_URL } from '~/utils/project'
 import type { RouteLocationRaw } from 'vue-router'
-import { communityClasses, GAME_COMMUNITIES, useHiddenCommunities } from '~/composables/useGameSection'
+import { communityClasses, useHiddenCommunities } from '~/composables/useGameSection'
 
 const route = useRoute()
-// 顶栏只有一层：品牌旁的"频道"组（首页/鸣潮/碧蓝航线…）+ 右侧工具；
+const { t } = useSiteConfig()
+const { rememberRouteCommunity, communities } = useGameSection()
+// 顶栏只有一层：品牌旁的"频道"组（首页/鸣潮/自定义分区…）+ 右侧工具；
 // 栏目导航（官方动态/活动日历/商品/事件/内容库）由 SectionNav 放在内容区首行。
 const brand = communityClasses('blue')
-const allChannels = [
+const allChannels = computed(() => [
   { key: 'home', label: '首页', nav: brand.nav, dot: brand.dot, to: '/' as RouteLocationRaw },
-  ...GAME_COMMUNITIES.map(c => ({
+  ...communities.value.map(c => ({
     key: c.key,
     label: c.key === 'ai' ? 'AI 快讯' : c.label,
     nav: communityClasses(c.color).nav,
@@ -20,9 +22,8 @@ const allChannels = [
   })),
   // 定制化频道固定最后：用户自建监控（UID/关键词）的公开目录
   { key: 'custom', label: '定制化', nav: brand.nav, dot: brand.dot, to: '/custom' as RouteLocationRaw },
-]
+])
 
-const { rememberRouteCommunity } = useGameSection()
 onMounted(rememberRouteCommunity)
 watch(() => [route.path, route.query.community], rememberRouteCommunity)
 
@@ -32,7 +33,7 @@ const TOOL_PATHS = ['/stats', '/sources', '/watch', '/project']
 const activeChannel = computed(() => (TOOL_PATHS.includes(route.path) ? null : active.value))
 // 账号屏蔽的分区不进顶栏；正在浏览的分区（例如从链接打开）仍保留，以免当前页没有高亮。
 const { hidden } = useHiddenCommunities()
-const channels = computed(() => allChannels.filter(ch => !hidden.value.has(ch.key) || ch.key === activeChannel.value))
+const channels = computed(() => allChannels.value.filter(ch => !hidden.value.has(ch.key) || ch.key === activeChannel.value))
 
 // ---------- 频道按宽度收纳（md 起）----------
 // 依次放入能完整显示的频道，其余收进"更多"；当前频道始终占一个位置。手机端整行横滑，不收纳。
@@ -168,7 +169,8 @@ async function handleLogout() {
       </nav>
       <div class="ml-auto flex shrink-0 items-center gap-1 md:ml-0">
         <a
-          :href="PROJECT_GITHUB_URL"
+          v-if="t('source_url') || PROJECT_GITHUB_URL"
+          :href="t('source_url') || PROJECT_GITHUB_URL"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="在 GitHub 查看 AniSignal 项目"

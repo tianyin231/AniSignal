@@ -3,7 +3,7 @@
 # 插件市场按仓库根目录打包审核，主仓库体量太大，所以插件单独发布；源码仍在本仓库开发和测试。
 #
 # 用法：deploy/sync-astrbot-plugin.sh <发布仓库的本地目录> [--push]
-# 发版顺序：改 VERSION、两份 metadata.yaml 和插件源版本号 → 提交主仓库 → 运行本脚本。
+# 发版顺序：改 integrations/astrbot_plugin_anisignal 下的 VERSION、metadata.yaml 和插件源版本号 → 提交主仓库 → 运行本脚本。
 set -eu
 
 target=${1:?"用法: deploy/sync-astrbot-plugin.sh <发布仓库目录> [--push]"}

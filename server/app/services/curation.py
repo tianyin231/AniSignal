@@ -243,24 +243,44 @@ async def review_contents(
 
 
 async def _cover_data_url(url: str) -> str | None:
-    """服务端抓取封面转 base64 数据图。
+    """服务端抓取封面转 base64 数据图（逐跳校验公网地址，防 SSRF）。
 
     AI 网关无法抓取远程图片 URL（一律 500），必须在本地转成数据图内嵌。
     """
+    from urllib.parse import urljoin
     import httpx
+    from app.collectors.rss import public_feed_url
 
+    max_bytes = 4 * 1024 * 1024
     try:
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(15.0), follow_redirects=True
+            timeout=httpx.Timeout(15.0), follow_redirects=False
         ) as client:
-            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AniSignal/1.0)"})
-        if resp.status_code != 200 or len(resp.content) > 4 * 1024 * 1024:
-            return None
-        mime = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
-        if not mime.startswith("image/"):
-            return None
-        return f"data:{mime};base64," + base64.b64encode(resp.content).decode()
-    except Exception:  # noqa: BLE001 - 封面抓不到就退回纯文本审核
+            target = url
+            for _ in range(5):
+                await public_feed_url(target)
+                async with client.stream(
+                    "GET", target, headers={"User-Agent": "Mozilla/5.0 (compatible; AniSignal/1.0)"}
+                ) as resp:
+                    if resp.is_redirect:
+                        location = resp.headers.get("location", "")
+                        if not location:
+                            return None
+                        target = urljoin(target, location)
+                        continue
+                    if resp.status_code != 200:
+                        return None
+                    mime = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                    if not mime.startswith("image/"):
+                        return None
+                    buf = bytearray()
+                    async for chunk in resp.aiter_bytes():
+                        buf.extend(chunk)
+                        if len(buf) > max_bytes:
+                            return None
+                    return f"data:{mime};base64," + base64.b64encode(bytes(buf)).decode()
+        return None
+    except Exception:  # noqa: BLE001 - 封面抓不到或命中私网拦截就退回纯文本审核
         return None
 
 

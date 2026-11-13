@@ -76,17 +76,34 @@ def feed_time(value: str):
     return date.replace(tzinfo=timezone.utc) if date.tzinfo is None else date.astimezone(timezone.utc)
 
 
+def _is_permitted_egress_ip(raw_ip: str, allow_networks: tuple[ipaddress._BaseNetwork, ...]) -> bool:
+    ip = ipaddress.ip_address(raw_ip)
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        return False
+    return ip.is_global or any(ip in net for net in allow_networks)
+
+
 async def public_feed_url(value: str) -> str:
     """每次重定向都检查；采集地址不能访问本机、云元数据或私有网络。"""
     parsed = urlsplit(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or "\\" in value:
         raise CollectorError("RSS 地址必须是公开 HTTP(S) 地址")
     try:
         addresses = await asyncio.to_thread(socket.getaddrinfo, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
     except OSError as exc:
         raise CollectorError("RSS 地址无法解析") from exc
-    if not addresses or any(not ipaddress.ip_address(row[4][0]).is_global for row in addresses):
-        raise CollectorError("RSS 地址不能指向私有网络")
+    if not addresses:
+        raise CollectorError("RSS 地址无法解析")
+    allow_networks = get_settings().egress_allow_networks
+    for row in addresses:
+        addr = row[4][0]
+        if not _is_permitted_egress_ip(addr, allow_networks):
+            raise CollectorError(
+                f"RSS 地址不能指向私有网络（解析到 {addr}；若使用 fake-ip 代理可设置 ANISIGNAL_EGRESS_ALLOW_CIDRS=198.18.0.0/15）"
+            )
     return value
 
 

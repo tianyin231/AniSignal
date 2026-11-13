@@ -4,28 +4,17 @@ useSeoMeta({
   description: 'AniSignal 爬虫与消息机器人守则（robots.txt 风格）',
 })
 
-const crawlerRules = `# AniSignal robots.txt
-# https://anisignal.xyz/robots.txt
+const requestUrl = useRequestURL()
+const { siteUrl } = useRuntimeConfig().public
+const { t } = useSiteConfig()
+const contactEmail = computed(() => t('contact_email').trim())
+const siteOrigin = computed(() => (siteUrl || requestUrl.origin).replace(/\/+$/, ''))
+
+const crawlerRules = computed(() => `# AniSignal robots.txt
+# ${siteOrigin.value}/robots.txt
 
 User-agent: *
 Allow: /
-Allow: /intro
-Allow: /about
-Allow: /legal
-Allow: /terms
-Allow: /privacy
-Allow: /copyright
-Allow: /bot-rules
-Allow: /official
-Allow: /contents
-Allow: /events
-Allow: /products
-Allow: /sources
-Allow: /stats
-Allow: /search
-Allow: /custom
-Allow: /rss.xml
-
 Disallow: /admin
 Disallow: /account
 Disallow: /api/
@@ -35,13 +24,13 @@ Disallow: /forgot
 
 Crawl-delay: 10
 
-Sitemap: https://anisignal.xyz/sitemap.xml`
+Sitemap: ${siteOrigin.value}/sitemap.xml`)
 
-const messageBotRules = `# ── 消息机器人（QQ / 邮件等通道）──
+const messageBotRules = computed(() => `# ── 消息机器人（QQ / 邮件等通道）──
 # 本段不是 HTTP robots.txt 语法，供人阅读；不供爬虫解析。
 
 # User-agent: AniSignal-Bot
-# 身份: AniSignal 试运行站资讯通道，非腾讯/QQ 官方
+# 身份: AniSignal 资讯通道，非腾讯/QQ 官方
 
 Allow:
   /帮助
@@ -70,13 +59,13 @@ Add-To-Group: free
 # 添加本身不收费；增值服务以站内说明为准
 
 # 守则全文
-Policy: https://anisignal.xyz/bot-rules
-Terms:  https://anisignal.xyz/terms`
+Policy: ${siteOrigin.value}/bot-rules
+Terms:  ${siteOrigin.value}/terms`)
 
 const lines = computed(() => [
-  ...crawlerRules.split('\n'),
+  ...crawlerRules.value.split('\n'),
   '',
-  ...messageBotRules.split('\n'),
+  ...messageBotRules.value.split('\n'),
 ])
 </script>
 
@@ -144,7 +133,7 @@ const lines = computed(() => [
       <div class="mt-4 flex flex-wrap gap-4 text-sm">
         <NuxtLink to="/legal" class="link">条款索引</NuxtLink>
         <NuxtLink to="/terms" class="link">用户协议</NuxtLink>
-        <a href="mailto:admin@anisignal.nanamiyako.cn" class="link">联系管理员</a>
+        <a v-if="contactEmail" :href="`mailto:${contactEmail}`" class="link">联系管理员</a>
       </div>
     </section>
   </div>

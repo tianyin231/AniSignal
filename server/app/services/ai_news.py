@@ -145,6 +145,187 @@ async def approved_news_query(session: AsyncSession, *, include_archived=False):
     return query.where(RawContent.platform.notin_(hidden)) if hidden else query
 
 
+def plain_excerpt(text: str | None, limit: int = 180) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"<[^>]+>", " ", text)
+    cleaned = re.sub(r"\s+", " ", unescape(cleaned)).strip()
+    return _whole_sentences(cleaned, limit)
+
+
+async def raw_news_feed(
+    session: AsyncSession,
+    *,
+    q: str = "",
+    topic: str = "",
+    kind: str = "all",
+    hours: int = 168,
+    limit: int = 20,
+    offset: int = 0,
+    exclude_platforms: tuple[str, ...] = (),
+) -> tuple[list[dict], int]:
+    """未配置 AI 或用户主动开启原文直出时：合并已过审快讯与尚未审核的一手/候选原文。
+
+    若某条内容已经过当前版本 AI 审核且被判不合准入（如教程/推广），仍保持隐藏不混入。
+    """
+    from app.services.settings import get_media_visibility, hidden_platforms
+
+    latest = (
+        select(
+            ContentVersion.raw_content_id.label("rid"),
+            func.max(ContentVersion.version).label("version"),
+        )
+        .group_by(ContentVersion.raw_content_id)
+        .subquery()
+    )
+    news = ContentReview.news
+    review_current = and_(
+        ContentReview.raw_content_id.is_not(None),
+        news["content_hash"].as_string() == RawContent.content_hash,
+        news["content_version"].as_integer() == ContentVersion.version,
+    )
+    approved = and_(
+        ContentReview.relevant.is_(True),
+        ContentReview.promotional.is_(False),
+        ContentReview.violation.is_(False),
+        news["newsworthy"].as_boolean().is_(True),
+    )
+    ts = func.coalesce(RawContent.published_at, RawContent.collected_at)
+    query = (
+        select(RawContent, ContentVersion, Source, ContentReview)
+        .options(defer(RawContent.raw_json))
+        .join(latest, latest.c.rid == RawContent.id)
+        .join(
+            ContentVersion,
+            (ContentVersion.raw_content_id == latest.c.rid)
+            & (ContentVersion.version == latest.c.version),
+        )
+        .outerjoin(Source, Source.id == RawContent.source_id)
+        .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
+        .where(
+            RawContent.community == "ai",
+            ts >= utcnow() - timedelta(hours=hours),
+            or_(~review_current, approved),
+            ~select(Evidence.raw_content_id)
+            .where(Evidence.raw_content_id == RawContent.id, Evidence.role == "excluded")
+            .exists(),
+        )
+    )
+    hidden = set(hidden_platforms(await get_media_visibility(session))) | set(exclude_platforms)
+    if hidden:
+        query = query.where(RawContent.platform.notin_(sorted(hidden)))
+    if kind == "rumor":
+        query = query.where(review_current, news["kind"].as_string() == "rumor")
+    elif kind == "report":
+        query = query.where(or_(~review_current, news["kind"].as_string() == "report"))
+    if topic:
+        query = query.where(
+            or_(
+                and_(review_current, news["topics"].as_string().contains(f'"{topic}"', autoescape=True)),
+                ContentVersion.title.icontains(topic, autoescape=True),
+                ContentVersion.text.icontains(topic, autoescape=True),
+            )
+        )
+    if q.strip():
+        needle = q.strip()
+        query = query.where(
+            or_(
+                ContentVersion.title.icontains(needle, autoescape=True),
+                ContentVersion.text.icontains(needle, autoescape=True),
+                news["headline"].as_string().icontains(needle, autoescape=True),
+                Source.name.icontains(needle, autoescape=True),
+            )
+        )
+    total = await session.scalar(select(func.count()).select_from(query.subquery())) or 0
+    rows = (
+        await session.execute(
+            query.order_by(ts.desc(), RawContent.id.desc()).limit(limit).offset(offset)
+        )
+    ).all()
+    items: list[dict] = []
+    for raw, version, source, review in rows:
+        is_approved = bool(
+            review
+            and review.news
+            and review.news.get("content_hash") == raw.content_hash
+            and review.news.get("content_version") == version.version
+            and review.relevant
+            and not review.promotional
+            and not review.violation
+            and review.news.get("newsworthy")
+        )
+        media = (version.normalized_json or {}).get("media") or []
+        cover = next(
+            (
+                m if isinstance(m, str) else m.get("url")
+                for m in media
+                if isinstance(m, str) or (isinstance(m, dict) and m.get("kind") == "image")
+            ),
+            None,
+        )
+        pub_at = raw.published_at or raw.collected_at
+        source_name = source.name if source and source.name else "来源未署名"
+        if is_approved:
+            val = review.news
+            items.append({
+                "id": raw.id,
+                "path": f"/ai/items/raw-{raw.id}",
+                "image": cover,
+                "headline": val["headline"],
+                "summary": val["summary"],
+                "original_title": version.title or "",
+                "kind": val["kind"],
+                "topics": val["topics"],
+                "platform": raw.platform,
+                "source_name": source_name,
+                "source_role": "original" if raw.platform in {"x", "rss"} else "secondary",
+                "verification": "pending",
+                "published_at": raw.published_at,
+                "url": raw.url,
+                "references": reference_links(version.text or ""),
+                "story_id": None,
+                "report_count": 1,
+                "participant_count": 1,
+                "heat": 0,
+                "selected": False,
+                "score": None,
+                "latest_at": pub_at,
+                "updated_at": review.updated_at,
+                "sources": [],
+                "developments": [],
+            })
+        else:
+            title = (version.title or "").strip() or plain_excerpt(version.text, 60) or raw.external_id
+            items.append({
+                "id": raw.id,
+                "path": f"/ai/items/raw-{raw.id}",
+                "image": cover,
+                "headline": title[:120],
+                "summary": plain_excerpt(version.text, 180),
+                "original_title": version.title or "",
+                "kind": "report",
+                "topics": [],
+                "platform": raw.platform,
+                "source_name": source_name,
+                "source_role": "original" if raw.platform in {"x", "rss"} else "secondary",
+                "verification": "unreviewed",
+                "published_at": raw.published_at,
+                "url": raw.url,
+                "references": reference_links(version.text or ""),
+                "story_id": None,
+                "report_count": 1,
+                "participant_count": 1,
+                "heat": 0,
+                "selected": False,
+                "score": None,
+                "latest_at": pub_at,
+                "updated_at": version.parsed_at,
+                "sources": [],
+                "developments": [],
+            })
+    return items, total
+
+
 async def load_bot_news(session: AsyncSession, keywords, start_at, end_at, *, collected_after=None, collapse=True) -> list[dict]:
     from app.services import aihot
     if aihot.enabled():

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { ApiProductList } from '~/composables/usePublicApi'
-import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { sortProductsBySignal } from '~/utils/product-utils'
 import { fmtTime } from '~/utils/admin-types'
 
 function communityChip(community?: string) {
-  const meta = GAME_COMMUNITIES.find(c => c.key === community)
+  const meta = communityMeta(community)
   return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
 }
 

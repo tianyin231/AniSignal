@@ -2,13 +2,15 @@
 """给运行中的 NapCat 应用 OOM 优先级和整组恢复保护。"""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
 
 def main():
+    container = os.environ.get("NAPCAT_CONTAINER", "napcat")
     result = subprocess.run(
-        ["docker", "inspect", "napcat_nNjs"],
+        ["docker", "inspect", container],
         capture_output=True,
         text=True,
         timeout=10,

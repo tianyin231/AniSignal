@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-vue-next'
-import { GAME_COMMUNITIES, communityClasses, useHiddenCommunities } from '~/composables/useGameSection'
+import { communityClasses, communityMeta, useHiddenCommunities } from '~/composables/useGameSection'
 import type { CalendarEntry } from '~/composables/usePublicApi'
 import { beijingDay, calendarDays, shiftCalendarMonth, type CalendarMilestone } from '~/utils/calendar'
 import { fmtTime } from '~/utils/admin-types'
@@ -11,6 +11,7 @@ useSeoMeta({ title: '活动日历 · AniSignal', description: '游戏活动、�
 const route = useRoute()
 const router = useRouter()
 const { api } = usePublicApi()
+const { communities } = useGameSection()
 const today = useState('calendar-today', () => beijingDay(Date.now()))
 const month = computed(() => /^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$/.test(String(route.query.month ?? ''))
   ? String(route.query.month) : today.value.slice(0, 7))
@@ -19,7 +20,7 @@ const selectedDay = ref(month.value === today.value.slice(0, 7) ? today.value : 
 watch(month, value => { selectedDay.value = value === today.value.slice(0, 7) ? today.value : `${value}-01` })
 
 const community = computed({
-  get: () => GAME_COMMUNITIES.some(c => c.key === route.query.community) ? String(route.query.community) : 'all',
+  get: () => communityMeta(String(route.query.community || '')) ? String(route.query.community) : 'all',
   set: (value: string) => router.replace({ query: { ...route.query, community: value } }),
 })
 const { data, status, error, refresh } = await useLazyAsyncData(
@@ -50,14 +51,13 @@ const detailGroups = computed(() => [
 // 账号屏蔽的分区不出现在筛选里（「全部游戏」也已在后端排除），当前选中的除外。
 const { hidden } = useHiddenCommunities()
 const filters = computed(() => [
-  { key: 'all', label: '全部游戏', color: 'blue' },
-  ...GAME_COMMUNITIES.filter(c => !hidden.value.has(c.key) || c.key === community.value)
+  { key: 'all', label: '全部分区', color: 'blue' },
+  ...communities.value.filter(c => !hidden.value.has(c.key) || c.key === community.value)
     .map(c => ({ ...c, label: c.key === 'ai' ? 'AI 快讯' : c.label })),
 ])
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const selectedLabel = computed(() => new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long', timeZone: 'UTC' }).format(new Date(`${selectedDay.value}T00:00:00Z`)))
 const kindLabels: Record<string, string> = { activity: '活动', maintenance: '更新 / 维护', pool: '卡池', broadcast: '直播', delay: '变更', deadline: '截止' }
-const communityMeta = (key?: string) => GAME_COMMUNITIES.find(c => c.key === key)
 const itemColor = (item: CalendarEntry) => communityClasses(communityMeta(item.community)?.color ?? 'blue').chip
 const itemDot = (item: CalendarEntry) => communityClasses(communityMeta(item.community)?.color ?? 'blue').dot
 

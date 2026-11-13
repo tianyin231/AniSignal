@@ -14,6 +14,7 @@ interface NewsItem {
   summary: string
   original_title: string
   kind: 'report' | 'rumor'
+  verification?: 'verified' | 'pending' | 'unreviewed'
   topics: string[]
   platform: string
   source_name: string
@@ -43,6 +44,8 @@ useSeoMeta({ title: 'AI 快讯 · AniSignal', description: '追踪 AI 产品与�
 const route = useRoute()
 const router = useRouter()
 const { api } = usePublicApi()
+const { aiConfigured } = useSiteConfig()
+const showRaw = computed(() => !aiConfigured.value || route.query.raw === '1')
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const search = ref(String(route.query.q || ''))
 const filters = computed(() => ({
@@ -52,6 +55,7 @@ const filters = computed(() => ({
   hours: [24, 168, 720].includes(Number(route.query.hours)) ? Number(route.query.hours) : 168,
   sort: route.query.mode === 'hot' ? 'hot' : 'time',
   selected: route.query.mode === 'selected',
+  include_raw: showRaw.value || undefined,
 }))
 const request = computed(() => ({ ...filters.value, limit: 20, offset: (page.value - 1) * 20 }))
 // 互不依赖的首屏数据并行请求；逐个 await 会让服务端渲染串行等待（实测首字节 2s+）。
@@ -61,13 +65,17 @@ const newsRequest = useLazyAsyncData(
 )
 const editionRequest = useLazyAsyncData('ai-news-edition',
   (_app, { signal }) => api<{ day: string | null; items: NewsItem[] }>('/api/ai-news/edition', { signal }))
-const pulseRequest = useLazyAsyncData('ai-news-pulse', async (_app, { signal }) => {
-  const [day, week] = await Promise.all([
-    api<NewsList>('/api/ai-news/events', { query: { hours: 24, limit: 1 }, signal }),
-    api<NewsList>('/api/ai-news/events', { query: { hours: 168, limit: 1 }, signal }),
-  ])
-  return { day: day.total, week: week.total }
-})
+const pulseRequest = useLazyAsyncData(
+  () => `ai-news-pulse-${showRaw.value ? 'raw' : 'ai'}`,
+  async (_app, { signal }) => {
+    const extra = showRaw.value ? { include_raw: true } : {}
+    const [day, week] = await Promise.all([
+      api<NewsList>('/api/ai-news/events', { query: { hours: 24, limit: 1, ...extra }, signal }),
+      api<NewsList>('/api/ai-news/events', { query: { hours: 168, limit: 1, ...extra }, signal }),
+    ])
+    return { day: day.total, week: week.total }
+  },
+)
 await Promise.all([newsRequest, editionRequest, pulseRequest])
 const { data, status, error, refresh } = newsRequest
 const { data: edition } = editionRequest
@@ -253,7 +261,7 @@ onBeforeUnmount(() => {
           <p v-if="sourceCells.length" class="min-w-0"><span class="num block text-2xl font-bold text-ai-ink sm:text-3xl">{{ sourcesOk }}<span class="font-medium text-white/40">/{{ sourceCells.length }}</span></span><span class="mt-0.5 block text-[11px] leading-tight text-white/70 sm:text-[13px]">来源正常</span></p>
         </div>
         <div v-if="lead" class="mt-1 flex w-full min-w-0 max-w-full flex-wrap items-center gap-2">
-          <span class="inline-flex h-7 items-center rounded-full px-2.5 text-xs font-semibold" :class="lead.kind === 'rumor' ? 'bg-warn/20 text-warn' : 'bg-white/10 text-white'">{{ lead.kind === 'rumor' ? '传闻线索' : '报道' }}</span>
+          <span class="inline-flex h-7 items-center rounded-full px-2.5 text-xs font-semibold" :class="lead.verification === 'unreviewed' ? 'bg-white/15 text-white' : lead.kind === 'rumor' ? 'bg-warn/20 text-warn' : 'bg-white/10 text-white'">{{ lead.verification === 'unreviewed' ? '原文直出' : lead.kind === 'rumor' ? '传闻线索' : '报道' }}</span>
           <span v-if="lead.participant_count >= 2" class="inline-flex h-7 items-center gap-1 rounded-full bg-white/10 px-2.5 text-xs text-white"><Flame :size="13" aria-hidden="true" />{{ lead.participant_count }} 个来源</span>
           <span class="max-w-[14rem] truncate text-[13px] text-white/65">{{ platformMark(lead.platform).label }} · {{ lead.source_name }}</span>
           <time :datetime="lead.published_at || undefined" class="mono text-[13px] text-white/55">{{ lead.published_at ? fmtTime(lead.published_at) : '时间未知' }}</time>
@@ -270,7 +278,24 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <nav class="flex flex-wrap gap-4 text-sm text-ink-2" aria-label="AI 栏目"><NuxtLink to="/ai/reports" class="hover:text-ink">日报 · 周报 · 月报</NuxtLink><a href="/api/ai-news/rss.xml" class="hover:text-ink">精选 RSS</a></nav>
+    <div v-if="!aiConfigured" class="panel mb-4 flex flex-wrap items-center justify-between gap-3 border-ai/30 bg-ai-soft/40 px-4 py-3 text-sm text-ink-2">
+      <p>当前尚未配置 AI 模型，已自动切换为<strong class="font-semibold text-ink">原文直出模式</strong>，直接显示已采集的一手信源内容。</p>
+      <NuxtLink to="/admin/ai" class="link shrink-0 text-xs font-semibold">前往后台配置 AI 精炼 →</NuxtLink>
+    </div>
+
+    <nav class="mb-3 flex flex-wrap items-center gap-4 text-sm text-ink-2" aria-label="AI 栏目">
+      <NuxtLink to="/ai/reports" class="hover:text-ink">AI 刊物</NuxtLink>
+      <a href="/api/ai-news/rss.xml" class="hover:text-ink">精选 RSS</a>
+      <button
+        v-if="aiConfigured"
+        type="button"
+        class="ml-auto rounded-full px-3 py-1 text-xs transition-colors"
+        :class="showRaw ? 'bg-ai-soft font-semibold text-ai-ink' : 'bg-chip text-muted hover:text-ink'"
+        @click="filterBy('raw', route.query.raw === '1' ? undefined : '1')"
+      >
+        {{ showRaw ? '已包含未审原文（点击仅看 AI 精炼）' : '同时显示未审原文' }}
+      </button>
+    </nav>
     <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <section class="panel min-w-0 overflow-hidden" aria-labelledby="ai-feed-title" :aria-busy="status === 'pending'">
         <header class="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-5">
@@ -393,7 +418,7 @@ onBeforeUnmount(() => {
                 </NuxtLink>
                 <p class="mt-1 text-[13px] leading-relaxed text-muted" :class="rowCover(item.id) ? 'line-clamp-1' : 'line-clamp-2'">{{ item.summary }}</p>
                 <div class="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
-                  <span class="inline-flex h-5 items-center rounded-md px-1.5 font-semibold" :class="item.kind === 'rumor' ? 'bg-warn/10 text-warn' : 'bg-ai-soft text-ai-ink'">{{ item.kind === 'rumor' ? '传闻线索' : '报道' }}</span>
+                  <span class="inline-flex h-5 items-center rounded-md px-1.5 font-semibold" :class="item.verification === 'unreviewed' ? 'bg-chip text-ink-2' : item.kind === 'rumor' ? 'bg-warn/10 text-warn' : 'bg-ai-soft text-ai-ink'">{{ item.verification === 'unreviewed' ? '原文直出' : item.kind === 'rumor' ? '传闻线索' : '报道' }}</span>
                   <span v-if="item.participant_count >= 2" class="inline-flex items-center gap-1 text-hot"><Flame :size="13" aria-hidden="true" />{{ item.participant_count }} 个来源</span>
                   <span class="max-w-[16rem] truncate">{{ rowCover(item.id) ? item.source_name : `${platformMark(item.platform).label} · ${item.source_name}` }}</span>
                   <time :datetime="item.published_at || undefined" class="mono text-faint">{{ item.published_at ? fmtTime(item.published_at) : '时间未知' }}</time>

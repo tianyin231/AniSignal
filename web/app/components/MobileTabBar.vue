@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CalendarDays, House, Layers, Package, UserRound } from 'lucide-vue-next'
-import { GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { communityMeta } from '~/composables/useGameSection'
 
 // 手机端底部主导航（lg 以下）：首页 / 日历 / 事件 / 商品 / 我的；栏目链接沿用当前分区视角
 const route = useRoute()
@@ -8,7 +8,7 @@ const { user } = useAuth()
 
 const scope = computed(() => {
   const query = String(route.query.community || '')
-  if (GAME_COMMUNITIES.some(c => c.key === query)) return query
+  if (communityMeta(query)) return query
   return 'all'
 })
 const home = computed(() => {

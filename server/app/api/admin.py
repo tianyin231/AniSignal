@@ -4,10 +4,19 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.communities import DEFAULT_COMMUNITY, community_pattern
+from app.communities import (
+    BUILTIN_COMMUNITIES,
+    COMMUNITIES,
+    COMMUNITY_ALL,
+    COMMUNITY_OPTIONAL_QUERY_DEP,
+    DEFAULT_COMMUNITY,
+    community_to_public_dict,
+    get_community,
+    sync_communities,
+)
 from app.api.deps import require_admin
 from app.api.public import invalidate_official_links_cache
 from app.config import get_settings
@@ -33,6 +42,9 @@ from app.schemas.api import (
     CollectTargetCreate,
     CollectTargetOut,
     CollectTargetUpdate,
+    CommunityBatchRequest,
+    CommunityCreate,
+    CommunityUpdate,
     ContentItemOut,
     ContentListOut,
     EventListOut,
@@ -54,6 +66,8 @@ from app.schemas.api import (
     RuleCreate,
     RuleOut,
     RunTriggerOut,
+    TargetBatchRequest,
+    TargetImportPresetsRequest,
 )
 from app.services.queue import ArqQueue, BaseQueue, LocalQueue
 from app.services.views import events_to_out, product_to_out, products_to_out
@@ -78,7 +92,175 @@ async def get_queue(request: Request) -> BaseQueue:
     return queue
 
 
-# ---------- 采集目标 ----------
+# ---------- 分区与采集目标 ----------
+
+
+async def _admin_communities_payload(session: AsyncSession) -> dict:
+    raw = await sync_communities(session)
+    counts = dict(
+        (await session.execute(select(CollectTarget.community, func.count(CollectTarget.id)).group_by(CollectTarget.community))).all()
+    )
+    items = []
+    for meta in COMMUNITIES.values():
+        row = community_to_public_dict(meta)
+        row["official_bili_mid"] = meta.official_bili_mid_default or ""
+        row["aliases"] = list(meta.extra_names)
+        row["target_count"] = int(counts.get(meta.key, 0))
+        items.append(row)
+    return {"items": items, "raw": raw}
+
+
+@router.get("/communities")
+async def list_communities_admin(session: AsyncSession = Depends(get_session)):
+    data = await _admin_communities_payload(session)
+    return {"items": data["items"]}
+
+
+@router.post("/communities", status_code=status.HTTP_201_CREATED)
+async def create_community_admin(body: CommunityCreate, session: AsyncSession = Depends(get_session)):
+    from app.services.settings import set_setting
+
+    raw = await sync_communities(session)
+    key = body.key.strip().lower()
+    if key == COMMUNITY_ALL or key in COMMUNITIES:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"分区标识 {key} 已存在或为系统保留字")
+    custom = list(raw.get("custom") or [])
+    entry = {
+        "key": key,
+        "label": body.label.strip(),
+        "en": body.en.strip(),
+        "color": body.color,
+        "domain": body.domain,
+        "official_bili_mid": (body.official_bili_mid or "").strip(),
+        "aliases": [x.strip() for x in body.aliases if x.strip()],
+        "active": body.active,
+    }
+    custom.append(entry)
+    await set_setting(session, "communities", {"disabled_builtins": list(raw.get("disabled_builtins") or []), "custom": custom})
+    data = await _admin_communities_payload(session)
+    return next(item for item in data["items"] if item["key"] == key)
+
+
+@router.put("/communities/{key}")
+async def update_community_admin(key: str, body: CommunityUpdate, session: AsyncSession = Depends(get_session)):
+    from app.services.settings import set_setting
+
+    raw = await sync_communities(session)
+    if key not in COMMUNITIES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "分区不存在")
+    disabled = set(raw.get("disabled_builtins") or [])
+    custom = list(raw.get("custom") or [])
+    if key in BUILTIN_COMMUNITIES:
+        if body.active is not None:
+            if body.active:
+                disabled.discard(key)
+            else:
+                disabled.add(key)
+    else:
+        for item in custom:
+            if item.get("key") == key:
+                if body.label is not None:
+                    item["label"] = body.label.strip()
+                if body.en is not None:
+                    item["en"] = body.en.strip()
+                if body.color is not None:
+                    item["color"] = body.color
+                if body.domain is not None:
+                    item["domain"] = body.domain
+                if body.official_bili_mid is not None:
+                    item["official_bili_mid"] = body.official_bili_mid.strip()
+                if body.aliases is not None:
+                    item["aliases"] = [x.strip() for x in body.aliases if x.strip()]
+                if body.active is not None:
+                    item["active"] = body.active
+                break
+    await set_setting(session, "communities", {"disabled_builtins": sorted(disabled), "custom": custom})
+    data = await _admin_communities_payload(session)
+    return next(item for item in data["items"] if item["key"] == key)
+
+
+@router.post("/communities/batch")
+async def batch_communities_admin(body: CommunityBatchRequest, session: AsyncSession = Depends(get_session)):
+    from app.services.settings import set_setting
+
+    raw = await sync_communities(session)
+    disabled = set(raw.get("disabled_builtins") or [])
+    custom = list(raw.get("custom") or [])
+    wanted = set(body.keys)
+    enable = body.action == "enable"
+    for key in wanted:
+        if key in BUILTIN_COMMUNITIES:
+            disabled.discard(key) if enable else disabled.add(key)
+    for item in custom:
+        if item.get("key") in wanted:
+            item["active"] = enable
+    await set_setting(session, "communities", {"disabled_builtins": sorted(disabled), "custom": custom})
+    data = await _admin_communities_payload(session)
+    return {"items": data["items"]}
+
+
+@router.delete("/communities/{key}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_community_admin(
+    key: str,
+    purge_targets: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.settings import set_setting
+
+    raw = await sync_communities(session)
+    if key in BUILTIN_COMMUNITIES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "内置分区不支持删除，请使用停用隐藏")
+    if key not in COMMUNITIES:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "分区不存在")
+    count = await session.scalar(select(func.count(CollectTarget.id)).where(CollectTarget.community == key)) or 0
+    if count and not purge_targets:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"该分区下仍有 {count} 个采集目标，请勾选同时清理目标后再删除")
+    if count and purge_targets:
+        await session.execute(delete(CollectTarget).where(CollectTarget.community == key))
+    custom = [item for item in (raw.get("custom") or []) if item.get("key") != key]
+    await set_setting(session, "communities", {"disabled_builtins": list(raw.get("disabled_builtins") or []), "custom": custom})
+    await sync_communities(session)
+
+
+@router.get("/collect-targets/presets")
+async def list_target_presets(session: AsyncSession = Depends(get_session)):
+    from app.seeds import preset_catalog
+
+    await sync_communities(session)
+    return {"items": preset_catalog()}
+
+
+@router.post("/collect-targets/import-presets")
+async def import_target_presets(body: TargetImportPresetsRequest, session: AsyncSession = Depends(get_session)):
+    from app.seeds import import_preset_targets
+
+    await sync_communities(session)
+    return await import_preset_targets(session, body.communities)
+
+
+@router.post("/collect-targets/batch")
+async def batch_targets(body: TargetBatchRequest, session: AsyncSession = Depends(get_session)):
+    from app.clock import utcnow
+
+    if not body.ids and not body.community:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请指定要操作的目标 ID 列表或分区")
+    conditions = []
+    if body.ids:
+        conditions.append(CollectTarget.id.in_(body.ids))
+    if body.community:
+        conditions.append(CollectTarget.community == body.community)
+    if body.action == "delete":
+        res = await session.execute(delete(CollectTarget).where(*conditions))
+    elif body.action == "enable":
+        res = await session.execute(
+            update(CollectTarget).where(*conditions).values(enabled=True, next_run_at=utcnow())
+        )
+    else:
+        res = await session.execute(
+            update(CollectTarget).where(*conditions).values(enabled=False, next_run_at=None)
+        )
+    await session.commit()
+    return {"affected": int(res.rowcount or 0), "action": body.action}
 
 
 @router.get("/bilibili-session")
@@ -93,6 +275,50 @@ async def check_bilibili_session(session: AsyncSession = Depends(get_session)):
     from app.services.bilibili_session import check_status
 
     return await check_status(session)
+
+
+@router.post("/bilibili-session/qrcode")
+async def create_bilibili_qrcode():
+    import httpx
+    from app.services.bilibili_session import generate_qr_login
+
+    try:
+        return await generate_qr_login()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc) or "生成扫码会话失败") from exc
+
+
+@router.get("/bilibili-session/qrcode/{qrcode_key}")
+async def poll_bilibili_qrcode(qrcode_key: str, session: AsyncSession = Depends(get_session)):
+    import httpx
+    from app.services.bilibili_session import poll_qr_login
+
+    try:
+        return await poll_qr_login(session, qrcode_key)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "查询扫码状态失败，请重试") from exc
+
+
+@router.put("/bilibili-session/cookie")
+async def set_bilibili_cookie(body: dict, session: AsyncSession = Depends(get_session)):
+    from app.services.bilibili_session import save_manual_cookie
+
+    raw_cookie = str(body.get("cookie") or "").strip()
+    if not raw_cookie:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请粘贴包含 SESSDATA 的 Cookie 内容")
+    try:
+        return await save_manual_cookie(session, raw_cookie)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
+@router.delete("/bilibili-session")
+async def delete_bilibili_session(session: AsyncSession = Depends(get_session)):
+    from app.services.bilibili_session import clear_credentials
+
+    return await clear_credentials(session)
 
 
 def _x_target_value(value: str, target_type: str, interval_minutes: int) -> str:
@@ -110,7 +336,7 @@ def _x_target_value(value: str, target_type: str, interval_minutes: int) -> str:
 
 @router.get("/collect-targets", response_model=list[CollectTargetOut])
 async def list_targets(
-    community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
+    community: str | None = COMMUNITY_OPTIONAL_QUERY_DEP,
     session: AsyncSession = Depends(get_session),
 ):
     query = select(CollectTarget).order_by(CollectTarget.platform, CollectTarget.id)
@@ -139,8 +365,12 @@ async def create_target(
     )
     if duplicate is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "该采集目标已存在；不同分区请使用包含游戏名称的独立搜索词")
-    min_views = body.min_views if "min_views" in body.model_fields_set else 10000
-    if body.community == "ai" or not supports_view_threshold(body.platform, body.target_type):
+    min_views = (
+        body.min_views
+        if "min_views" in body.model_fields_set
+        else (0 if body.target_type == "account_videos" else 10000)
+    )
+    if get_community(body.community).domain == "news" or not supports_view_threshold(body.platform, body.target_type):
         min_views = 0
     target = CollectTarget(
         platform=body.platform,
@@ -212,7 +442,7 @@ async def update_target(
         target.community = body.community
     if body.min_views is not None:
         target.min_views = body.min_views
-    if target.community == "ai" or not supports_view_threshold(target.platform, target.target_type):
+    if get_community(target.community).domain == "news" or not supports_view_threshold(target.platform, target.target_type):
         target.min_views = 0
     if body.co_terms is not None:
         target.co_terms = body.co_terms
@@ -275,7 +505,7 @@ async def overview(
 @router.get("/contents", response_model=ContentListOut)
 async def list_contents(
     platform: str | None = Query(default=None),
-    community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
+    community: str | None = COMMUNITY_OPTIONAL_QUERY_DEP,
     hidden: bool | None = Query(default=None),
     review: str | None = Query(default=None, description="violation / irrelevant / ok"),
     q: str | None = Query(default=None, description="标题关键词"),
@@ -586,7 +816,7 @@ async def list_runs(
 @router.get("/events", response_model=EventListOut)
 async def list_events(
     category: str | None = Query(default=None),
-    community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
+    community: str | None = COMMUNITY_OPTIONAL_QUERY_DEP,
     include_inactive: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -809,7 +1039,7 @@ async def recompute_events(session: AsyncSession = Depends(get_session)):
 
 @router.get("/products", response_model=ProductListOut)
 async def list_products_admin(
-    community: str | None = Query(default=None, pattern=community_pattern(), description="游戏分区"),
+    community: str | None = COMMUNITY_OPTIONAL_QUERY_DEP,
     session: AsyncSession = Depends(get_session),
 ):
     query = select(Product).order_by(Product.id)
@@ -1054,6 +1284,10 @@ async def delete_product(product_id: int, session: AsyncSession = Depends(get_se
 
 @router.get("/classification-rules", response_model=list[RuleOut])
 async def list_rules(session: AsyncSession = Depends(get_session)):
+    if not await session.scalar(select(func.count(ClassificationRule.id))):
+        from app.services.classify import seed_defaults
+
+        await seed_defaults(session)
     rules = list(
         (
             await session.execute(

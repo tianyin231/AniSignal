@@ -49,6 +49,10 @@ def _collector(platform: str):
 async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> list:
     """抓取并解析定制源；平台礼貌间隔与主采集共享同一个 Redis 槽。"""
     collector = _collector(source.platform)
+    if hasattr(collector, "set_cookies") and session is not None:
+        from app.services.bilibili_session import get_db_cookies
+
+        collector.set_cookies(await get_db_cookies(session))
     preset = custom_preset(source.platform, source.kind, source.target_value)
     if not preset and (source.platform not in CUSTOM_PLATFORMS or source.kind not in CUSTOM_KINDS):
         raise ValueError(f"unsupported custom kind: {source.kind}")
@@ -237,8 +241,8 @@ async def _run_shared_source(session, redis, source_id, stats):
     except Exception as exc:
         await session.rollback()
         source = await session.get(CustomFeedSource, source_id, populate_existing=True)
-        from app.services.bilibili_session import local_status, redact
-        source.last_error = redact(str(exc), local_status()[1])[:1000]
+        from app.services.bilibili_session import load_credentials, redact
+        source.last_error = redact(str(exc), (await load_credentials(session))[1])[:1000]
         if isinstance(exc, CollectorDeferred):
             source.next_run_at = exc.retry_at
             if source.platform == "x":

@@ -115,6 +115,10 @@ async def backfill_product_images(
                and (p.discovery or {}).get("raw_content_id")
                and (p.discovery or {}).get("images_retry_at", "") <= now.isoformat()][:limit]
     collector = BilibiliCollector()
+    if hasattr(collector, "set_cookies"):
+        from app.services.bilibili_session import get_db_cookies
+
+        collector.set_cookies(await get_db_cookies(session))
     updated = 0
     for product_id in [product.id for product in pending]:
         product = await session.get(Product, product_id, populate_existing=True)

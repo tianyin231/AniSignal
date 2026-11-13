@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { PROJECT_GITHUB_URL } from '~/utils/project'
 const { t } = useSiteConfig()
+const repoUrl = computed(() => t('source_url').trim() || PROJECT_GITHUB_URL)
 // 原左侧栏的工具页（数据统计 / 来源健康 / 订阅中心）收进页脚第一组
 const tools = [
   { to: '/stats', label: '数据统计' },
@@ -22,7 +23,7 @@ const about = [
       <div class="flex flex-wrap items-center gap-3">
         <span class="num text-[15px] font-bold text-ink-2">AniSignal</span>
         <span class="text-faint">{{ t('footer_note') }}</span>
-        <a :href="PROJECT_GITHUB_URL" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 items-center gap-1.5 text-ink-2 transition-colors hover:text-ink" aria-label="在 GitHub 查看 AniSignal 项目">
+        <a :href="repoUrl" target="_blank" rel="noopener noreferrer" class="inline-flex min-h-11 items-center gap-1.5 text-ink-2 transition-colors hover:text-ink" aria-label="查看项目开源仓库">
           <GitHubMark :size="17" /> <span>GitHub</span>
         </a>
       </div>

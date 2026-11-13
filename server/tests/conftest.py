@@ -71,3 +71,15 @@ async def client(session_factory, fake_queue):
 @pytest.fixture
 def admin_headers():
     return {"X-Admin-Token": "test-admin-token"}
+
+
+@pytest.fixture(autouse=True)
+def _reset_dynamic_communities():
+    from app.communities import reset_communities
+    from app.services import auth as auth_module
+
+    reset_communities()
+    auth_module._smtp_send_times.clear()
+    yield
+    reset_communities()
+    auth_module._smtp_send_times.clear()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { communityMeta } from '~/composables/useGameSection'
 
 /**
  * 栏目导航（总览 / 官方动态 / 活动日历 / 事件 / 商品追踪 / 内容库）。
@@ -11,7 +11,7 @@ const { community } = useGameSection()
 
 const scope = computed(() => {
   const query = String(route.query.community || '')
-  if (GAME_COMMUNITIES.some(c => c.key === query)) return query
+  if (communityMeta(query)) return query
   if (query === 'all' || route.path === '/') return 'all'
   return community.value
 })

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from app.api.admin import get_queue
 from app.api.deps import require_admin
 from app.clock import utcnow
-from app.communities import community_pattern
+from app.communities import COMMUNITY_REQUIRED_QUERY_DEP
 from app.db import get_session
 from app.models import AiUsage
 from app.services import settings as settings_service
@@ -293,7 +293,7 @@ async def review_recent(
 
 @router.post("/review-community")
 async def review_community(
-    community: str = Query(..., pattern=community_pattern(), description="游戏分区"),
+    community: str = COMMUNITY_REQUIRED_QUERY_DEP,
     limit: int = Query(default=500, ge=1, le=1000, description="单次最多重审条数"),
     only_missing: bool = Query(default=False, description="只处理当前没有判定记录的内容（增量补审）"),
     session: AsyncSession = Depends(get_session),

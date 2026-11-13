@@ -57,19 +57,37 @@ class BaseQueue:
 
 
 class LocalRedis:
-    """platform_slot 依赖的最小内存实现（SET NX PX / PTTL 语义）。"""
+    """platform_slot 与单目标互斥锁依赖的最小内存实现（SET NX PX/EX / PTTL / 条件释放）。"""
 
     def __init__(self) -> None:
         self._keys: dict[str, float] = {}
+        self._values: dict[str, str] = {}
 
-    async def set(self, key: str, value: str, nx: bool = False, px: int | None = None) -> bool | None:
+    async def set(
+        self,
+        key: str,
+        value: str,
+        nx: bool = False,
+        px: int | None = None,
+        ex: int | None = None,
+    ) -> bool | None:
         now = time.monotonic()
         if nx:
             expiry = self._keys.get(key, 0.0)
             if expiry > now:
                 return None
-        self._keys[key] = now + (px / 1000.0 if px else float("inf"))
+        ttl_s = (px / 1000.0) if px is not None else (float(ex) if ex is not None else float("inf"))
+        self._keys[key] = now + ttl_s
+        self._values[key] = value
         return True
+
+    async def release_if_match(self, key: str, token: str) -> int:
+        expiry = self._keys.get(key, 0.0)
+        if expiry > time.monotonic() and self._values.get(key) == token:
+            self._keys.pop(key, None)
+            self._values.pop(key, None)
+            return 1
+        return 0
 
     async def pttl(self, key: str) -> int:
         expiry = self._keys.get(key)

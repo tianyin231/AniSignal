@@ -12,7 +12,14 @@ from app.services.urls import safe_link, safe_link_list, safe_media_url
 def _none_to_list(v):
     return v if v is not None else []
 
-from app.communities import DEFAULT_COMMUNITY as _DEFAULT_COMMUNITY, community_pattern as _community_pattern
+from app.communities import (
+    COMMUNITY_SLUG_RE,
+    CommunitySlug,
+    DEFAULT_COMMUNITY as _DEFAULT_COMMUNITY,
+    OptionalCommunitySlug,
+    VALID_COLORS,
+    community_pattern as _community_pattern,
+)
 from app.models.enums import Platform, TargetType
 
 COMMUNITY_PATTERN = _community_pattern()
@@ -64,7 +71,7 @@ class CollectTargetCreate(BaseModel):
     co_terms: list[str] = Field(default_factory=list)
     min_views: int = Field(default=0, ge=0, le=10_000_000)
     tier: str = Field(default="general", pattern="^(core|general)$")
-    community: str = Field(default=_DEFAULT_COMMUNITY, pattern=COMMUNITY_PATTERN)
+    community: CommunitySlug = Field(default=_DEFAULT_COMMUNITY)
 
     @model_validator(mode="after")
     def _check_target_value(self):
@@ -88,7 +95,43 @@ class CollectTargetUpdate(BaseModel):
     co_terms: list[str] | None = None
     min_views: int | None = Field(default=None, ge=0, le=10_000_000)
     tier: str | None = Field(default=None, pattern="^(core|general)$")
-    community: str | None = Field(default=None, pattern=COMMUNITY_PATTERN)
+    community: OptionalCommunitySlug = Field(default=None)
+
+
+class CommunityCreate(BaseModel):
+    key: str = Field(min_length=1, max_length=16, pattern=COMMUNITY_SLUG_RE.pattern)
+    label: str = Field(min_length=1, max_length=32)
+    en: str = Field(default="", max_length=64)
+    color: str = Field(default="blue", pattern="^(%s)$" % "|".join(VALID_COLORS))
+    domain: str = Field(default="game", pattern="^(game|news)$")
+    official_bili_mid: str | None = Field(default=None, max_length=24, pattern=r"^(\d{1,20})?$")
+    aliases: list[str] = Field(default_factory=list, max_length=16)
+    active: bool = True
+
+
+class CommunityUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=32)
+    en: str | None = Field(default=None, max_length=64)
+    color: str | None = Field(default=None, pattern="^(%s)$" % "|".join(VALID_COLORS))
+    domain: str | None = Field(default=None, pattern="^(game|news)$")
+    official_bili_mid: str | None = Field(default=None, max_length=24, pattern=r"^(\d{1,20})?$")
+    aliases: list[str] | None = Field(default=None, max_length=16)
+    active: bool | None = None
+
+
+class CommunityBatchRequest(BaseModel):
+    action: str = Field(pattern="^(enable|disable)$")
+    keys: list[str] = Field(min_length=1, max_length=100)
+
+
+class TargetImportPresetsRequest(BaseModel):
+    communities: list[str] | None = None
+
+
+class TargetBatchRequest(BaseModel):
+    action: str = Field(pattern="^(enable|disable|delete)$")
+    ids: list[int] = Field(default_factory=list, max_length=500)
+    community: OptionalCommunitySlug = None
 
 
 class CollectTargetOut(BaseModel):
@@ -556,7 +599,7 @@ class ProductCreate(BaseModel):
     slug: str | None = Field(default=None, min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
     publisher: str | None = Field(default=None, max_length=255)
-    community: str = Field(default=_DEFAULT_COMMUNITY, pattern=COMMUNITY_PATTERN)
+    community: CommunitySlug = Field(default=_DEFAULT_COMMUNITY)
     skus: list[str] = Field(default_factory=list)
     price_note: str | None = Field(default=None, max_length=64)
     presale_at: str | None = Field(default=None, max_length=64)
@@ -574,7 +617,7 @@ class ProductCreate(BaseModel):
 class ProductUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     publisher: str | None = Field(default=None, max_length=255)
-    community: str | None = Field(default=None, pattern=COMMUNITY_PATTERN)
+    community: OptionalCommunitySlug = Field(default=None)
     skus: list[str] | None = None
     price_note: str | None = Field(default=None, max_length=64)
     presale_at: str | None = Field(default=None, max_length=64)
@@ -597,7 +640,7 @@ class RuleCreate(BaseModel):
     platform: str | None = Field(default=None, max_length=32)
     priority: int = Field(default=100, ge=0, le=1000)
     enabled: bool = True
-    community: str | None = Field(default=None, pattern=COMMUNITY_PATTERN)
+    community: OptionalCommunitySlug = Field(default=None)
 
 
 class RuleOut(RuleCreate):

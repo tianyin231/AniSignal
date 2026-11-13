@@ -9,6 +9,7 @@ import asyncio
 import logging
 import random
 import re
+import secrets
 import unicodedata
 from datetime import datetime, timedelta
 
@@ -297,7 +298,44 @@ async def _backfill_empty_draw_dynamics(
     return total
 
 
+_UNLOCK_LUA = "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0"
+_COLLECT_LOCK_TTL_MS = 1_900_000
+
+
+async def _release_lock(redis, key: str, token: str) -> None:
+    if hasattr(redis, "eval"):
+        await redis.eval(_UNLOCK_LUA, 1, key, token)
+    elif hasattr(redis, "release_if_match"):
+        await redis.release_if_match(key, token)
+    elif hasattr(redis, "store") and isinstance(redis.store, dict):
+        if redis.store.get(key) == token:
+            redis.store.pop(key, None)
+
+
 async def run_collection(redis, target_id: int) -> dict:
+    """执行一次采集（带单目标互斥锁，防止连点立即采集或多副本并发重入同一目标）。"""
+    lock_key = f"anisignal:collect-lock:{target_id}"
+    lock_token = secrets.token_hex(16)
+    if redis is not None:
+        got = await redis.set(lock_key, lock_token, nx=True, px=_COLLECT_LOCK_TTL_MS)
+        if not got:
+            logger.info("collect target %s skipped: already running", target_id)
+            return {
+                "run_id": None,
+                "status": "busy",
+                "items_found": 0,
+                "items_new": 0,
+                "error": None,
+                "retry_at": None,
+            }
+    try:
+        return await _run_collection_unlocked(redis, target_id)
+    finally:
+        if redis is not None:
+            await _release_lock(redis, lock_key, lock_token)
+
+
+async def _run_collection_unlocked(redis, target_id: int) -> dict:
     """执行一次采集。redis 为 arq Redis 池（复用连接，也用于平台间隔）。"""
     settings = get_settings()
     async with SessionLocal() as session:
@@ -334,8 +372,16 @@ async def run_collection(redis, target_id: int) -> dict:
             await claim_collection_budget(session, target.platform, low_priority=product is not None)
             if isinstance(collector, RssCollector):
                 collector.source_config = {**(target.config or {}), "name": target.display_name, "feed_url": target.target_value}
+            if isinstance(collector, MiyousheCollector):
+                collector.set_community(target.community)
+            from app.communities import sync_communities
+            await sync_communities(session)
             is_news = get_community(target.community).domain == "news"
             if isinstance(collector, BilibiliCollector):
+                if hasattr(collector, "set_cookies"):
+                    from app.services.bilibili_session import get_db_cookies
+
+                    collector.set_cookies(await get_db_cookies(session))
                 if is_news:
                     collector.newest_first = True
                 elif target.target_type == "keyword_search":

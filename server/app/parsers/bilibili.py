@@ -9,22 +9,17 @@ from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
 PARSER_VERSION = "5"
 
-# 已知官方账号兜底（身份判定用；正常路径由 communities 注册表驱动读配置）
-_OFFICIAL_MIDS = {meta.official_bili_mid_default for meta in COMMUNITIES.values() if meta.official_bili_mid_default}
-
-
 def _official_mids() -> set[str]:
-    """官方账号 UID 集合：遍历注册表读各分区 config 项，全部为空时回退兜底集合。"""
+    """官方账号 UID 集合：遍历注册表读各分区 config 项或兜底 UID（含动态自定义分区）。"""
     from app.config import get_settings
 
     settings = get_settings()
-    configured = set()
+    known: set[str] = set()
     for meta in COMMUNITIES.values():
-        if meta.bili_mid_setting:
-            configured.add(getattr(settings, meta.bili_mid_setting, "") or "")
-    configured.discard("")
-    known = configured or _OFFICIAL_MIDS
-    return {str(mid) for mid in known} | set(official_merch_bilibili_sources())
+        mid = (getattr(settings, meta.bili_mid_setting, "") if meta.bili_mid_setting else "") or meta.official_bili_mid_default
+        if mid:
+            known.add(str(mid))
+    return known | set(official_merch_bilibili_sources())
 
 
 def parse_video(raw: dict) -> NormalizedContent:

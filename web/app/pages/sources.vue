@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { fmtTime } from '~/utils/admin-types'
-import { platformMeta, type Platform, type Region } from '~/utils/data'
-import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { platformMeta, type Platform } from '~/utils/data'
+import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import type { PublicSource } from '~/composables/usePublicApi'
 
 useSeoMeta({ title: '来源健康', description: '每个采集来源最近一次运行的情况与健康状态。' })
@@ -14,16 +14,19 @@ const { data, status, error, refresh } = await useLazyAsyncData(
 )
 
 function communityBadge(community?: string) {
-  const meta = GAME_COMMUNITIES.find(c => c.key === community)
+  const meta = communityMeta(community)
   return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
 }
 
-const regionOf: Record<string, Region> = {
-  bilibili: 'cn',
-  miyoushe: 'cn',
-  kuro_cn: 'cn',
-  kuro_global: 'global',
-  youtube: 'global',
+const regionLabel: Record<string, string> = {
+  bilibili: '国内',
+  miyoushe: '国内',
+  kuro_cn: '国服',
+  kuro_global: '国际服',
+  youtube: '海外',
+  x: '海外',
+  rss: '通用',
+  game_official: '官方',
 }
 
 const targetTypeLabels: Record<string, string> = {
@@ -32,6 +35,7 @@ const targetTypeLabels: Record<string, string> = {
   account_dynamics: '账号动态',
   notices: '官方公告',
   channel_rss: '频道 RSS',
+  feed: 'RSS 订阅',
 }
 </script>
 
@@ -77,12 +81,12 @@ const targetTypeLabels: Record<string, string> = {
               <span class="inline-flex items-center gap-1.5 text-slate-600 dark:text-zinc-400">
                 <span
                   class="grid size-4 shrink-0 place-items-center rounded-full text-[8px] font-bold text-white"
-                  :class="platformMeta[s.platform as Platform].badge"
-                >{{ platformMeta[s.platform as Platform].short }}</span>
-                {{ platformMeta[s.platform as Platform].label }}
+                  :class="platformMeta[s.platform as Platform]?.badge ?? 'bg-slate-500'"
+                >{{ platformMeta[s.platform as Platform]?.short ?? s.platform.slice(0, 1).toUpperCase() }}</span>
+                {{ platformMeta[s.platform as Platform]?.label ?? s.platform }}
               </span>
             </td>
-            <td class="px-3 py-2.5 text-slate-600 dark:text-zinc-400">{{ regionOf[s.platform] === 'global' ? '国际服' : '国服' }}</td>
+            <td class="px-3 py-2.5 text-slate-600 dark:text-zinc-400">{{ regionLabel[s.platform] ?? '通用' }}</td>
             <td class="mono px-3 py-2.5 text-slate-500 dark:text-zinc-400">
               {{ s.last_success_at ? fmtTime(s.last_success_at) : '尚未成功' }}
             </td>

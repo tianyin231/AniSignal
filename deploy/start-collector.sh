@@ -10,6 +10,15 @@ SCHED_PID=$!
 arq app.worker.settings.WorkerSettings &
 WORKER_PID=$!
 
-trap 'kill "$SCHED_PID" "$WORKER_PID" 2>/dev/null' TERM INT
+shutdown() {
+  kill "$SCHED_PID" "$WORKER_PID" 2>/dev/null || true
+  wait "$SCHED_PID" "$WORKER_PID" 2>/dev/null || true
+}
+
+trap 'shutdown; exit 0' TERM INT
+
+set +e
 wait -n "$SCHED_PID" "$WORKER_PID"
-exit $?
+CODE=$?
+shutdown
+exit "$CODE"

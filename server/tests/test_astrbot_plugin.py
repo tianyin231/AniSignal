@@ -15,8 +15,8 @@ import yaml
 pytestmark = pytest.mark.filterwarnings('ignore:__package__ != __spec__.parent:DeprecationWarning')
 
 
-@pytest.fixture(params=['integrations/astrbot_plugin_anisignal/main.py', 'main.py'],
-                ids=['standalone', 'repository'])
+@pytest.fixture(params=['integrations/astrbot_plugin_anisignal/main.py'],
+                ids=['standalone'])
 def plugin(monkeypatch, request):
     class SavedConfig(dict):
         def save_config(self):
@@ -117,15 +117,15 @@ def test_plugin_source_lists_the_current_release():
 
     不提供 -md5.json：AstrBot 取不到 md5 时每次都重新读取插件源；md5 文件一旦漏改，反而会一直用旧缓存。
     """
-    root = Path(__file__).parents[2]
-    meta = yaml.safe_load((root / 'metadata.yaml').read_text(encoding='utf-8'))
-    registry = json.loads((root / 'astrbot-plugin-source.json').read_text(encoding='utf-8'))
+    standalone = Path(__file__).parents[2] / 'integrations/astrbot_plugin_anisignal'
+    meta = yaml.safe_load((standalone / 'metadata.yaml').read_text(encoding='utf-8'))
+    registry = json.loads((standalone / 'astrbot-plugin-source.json').read_text(encoding='utf-8'))
     entries = {key: value for key, value in registry.items() if key != '$meta'}
     assert list(entries) == [f"{meta['author']}/{meta['name']}"]
     entry = next(iter(entries.values()))
     assert (entry['name'], entry['repo']) == (meta['name'], meta['repo'])
     assert entry['version'] == meta['version'].removeprefix('v'), '发布新版本时同步插件源中的 version'
-    assert not (root / 'astrbot-plugin-source-md5.json').exists()
+    assert not (standalone / 'astrbot-plugin-source-md5.json').exists()
 
 
 def implementation(plugin, name):
@@ -308,21 +308,17 @@ def test_new_install_defaults_are_portable_and_mask_the_access_key():
     assert notifications['min_push_interval_minutes']['default'] == 0
 
 
-def test_repository_install_manifests_match_standalone_plugin(plugin):
+def test_standalone_plugin_manifests_and_clean_repo_root(plugin):
     root = Path(__file__).parents[2]
     standalone = root / 'integrations/astrbot_plugin_anisignal'
-    # 根目录这份入口留给早期从主仓库安装的实例；插件市场与新安装使用独立仓库 AstrBot_Plugin_AniSignal。
+    for legacy in ['main.py', 'metadata.yaml', '_conf_schema.json', 'logo.png', 'astrbot-plugin-source.json', 'views', '.astrbot-plugin']:
+        assert not (root / legacy).exists(), f'根目录不应残留插件重复副本 {legacy}'
     for filename in ['metadata.yaml', '_conf_schema.json', 'logo.png', 'astrbot-plugin-source.json']:
-        assert (root / filename).read_bytes() == (standalone / filename).read_bytes(), \
-            f'修改插件设置或元数据后，需要同步根目录的 {filename}'
-    # 仓库安装时 AstrBot 从仓库根目录扫描设置视图和视图标题，两处文件必须一致。
+        assert (standalone / filename).is_file()
     for folder in ['views', '.astrbot-plugin']:
         files = sorted(path.relative_to(standalone) for path in (standalone / folder).rglob('*') if path.is_file())
-        assert files and files == sorted(path.relative_to(root) for path in (root / folder).rglob('*') if path.is_file())
-        for relative in files:
-            assert (root / relative).read_bytes() == (standalone / relative).read_bytes(), \
-                f'修改设置视图后，需要同步根目录的 {relative}'
-    metadata = yaml.safe_load((root / 'metadata.yaml').read_text(encoding='utf-8'))
+        assert files
+    metadata = yaml.safe_load((standalone / 'metadata.yaml').read_text(encoding='utf-8'))
     assert metadata['version'] == 'v' + sys.modules[plugin.__class__.__module__].VERSION
     assert metadata['repo'] == 'https://github.com/tianyin231/AstrBot_Plugin_AniSignal'
     # 版本检查和设置页给出的插件源地址都要指向发布仓库，否则会读到停更仓库的版本号。
@@ -850,7 +846,6 @@ async def test_legacy_cached_query_is_not_expanded_without_server_reference(plug
 @pytest.mark.parametrize('original,expected', [
     ('http://anisignal.xyz/', 'https://anisignal.xyz'),
     ('http://www.anisignal.xyz', 'https://anisignal.xyz'),
-    ('http://anisignal.nanamiyako.cn', 'https://anisignal.xyz'),
     ('http://127.0.0.1:8090', 'http://127.0.0.1:8090'),
 ])
 async def test_existing_public_http_configuration_is_upgraded_before_first_request(plugin, original, expected):

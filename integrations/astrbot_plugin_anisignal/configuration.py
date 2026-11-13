@@ -20,8 +20,7 @@ def cleanup_legacy_configuration(config):
     for key in obsolete:
         config.pop(key)
     changed = bool(obsolete)
-    if str(config.get("base_url", "")).rstrip("/") in {
-            "http://anisignal.xyz", "http://www.anisignal.xyz", "http://anisignal.nanamiyako.cn"}:
+    if str(config.get("base_url", "")).rstrip("/") in {"http://anisignal.xyz", "http://www.anisignal.xyz"}:
         config["base_url"] = "https://anisignal.xyz"
         changed = True
     for target in config.get("targets", []):

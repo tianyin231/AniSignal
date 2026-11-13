@@ -40,6 +40,25 @@ async def test_feed_cannot_fetch_loopback_metadata_or_private_network(monkeypatc
         await public_feed_url("https://example.org/feed")
 
 
+async def test_egress_allow_cidrs_permits_fake_ip_but_never_loopback_or_metadata(monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setenv("ANISIGNAL_EGRESS_ALLOW_CIDRS", "0.0.0.0/0,::/0")
+    get_settings.cache_clear()
+    try:
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("198.18.0.1", 80))])
+        assert await public_feed_url("https://example.org/feed") == "https://example.org/feed"
+
+        for forbidden in ("127.0.0.1", "169.254.169.254", "::1", "::ffff:127.0.0.1"):
+            family = socket.AF_INET6 if ":" in forbidden else socket.AF_INET
+            monkeypatch.setattr(socket, "getaddrinfo", lambda *a, _f=family, _ip=forbidden, **kw: [(_f, socket.SOCK_STREAM, 6, "", (_ip, 80))])
+            with pytest.raises(CollectorError, match="私有网络"):
+                await public_feed_url("https://example.org/feed")
+    finally:
+        monkeypatch.delenv("ANISIGNAL_EGRESS_ALLOW_CIDRS", raising=False)
+        get_settings.cache_clear()
+
+
 def test_english_rss_uses_editorial_review_without_chinese_title_gate():
     news = {"newsworthy": True, "headline": "研究团队发布模型", "summary": "来源公布了模型。", "kind": "report", "topics": []}
     assert constrain_news(news, {"platform": "rss", "title": "Introducing our model", "text": "The lab released its research."})["newsworthy"]

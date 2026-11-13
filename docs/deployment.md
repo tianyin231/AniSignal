@@ -1,14 +1,24 @@
-# 部署与本地开发
+# 部署与运维手册
 
-[返回首页](../README.md) · [功能指南](features.md)
+[返回首页](../README.md) · [功能指南](features.md) · [Nginx 反代模板](examples/nginx.conf)
 
-完整部署使用 Docker Compose；本地开发可以使用 SQLite 与进程内队列。两种模式不要混用默认凭据，也不要把本地演示数据或页面可打开当作生产采集验收。
+生产环境推荐使用 Docker Compose（4 容器形态）；本地开发可使用 SQLite 与进程内队列免容器启动。
 
-## Docker Compose
+---
 
-### 首次启动
+## 1. 环境要求与支持矩阵
 
-需要 Git、Docker 和 Compose，以及拉取镜像、安装依赖所需的网络访问。构建内容以根目录 [Dockerfile](../Dockerfile) 为准，包含 Python 3.12、Node.js 22、Web 构建产物和 `bili` CLI。
+- **硬件基线**：建议内存 **≥ 2 GB**（运行态 MySQL + Redis + App + Collector 合计约 0.85 GiB，前端构建阶段与数据库缓冲需要额外余量），磁盘预留 ≥ 10 GB。
+- **软件要求**：Git、Docker 24+（需包含 `docker buildx`）与 Docker Compose v2。
+- **架构与系统**：
+  - 官方镜像链支持 `linux/amd64` 与 `linux/arm64`（前端构建阶段通过 `--platform=$BUILDPLATFORM` 在宿主机原生架构编译，避免跨架构卡死；不支持 32 位 `armv7`）。
+  - Windows 用户请在 **WSL2** 文件系统内克隆仓库并运行（仓库已配置 [.gitattributes](../.gitattributes) 强制脚本使用 `LF` 换行符，避免挂载 NTFS 目录导致 MySQL 性能或权限异常）。
+
+---
+
+## 2. Docker Compose 快速部署
+
+### 2.1 准备 `.env`
 
 ```bash
 git clone https://github.com/tianyin231/AniSignal.git
@@ -16,110 +26,127 @@ cd AniSignal
 cp .env.example .env
 ```
 
-编辑 `.env`，然后再启动。下面的字段由当前 [compose.yaml](../compose.yaml) 显式读取：
+编辑 `.env`（[compose.yaml](../compose.yaml) 已通过 `env_file` 将 `.env` 注入 `app` 与 `collector`，所有 `ANISIGNAL_*` 配置项均可直接在 `.env` 中声明）：
 
-| 变量 | 用途 | 首次部署建议 |
-| --- | --- | --- |
-| `ANISIGNAL_ADMIN_TOKEN` | 管理员访问 Token | 设置独立的随机长字符串，不能保留 `change-me`。 |
-| `MYSQL_ROOT_PASSWORD` | 数据库密码，同时用于应用连接串 | 设置另一串随机长密码。当前模板直接拼接连接 URL，使用足够长的随机十六进制值可避免 URL 特殊字符问题。 |
-| `WEB_PORT` | 宿主机端口映射，未设置时为 `8090` | 本机试用填 `127.0.0.1:8090`；裸端口映射不是仅本机监听。 |
-| `DATA_DIR` | MySQL 与 Redis 数据目录，默认 `./data` | 使用持久化目录并规划备份，不提交到仓库。 |
-| `ANISIGNAL_PUBLIC_BASE_URL` | 对外站点地址，用于邮件、订阅等链接 | 对外部署时填写用户实际访问的完整地址。 |
-| `ANISIGNAL_YOUTUBE_API_KEY` | YouTube Data API v3 凭据 | 可选；未配置时使用频道 RSS，API 失败时也会回退 RSS。 |
+| 变量 | 必填 | 默认值 | 说明 |
+| :--- | :---: | :--- | :--- |
+| `MYSQL_ROOT_PASSWORD` | 是 | — | MySQL 密码（建议 `openssl rand -hex 24`；后端自动做 URL 编码，兼容任意特殊字符）。 |
+| `ANISIGNAL_ADMIN_TOKEN` | 是 | — | `/admin` 管理端访问令牌（建议独立随机长字符串，禁止保留 `change-me`）。 |
+| `ANISIGNAL_PUBLIC_BASE_URL` | 推荐 | `http://127.0.0.1:8090` | 对外完整访问基址（如 `https://signal.example.com`），自动同步至前端 Canonical/OG、Sitemap、robots.txt、RSS 与邮件链接。 |
+| `WEB_PORT` | 否 | `127.0.0.1:8090` | 宿主机监听绑定。默认仅监听本机回环供反代转发；局域网/NAS 直连可改为 `0.0.0.0:8090`。 |
+| `DATA_DIR` | 否 | `./data` | MySQL、Redis 与可选本地文件的持久化目录。 |
+| `ANISIGNAL_EGRESS_ALLOW_CIDRS` | 否 | 空 | 出站 SSRF 额外放行网段。宿主机开启 Clash / mihomo TUN `fake-ip` 时设为 `198.18.0.0/15`（云元数据 `169.254.169.254` 始终拦截）。 |
+| `ANISIGNAL_MAIL_HOURLY_LIMIT` | 否 | `100` | 配置 SMTP 后的全站每小时验证码发信上限，防止接口被刷信。 |
+| `ANISIGNAL_YOUTUBE_API_KEY` | 否 | 空 | 可选 YouTube Data API v3 密钥；不填默认走免密钥频道 RSS。 |
+
+### 2.2 启动与验活
 
 ```bash
 docker compose up -d --build
 docker compose ps
-docker compose logs --tail=100 app collector
+docker compose logs --tail=80 app collector
 ```
 
-本机打开 `http://127.0.0.1:8090`；`/api/healthz` 用于 API 健康检查，`/admin` 为管理页面。健康检查通过只说明对应服务可响应，采集、模型和消息通道需要分别验证。
+- `app` 启动时自动通过 MySQL `GET_LOCK` 互斥执行 `alembic upgrade head`（新库通过 `0057_baseline` 一步建齐全部数据表，不写入任何作者私站演示数据），随后拉起 FastAPI（`127.0.0.1:8000`）与 Nuxt SSR（`:3000`）。
+- 健康检查探测 `:3000/api/healthz`，同时验证前端 Nitro 代理与后端数据库连通性；公网内部路径 `/api/internal/**` 已在 Nitro 层直接拦截返回 `404`。
+- 如需水平扩展采集并发，可执行 `docker compose up -d --scale collector=2`（调度器自动通过 Redis 原子续租选举单主，单信源采集与每日早报均带分布式互斥锁）。
 
-### 运行结构
+---
 
-| 服务 | 职责 |
-| --- | --- |
-| `mysql` | 存储内容、版本、事件、用户与配置等持久化数据。 |
-| `redis` | 任务队列与调度协调。 |
-| `app` | 同一容器内运行 FastAPI 和 Nuxt SSR；Nitro 同源代理 `/api/**`。 |
-| `collector` | 调度器与 arq worker，执行采集及相关后台任务。 |
+## 3. 浏览器内零 SSH 初始化（3 步闭环）
 
-应用启动时通过 [start-app.sh](../deploy/start-app.sh) 执行 `alembic upgrade head`，随后启动 API 和 Web。Compose 将 Web 端口映射到宿主机，没有直接发布 MySQL、Redis 或 API 的内部端口。
+访问 `http://127.0.0.1:8090/admin`（或你的域名 `/admin`），输入 `ANISIGNAL_ADMIN_TOKEN`：
 
-### 首次配置与检查
+1. **分区与信源（`/admin/targets`）**
+   - **自定义分区**：在顶部「分区管理」面板可直接新建自定义分区（填写标识、名称、关键词别名），也可一键隐藏不需要的内置分区。顶栏导航仅展示已启用且存在活跃信源的分区。
+   - **一键导入 / 批量移除**：点击「导入预设信源」可按勾选分区导入鸣潮、原神、星铁、AI 快讯等预设源（X 账号默认停用）；列表支持全选批量启用、停用或一键删除。
+   - **命令行导入预设（可选）**：也可执行 `docker compose exec app uv run --project /app/server python -m app.seeds --all`（或 `--communities wuwa,ai`）。
+   - **B 站登录态**：直接在同页点击「扫码登录」用手机 B 站 App 扫码，或粘贴 `SESSDATA` Cookie。凭据存入数据库并通过内存环境变量 `BILI_COOKIE` 传递给采集器，无需进服务器导文件。
+2. **AI 模型与无 AI 降级（`/admin/ai`）**
+   - 填写任意 OpenAI 兼容接口（Base URL、API Key 池、主模型/轻量模型），保存后点击测试连接即可。
+   - **不配置 AI 时的行为边界**：游戏官网公告与视频的规则分类归并、RSS/B 站/YouTube 采集、关键词关注均正常工作；依赖模型的活动日历抽取、周边自动发现与外语翻译会自动跳过，`/ai` 快讯页会出现引导提示并自动支持切换 **「显示未审原文」** 直接阅读一手 RSS 原文。
+3. **用户注册、邮件与站点信息（`/admin/users` & `/admin/settings`）**
+   - **配置了 SMTP**：在 `/admin/settings` 填写并发测试信，即可启用注册/找回密码发码与每日 08:00 早报。
+   - **未配置 SMTP**：登录/注册页会提示联系管理员；管理员可在 `/admin/users` 顶部的「待用注册码」面板直接复制验证码发给用户，或直接点击用户行的 **「激活」**、**「改密」** 完成账号开通与密码重置。
+   - **站点合规信息**：在 `/admin/settings` 的站点文案中可配置 `contact_email`（公开法律页联系邮箱，默认留空不暴露任何私人邮箱）与 `source_url`（AGPL-3.0 源码地址）。
 
-进入管理端，用 `.env` 中的管理员 Token 登录。配置采集目标并手动触发一次，核对来源状态、内容列表及原始链接；不要假设新数据库已经具备试运行站的全部数据与配置。
+---
 
-按需配置 SMTP、AI 模型接口及机器人通道，并逐项检查邮件投递、AI 用量和消息处理记录。公开访问还需要正确的站点地址、域名、HTTPS 与访问控制；不要使用开发 Token 或测试账号对外部署。
+## 4. 反向代理与 HTTPS（Nginx）
 
-### 环境变量的两层含义
+仓库提供脱敏且可直接通过 `nginx -t` 校验的配置模板：[docs/examples/nginx.conf](examples/nginx.conf)。
 
-`server/app/config.py` 使用 `ANISIGNAL_` 前缀，例如 `ANISIGNAL_PUBLIC_BASE_URL`、`ANISIGNAL_SMTP_HOST` 和 `ANISIGNAL_AI_MODEL`。**但 Compose 的 `.env` 不是自动注入容器的配置文件**：只有 `compose.yaml` 引用或 `environment` / `env_file` 传入的变量才会进入服务环境。
+关键配置要点：
+1. 保持 `WEB_PORT=127.0.0.1:8090`，避免绕过 Nginx 与防火墙直接暴露 `:8090`；若前置 Cloudflare 等 CDN，建议在云安全组仅允许 CDN 回源 IP 段访问 `80/443`。
+2. 反代需透传 `Host`、`X-Real-IP`、`X-Forwarded-For` 与 **`X-Forwarded-Proto $scheme`**，并将 `.env` 中的 `ANISIGNAL_PUBLIC_BASE_URL` 设为 `https://你的域名`，以确保登录会话 Cookie 自动附带 `Secure` 标志。
 
-当前 Compose 显式向 `app` 与 `collector` 传入数据库、Redis、管理员 Token、公开站点地址、YouTube API Key 和时区。公开地址与 YouTube Key 可直接在根目录 `.env` 中设置。SMTP、AI 等已有管理端配置入口；通过环境变量配置其他字段时，需要在本地 Compose override 中显式传入，实际优先级以代码为准。
+---
 
-例如，通过环境变量指定模型名时，可创建不含秘密值的本地 `compose.override.yaml`：
+## 5. 国内网络与代理排障
 
-```yaml
-services:
-  app:
-    environment:
-      ANISIGNAL_AI_MODEL: ${ANISIGNAL_AI_MODEL}
-  collector:
-    environment:
-      ANISIGNAL_AI_MODEL: ${ANISIGNAL_AI_MODEL}
-```
+1. **构建阶段 npm 镜像源**：`Dockerfile` 默认使用官方源（`--replace-registry-host=always`）。国内机器构建缓慢时可传入构建参数：
+   ```bash
+   docker compose build --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+   docker compose up -d
+   ```
+2. **Clash / mihomo TUN `fake-ip` 模式**：开启 `fake-ip` 后 DNS 会返回 `198.18.0.0/15` 测试网段地址，触发默认公网 SSRF 拦截（报错提示解析到了非公网地址）。在 `.env` 中添加：
+   ```dotenv
+   ANISIGNAL_EGRESS_ALLOW_CIDRS=198.18.0.0/15
+   ```
+   然后执行 `docker compose up -d` 重建容器即可。
+3. **采集出口代理池**：若部分境外信源（YouTube / X / 海外 RSS）需要走 HTTP/SOCKS 代理，可在后台 `/admin/proxies` 按平台配置代理池，无需重启容器。
 
-在 `.env` 中设置对应值后，用 `docker compose up -d` 重建相关容器。反向代理改变了对外域名时，也要更新公开站点地址并核对邮件链接。凭据放在受保护的本地配置中，不写入文档或提交记录。
+---
 
-### 更新与备份
+## 6. 备份、升级与首次安装自救
 
-在确认工作区无未提交改动、数据库与配置已备份后，拉取已审核的版本，再运行 `docker compose up -d --build`。数据库迁移会随应用启动执行；更新前应先阅读变更，不能将代码回退视作数据库自动回退。
-
-数据默认落在 `./data`。备份数据库、配置与必要的运行数据，并验证恢复流程；不要以删除数据目录作为常规排障方式。机器人是可选组件，根目录另有 [compose.astrbot.yaml](../compose.astrbot.yaml) 和 [插件目录](../integrations/astrbot_plugin_anisignal/)，启用前须单独完成其配置与检查。
-
-## 本地开发：免 MySQL / Redis / Docker
-
-需要 **Python 3.12+、uv、Node.js 22 和 npm**；Node.js 22 与仓库构建镜像保持一致。
-
-在仓库根目录打开第一个终端：
+### 备份与恢复
+持久化数据位于 `${DATA_DIR:-./data}`。建议定期逻辑备份 MySQL 数据库与 `.env`：
 
 ```bash
+# 导出压缩备份
+docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot --single-transaction --routines anisignal' | gzip > anisignal-$(date +%F).sql.gz
+
+# 恢复到空库
+gunzip -c anisignal-2026-11-13.sql.gz | docker compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot anisignal'
+```
+
+### 升级流程
+确认已备份数据库后：
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+### 首次启动失败自救
+- 查看具体报错：`docker compose logs app mysql`
+- 若*全新首次安装*因填错配置中断、尚未产生任何业务数据，可执行 `docker compose down && rm -rf ./data/mysql ./data/redis && docker compose up -d` 从干净状态重来（**已有数据的线上实例切勿删除 `./data`**）。
+
+---
+
+## 7. 本地开发（免 Docker / MySQL / Redis）
+
+需要 **Python 3.12+、uv、Node.js 22 和 npm**：
+
+```bash
+# 终端 1：启动本地后端（SQLite ./server/local.db + 进程内队列，默认管理令牌 local-dev）
 cd server
 uv run python -m app.local
-```
 
-另开一个终端，同样从仓库根目录执行：
-
-```bash
+# 终端 2：启动前端开发服（http://localhost:3000）
 cd web
 npm ci
 npm run dev
 ```
 
-访问 `http://localhost:3000`。API 监听 `127.0.0.1:8000`，本地管理员 Token 默认为 `local-dev`，仅用于开发；可以通过 `ANISIGNAL_ADMIN_TOKEN` 覆盖。
+如需在本地模式调试 B 站采集，可从 [tamnd/bili Releases](https://github.com/tamnd/bili/releases) 下载对应平台（macOS / Linux / Windows，amd64 / arm64）的可执行文件放入 `PATH` 或设置 `ANISIGNAL_BILI_BIN`。
 
-[本地入口](../server/app/local.py) 会创建 `server/local.db`，使用 SQLite 和进程内队列，并在空目标表中播种示例采集目标。示例官网目标会访问真实公开来源；B 站示例目标默认停用，运行对应采集需要可用的 `bili` CLI。免数据库容器不等于离线运行或所有采集器无额外依赖。
-
-本地模式不验证完整部署中的 MySQL 行为、Redis 队列、多副本调度或容器网络。已有本地数据库的结构变更也应单独处理，不能假定 `create_all` 会迁移旧表。
-
-## 开发检查
-
-后端测试：
-
+### 运行测试
 ```bash
-cd server
-uv run pytest
+# 后端单元测试
+uv run --directory server pytest -q
+
+# 前端测试
+npm --prefix web test
 ```
-
-前端构建：
-
-```bash
-cd web
-npm ci
-npm run build
-```
-
-测试数量与结果以实际执行为准，不在介绍页写死。构建成功不等于浏览器交互通过；涉及页面或 API 的修改，应补充相应运行检查。
-
-[后端说明](../server/README.md) · [前端说明](../web/README.md) · [配置定义](../server/app/config.py)

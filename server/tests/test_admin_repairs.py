@@ -10,14 +10,16 @@ from app.clock import utcnow
 from app.models import ContentTranslation, ContentVersion, Event, Evidence, RawContent
 
 
-@pytest.mark.parametrize("platform,target_type,expected", [
-    ("bilibili", "keyword_search", 10000),
-    ("bilibili", "account_videos", 10000),
-    ("bilibili", "account_dynamics", 0),
-    ("youtube", "channel_rss", 0),
-    ("miyoushe", "keyword_search", 0),
+@pytest.mark.parametrize("platform,target_type,expected_default,supports_custom", [
+    ("bilibili", "keyword_search", 10000, True),
+    ("bilibili", "account_videos", 0, True),
+    ("bilibili", "account_dynamics", 0, False),
+    ("youtube", "channel_rss", 0, False),
+    ("miyoushe", "keyword_search", 0, False),
 ])
-async def test_target_view_threshold_matches_collector_capability(client, admin_headers, platform, target_type, expected):
+async def test_target_view_threshold_matches_collector_capability(
+    client, admin_headers, platform, target_type, expected_default, supports_custom
+):
     # 目标值要符合该 (platform, target_type) 的形态：账号类必须是数字 MID / 频道 ID
     value = {
         "account_videos": "12345",
@@ -28,13 +30,13 @@ async def test_target_view_threshold_matches_collector_capability(client, admin_
     payload = {"platform": platform, "target_type": target_type, "target_value": value}
     response = await client.post("/api/admin/collect-targets", json=payload, headers=admin_headers)
     assert response.status_code == 201
-    assert response.json()["min_views"] == expected
+    assert response.json()["min_views"] == expected_default
     response = await client.put(f"/api/admin/collect-targets/{response.json()['id']}",
         json={"min_views": 20000}, headers=admin_headers)
-    assert response.json()["min_views"] == (20000 if expected else 0)
+    assert response.json()["min_views"] == (20000 if supports_custom else 0)
     response = await client.post("/api/admin/collect-targets",
         json={**payload, "target_value": value + "1", "min_views": 30000}, headers=admin_headers)
-    assert response.json()["min_views"] == (30000 if expected else 0)
+    assert response.json()["min_views"] == (30000 if supports_custom else 0)
 
 
 async def test_news_target_defaults_to_no_view_threshold(client, admin_headers):

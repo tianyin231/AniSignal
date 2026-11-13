@@ -3,29 +3,17 @@ import { Check, Copy } from 'lucide-vue-next'
 import type { RedeemCodeDto } from '~/composables/usePublicApi'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { fmtTime } from '~/utils/admin-types'
+import { copyText } from '~/utils/clipboard'
 
 // 兑换码：官方内容抽取，点击复制
 const props = defineProps<{ codes: RedeemCodeDto[], showCommunity?: boolean }>()
 const copied = ref('')
 
 async function copy(code: string) {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(code)
-    } else {
-      // HTTP 部署下没有异步剪贴板 API，回退到隐藏文本域 + execCommand
-      const box = document.createElement('textarea')
-      box.value = code
-      box.style.position = 'fixed'
-      box.style.opacity = '0'
-      document.body.appendChild(box)
-      box.select()
-      document.execCommand('copy')
-      box.remove()
-    }
+  if (await copyText(code)) {
     copied.value = code
     setTimeout(() => { if (copied.value === code) copied.value = '' }, 1500)
-  } catch {}
+  }
 }
 const rows = computed(() => props.codes.map((c) => {
   const meta = props.showCommunity ? communityMeta(c.community) : undefined

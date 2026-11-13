@@ -18,9 +18,8 @@ def _engine_kwargs(database_url: str) -> dict:
     return {"pool_pre_ping": True, "pool_recycle": 3600, "pool_size": 5, "max_overflow": 5}
 
 
-engine = create_async_engine(
-    get_settings().database_url, **_engine_kwargs(get_settings().database_url)
-)
+_db_url = get_settings().resolved_database_url
+engine = create_async_engine(_db_url, **_engine_kwargs(_db_url))
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 

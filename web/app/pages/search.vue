@@ -2,10 +2,11 @@
 import { Search } from 'lucide-vue-next'
 import type { ApiEventList, PublicContentList } from '~/composables/usePublicApi'
 import { toAppEvent, toRawItem } from '~/utils/public-utils'
-import { GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { communityMeta } from '~/composables/useGameSection'
 
 const route = useRoute()
 const router = useRouter()
+const { communities } = useGameSection()
 const input = ref(String(route.query.q || ''))
 watch(
   () => route.query.q,
@@ -26,7 +27,7 @@ const q = computed(() => String(route.query.q || ''))
 
 const { api } = usePublicApi()
 const community = computed({
-  get: () => GAME_COMMUNITIES.some(c => c.key === route.query.community) ? String(route.query.community) : 'all',
+  get: () => communityMeta(String(route.query.community || '')) ? String(route.query.community) : 'all',
   set: (value: string) => router.replace({ query: { ...route.query, community: value, page: undefined } }),
 })
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
@@ -68,7 +69,7 @@ useSeoMeta({ title: '搜索' })
       <button type="submit" class="btn-primary shrink-0 px-3.5 py-1.5">搜索</button>
       <select v-model="community" aria-label="搜索范围" class="select w-full px-2 py-1.5 text-sm sm:w-auto">
         <option value="all">全站</option>
-        <option v-for="c in GAME_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
+        <option v-for="c in communities" :key="c.key" :value="c.key">{{ c.label }}</option>
       </select>
     </form>
 

@@ -16,17 +16,18 @@ export default defineNuxtConfig({
     public: {
       // 浏览器端走同源（默认空串），由 Nitro 代理到 FastAPI，不再暴露 API 端口
       apiBase: '',
-      // 规范地址和分享卡片用的公开域名，可用 NUXT_PUBLIC_SITE_URL 覆盖
-      siteUrl: 'https://anisignal.xyz',
+      // 规范地址和分享卡片用的公开域名，可用 NUXT_PUBLIC_SITE_URL 覆盖；留空自动取当前请求源
+      siteUrl: '',
     },
   },
   routeRules: {
     // 后端所有 HTTP API 都在 /api/** 下（含 /api/admin 管理接口）；
     // /admin/** 是 Nuxt 页面路由，不代理
     '/api/**': { proxy: `${apiProxy}/api/**` },
-    // RSS 订阅源：后端生成 XML，这里映射到站点根路径
+    // RSS / Sitemap / robots：后端动态生成，映射到站点根路径
     '/rss.xml': { proxy: `${apiProxy}/api/rss.xml` },
     '/sitemap.xml': { proxy: `${apiProxy}/api/sitemap.xml` },
+    '/robots.txt': { proxy: `${apiProxy}/api/robots.txt` },
   },
   vite: {
     plugins: [tailwindcss()],

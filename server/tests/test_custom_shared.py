@@ -165,19 +165,19 @@ async def test_capacity_counts_targets_not_users(session):
     assert (await capacity(session)) == {"active_sources":500,"estimated_tasks_per_hour":1000.0}
 
 
-async def test_migration_preserves_history_and_deduplicates_sources():
-    from sqlalchemy.ext.asyncio import create_async_engine
-    engine=create_async_engine("sqlite+aiosqlite://")
-    path=Path("alembic/versions/0048_custom_shared_sources.py")
-    spec=importlib.util.spec_from_file_location("custom_shared_migration",path); migration=importlib.util.module_from_spec(spec);spec.loader.exec_module(migration)
-    def apply(conn):
-        conn.exec_driver_sql("CREATE TABLE custom_feeds (id INTEGER PRIMARY KEY,user_id INTEGER,platform VARCHAR(16),kind VARCHAR(16),target_value VARCHAR(128),interval_minutes INTEGER,is_public BOOLEAN,push_enabled BOOLEAN)")
-        conn.exec_driver_sql("INSERT INTO custom_feeds VALUES (1,1,'bilibili','uid','00123',5,0,1),(2,2,'bilibili','uid','123',60,1,0)")
-        conn.exec_driver_sql("CREATE TABLE custom_feed_items (id INTEGER PRIMARY KEY,feed_id INTEGER,external_id TEXT)")
-        conn.exec_driver_sql("INSERT INTO custom_feed_items VALUES (99,1,'history')")
-        with patch.object(migration,"op",Operations(MigrationContext.configure(conn))): migration.upgrade()
-        rows=conn.exec_driver_sql("SELECT id,source_id,interval_minutes,is_public,push_enabled FROM custom_feeds ORDER BY id").all()
-        assert rows[0][1]==rows[1][1] and rows[0][2:]==(5,0,1) and rows[1][2:]==(60,1,0)
-        assert conn.exec_driver_sql("SELECT id FROM custom_feed_items").scalar()==99
-    async with engine.begin() as conn: await conn.run_sync(apply)
-    await engine.dispose()
+async def test_shared_source_deduplicates_normalized_uid_and_preserves_feed_settings(session):
+    a, b = await users(session)
+    s1 = await shared_source(session, "bilibili", "uid", "00123")
+    s2 = await shared_source(session, "bilibili", "uid", "123")
+    assert s1.id == s2.id
+    f1 = CustomFeed(user_id=a.id, source_id=s1.id, name="A", kind="uid", target_value="00123", interval_minutes=5, is_public=False, push_enabled=True)
+    f2 = CustomFeed(user_id=b.id, source_id=s2.id, name="B", kind="uid", target_value="123", interval_minutes=60, is_public=True, push_enabled=False)
+    session.add_all([f1, f2])
+    await session.flush()
+    item = CustomFeedItem(feed_id=f1.id, platform="bilibili", external_id="history")
+    session.add(item)
+    await session.commit()
+    assert f1.source_id == f2.source_id
+    assert (f1.interval_minutes, f1.is_public, f1.push_enabled) == (5, False, True)
+    assert (f2.interval_minutes, f2.is_public, f2.push_enabled) == (60, True, False)
+    assert await session.get(CustomFeedItem, item.id) is not None

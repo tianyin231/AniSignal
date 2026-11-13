@@ -17,11 +17,15 @@ from sqlalchemy.orm import aliased, defer
 
 from app.communities import (
     COMMUNITIES,
+    COMMUNITY_AGGREGATE_QUERY_DEP,
+    COMMUNITY_QUERY_DEP,
+    CommunityOrAllSlug,
+    CommunitySlug,
     DEFAULT_COMMUNITY,
-    community_pattern,
     community_conditions,
-    community_query_pattern,
+    community_to_public_dict,
     is_all_community,
+    sync_communities,
 )
 from app.db import get_session
 from app.clock import utcnow
@@ -53,18 +57,9 @@ MAX_PUBLIC_OFFSET = 10_000
 # 热门排序要逐条取最新指标，时间跨度越大越慢：30 天仍要 2 秒以上。默认值与站内入口的 7 天一致。
 HOT_DEFAULT_WINDOW_HOURS = 168
 
-# 公开分区参数：默认值与合法值集合来自 communities 注册表
-COMMUNITY_QUERY = Query(
-    default=DEFAULT_COMMUNITY,
-    pattern=community_pattern(),
-    description="游戏分区（%s）" % ", ".join(f"{k}={v.label}" for k, v in COMMUNITIES.items()),
-)
-# 聚合版：额外接受 all（跨分区），仅首页三个列表端点使用
-COMMUNITY_AGGREGATE_QUERY = Query(
-    default=DEFAULT_COMMUNITY,
-    pattern=community_query_pattern(),
-    description="游戏分区（all=跨分区聚合）",
-)
+# 公开分区参数：运行时通过 Depends 校验动态注册表（非法值返回 422）
+COMMUNITY_QUERY = COMMUNITY_QUERY_DEP
+COMMUNITY_AGGREGATE_QUERY = COMMUNITY_AGGREGATE_QUERY_DEP
 
 
 HIGHLIGHTS_CACHE_SECONDS = 60
@@ -74,7 +69,7 @@ HIGHLIGHTS_CACHE_SECONDS = 60
 async def list_highlights(
     request: Request,
     limit: int = Query(default=5, ge=1, le=8),
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     """首页精选：官方实质动态与高热度社区内容混排。
@@ -114,7 +109,7 @@ async def list_highlights(
 @router.get("/trending", response_model=PublicContentList)
 async def list_trending(
     request: Request,
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     hours: int = Query(default=24, ge=6, le=168, description="增量统计窗口"),
     limit: int = Query(default=10, ge=1, le=20),
     session: AsyncSession = Depends(get_session),
@@ -136,7 +131,7 @@ async def list_trending(
 @router.get("/calendar")
 async def content_calendar(
     request: Request,
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     from app.services.calendar import calendar_groups
@@ -148,7 +143,7 @@ async def content_calendar(
 async def monthly_calendar(
     request: Request,
     month: str = Query(pattern=r"^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])$"),
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     from app.services.calendar import calendar_month
@@ -175,7 +170,7 @@ async def export_calendar(schedule_id: int, session: AsyncSession = Depends(get_
 @router.get("/codes")
 async def list_redeem_codes(
     request: Request,
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     """可用兑换码列表（官方内容 AI 抽取；过期自动隐藏）。"""
@@ -218,7 +213,7 @@ def _preview_mode(text: str | None, media: list, url: str | None) -> str:
 async def list_contents(
     request: Request,
     platform: str | None = Query(default=None),
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     content_type: str | None = Query(default=None),
     identity: str | None = Query(default=None, description="official/user/... 来源身份过滤"),
     exclude_identity: str | None = Query(default=None, max_length=32, description="排除指定来源身份"),
@@ -393,16 +388,65 @@ _SITEMAP_PAGES = (
 )
 
 
+def public_site_base(request: Request | None = None) -> str:
+    """对外站点基址：优先 ANISIGNAL_PUBLIC_BASE_URL，否则根据反代头或请求基址还原。"""
+    from app.config import get_settings
+
+    configured = get_settings().public_base_url.strip().rstrip("/")
+    if configured:
+        return configured
+    if request is None:
+        return "http://127.0.0.1:8090"
+    host = (
+        request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+        or request.headers.get("host", "").strip()
+    )
+    proto = (
+        request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+        or request.url.scheme
+        or "http"
+    )
+    if (
+        proto in {"http", "https"}
+        and host
+        and host not in {"127.0.0.1:8000", "localhost:8000"}
+        and re.fullmatch(r"[A-Za-z0-9._:\[\]-]{1,255}", host)
+    ):
+        return f"{proto}://{host}".rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
+@router.get("/robots.txt", response_class=Response)
+async def robots_txt(request: Request):
+    base = public_site_base(request)
+    content = "\n".join(
+        [
+            "# AniSignal robots.txt",
+            "User-agent: *",
+            "Allow: /",
+            "Disallow: /admin",
+            "Disallow: /account",
+            "Disallow: /api/",
+            "Disallow: /login",
+            "Disallow: /register",
+            "Disallow: /forgot",
+            "Crawl-delay: 10",
+            f"Sitemap: {base}/sitemap.xml",
+            "",
+        ]
+    )
+    return Response(content=content, media_type="text/plain; charset=utf-8")
+
+
 @router.get("/sitemap.xml", response_class=Response)
 async def sitemap(request: Request, session: AsyncSession = Depends(get_session)):
     """站点地图：公开栏目、游戏频道、全部商品和进行中的事件。"""
     from xml.sax.saxutils import escape
 
-    from app.config import get_settings
     from app.models import Event as EventModel
     from app.models import Product as ProductModel
 
-    base = get_settings().public_base_url.strip().rstrip("/") or str(request.base_url).rstrip("/")
+    base = public_site_base(request)
     cached = _SITEMAP_CACHE.get(base)
     if cached and cached[0] > time.time():
         return Response(content=cached[1], media_type="application/xml; charset=utf-8")
@@ -432,7 +476,7 @@ async def sitemap(request: Request, session: AsyncSession = Depends(get_session)
 @router.get("/rss.xml", response_class=Response)
 async def rss_feed(
     request: Request,
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     q: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=30, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
@@ -463,10 +507,7 @@ async def rss_feed(
         offset=0,
         session=session,
     )
-    from app.config import get_settings
-
-    configured_base = get_settings().public_base_url.strip().rstrip("/")
-    base = configured_base or str(request.base_url).rstrip("/")
+    base = public_site_base(request)
     label = "跨分区聚合" if is_all_community(community) else community
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -507,7 +548,7 @@ async def rss_feed(
 
 @router.get("/sources", response_model=PublicSourceList)
 async def list_sources(
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     """公开的来源健康：已接入来源、最近成功采集时间与不可用状态（设计文档 §6/§16）。
@@ -546,9 +587,11 @@ _ALLOWED_ATTRS = {"a": ["href", "title"], "img": ["src", "alt"]}
 def _sanitize_html(text: str) -> str | None:
     if "<" not in text or ">" not in text:
         return None
+    import re
     import bleach
 
-    return bleach.clean(text, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
+    cleaned = bleach.clean(text, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
+    return re.sub(r"<img\b", '<img referrerpolicy="no-referrer" loading="lazy"', cleaned)
 
 
 @router.get("/contents/{content_id}/notification-image.jpg")
@@ -680,7 +723,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
 async def list_events(
     request: Request,
     category: str | None = Query(default=None),
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     product_slug: str | None = Query(default=None),
     importance: bool | None = Query(default=None),
     published_within_hours: int | None = Query(
@@ -775,7 +818,7 @@ async def get_event(event_id: int, session: AsyncSession = Depends(get_session))
 @router.get("/products", response_model=ProductListOut)
 async def list_products(
     request: Request,
-    community: str = COMMUNITY_AGGREGATE_QUERY,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     from app.models import Product as ProductModel
@@ -1069,7 +1112,7 @@ async def _ai_official_links(session: AsyncSession, community: str) -> list[dict
 
 @router.get("/official-links")
 async def official_links(
-    community: str = COMMUNITY_QUERY,
+    community: CommunitySlug = COMMUNITY_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
     """官方动态中指向活动/奖励/H5 的站外链接，去重去模板后按最新排序。
@@ -1097,17 +1140,22 @@ async def official_links(
 
 @router.get("/site-config")
 async def site_config(session: AsyncSession = Depends(get_session)):
-    """公开站点配置：全服公告、文案区域与分区清单（不含任何 SMTP 信息）。"""
+    """公开站点配置：全服公告、文案区域、动态分区与服务就绪布尔状态（不含任何凭据或 SMTP 详情）。"""
     from app.services import settings as settings_service
+    from app.services.ai import ai_available, get_ai_config
 
+    await sync_communities(session)
+    all_items = [community_to_public_dict(meta) for meta in COMMUNITIES.values()]
+    ai_cfg = await get_ai_config(session)
+    smtp_cfg = await settings_service.get_effective_smtp(session)
     return {
         "announcement": await settings_service.get_announcement(session),
         "texts": await settings_service.get_texts(session),
-        "communities": [
-            {"key": meta.key, "label": meta.label, "color": meta.color}
-            for meta in COMMUNITIES.values()
-        ],
+        "communities": [item for item in all_items if item["active"]],
+        "all_communities": all_items,
         "media_visibility": await settings_service.get_media_visibility(session),
+        "ai_configured": bool(ai_available(ai_cfg)),
+        "smtp_configured": bool(smtp_cfg.get("host") and smtp_cfg.get("user") and smtp_cfg.get("password")),
     }
 
 

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 useSeoMeta({ title: '版权与下架 · AniSignal' })
+const { t } = useSiteConfig()
+const contactEmail = computed(() => t('contact_email').trim())
 
-const steps = [
+const steps = computed(() => [
   {
     n: '01',
     t: '准备材料',
@@ -9,8 +11,10 @@ const steps = [
   },
   {
     n: '02',
-    t: '发送邮件',
-    d: '发至 admin@anisignal.nanamiyako.cn，主题含「版权投诉」。请附联系方式，便于我们回执与核对。',
+    t: '发送请求',
+    d: contactEmail.value
+      ? `发至 ${contactEmail.value}，主题含「版权投诉」。请附联系方式，便于我们回执与核对。`
+      : '联系本站管理员并注明「版权投诉」，请附联系方式便于回执与核对。',
   },
   {
     n: '03',
@@ -22,7 +26,7 @@ const steps = [
     t: '处理结果',
     d: '核实后将下架、限制展示或修正错误归并，并在站内记录处理状态。已发出的邮件/机器人消息无法撤回，但站内详情会更新。',
   },
-]
+])
 </script>
 
 <template>
@@ -81,7 +85,8 @@ const steps = [
       <h2 class="text-base font-bold text-ink">联系方式</h2>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
         版权与下架：
-        <a href="mailto:admin@anisignal.nanamiyako.cn" class="link">admin@anisignal.nanamiyako.cn</a>
+        <a v-if="contactEmail" :href="`mailto:${contactEmail}`" class="link">{{ contactEmail }}</a>
+        <span v-else>请联系本站管理员</span>
       </p>
       <div class="mt-4 flex flex-wrap gap-4 text-sm">
         <NuxtLink to="/terms" class="link">用户协议</NuxtLink>

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 useSeoMeta({ title: '用户协议 · AniSignal' })
+const { t } = useSiteConfig()
+const contactEmail = computed(() => t('contact_email').trim())
 
 const updated = '2026-09-13'
 </script>
@@ -82,8 +84,11 @@ const updated = '2026-09-13'
     <section class="panel p-5 sm:p-6">
       <h2 class="text-base font-bold text-ink">8. 联系</h2>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
-        协议、账号与投诉相关事宜，请发送邮件至
-        <a href="mailto:admin@anisignal.nanamiyako.cn" class="link">admin@anisignal.nanamiyako.cn</a>。
+        <template v-if="contactEmail">
+          协议、账号与投诉相关事宜，请发送邮件至
+          <a :href="`mailto:${contactEmail}`" class="link">{{ contactEmail }}</a>。
+        </template>
+        <template v-else>协议、账号与投诉相关事宜，请联系本站管理员。</template>
       </p>
       <div class="mt-4 flex flex-wrap gap-4 text-sm">
         <NuxtLink to="/privacy" class="link">隐私政策</NuxtLink>

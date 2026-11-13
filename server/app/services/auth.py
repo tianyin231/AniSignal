@@ -34,6 +34,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # 进程内限频状态（单 worker 有效）
 _send_times: dict[str, deque[float]] = {}
+_smtp_send_times: deque[float] = deque()
 _login_failures: dict[str, deque[float]] = {}
 
 # 这两张表都按「外部可控的键」增长（任意邮箱都能各插一条），必须封顶：
@@ -179,14 +180,26 @@ async def issue_code(session: AsyncSession, user: User, purpose: str) -> bool:
     await session.flush()
 
     action = "注册验证" if purpose == "register" else "密码重置"
+    from app.config import get_settings
     from app.services.settings import get_effective_smtp
+
+    smtp = await get_effective_smtp(session)
+    if smtp.get("host") and smtp.get("user") and smtp.get("password"):
+        cap = get_settings().mail_hourly_limit
+        if cap > 0:
+            now = time.monotonic()
+            while _smtp_send_times and now - _smtp_send_times[0] > 3600:
+                _smtp_send_times.popleft()
+            if len(_smtp_send_times) >= cap:
+                raise AuthError("全站发信通道繁忙，请稍后再试或联系管理员激活账号", 429)
+            _smtp_send_times.append(now)
 
     sent = await send_email(
         user.email,
         f"AniSignal {action}验证码",
         f"你的验证码是：{code}\n{action}码 {_CODE_TTL_MINUTES} 分钟内有效。\n"
         f"如果这不是你本人的操作，请忽略本邮件。",
-        smtp=await get_effective_smtp(session),
+        smtp=smtp,
         html_body=code_email(action, code, _CODE_TTL_MINUTES),
     )
     if not sent:

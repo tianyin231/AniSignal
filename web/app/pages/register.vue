@@ -5,6 +5,7 @@ definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '注册 · AniSignal' })
 
 const flash = useAuthFlash()
+const { smtpConfigured } = useSiteConfig()
 const step = ref<'form' | 'code'>('form')
 const email = ref(flash.value?.email ?? '')
 flash.value = null
@@ -40,12 +41,18 @@ async function submit() {
 
 <template>
   <AuthVerifyEmail v-if="step === 'code'" :email="email.trim()" @back="step = 'form'">
+    <UiNotice v-if="!smtpConfigured" tone="warn" class="mt-3">
+      当前站点尚未配置邮件发送（SMTP）。请联系管理员在「管理看板 → 用户管理」查看 6 位注册验证码或直接激活账号。
+    </UiNotice>
     <p class="mt-2 text-xs leading-relaxed text-faint">如果这个邮箱已经注册过，不会再收到验证码，请直接登录或找回密码。</p>
   </AuthVerifyEmail>
   <form v-else novalidate @submit.prevent="submit">
     <AuthModeSwitch active="register" :email="email" />
     <h1 class="mt-7 text-2xl font-bold text-ink">创建账号</h1>
     <p class="mt-1.5 text-sm text-muted">免费注册，用来保存关注词与通知方式。</p>
+    <UiNotice v-if="!smtpConfigured" tone="info" class="mt-4">
+      当前站点尚未配置 SMTP 发信；提交注册后验证码将保存在后台，可由管理员协助验证或一键激活。
+    </UiNotice>
 
     <div class="mt-6 space-y-3">
       <div>

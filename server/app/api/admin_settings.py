@@ -79,7 +79,7 @@ async def test_ai(session: AsyncSession = Depends(get_session)):
     if not ai_available(config):
         return {"ok": False, "message": "未配置完整（需要 base_url / api_key / model）"}
     try:
-        reply = await chat(config, "你是连通性测试。", "回复两个字：正常")
+        reply, _ = await chat(config, "你是连通性测试。", "回复两个字：正常")
         return {"ok": True, "message": f"模型响应：{reply[:50]}"}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "message": f"调用失败：{exc!r}"[:200]}
@@ -231,6 +231,9 @@ async def put_media_visibility(body: dict, session: AsyncSession = Depends(get_s
 @router.put("/texts")
 async def put_texts(body: dict, session: AsyncSession = Depends(get_session)):
     """更新文案区域；只接受白名单 key。"""
+    import re
+    from app.services.urls import is_public_http_url
+
     allowed = settings_service.DEFAULT_TEXTS
     unknown = [k for k in body if k not in allowed]
     if unknown:
@@ -239,7 +242,15 @@ async def put_texts(body: dict, session: AsyncSession = Depends(get_session)):
         )
     stored = (await settings_service.get_setting(session, "texts")) or {}
     for key, value in body.items():
-        if value is not None:
-            stored[key] = str(value)[:1000]
+        if value is None:
+            continue
+        text_val = str(value).strip()[:1000]
+        if key == "contact_email" and text_val:
+            if not re.fullmatch(r"[^@\s<>\"':;]+@[^@\s<>\"':;]+\.[^@\s<>\"':;]+", text_val):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "联系邮箱格式无效")
+        if key == "source_url" and text_val:
+            if not is_public_http_url(text_val):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "开源仓库地址必须是公开 http(s) 地址")
+        stored[key] = text_val
     await settings_service.set_setting(session, "texts", stored)
     return await settings_service.get_texts(session)

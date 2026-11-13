@@ -405,31 +405,36 @@ async def test_bot_and_rss_reuse_event_selection(session, monkeypatch, client):
     assert "one" in feed.text and "two" in feed.text
 
 
-def test_migration_preserves_existing_sources_and_compiles_for_mysql():
+def test_baseline_migration_compiles_for_mysql_and_matches_models():
     import importlib.util
     import io
     from pathlib import Path
     import sqlalchemy as sa
+    from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
+    from app.models import Base
 
-    path = Path(__file__).parents[1] / "alembic/versions/0042_news_editorial.py"
-    spec = importlib.util.spec_from_file_location("news_migration", path)
+    path = Path(__file__).parents[1] / "alembic/versions/0057_baseline.py"
+    spec = importlib.util.spec_from_file_location("baseline_migration", path)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
+
     engine = sa.create_engine("sqlite://")
     with engine.begin() as connection:
-        for table in ("sources", "raw_contents", "events", "ai_usage"):
-            connection.execute(sa.text(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY)"))
-        connection.execute(sa.text("INSERT INTO sources (id) VALUES (1)"))
         with Operations.context(MigrationContext.configure(connection)):
             migration.upgrade()
-            assert connection.execute(sa.text("SELECT id, owner_key, editorial_tier FROM sources")).one() == (1, None, None)
             assert "news_groupings" in sa.inspect(connection).get_table_names()
+            diffs = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+            assert diffs == []
             migration.downgrade()
-        assert connection.execute(sa.text("SELECT id FROM sources")).scalar() == 1
+        assert sa.inspect(connection).get_table_names() == []
+
     output = io.StringIO()
     with Operations.context(MigrationContext.configure(dialect_name="mysql", opts={"as_sql": True, "output_buffer": output})):
         migration.upgrade()
-    assert "CREATE TABLE news_groupings" in output.getvalue()
-    assert "FOREIGN KEY(story_id) REFERENCES events" in output.getvalue()
+    sql = output.getvalue()
+    assert "CREATE TABLE news_groupings" in sql
+    assert "FOREIGN KEY(story_id) REFERENCES events" in sql
+    assert "CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci" in sql
+    assert "INSERT INTO" not in sql

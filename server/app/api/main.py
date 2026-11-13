@@ -33,6 +33,14 @@ async def lifespan(app: FastAPI):
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)  # 完整请求 URL 可能含 API 密钥。
     settings = get_settings()
+    try:
+        from app.communities import sync_communities
+        from app.db import SessionLocal
+
+        async with SessionLocal() as session:
+            await sync_communities(session)
+    except Exception:  # noqa: BLE001 - 空库或测试未建表时静默回退内置分区
+        logger.debug("initial community sync skipped", exc_info=True)
     app.state.redis = Redis.from_url(settings.redis_url, decode_responses=True)
     scheduler_task: asyncio.Task | None = None
     if settings.local_mode:

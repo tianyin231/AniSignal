@@ -1,0 +1,95 @@
+{
+  "wuwa": [
+    {"platform": "kuro_cn", "target_type": "notices", "target_value": "default", "display_name": "鸣潮官网公告（国服）", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "kuro_global", "target_type": "notices", "target_value": "default", "display_name": "鸣潮官网公告（国际服）", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "1955897084", "display_name": "鸣潮官方账号动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3493082584582776", "display_name": "库洛游戏周边·官方周边动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "鸣潮", "display_name": "B站搜索·鸣潮社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["鸣潮", "鳴潮", "Wuthering Waves", "WuWa"]},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCX42emUG96mELubKENIvv-Q", "display_name": "Rexlent · 社区（鸣潮）", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true, "co_terms": ["鸣潮", "Wuthering Waves", "WuWa"]},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCnRqDZs2TrRxqPAnafCJGaA", "display_name": "Xlice · 社区（鸣潮）", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true, "co_terms": ["鸣潮", "Wuthering Waves", "WuWa"]}
+  ],
+  "blhx": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "233114659", "display_name": "碧蓝航线官方账号动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "碧蓝航线", "display_name": "B站搜索·碧蓝航线社区", "interval_minutes": 60, "min_views": 5000, "tier": "general", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCPeJaqP6WgxUVDcpYkXZKMQ", "display_name": "碧蓝航线 YouTube 官方", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true}
+  ],
+  "hsr": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "1340190821", "display_name": "崩坏星穹铁道官方账号动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "崩坏星穹铁道", "display_name": "B站搜索·崩坏星穹铁道社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UC2PeMPA8PAOp-bynLoCeMLA", "display_name": "崩坏星穹铁道 YouTube 官方", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCnRqDZs2TrRxqPAnafCJGaA", "display_name": "Xlice · 社区（星穹铁道）", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true, "co_terms": ["崩坏星穹铁道", "星穹铁道", "崩坏：星穹铁道", "Honkai: Star Rail", "Star Rail"]}
+  ],
+  "arknights": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "161775300", "display_name": "明日方舟官方账号动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3546864272017883", "display_name": "朝陇山播报站·官方周边动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "明日方舟", "display_name": "B站搜索·明日方舟社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCR0J2NYGuC8epsa1O4DMmXQ", "display_name": "明日方舟 YouTube 官方", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true}
+  ],
+  "genshin": [
+    {"platform": "game_official", "target_type": "notices", "target_value": "genshin", "display_name": "原神官网公告", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "401742377", "display_name": "原神官方账号动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "原神", "display_name": "B站搜索·原神社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCiS882YPwZt1NfaM0gR0D9Q", "display_name": "原神 YouTube 官方", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCnRqDZs2TrRxqPAnafCJGaA", "display_name": "Xlice · 社区（原神）", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true, "co_terms": ["原神", "Genshin Impact", "Genshin"]},
+    {"platform": "miyoushe", "target_type": "keyword_search", "target_value": "原神", "display_name": "米游社·原神社区", "interval_minutes": 120, "min_views": 0, "tier": "general", "enabled": true},
+    {"platform": "x", "target_type": "account_dynamics", "target_value": "genshinimpact", "display_name": "原神 X 官方（需自备 X/RSS 网关）", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": false}
+  ],
+  "endfield": [
+    {"platform": "game_official", "target_type": "notices", "target_value": "endfield", "display_name": "终末地官网公告", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "1265652806", "display_name": "终末地官方账号动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "终末地", "display_name": "B站搜索·终末地社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCowPaVRBzg8CE6K4CB6LJfw", "display_name": "终末地 YouTube 官方", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCnRqDZs2TrRxqPAnafCJGaA", "display_name": "Xlice · 社区（终末地）", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true, "co_terms": ["终末地", "Arknights Endfield", "Endfield"]},
+    {"platform": "x", "target_type": "account_dynamics", "target_value": "akendfield", "display_name": "终末地 X 官方（需自备 X/RSS 网关）", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": false}
+  ],
+  "zzz": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "1636034895", "display_name": "绝区零·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "绝区零", "display_name": "B站搜索·绝区零社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["绝区零", "絕區零", "Zenless Zone Zero", "ZZZ"]}
+  ],
+  "petitplanet": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3546622923377024", "display_name": "星布谷地·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "星布谷地", "display_name": "B站搜索·星布谷地社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["星布谷地", "Petit Planet"]}
+  ],
+  "hna": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3546886017387331", "display_name": "因缘精灵·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "因缘精灵", "display_name": "B站搜索·因缘精灵社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["因缘精灵", "因緣精靈", "Nexus Anima"]}
+  ],
+  "roco": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "626796832", "display_name": "洛克王国世界·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "洛克王国世界", "display_name": "B站搜索·洛克王国世界社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["洛克王国世界", "洛克王国：世界", "洛克王国:世界", "洛克王国 世界", "Roco Kingdom"]}
+  ],
+  "promilia": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3546569016085336", "display_name": "蓝色星原·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "蓝色星原", "display_name": "B站搜索·蓝色星原社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["蓝色星原", "藍色星原", "Azur Promilia"]}
+  ],
+  "nte": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3546636978489848", "display_name": "异环·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "异环", "display_name": "B站搜索·异环社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["异环", "異環", "Neverness to Everness", "NTE"]}
+  ],
+  "nikke": [
+    {"platform": "game_official", "target_type": "notices", "target_value": "nikke", "display_name": "NIKKE 国际服官网公告", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCmmgZwsqQRD6PKeo87uq1bA", "display_name": "NIKKE 国际服 · 官方 YouTube", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "x", "target_type": "account_dynamics", "target_value": "nikke_en", "display_name": "NIKKE 国际服 · 官方 X（需自备网关）", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": false}
+  ],
+  "infinitynikki": [
+    {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3461576715667734", "display_name": "无限暖暖·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "无限暖暖", "display_name": "B站搜索·无限暖暖社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["无限暖暖", "無限暖暖", "Infinity Nikki"]}
+  ],
+  "ai": [
+    {"platform": "rss", "target_type": "feed", "target_value": "https://openai.com/news/rss.xml", "display_name": "OpenAI News", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true, "config": {"name": "OpenAI News", "first_party": true, "owner_key": "openai", "tier": "T1", "participation_mode": "editorial"}},
+    {"platform": "rss", "target_type": "feed", "target_value": "https://deepmind.google/blog/rss.xml", "display_name": "Google DeepMind Blog", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true, "config": {"name": "Google DeepMind", "first_party": true, "owner_key": "google", "tier": "T1", "participation_mode": "editorial"}},
+    {"platform": "rss", "target_type": "feed", "target_value": "https://research.google/blog/rss/", "display_name": "Google Research Blog", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": true, "config": {"name": "Google Research", "first_party": true, "owner_key": "google", "tier": "T1", "participation_mode": "editorial"}},
+    {"platform": "rss", "target_type": "feed", "target_value": "https://huggingface.co/blog/feed.xml", "display_name": "Hugging Face Blog", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true, "config": {"name": "Hugging Face Blog", "first_party": true, "owner_key": "hugging-face", "tier": "T1", "participation_mode": "editorial"}},
+    {"platform": "rss", "target_type": "feed", "target_value": "https://www.microsoft.com/en-us/research/feed/", "display_name": "Microsoft Research", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": true, "config": {"name": "Microsoft Research", "first_party": true, "owner_key": "microsoft", "tier": "T1", "participation_mode": "editorial"}},
+    {"platform": "rss", "target_type": "feed", "target_value": "https://github.blog/ai-and-ml/feed/", "display_name": "GitHub Blog · AI & ML", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": true, "config": {"name": "GitHub Blog · AI & ML", "first_party": true, "tier": "T1", "participation_mode": "editorial"}},
+    {"platform": "rss", "target_type": "feed", "target_value": "https://mistral.ai/news/rss", "display_name": "Mistral AI News", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": true, "config": {"name": "Mistral AI", "first_party": true, "tier": "T1", "participation_mode": "editorial"}},
+    {"platform": "rss", "target_type": "feed", "target_value": "https://arstechnica.com/ai/feed/", "display_name": "Ars Technica · AI", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true, "config": {"name": "Ars Technica · AI", "first_party": false, "tier": "T2", "participation_mode": "editorial"}},
+    {"platform": "rss", "target_type": "feed", "target_value": "https://simonwillison.net/atom/everything/", "display_name": "Simon Willison Weblog", "interval_minutes": 120, "min_views": 0, "tier": "general", "enabled": true, "config": {"name": "Simon Willison", "first_party": false, "tier": "T2", "participation_mode": "editorial"}},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "AI 快讯", "display_name": "B站搜索 · AI 快讯", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "Claude", "display_name": "B站搜索 · Claude", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "Gemini", "display_name": "B站搜索 · Gemini", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true},
+    {"platform": "bilibili", "target_type": "keyword_search", "target_value": "DeepSeek", "display_name": "B站搜索 · DeepSeek", "interval_minutes": 60, "min_views": 0, "tier": "general", "enabled": true},
+    {"platform": "x", "target_type": "account_dynamics", "target_value": "openai", "display_name": "X · OpenAI（需自备网关）", "interval_minutes": 120, "min_views": 0, "tier": "general", "enabled": false},
+    {"platform": "x", "target_type": "account_dynamics", "target_value": "deepseek_ai", "display_name": "X · DeepSeek（需自备网关）", "interval_minutes": 120, "min_views": 0, "tier": "general", "enabled": false}
+  ]
+}

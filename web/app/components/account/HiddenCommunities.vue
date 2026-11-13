@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { EyeOff } from 'lucide-vue-next'
-import { communityClasses, GAME_COMMUNITIES, HIDDEN_COMMUNITIES_COOKIE } from '~/composables/useGameSection'
+import { communityClasses, HIDDEN_COMMUNITIES_COOKIE } from '~/composables/useGameSection'
 import { apiErrorDetail } from '~/utils/api-errors'
 import { platformMeta, type Platform } from '~/utils/data'
 
@@ -8,7 +8,10 @@ import { platformMeta, type Platform } from '~/utils/data'
 // 来源平台按游戏分区与 AI 快讯分开设置，令牌形如 game:bilibili / ai:x，与后端 BLOCKABLE_PLATFORMS 对应。
 interface Blocks { communities: string[], platforms: string[] }
 
-const games = GAME_COMMUNITIES.map(game => ({ ...game, label: game.key === 'ai' ? 'AI 快讯' : game.label, dot: communityClasses(game.color).dot }))
+const { communities: activeCommunities } = useGameSection()
+const games = computed(() =>
+  activeCommunities.value.map(game => ({ ...game, label: game.key === 'ai' ? 'AI 快讯' : game.label, dot: communityClasses(game.color).dot })),
+)
 const PLATFORM_GROUPS = [
   { scope: 'game', label: '游戏分区', keys: ['bilibili', 'youtube', 'x', 'kuro', 'miyoushe', 'game_official'] },
   { scope: 'ai', label: 'AI 快讯', keys: ['bilibili', 'x', 'rss'] },
@@ -32,7 +35,7 @@ const error = ref('')
 
 const snapshot = () => JSON.stringify([[...communities.value].sort(), [...platforms.value].sort()])
 const dirty = computed(() => ready.value && snapshot() !== saved.value)
-const allHidden = computed(() => communities.value.length >= games.length)
+const allHidden = computed(() => games.value.length > 0 && communities.value.length >= games.value.length)
 
 function apply(result: Blocks) {
   communities.value = result.communities

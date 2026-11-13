@@ -65,26 +65,23 @@ def test_original_game_official_target_keeps_its_existing_behavior():
     assert filter_relevant([{"text": "新角色预告"}], target)[1] == 0
 
 
-async def test_merch_seed_matches_registry_and_preserves_existing_settings(engine):
-    path = Path("alembic/versions/0049_official_merch_sources.py")
-    spec = importlib.util.spec_from_file_location("seed_merch_sources", path)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+async def test_merch_seed_matches_registry_and_preserves_existing_settings(session):
+    from app.seeds import import_preset_targets
 
-    def upgrade(conn):
-        with patch.object(migration.op, "get_bind", return_value=conn):
-            migration.upgrade()
+    await import_preset_targets(session, ["wuwa", "arknights"])
+    merch_mids = {"3493082584582776", "3546864272017883"}
+    rows = list(await session.scalars(select(CollectTarget).where(CollectTarget.target_value.in_(merch_mids))))
+    registry = official_merch_bilibili_sources()
+    assert {r.target_value: (r.community, r.display_name.split("·")[0]) for r in rows} == {
+        k: registry[k] for k in merch_mids
+    }
+    assert all(r.enabled and r.interval_minutes == 30 and r.tier == "core" and r.min_views == 0 and r.next_run_at for r in rows)
 
-    async with engine.begin() as conn:
-        await conn.run_sync(upgrade)
-        rows = (await conn.execute(select(CollectTarget.__table__))).mappings().all()
-        assert {r["target_value"]: (r["community"], r["display_name"].split("·")[0]) for r in rows} == official_merch_bilibili_sources()
-        assert all(r["enabled"] and r["interval_minutes"] == 30 and r["tier"] == "core"
-                   and r["min_views"] == 0 and r["next_run_at"] for r in rows)
-        await conn.execute(CollectTarget.__table__.update().where(CollectTarget.target_value == "3493082584582776")
-                           .values(interval_minutes=75, enabled=False))
-        await conn.run_sync(upgrade)
-        rows = (await conn.execute(select(CollectTarget.__table__))).mappings().all()
-        assert len(rows) == 3
-        kuro = next(r for r in rows if r["target_value"] == "3493082584582776")
-        assert kuro["interval_minutes"] == 75 and not kuro["enabled"]
+    kuro = next(r for r in rows if r.target_value == "3493082584582776")
+    kuro.interval_minutes = 75
+    kuro.enabled = False
+    await session.commit()
+
+    await import_preset_targets(session, ["wuwa", "arknights"])
+    await session.refresh(kuro)
+    assert kuro.interval_minutes == 75 and not kuro.enabled

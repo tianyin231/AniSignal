@@ -16,6 +16,67 @@ from app.services.news_publication import participant, selected_score
 from app.services import native_news
 
 
+async def raw_article(session, raw_id: int) -> dict:
+    """原文直出详情页：允许读取尚未经 AI 审核（或已过审）的 AI 候选原文，拒绝已被判违规/推广的条目。"""
+    from app.api.public import _sanitize_html
+    from app.models import ContentReview, Evidence, RawContent, Source
+    from app.services.ai_news import plain_excerpt
+
+    row = (
+        await session.execute(
+            select(RawContent, ContentVersion, Source, ContentReview)
+            .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+            .outerjoin(Source, Source.id == RawContent.source_id)
+            .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
+            .where(RawContent.id == raw_id, RawContent.community == "ai")
+            .order_by(ContentVersion.version.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(404, "资讯不存在")
+    raw, version, source, review = row
+    excluded = await session.scalar(
+        select(Evidence.raw_content_id).where(
+            Evidence.raw_content_id == raw.id, Evidence.role == "excluded"
+        )
+    )
+    if excluded is not None:
+        raise HTTPException(404, "资讯已撤下")
+    if (
+        review
+        and review.news
+        and review.news.get("content_hash") == raw.content_hash
+        and review.news.get("content_version") == version.version
+        and not (review.relevant and not review.promotional and not review.violation and review.news.get("newsworthy"))
+    ):
+        raise HTTPException(404, "资讯不符合收录标准")
+    text = version.text or ""
+    html_body = _sanitize_html(text)
+    if not html_body and text.strip():
+        html_body = "<p>" + escape(text).replace("\n", "<br>") + "</p>"
+    translation = await session.get(ContentTranslation, raw.id)
+    zh_html = ("<p>" + escape(translation.text).replace("\n", "<br>") + "</p>") if translation else None
+    title = (version.title or "").strip() or plain_excerpt(text, 60) or raw.external_id
+    return {
+        "id": f"raw-{raw.id}",
+        "title": title,
+        "originalTitle": version.title,
+        "summary": None if html_body else plain_excerpt(text, 240),
+        "reason": None,
+        "source": {"name": source.name if source and source.name else "来源未署名"},
+        "links": {"original": raw.url or ""},
+        "publishedAt": raw.published_at,
+        "selected": False,
+        "readingMode": "original" if html_body else "summary-only",
+        "body": {"zh": zh_html, "original": html_body, "complete": True} if (html_body or zh_html) else None,
+        "hasTranslation": bool(translation),
+        "group": None,
+        "story": None,
+        "relatedStories": [],
+    }
+
+
 async def resolve_article(session, key, *, require_news=False):
     alias = await session.get(NewsArchive, ("article", key))
     match = re.fullmatch(r"(?:as|content)-(\d+)", key)

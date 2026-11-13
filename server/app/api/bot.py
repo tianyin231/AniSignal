@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin
 from app.clock import utcnow
-from app.communities import COMMUNITIES, community_query_pattern
+from app.communities import COMMUNITIES, CommunityOrAllSlug
 from app.custom_presets import CUSTOM_PRESETS, promote_subscriptions
 from app.db import get_session
 from app.models import BotClient, BotDelivery, BotReminder, BotTarget, SiteSetting
@@ -31,8 +31,8 @@ class TargetBody(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     umo: str = Field(min_length=3, max_length=255, pattern=r"^[^:]+:(FriendMessage|GroupMessage):[^:]+$")
     enabled: bool = False
-    community: str = Field(default="all", pattern=community_query_pattern())
-    communities: list[str] | None = Field(default=None, max_length=len(COMMUNITIES))
+    community: CommunityOrAllSlug = Field(default="all")
+    communities: list[str] | None = Field(default=None, max_length=64)
     channels: list[str] = Field(default_factory=list, max_length=200)
     scope_mode: Literal["legacy", "channels", "custom"] = "legacy"
     inherit_preferences: bool = False

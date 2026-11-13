@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Bot, Check, Copy, Eye, EyeOff, Plus } from 'lucide-vue-next'
 import { apiErrorDetail, apiErrorStatus } from '~/utils/api-errors'
+import { copyText } from '~/utils/clipboard'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
 // 机器人接入：为自己的 AstrBot 签发专用 Token；Token 只在签发当次展示。
@@ -82,10 +83,9 @@ async function revoke(row: BotAccess) {
 }
 async function copyToken() {
   if (!issued.value) return
-  try {
-    await navigator.clipboard.writeText(issued.value.token)
+  if (await copyText(issued.value.token)) {
     copied.value = true
-  } catch {
+  } else {
     error.value = '复制失败，请点击 Token 输入框全选后手动复制。'
   }
 }

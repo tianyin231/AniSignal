@@ -189,9 +189,53 @@ async def update_user(
         user.notification_enabled = bool(body["notification_enabled"])
         actions.append("notification_updated")
 
+    if "is_verified" in body and bool(body["is_verified"]) and not user.is_verified:
+        user.is_verified = True
+        actions.append("verified")
+
     await session.commit()
     logger.info("admin updated user %s: %s", user_id, actions or "no-op")
     return {**_user_out(user), "actions": actions}
+
+
+@router.post("/{user_id}/verify")
+async def verify_user_manually(user_id: int, session: AsyncSession = Depends(get_session)):
+    """无 SMTP 环境下由管理员直接核验激活用户，并清理待用注册验证码。"""
+    from sqlalchemy import update
+    from app.models import EmailCode
+
+    user = await _get_user_or_404(session, user_id)
+    user.is_verified = True
+    await session.execute(
+        update(EmailCode)
+        .where(EmailCode.user_id == user.id, EmailCode.purpose == "register", EmailCode.used_at.is_(None))
+        .values(used_at=utcnow())
+    )
+    await session.commit()
+    return _user_out(user)
+
+
+@router.post("/{user_id}/reset-password")
+async def reset_user_password(user_id: int, body: dict, session: AsyncSession = Depends(get_session)):
+    """无 SMTP 环境下由管理员为用户重设密码，并即时吊销全部旧会话。"""
+    from sqlalchemy import update
+    from app.models import EmailCode
+    from app.services.auth import hash_password
+
+    password = str(body.get("password") or "")
+    if len(password) < 8 or len(password) > 128:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "新密码长度须在 8～128 位之间")
+    user = await _get_user_or_404(session, user_id)
+    user.password_hash = hash_password(password)
+    if body.get("verify", True):
+        user.is_verified = True
+    await session.execute(
+        update(EmailCode)
+        .where(EmailCode.user_id == user.id, EmailCode.used_at.is_(None))
+        .values(used_at=utcnow())
+    )
+    await revoke_all_sessions(session, user.id)
+    return _user_out(user)
 
 
 @router.post("/{user_id}/email", status_code=status.HTTP_202_ACCEPTED)

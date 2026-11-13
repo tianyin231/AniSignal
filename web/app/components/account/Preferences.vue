@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { communityClasses, GAME_COMMUNITIES } from '~/composables/useGameSection'
+import { communityClasses } from '~/composables/useGameSection'
 import { apiErrorDetail } from '~/utils/api-errors'
 
-// 个人降噪：限定游戏 + 排除词，作用于关注流、每日早报和 AI 精炼邮件。
+// 个人降噪：限定分区 + 排除词，作用于关注流、每日早报和 AI 精炼邮件。
 const emit = defineEmits<{ saved: [] }>()
 interface Preferences { communities: string[], exclude_keywords: string[] }
-const games = GAME_COMMUNITIES.map(game => ({ ...game, label: game.key === 'ai' ? 'AI 快讯' : game.label, dot: communityClasses(game.color).dot }))
+const { communities: activeCommunities } = useGameSection()
+const games = computed(() =>
+  activeCommunities.value.map(game => ({ ...game, label: game.key === 'ai' ? 'AI 快讯' : game.label, dot: communityClasses(game.color).dot })),
+)
 const selected = ref<string[]>([])
 const excludedText = ref('')
 const saved = ref('')

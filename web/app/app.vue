@@ -2,14 +2,16 @@
 import type { PublicSiteConfig } from '~/composables/useSiteConfig'
 
 const { api } = usePublicApi()
-useAsyncData('site-config', (_app, { signal }) => api<PublicSiteConfig>('/api/site-config', { signal }))
+await useAsyncData('site-config', (_app, { signal }) => api<PublicSiteConfig>('/api/site-config', { signal }))
 
 const route = useRoute()
+const requestUrl = useRequestURL()
 const { siteUrl } = useRuntimeConfig().public
+const baseUrl = computed(() => (siteUrl || requestUrl.origin).replace(/\/+$/, ''))
 // 规范地址保留分区；页码、筛选和搜索词都归并到同一页
 const canonical = computed(() => {
   const community = route.query.community
-  return `${siteUrl}${route.path}${typeof community === 'string' && community ? `?community=${encodeURIComponent(community)}` : ''}`
+  return `${baseUrl.value}${route.path}${typeof community === 'string' && community ? `?community=${encodeURIComponent(community)}` : ''}`
 })
 useHead({
   titleTemplate: title => !title ? 'AniSignal · 让重要的变化，找到你' : title.includes('AniSignal') ? title : `${title} · AniSignal`,
@@ -19,7 +21,7 @@ useSeoMeta({
   ogSiteName: 'AniSignal',
   ogType: 'website',
   ogUrl: canonical,
-  ogImage: `${siteUrl}/og.jpg`,
+  ogImage: () => `${baseUrl.value}/og.jpg`,
   ogImageWidth: 1200,
   ogImageHeight: 630,
   twitterCard: 'summary_large_image',

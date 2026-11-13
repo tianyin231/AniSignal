@@ -1,1 +1,0 @@
--r integrations/astrbot_plugin_anisignal/requirements.txt

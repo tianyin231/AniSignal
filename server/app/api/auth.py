@@ -255,9 +255,17 @@ async def reset(body: dict, session: AsyncSession = Depends(get_session)):
 
 
 def _secure_request(request: Request) -> bool:
-    """经 HTTPS 访问时（uvicorn 按本机代理转发的 X-Forwarded-Proto 还原 scheme）才标 Secure；
-    纯 HTTP 入口（IP 直连、备用域名）仍能登录。"""
-    return request.url.scheme == "https"
+    """经 HTTPS 访问时才标 Secure；纯 HTTP 入口（本机或局域网 IP 直连）仍能登录。"""
+    if request.url.scheme == "https":
+        return True
+    if request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower() == "https":
+        return True
+    host = (
+        request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    ).split(",")[0].split(":")[0].strip().lower()
+    if host not in {"", "127.0.0.1", "localhost", "::1"} and get_settings().public_base_url.strip().lower().startswith("https://"):
+        return True
+    return False
 
 
 def _set_session_cookie(request: Request, response: Response, token: str, user: User) -> None:

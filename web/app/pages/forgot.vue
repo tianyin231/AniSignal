@@ -6,6 +6,7 @@ definePageMeta({ layout: 'auth' })
 useSeoMeta({ title: '找回密码 · AniSignal' })
 
 const { withRedirect } = useAuthRedirect()
+const { smtpConfigured } = useSiteConfig()
 const flash = useAuthFlash()
 const step = ref<'email' | 'reset'>('email')
 const email = ref(flash.value?.email ?? '')
@@ -65,6 +66,9 @@ function changeEmail() {
     </span>
     <h1 class="mt-4 text-2xl font-bold text-ink">找回密码</h1>
     <p class="mt-1.5 text-sm leading-relaxed text-muted">输入注册邮箱，我们会发送 6 位重置码，15 分钟内有效。</p>
+    <UiNotice v-if="!smtpConfigured" tone="warn" class="mt-4">
+      当前站点未配置邮件发送（SMTP），无法发出重置码邮件；请联系站点管理员在后台「用户管理」直接为您重置密码。
+    </UiNotice>
 
     <label for="email" class="mt-6 block text-sm font-medium text-ink-2">邮箱</label>
     <input

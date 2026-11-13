@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ApiProduct, ApiProductSignalList } from '~/composables/usePublicApi'
-import { GAME_COMMUNITIES, communityClasses } from '~/composables/useGameSection'
+import { communityClasses, communityMeta as findCommunityMeta } from '~/composables/useGameSection'
 
 const route = useRoute()
 const { api } = usePublicApi()
@@ -25,7 +25,7 @@ const lastProduct = shallowRef(productData.value!)
 watch(productData, value => { if (value) lastProduct.value = value })
 const product = computed(() => productData.value ?? lastProduct.value)
 const productCommunity = computed(() => product.value.community || 'wuwa')
-const communityMeta = computed(() => GAME_COMMUNITIES.find(item => item.key === productCommunity.value))
+const communityMeta = computed(() => findCommunityMeta(productCommunity.value))
 // 分享直达时使用商品自身分区，聚合列表传来的 all 视角则保留。
 if (route.query.community !== 'all' && route.query.community !== productCommunity.value) {
   await navigateTo({ path: route.path, query: { ...route.query, community: productCommunity.value } }, { replace: true })

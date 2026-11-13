@@ -1,5 +1,7 @@
 <script setup lang="ts">
 useSeoMeta({ title: '隐私政策 · AniSignal' })
+const { t } = useSiteConfig()
+const contactEmail = computed(() => t('contact_email').trim())
 
 const updated = '2026-09-13'
 </script>
@@ -114,9 +116,12 @@ const updated = '2026-09-13'
     <section class="panel p-5 sm:p-6">
       <h2 class="text-base font-bold text-ink">7. 联系我们</h2>
       <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-zinc-300">
-        隐私相关请求请邮件：
-        <a href="mailto:admin@anisignal.nanamiyako.cn" class="link">admin@anisignal.nanamiyako.cn</a>
-        （主题可写「隐私请求」）。
+        <template v-if="contactEmail">
+          隐私相关请求请邮件：
+          <a :href="`mailto:${contactEmail}`" class="link">{{ contactEmail }}</a>
+          （主题可写「隐私请求」）。
+        </template>
+        <template v-else>隐私相关请求请联系本站管理员（主题可注明「隐私请求」）。</template>
       </p>
       <div class="mt-4 flex flex-wrap gap-4 text-sm">
         <NuxtLink to="/terms" class="link">用户协议</NuxtLink>

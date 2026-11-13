@@ -2,12 +2,13 @@
 import type { ApiEvent, ApiEventList } from '~/composables/usePublicApi'
 import { fmtTime } from '~/utils/admin-types'
 import { categoryMeta } from '~/utils/public-utils'
-import { ADMIN_COMMUNITIES } from '~/utils/admin-communities'
+import { useAdminCommunities } from '~/utils/admin-communities'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '事件审核 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
+const { communities: adminCommunities } = useAdminCommunities()
 const events = ref<ApiEvent[]>([])
 const total = ref(0)
 const error = ref<string | null>(null)
@@ -217,7 +218,7 @@ async function splitSelectedEvidence() {
           class="select px-3 py-2 text-sm"
         >
           <option value="">全部分区</option>
-          <option v-for="c in ADMIN_COMMUNITIES" :key="c.key" :value="c.key">{{ c.label }}</option>
+          <option v-for="c in adminCommunities" :key="c.key" :value="c.key">{{ c.label }}</option>
         </select>
         <button class="btn-primary px-4 py-2" :disabled="busy" @click="recompute">{{ busy ? '重算中…' : '重算事件' }}</button>
       </div>

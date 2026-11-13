@@ -1,5 +1,5 @@
 /**
- * 站点配置：全服公告 + 文案区域（管理端可改；默认值与后端 DEFAULT_TEXTS 对应）。
+ * 站点配置：全服公告 + 文案区域 + 动态分区 + 服务就绪状态（管理端可改；默认值与后端一致）。
  */
 
 export interface SiteAnnouncement {
@@ -19,10 +19,27 @@ export interface MediaVisibility {
   platforms: Record<string, Partial<MediaModes>>
 }
 
+export interface SiteCommunityItem {
+  key: string
+  label: string
+  en: string
+  color: 'blue' | 'yellow' | 'sky' | 'violet' | 'orange' | 'cyan' | 'lime' | 'teal'
+  domain: 'game' | 'news'
+  platforms: string[]
+  active: boolean
+  builtin: boolean
+  official_bili_mid?: string | null
+  aliases?: string[]
+}
+
 export interface PublicSiteConfig {
   announcement: SiteAnnouncement
   texts: Record<string, string>
   media_visibility?: MediaVisibility
+  communities?: SiteCommunityItem[]
+  all_communities?: SiteCommunityItem[]
+  ai_configured?: boolean
+  smtp_configured?: boolean
 }
 
 const MEDIA_DEFAULTS: MediaVisibility = {
@@ -32,11 +49,13 @@ const MEDIA_DEFAULTS: MediaVisibility = {
 
 export const TEXT_DEFAULTS: Record<string, string> = {
   footer_note: 'AniSignal · 定制化情报采集',
+  contact_email: '',
+  source_url: 'https://github.com/tianyin231/AniSignal',
 }
 
 export function useSiteConfig() {
   // app.vue 统一取数；内容行只订阅，避免 SSR 每渲染一行就重发配置请求。
-  const { data } = useNuxtData<PublicSiteConfig>('site-config')
+  const { data, refresh: refreshSiteConfig } = useNuxtData<PublicSiteConfig>('site-config')
   const announcement = computed<SiteAnnouncement>(
     () => data.value?.announcement ?? { enabled: false, level: 'info', text: '', link: '' },
   )
@@ -51,5 +70,9 @@ export function useSiteConfig() {
   const mediaMode = (platform: string, kind: 'image' | 'video'): MediaMode =>
     mediaVisibility.value.platforms[platform]?.[kind] ?? mediaVisibility.value.default[kind] ?? 'show'
 
-  return { announcement, t, mediaVisibility, mediaMode }
+  /** 未拿到 site-config 前默认视作已配置，避免首屏误闪警告横幅 */
+  const aiConfigured = computed(() => data.value ? Boolean(data.value.ai_configured) : true)
+  const smtpConfigured = computed(() => data.value ? Boolean(data.value.smtp_configured) : true)
+
+  return { announcement, t, mediaVisibility, mediaMode, aiConfigured, smtpConfigured, refreshSiteConfig }
 }

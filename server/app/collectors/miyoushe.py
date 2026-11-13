@@ -13,6 +13,11 @@ from app.services.collector_proxy import http_proxy_kwargs
 
 SEARCH_URL = "https://bbs-api.miyoushe.com/post/wapi/searchPosts"
 DETAIL_URL = "https://bbs-api.miyoushe.com/post/wapi/getPostFull"
+COMMUNITY_GIDS: dict[str, int] = {
+    "genshin": 2,
+    "hsr": 6,
+    "zzz": 8,
+}
 
 
 class MiyousheCollector:
@@ -23,6 +28,10 @@ class MiyousheCollector:
         self._timeout = settings.http_timeout_seconds
         self._retries = settings.http_max_retries
         self._gids = settings.miyoushe_default_gids
+
+    def set_community(self, community: str | None) -> None:
+        if community and community in COMMUNITY_GIDS:
+            self._gids = COMMUNITY_GIDS[community]
 
     async def fetch(self, target_type: str, target_value: str, limit: int) -> FetchResult:
         if target_type != "keyword_search":

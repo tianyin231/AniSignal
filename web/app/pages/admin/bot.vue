@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ADMIN_COMMUNITIES, ADMIN_COMMUNITY_LABELS } from '~/utils/admin-communities'
+import { useAdminCommunities } from '~/utils/admin-communities'
 import { fmtTime } from '~/utils/admin-types'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
 useSeoMeta({ title: '机器人通知 · AniSignal' })
 const { api } = useAdminApi()
+const { communities: adminCommunities, labelOf } = useAdminCommunities()
 const toast = useAdminToast()
 interface Target {
   id: number; name: string; umo: string; enabled: boolean; communities: string[]; community: string; keywords: string[]; exclude_keywords: string[]; channels: string[]
@@ -41,8 +42,8 @@ const statuses: Record<string, string> = { pending: '待发送', sending: '发�
 
 function subscriptionLabel(target: Target) {
   if (target.channels?.length) return target.channels.map(key => channelLabels.value[key] || key).join(' / ')
-  const communities = target.communities || (target.community === 'all' ? ADMIN_COMMUNITIES.map(c => c.key) : [target.community])
-  return communities.length === ADMIN_COMMUNITIES.length ? '全站' : communities.map(key => ADMIN_COMMUNITY_LABELS[key] || key).join(' / ')
+  const communities = target.communities || (target.community === 'all' ? adminCommunities.value.map(c => c.key) : [target.community])
+  return communities.length >= adminCommunities.value.length ? '全站' : communities.map(key => labelOf(key)).join(' / ')
 }
 function relTime(iso?: string) {
   if (!iso) return '暂无记录'

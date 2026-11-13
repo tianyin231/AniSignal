@@ -14,9 +14,22 @@ concurrency:
 
 jobs:
   server:
-    name: Server tests
+    name: Server tests and MySQL migration
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: anisignal_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     defaults:
       run:
         working-directory: server
@@ -29,6 +42,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: server/uv.lock
       - run: uv sync --frozen
+      - name: Verify empty MySQL 8.4 baseline migration and schema parity
+        env:
+          ANISIGNAL_DATABASE_URL: mysql+asyncmy://root:root@127.0.0.1:3306/anisignal_ci
+        run: |
+          uv run --frozen alembic upgrade head
+          uv run --frozen alembic check
       - run: uv run --frozen pytest -q
 
   web:
