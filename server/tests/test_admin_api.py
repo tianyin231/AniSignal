@@ -451,3 +451,33 @@ async def test_update_target_accepts_valid_value(client, admin_headers):
     )
     assert resp.status_code == 200
     assert resp.json()["target_value"] == "鸣潮 2.0"
+
+
+async def test_admin_youtube_target_accepts_handle(client, admin_headers, monkeypatch):
+    """F53：管理员 YouTube 目标也接受 @handle，创建时解析为 UC 频道 ID。"""
+    import app.collectors.youtube_rss as yt
+
+    async def fake_resolve(_session, handle):
+        assert handle == "@SomeChannel"
+        return "UC" + "c" * 22
+
+    monkeypatch.setattr(yt, "resolve_youtube_handle", fake_resolve)
+    resp = await client.post(
+        "/api/admin/collect-targets", headers=admin_headers,
+        json={"platform": "youtube", "target_type": "channel_rss", "target_value": "youtube.com/@SomeChannel",
+              "display_name": "某频道", "interval_minutes": 60, "community": "wuwa"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["target_value"] == "UC" + "c" * 22
+
+
+def test_youtube_handle_parsing_and_page_extraction():
+    from app.collectors.youtube_rss import _CANONICAL_RE, youtube_handle
+
+    assert youtube_handle("@Some.Name_1") == "@Some.Name_1"
+    assert youtube_handle("https://m.youtube.com/@x-y-z?si=1") == "@x-y-z"
+    assert youtube_handle("https://example.com/@x-y-z") is None
+    assert youtube_handle("UC" + "a" * 22) is None
+    html = ('<script>{"channelId":"UC' + "z" * 22 + '"}</script>'
+            '<link rel="canonical" href="https://www.youtube.com/channel/UC' + "d" * 22 + '">')
+    assert _CANONICAL_RE.search(html).group(1) == "UC" + "d" * 22

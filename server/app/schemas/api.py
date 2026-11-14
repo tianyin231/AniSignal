@@ -41,9 +41,23 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     ("kuro_cn", "notices"): re.compile(r"^default$"),
     ("kuro_global", "notices"): re.compile(r"^default$"),
     ("game_official", "notices"): re.compile(r"^(genshin|endfield|nikke)$"),
-    ("youtube", "channel_rss"): re.compile(r"^[A-Za-z0-9_-]{2,64}$"),
+    # UC 频道 ID，或待创建时解析的 @handle
+    ("youtube", "channel_rss"): re.compile(r"^(?:[A-Za-z0-9_-]{2,64}|@[A-Za-z0-9._-]{3,30})$"),
     ("rss", "feed"): re.compile(r"^https?://[^\s]{1,247}$"),
 }
+
+
+_YT_CHANNEL_URL_RE = re.compile(r"youtube\.com/channel/(UC[A-Za-z0-9_-]{20,30})")
+
+
+def normalize_youtube_channel_input(text: str) -> str:
+    """频道链接取出 UC ID，@handle 链接取出 @handle（由接口层解析成 UC），其余原样返回。"""
+    from app.collectors.youtube_rss import youtube_handle
+
+    m = _YT_CHANNEL_URL_RE.search(text)
+    if m:
+        return m.group(1)
+    return youtube_handle(text) or text
 
 
 def validate_target_value(platform: object, target_type: object, value: object) -> str:
@@ -62,6 +76,8 @@ def validate_target_value(platform: object, target_type: object, value: object) 
         raise ValueError("target_value 不能以 - 开头（会被采集命令当作选项解析）")
     if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text):
         raise ValueError("target_value 不能包含制表符/换行等控制字符")
+    if plat == "youtube":
+        text = normalize_youtube_channel_input(text)
     pattern = _TARGET_VALUE_RULES.get((plat, ttype))
     if pattern is not None and not pattern.fullmatch(text):
         raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")

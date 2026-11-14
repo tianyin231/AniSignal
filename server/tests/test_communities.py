@@ -79,3 +79,41 @@ def test_get_community_fallback():
     assert get_community(None).key == DEFAULT_COMMUNITY
     assert get_community("unknown").key == DEFAULT_COMMUNITY
     assert get_community("blhx").key == "blhx"
+
+
+async def test_fresh_install_only_keeps_ai_partition_active(session):
+    """F55：全新空库首次启动只启用 AI 分区；已有配置、目标或内容的站点不受影响。"""
+    from app.communities import BUILTIN_COMMUNITIES, COMMUNITIES, seed_fresh_install_communities, sync_communities
+    from app.services.settings import get_setting
+
+    assert await seed_fresh_install_communities(session) is True
+    await sync_communities(session)
+    assert [k for k, m in COMMUNITIES.items() if m.active] == ["ai"]
+    assert set(COMMUNITIES) == set(BUILTIN_COMMUNITIES)  # 只是隐藏，随时可启用
+    stored = await get_setting(session, "communities")
+    # 已有配置后再启动不会重复写入
+    assert await seed_fresh_install_communities(session) is False
+    assert await get_setting(session, "communities") == stored
+
+
+async def test_existing_site_without_partition_settings_is_untouched(session):
+    from app.communities import seed_fresh_install_communities
+    from app.models import CollectTarget
+    from app.services.settings import get_setting
+
+    session.add(CollectTarget(platform="rss", target_type="feed", target_value="https://example.com/rss",
+                              community="wuwa", interval_minutes=60))
+    await session.commit()
+    assert await seed_fresh_install_communities(session) is False
+    assert await get_setting(session, "communities") is None
+
+
+async def test_cli_seed_restores_hidden_preset_partitions(session, monkeypatch):
+    from app.communities import seed_fresh_install_communities
+    from app.seeds.__main__ import _restore_communities
+    from app.services.settings import get_setting
+
+    await seed_fresh_install_communities(session)
+    await _restore_communities(session, ["wuwa"])
+    raw = await get_setting(session, "communities")
+    assert "wuwa" not in raw["disabled_builtins"] and "genshin" in raw["disabled_builtins"]

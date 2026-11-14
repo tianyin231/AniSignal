@@ -999,3 +999,34 @@ async def test_user_custom_feeds_rss_youtube_ssrf_and_manual_collect(client, adm
     # 刚采集完 5 分钟冷却内再次手动触发返回 429
     trig_cooldown = await client.post(f"/api/account/custom-feeds/{rss_feed_id}/collect")
     assert trig_cooldown.status_code == 429
+
+
+async def test_delete_community_with_purge_resyncs_official_source(client, admin_headers, session):
+    """F48 顺带：删除分区时连带删掉的官方目标，也要立即撤销来源的官方身份。"""
+    from sqlalchemy import select
+
+    from app.models import Source
+
+    created = await client.post(
+        "/api/admin/communities", headers=admin_headers,
+        json={"key": "tmpofc", "label": "临时分区", "color": "sky"},
+    )
+    assert created.status_code == 201
+    target = await client.post(
+        "/api/admin/collect-targets", headers=admin_headers,
+        json={
+            "platform": "x", "target_type": "account_dynamics", "target_value": "someofficial",
+            "display_name": "某官方", "interval_minutes": 60, "community": "tmpofc", "is_official": True,
+        },
+    )
+    assert target.status_code == 201, target.text
+    session.add(Source(platform="x", external_id="someofficial", name="某官方", identity="official"))
+    await session.commit()
+
+    resp = await client.delete(
+        "/api/admin/communities/tmpofc", params={"purge_targets": "true"}, headers=admin_headers,
+    )
+    assert resp.status_code == 204
+    session.expire_all()
+    source = await session.scalar(select(Source).where(Source.external_id == "someofficial"))
+    assert source.identity == "unknown"

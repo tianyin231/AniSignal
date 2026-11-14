@@ -52,6 +52,13 @@ const showCookieForm = ref(false)
 const cookieText = ref('')
 const cookieSaving = ref(false)
 const webLoginMode = ref<'password' | 'sms' | null>(null)
+const showMoreBiliLogin = ref(false)
+// 未登录只是匿名采集，不是故障，用中性色；凭据失效/核验失败才用警告色。
+const biliStateClass = computed(() => {
+  const state = biliSession.value?.state
+  if (state === 'logged_in') return 'text-ok'
+  return state === 'missing' || state === 'unconfigured' ? 'text-muted' : 'text-warn'
+})
 let qrTimer: ReturnType<typeof setInterval> | undefined
 
 function stopQrPoll() {
@@ -307,7 +314,7 @@ async function deleteCommunity(row: AdminCommunityRow) {
   }
   const kindText = row.builtin ? '预设分区' : '自定义分区'
   const msg = row.target_count > 0
-    ? `删除${kindText}「${row.label}」并同时移除其下 ${row.target_count} 个采集目标？已入库历史内容仍会保留。`
+    ? `删除${kindText}「${row.label}」并同时移除其下 ${row.target_count} 个采集目标？已入库的历史内容不会删除，但删除后前台不再展示；同一来源改挂到其他分区后，下次采集会自动归入新分区。`
     : `确认删除${kindText}「${row.label}」？${row.builtin ? '（预设分区删除后仍可随时恢复）' : ''}`
   if (!confirm(msg)) return
   communityBusy.value = true
@@ -457,7 +464,7 @@ const defaultMinViews = () => (supportsViews.value && form.target_type === 'keyw
 
 const targetPlaceholder = computed(() => {
   if (form.platform === 'rss') return 'RSS / Atom 地址，如 https://openai.com/news/rss.xml'
-  if (form.platform === 'youtube') return 'YouTube 24 位频道 ID（UC 开头）'
+  if (form.platform === 'youtube') return 'YouTube 频道链接、@handle 或 UC 开头的频道 ID'
   if (form.platform === 'x') return '@账号 或 https://x.com/账号'
   if (form.platform === 'game_official') return '仅支持 genshin / endfield / nikke'
   if (form.platform === 'kuro_cn' || form.platform === 'kuro_global') return '固定填写 default'
@@ -505,6 +512,9 @@ function formatLastError(err: string | null): string {
   if (!err) return '—'
   if (/BiliRiskControlError|风控|-352/.test(err)) {
     return '未登录时动态接口常被风控，可在本页上方扫码登录提高成功率'
+  }
+  if (/error '(404|5\d\d)\b[^']*' for url '[^']*\/feeds\/videos\.xml/.test(err)) {
+    return 'YouTube RSS 间歇性故障，系统会在 2 小时内自动重试；也可在 .env 配置 YouTube API Key 兜底'
   }
   return err
 }
@@ -833,21 +843,26 @@ async function remove(target: CollectTarget) {
     <div v-if="biliSession" class="panel space-y-3 px-5 py-4" aria-live="polite">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p class="text-sm font-medium" :class="biliSession.state === 'logged_in' ? 'text-ok' : 'text-warn'">{{ biliSession.message }}</p>
+          <p class="text-sm font-medium" :class="biliStateClass">{{ biliSession.message }}</p>
           <p v-if="biliSession.checked_at" class="mono mt-1 text-xs text-muted">检测时间 {{ fmtTime(biliSession.checked_at) }}</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" class="btn-primary px-3 py-2 text-sm" :disabled="checkingBili" @click="startQrLogin">
             B 站扫码登录
           </button>
-          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'password'; showCookieForm = false; closeQrLogin()">
-            账号密码登录
-          </button>
-          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'sms'; showCookieForm = false; closeQrLogin()">
-            短信验证码登录
-          </button>
-          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" @click="showCookieForm = !showCookieForm; webLoginMode = null; closeQrLogin()">
-            粘贴 Cookie
+          <template v-if="showMoreBiliLogin">
+            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'password'; showCookieForm = false; closeQrLogin()">
+              账号密码登录
+            </button>
+            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'sms'; showCookieForm = false; closeQrLogin()">
+              短信验证码登录
+            </button>
+            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" @click="showCookieForm = !showCookieForm; webLoginMode = null; closeQrLogin()">
+              粘贴 Cookie
+            </button>
+          </template>
+          <button v-else type="button" class="rounded-md border border-line px-3 py-2 text-sm text-muted hover:bg-chip" @click="showMoreBiliLogin = true">
+            更多登录方式
           </button>
           <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="loadBiliSession(true)">
             {{ checkingBili ? '检测中…' : '检测登录态' }}

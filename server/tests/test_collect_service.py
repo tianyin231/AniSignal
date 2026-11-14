@@ -268,6 +268,36 @@ def test_dynamic_risk_control_does_not_miss_recovery_for_hours(monkeypatch, inte
     assert collect_module.next_run_with_jitter(target, now) - now == timedelta(minutes=expected)
 
 
+_YT_404 = ("HTTPStatusError: Client error '404 Not Found' for url "
+           "'https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxxxxxxxxxxxxxxxxxxxx'")
+_YT_500 = _YT_404.replace("Client error '404 Not Found'", "Server error '500 Internal Server Error'")
+
+
+@pytest.mark.parametrize("interval,failures,error,expected", [
+    (60, 5, _YT_404, 120),
+    (60, 9, _YT_500, 120),
+    (30, 1, _YT_404, 60),
+    (240, 5, _YT_404, 240),
+    (60, 5, "CollectorError: timeout", 1920),
+])
+def test_youtube_rss_transient_errors_retry_within_two_hours(monkeypatch, interval, failures, error, expected):
+    """F49：YouTube RSS 间歇性 404/5xx 退避封顶约 2 小时，其他失败仍按 2^n 退避。"""
+    monkeypatch.setattr(collect_module.random, "uniform", lambda *_: 1.0)
+    target = CollectTarget(platform="youtube", target_type="channel_rss", target_value="UCxxxxxxxxxxxxxxxxxxxxxx",
+        interval_minutes=interval, consecutive_failures=failures, last_error=error)
+    now = utcnow()
+    assert collect_module.next_run_with_jitter(target, now) - now == timedelta(minutes=expected)
+
+
+def test_user_facing_error_hides_upstream_details():
+    from app.services.collect_errors import user_facing_error
+
+    assert user_facing_error("youtube", _YT_404) == "YouTube RSS 间歇性故障，系统会自动重试"
+    assert "youtube.com" not in user_facing_error("youtube", _YT_404)
+    assert user_facing_error("rss", None) is None
+    assert "ANISIGNAL" not in user_facing_error("rss", "ValueError: 可设置 ANISIGNAL_EGRESS_ALLOW_CIDRS=10.0.0.0/8")
+
+
 async def test_dynamic_refusal_keeps_failure_visible_but_probes_recovery_within_an_hour(session, patched_collect, monkeypatch):
     from app.collectors.bilibili import BiliRiskControlError
 

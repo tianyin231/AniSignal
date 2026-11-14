@@ -45,6 +45,8 @@ export interface CustomFeedRow {
   status: string
   item_count: number
   last_collected_at: string | null
+  /** 上次采集失败的友好原因；成功后为 null */
+  last_error?: string | null
   interval_minutes: number
   filters: { include?: string[], exclude?: string[] }
 }

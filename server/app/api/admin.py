@@ -280,7 +280,18 @@ async def delete_community_admin(
     if count and not purge_targets:
         raise HTTPException(status.HTTP_409_CONFLICT, f"该分区下仍有 {count} 个采集目标，请勾选同时清理目标后再删除")
     if count and purge_targets:
+        from app.services.ingest import sync_source_official_identity, target_source_external_id
+
+        official = [
+            (t.platform, t.target_value)
+            for t in (await session.scalars(select(CollectTarget).where(CollectTarget.community == key))).all()
+            if t.is_official
+        ]
         await session.execute(delete(CollectTarget).where(CollectTarget.community == key))
+        await session.flush()
+        # 和单个删除目标一致：连带删掉的官方目标也要立即重算来源的官方身份。
+        for platform, value in official:
+            await sync_source_official_identity(session, platform, target_source_external_id(platform, value))
     disabled, deleted, overrides, custom = _unpack_communities_raw(raw)
     if key in BUILTIN_COMMUNITIES:
         deleted.add(key)
@@ -441,6 +452,8 @@ async def create_target(
 
     if body.platform == "x":
         body.target_value = _x_target_value(body.target_value, body.target_type, body.interval_minutes)
+    if body.platform == "youtube":
+        body.target_value = await _resolve_youtube_value(session, body.target_value)
     await _ensure_no_target_conflict(
         session,
         platform=body.platform,
@@ -524,6 +537,8 @@ async def update_target(
             )
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+        if target.platform == "youtube":
+            next_value = await _resolve_youtube_value(session, next_value)
         value_changed = next_value != target.target_value
     if value_changed or next_community != target.community or body.tier is not None or body.co_terms is not None:
         await _ensure_no_target_conflict(
@@ -594,6 +609,19 @@ async def delete_target(target_id: int, session: AsyncSession = Depends(get_sess
             session, platform, target_source_external_id(platform, old_value)
         )
     await session.commit()
+
+
+async def _resolve_youtube_value(session: AsyncSession, value: str) -> str:
+    """YouTube 目标填的是 @handle 时，创建/修改那一刻解析成 UC 频道 ID，存储与采集逻辑不变。"""
+    if not value.startswith("@"):
+        return value
+    from app.collectors.base import CollectorError
+    from app.collectors.youtube_rss import resolve_youtube_handle
+
+    try:
+        return await resolve_youtube_handle(session, value)
+    except CollectorError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
 
 
 @router.post("/collect-targets/{target_id}/run", response_model=RunTriggerOut)

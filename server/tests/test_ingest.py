@@ -435,3 +435,27 @@ async def test_changed_metrics_are_always_recorded(session):
     await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, view_count=9999)])
     snapshots = list(await session.scalars(select(MetricSnapshot).order_by(MetricSnapshot.id)))
     assert len(snapshots) == 2 and snapshots[-1].metrics["view"] == 9999
+
+
+async def test_ingest_adopts_content_left_by_deleted_community(session):
+    """F48：分区删除后遗留的内容，被同一来源的新分区目标再次抓到时改归新分区并计为新增。"""
+    from app.communities import COMMUNITIES
+
+    stats = await ingest_items(session, "bilibili_search", [VIDEO_RAW], community="wuwa")
+    assert stats.items_new == 1
+    content = await session.scalar(select(RawContent))
+    content.community = "gone1"  # 模拟分区已删除
+    await session.commit()
+    assert "gone1" not in COMMUNITIES
+
+    stats = await ingest_items(session, "bilibili_search", [VIDEO_RAW], community="genshin")
+    assert stats.items_new == 1
+    await session.refresh(content)
+    assert content.community == "genshin"
+    assert await session.scalar(select(func.count(RawContent.id))) == 1
+
+    # 所属分区仍存在时保持全站只入库一次，不会被别的分区抢走。
+    stats = await ingest_items(session, "bilibili_search", [VIDEO_RAW], community="wuwa")
+    assert stats.items_new == 0
+    await session.refresh(content)
+    assert content.community == "genshin"
