@@ -452,6 +452,8 @@ async def create_target(
 
     if body.platform == "x":
         body.target_value = _x_target_value(body.target_value, body.target_type, body.interval_minutes)
+    if body.platform == "youtube":
+        body.target_value = await _resolve_youtube_value(session, body.target_value)
     await _ensure_no_target_conflict(
         session,
         platform=body.platform,
@@ -535,6 +537,8 @@ async def update_target(
             )
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+        if target.platform == "youtube":
+            next_value = await _resolve_youtube_value(session, next_value)
         value_changed = next_value != target.target_value
     if value_changed or next_community != target.community or body.tier is not None or body.co_terms is not None:
         await _ensure_no_target_conflict(
@@ -605,6 +609,19 @@ async def delete_target(target_id: int, session: AsyncSession = Depends(get_sess
             session, platform, target_source_external_id(platform, old_value)
         )
     await session.commit()
+
+
+async def _resolve_youtube_value(session: AsyncSession, value: str) -> str:
+    """YouTube 目标填的是 @handle 时，创建/修改那一刻解析成 UC 频道 ID，存储与采集逻辑不变。"""
+    if not value.startswith("@"):
+        return value
+    from app.collectors.base import CollectorError
+    from app.collectors.youtube_rss import resolve_youtube_handle
+
+    try:
+        return await resolve_youtube_handle(session, value)
+    except CollectorError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
 
 
 @router.post("/collect-targets/{target_id}/run", response_model=RunTriggerOut)

@@ -15,7 +15,7 @@ const KINDS = [
   { key: 'keyword', platform: 'bilibili', label: 'B 站关键词', fieldLabel: '搜索关键词', placeholder: '例如：独立游戏 发售、机械键盘 评测' },
   { key: 'uid', platform: 'bilibili', label: 'B 站 UP 主', fieldLabel: 'UP 主 UID', placeholder: '纯数字，空间主页地址里的那串数字' },
   { key: 'feed', platform: 'rss', label: 'RSS / Atom', fieldLabel: 'RSS / Atom 地址', placeholder: 'https://example.com/feed.xml' },
-  { key: 'channel_rss', platform: 'youtube', label: 'YouTube 频道', fieldLabel: '频道 ID 或主页链接', placeholder: 'UC... 或 https://www.youtube.com/channel/UC...' },
+  { key: 'channel_rss', platform: 'youtube', label: 'YouTube 频道', fieldLabel: '频道链接、@handle 或频道 ID', placeholder: 'https://www.youtube.com/@xxx、@xxx 或 UC...' },
 ] as const
 type MonitorKind = typeof KINDS[number]['key']
 

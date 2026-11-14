@@ -464,7 +464,7 @@ const defaultMinViews = () => (supportsViews.value && form.target_type === 'keyw
 
 const targetPlaceholder = computed(() => {
   if (form.platform === 'rss') return 'RSS / Atom 地址，如 https://openai.com/news/rss.xml'
-  if (form.platform === 'youtube') return 'YouTube 24 位频道 ID（UC 开头）'
+  if (form.platform === 'youtube') return 'YouTube 频道链接、@handle 或 UC 开头的频道 ID'
   if (form.platform === 'x') return '@账号 或 https://x.com/账号'
   if (form.platform === 'game_official') return '仅支持 genshin / endfield / nikke'
   if (form.platform === 'kuro_cn' || form.platform === 'kuro_global') return '固定填写 default'

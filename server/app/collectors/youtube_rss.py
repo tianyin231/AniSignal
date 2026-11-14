@@ -5,7 +5,9 @@ RSS 是原始层：collector 把 XML entry 整理成 dict 存 raw_json（不下�
 """
 
 import asyncio
+import re
 import xml.etree.ElementTree as ET
+from urllib.parse import quote
 
 import httpx
 
@@ -16,6 +18,30 @@ from app.schemas.content import FetchResult
 from app.services.collector_proxy import http_proxy_kwargs
 
 FEED_URL = "https://www.youtube.com/feeds/videos.xml"
+CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
+# 「@handle」或 youtube.com/@handle 链接；handle 规则：3–30 位字母数字、点、下划线、连字符。
+_HANDLE_RE = re.compile(r"^(?:(?:https?://)?(?:www\.|m\.)?youtube\.com/)?(@[A-Za-z0-9._-]{3,30})(?:[/?#].*)?$")
+# 频道页的 canonical 链接才是本频道；页面里其他 "channelId" 可能是推荐频道。
+_CANONICAL_RE = re.compile(r'<link rel="canonical" href="https://www\.youtube\.com/channel/(UC[A-Za-z0-9_-]{22})"')
+_EXTERNAL_ID_RE = re.compile(r'"externalId":"(UC[A-Za-z0-9_-]{22})"')
+HANDLE_HELP = "无法解析该 YouTube @handle，请改填 UC 开头的频道 ID"
+
+
+def youtube_handle(value: str) -> str | None:
+    """从用户输入里取出 @handle；不是 handle 形式时返回 None。"""
+    m = _HANDLE_RE.match((value or "").strip())
+    return m.group(1) if m else None
+
+
+async def resolve_youtube_handle(session, handle: str) -> str:
+    """创建/修改目标时请求一次频道页，把 @handle 换成 UC 频道 ID（无需 API Key，沿用采集出口）。"""
+    from app.services.collector_proxy import fetch_with_fallback
+
+    collector = YoutubeRssCollector()
+    try:
+        return await fetch_with_fallback(collector, session, "youtube", lambda: collector.resolve_handle(handle))
+    except (CollectorError, httpx.HTTPError, TimeoutError) as exc:
+        raise CollectorError(HANDLE_HELP) from exc
 
 _NS = {
     "atom": "http://www.w3.org/2005/Atom",
@@ -40,6 +66,20 @@ class YoutubeRssCollector:
             raise CollectorError("youtube channel_rss requires channel id")
         items = await self.fetch_feed(channel_id, limit)
         return FetchResult(platform=self.platform, fetch_kind="youtube_rss", items=items)
+
+    async def resolve_handle(self, handle: str) -> str:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": USER_AGENT, "Accept-Language": "en"},
+            cookies={"SOCS": "CAI"},  # 跳过欧盟地区的 Cookie 同意页
+            follow_redirects=True,
+            **http_proxy_kwargs(self),
+        ) as client:
+            resp = await client.get(f"https://www.youtube.com/{quote(handle)}", timeout=self._timeout)
+            resp.raise_for_status()
+        m = _CANONICAL_RE.search(resp.text) or _EXTERNAL_ID_RE.search(resp.text)
+        if not m:
+            raise CollectorError(HANDLE_HELP)
+        return m.group(1)
 
     async def fetch_feed(self, channel_id: str, limit: int) -> list[dict]:
         async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, **http_proxy_kwargs(self)) as client:

@@ -490,13 +490,13 @@ _KIND_DEFAULT_PLATFORM = {
     "feed": "rss",
     "channel_rss": "youtube",
 }
-_YT_CHANNEL_RE = _re.compile(r"^UC[A-Za-z0-9_-]{20,30}$")
-_YT_URL_RE = _re.compile(r"youtube\.com/channel/(UC[A-Za-z0-9_-]{20,30})")
+_YT_CHANNEL_RE = _re.compile(r"^(?:UC[A-Za-z0-9_-]{20,30}|@[A-Za-z0-9._-]{3,30})$")
 
 
 def _normalize_youtube_channel(raw: str) -> str:
-    m = _YT_URL_RE.search(raw)
-    return m.group(1) if m else raw
+    from app.schemas.api import normalize_youtube_channel_input
+
+    return normalize_youtube_channel_input(raw)
 
 
 def _validate_custom_target(kind: str, target: str) -> str:
@@ -507,9 +507,22 @@ def _validate_custom_target(kind: str, target: str) -> str:
     if kind == "channel_rss":
         chan = _normalize_youtube_channel(target)
         if not _YT_CHANNEL_RE.fullmatch(chan):
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请填写以 UC 开头的 YouTube 频道 ID（或包含 /channel/UC... 的频道链接）")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请填写 YouTube 频道链接、@handle 或以 UC 开头的频道 ID")
         return chan
     return target
+
+
+async def _resolve_custom_target(session: AsyncSession, kind: str, target: str) -> str:
+    """YouTube 监控填的是 @handle 时，创建/修改那一刻解析成 UC 频道 ID。"""
+    if kind != "channel_rss" or not target.startswith("@"):
+        return target
+    from app.collectors.base import CollectorError
+    from app.collectors.youtube_rss import resolve_youtube_handle
+
+    try:
+        return await resolve_youtube_handle(session, target)
+    except CollectorError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
 
 
 async def _ensure_safe_custom_target(kind: str, target: str) -> None:
@@ -651,6 +664,7 @@ async def create_custom_feed(
     if not payload["name"] or not payload["kind"] or not payload["target_value"]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "名称、监控类型与目标均不能为空")
     await _ensure_safe_custom_target(payload["kind"], payload["target_value"])
+    payload["target_value"] = await _resolve_custom_target(session, payload["kind"], payload["target_value"])
     from app.services.custom_policy import check_admission, shared_source, user_quota, request_interval
     quota = await user_quota(session, user.id)
     interval = payload["interval_minutes"] or quota["min_interval_minutes"]
@@ -697,6 +711,7 @@ async def update_custom_feed(
     from app.services.custom_policy import check_admission, shared_source, request_interval
     if payload["target_value"]:
         await _ensure_safe_custom_target(feed.kind, payload["target_value"])
+        payload["target_value"] = await _resolve_custom_target(session, feed.kind, payload["target_value"])
     if payload["target_value"] or payload["interval_minutes"] is not None or payload["enabled"] is True:
         await check_admission(session, user.id, feed.platform, feed.kind,
             payload["target_value"] or feed.target_value, payload["interval_minutes"] or feed.interval_minutes, exclude_id=feed.id)

@@ -406,3 +406,39 @@ async def test_custom_feed_list_shows_friendly_failure_reason(client, session, m
     )
     assert resp.status_code == 400
     assert "ANISIGNAL" not in resp.text and "10.1.2.3" not in resp.text
+
+
+async def test_youtube_handle_is_resolved_to_channel_id_on_create(client, session, monkeypatch):
+    """F53：用户填 @handle 或 youtube.com/@xxx 链接时，创建时解析成 UC 频道 ID 存储。"""
+    import app.collectors.youtube_rss as yt
+    from app.collectors.base import CollectorError
+
+    calls = []
+
+    async def fake_resolve(_session, handle):
+        calls.append(handle)
+        if handle == "@missing":
+            raise CollectorError(yt.HANDLE_HELP)
+        return "UC" + "b" * 22
+
+    monkeypatch.setattr(yt, "resolve_youtube_handle", fake_resolve)
+    session.add(User(email="cf-yt@anisignal.dev", password_hash="x", is_verified=True))
+    await session.commit()
+    await _login(client, session, "cf-yt@anisignal.dev")
+
+    resp = await client.post(
+        "/api/account/custom-feeds",
+        json={"name": "某频道", "kind": "channel_rss", "platform": "youtube",
+              "target_value": "https://www.youtube.com/@SomeChannel/videos"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert calls == ["@SomeChannel"]
+    feed = await session.get(CustomFeed, resp.json()["id"])
+    assert feed.target_value == "UC" + "b" * 22
+
+    resp = await client.post(
+        "/api/account/custom-feeds",
+        json={"name": "不存在", "kind": "channel_rss", "platform": "youtube", "target_value": "@missing"},
+    )
+    assert resp.status_code == 400
+    assert "UC" in resp.json()["detail"]
