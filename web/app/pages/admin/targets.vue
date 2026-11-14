@@ -52,6 +52,13 @@ const showCookieForm = ref(false)
 const cookieText = ref('')
 const cookieSaving = ref(false)
 const webLoginMode = ref<'password' | 'sms' | null>(null)
+const showMoreBiliLogin = ref(false)
+// 未登录只是匿名采集，不是故障，用中性色；凭据失效/核验失败才用警告色。
+const biliStateClass = computed(() => {
+  const state = biliSession.value?.state
+  if (state === 'logged_in') return 'text-ok'
+  return state === 'missing' || state === 'unconfigured' ? 'text-muted' : 'text-warn'
+})
 let qrTimer: ReturnType<typeof setInterval> | undefined
 
 function stopQrPoll() {
@@ -836,21 +843,26 @@ async function remove(target: CollectTarget) {
     <div v-if="biliSession" class="panel space-y-3 px-5 py-4" aria-live="polite">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p class="text-sm font-medium" :class="biliSession.state === 'logged_in' ? 'text-ok' : 'text-warn'">{{ biliSession.message }}</p>
+          <p class="text-sm font-medium" :class="biliStateClass">{{ biliSession.message }}</p>
           <p v-if="biliSession.checked_at" class="mono mt-1 text-xs text-muted">检测时间 {{ fmtTime(biliSession.checked_at) }}</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" class="btn-primary px-3 py-2 text-sm" :disabled="checkingBili" @click="startQrLogin">
             B 站扫码登录
           </button>
-          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'password'; showCookieForm = false; closeQrLogin()">
-            账号密码登录
-          </button>
-          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'sms'; showCookieForm = false; closeQrLogin()">
-            短信验证码登录
-          </button>
-          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" @click="showCookieForm = !showCookieForm; webLoginMode = null; closeQrLogin()">
-            粘贴 Cookie
+          <template v-if="showMoreBiliLogin">
+            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'password'; showCookieForm = false; closeQrLogin()">
+              账号密码登录
+            </button>
+            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'sms'; showCookieForm = false; closeQrLogin()">
+              短信验证码登录
+            </button>
+            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" @click="showCookieForm = !showCookieForm; webLoginMode = null; closeQrLogin()">
+              粘贴 Cookie
+            </button>
+          </template>
+          <button v-else type="button" class="rounded-md border border-line px-3 py-2 text-sm text-muted hover:bg-chip" @click="showMoreBiliLogin = true">
+            更多登录方式
           </button>
           <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="loadBiliSession(true)">
             {{ checkingBili ? '检测中…' : '检测登录态' }}

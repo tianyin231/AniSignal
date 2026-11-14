@@ -99,15 +99,19 @@ def redact(text: str, cookies: dict) -> str:
     return re.sub(r"(?i)\b(SESSDATA|bili_jct|DedeUserID(?:__ckMd5)?|sid|buvid[34])\s*=\s*[^;\s\"']+", r"\1=***", text)
 
 
+# 未登录不是故障：匿名即可采关键词与 UP 主投稿，登录只是提高动态接口成功率。
+ANONYMOUS_HINT = "未登录B站（可选）：匿名即可采集关键词与UP主投稿，登录后动态接口成功率更高"
+
+
 def local_status() -> tuple[dict, dict]:
     path = get_settings().bili_cookie_file
-    state = {"state": "unconfigured", "message": "未配置B站登录态，当前匿名采集", "credential_version": ""}
+    state = {"state": "unconfigured", "message": ANONYMOUS_HINT, "credential_version": ""}
     if not path:
         return state, {}
     try:
         cookies = read_cookie_file(path)
     except FileNotFoundError:
-        return {**state, "state": "missing", "message": "尚未登录B站，请完成扫码授权"}, {}
+        return {**state, "state": "missing", "message": ANONYMOUS_HINT}, {}
     except (OSError, ValueError, UnicodeError):
         return {**state, "state": "invalid", "message": "B站凭据文件不可用，请重新登录"}, {}
     return {**state, "state": "unchecked", "message": "B站凭据已就绪，等待检测", "credential_version": credential_version(cookies)}, cookies
