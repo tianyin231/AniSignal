@@ -4,8 +4,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 
 from app.api.account import router as account_router
@@ -63,6 +66,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AniSignal API", version="1.0.0", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_without_input(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # 默认 422 会在每条错误的 input 里回显请求体（含密码、验证码），统一去掉，只保留定位信息。
+    detail = [{k: v for k, v in err.items() if k not in ("input", "ctx")} for err in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(detail)})
 
 # 跨域来源由 ANISIGNAL_CORS_ORIGINS 配置（本地 dev + 部署的 web 源）
 app.add_middleware(

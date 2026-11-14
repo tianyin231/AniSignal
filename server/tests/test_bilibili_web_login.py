@@ -192,3 +192,25 @@ async def test_invalid_file_migration_preserves_database(session, tmp_path):
     with pytest.raises(ValueError):
         await credentials.import_file_credentials(session, str(path))
     assert await credentials.get_db_cookies(session) == {}
+
+
+async def test_validation_error_does_not_echo_password_or_code(client, admin_headers):
+    """F51：缺字段的 422 不能把请求体里的密码、短信验证码原样回显。"""
+    secret = "Fake-Pass-For-Test-9z"
+    resp = await client.post(
+        "/api/admin/bilibili-session/login/password",
+        headers=admin_headers,
+        json={"username": "someone", "password": secret},
+    )
+    assert resp.status_code == 422
+    assert secret not in resp.text
+    assert all("input" not in err for err in resp.json()["detail"])
+    assert {tuple(err["loc"]) for err in resp.json()["detail"]} >= {("body", "token")}
+
+    resp = await client.post(
+        "/api/admin/bilibili-session/login/sms",
+        headers=admin_headers,
+        json={"phone": "abc", "code": "778899", "captcha_key": "fake-captcha-key"},
+    )
+    assert resp.status_code == 422
+    assert "778899" not in resp.text and "fake-captcha-key" not in resp.text
