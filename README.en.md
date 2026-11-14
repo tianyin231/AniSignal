@@ -135,7 +135,7 @@ docker compose up -d
 docker compose ps
 ```
 
-> Upgrading later: `git pull && docker compose pull && docker compose up -d --remove-orphans` (or pin a release tag via `ANISIGNAL_IMAGE=ghcr.io/tianyin231/anisignal:1.2.0` in `.env`).
+> Upgrading later: `git pull && docker compose pull && docker compose up -d --remove-orphans` (or pin a release tag via `ANISIGNAL_IMAGE=ghcr.io/tianyin231/anisignal:1.2.1` in `.env`).
 
 **3. Complete 3-step onboarding in the browser**
 

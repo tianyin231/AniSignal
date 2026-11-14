@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
         await queue.aclose()
 
 
-app = FastAPI(title="AniSignal API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="AniSignal API", version="1.2.1", lifespan=lifespan)
 
 
 @app.exception_handler(RequestValidationError)

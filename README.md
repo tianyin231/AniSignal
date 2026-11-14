@@ -133,7 +133,7 @@ docker compose up -d
 docker compose ps
 ```
 
-> 后续升级：`git pull && docker compose pull && docker compose up -d --remove-orphans`（若需锁定固定版本，可在 `.env` 中设置 `ANISIGNAL_IMAGE=ghcr.io/tianyin231/anisignal:1.2.0`）。
+> 后续升级：`git pull && docker compose pull && docker compose up -d --remove-orphans`（若需锁定固定版本，可在 `.env` 中设置 `ANISIGNAL_IMAGE=ghcr.io/tianyin231/anisignal:1.2.1`）。
 
 **3. 浏览器内完成 3 步初始化**
 
