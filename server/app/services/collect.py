@@ -412,6 +412,8 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     RawContent.platform == "youtube",
                     RawContent.external_id.in_([str(item.get("id") or "") for item in fetch_result.items]),
                     RawContent.community != target.community,
+                    # 已删除分区遗留的内容不算“异区证据”，交给入库时改归当前分区。
+                    RawContent.community.in_(list(COMMUNITIES)),
                 ))).all())
                 kept = [item for item in fetch_result.items if str(item.get("id") or "") not in other_owned]
                 filtered_out += len(fetch_result.items) - len(kept)

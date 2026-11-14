@@ -307,7 +307,7 @@ async function deleteCommunity(row: AdminCommunityRow) {
   }
   const kindText = row.builtin ? '预设分区' : '自定义分区'
   const msg = row.target_count > 0
-    ? `删除${kindText}「${row.label}」并同时移除其下 ${row.target_count} 个采集目标？已入库历史内容仍会保留。`
+    ? `删除${kindText}「${row.label}」并同时移除其下 ${row.target_count} 个采集目标？已入库的历史内容不会删除，但删除后前台不再展示；同一来源改挂到其他分区后，下次采集会自动归入新分区。`
     : `确认删除${kindText}「${row.label}」？${row.builtin ? '（预设分区删除后仍可随时恢复）' : ''}`
   if (!confirm(msg)) return
   communityBusy.value = true

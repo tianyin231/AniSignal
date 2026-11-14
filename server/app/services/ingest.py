@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
-from app.communities import DEFAULT_COMMUNITY, get_community
+from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community
 from app.models import CollectTarget, ContentVersion, MetricSnapshot, RawContent, Source
 from app.models.enums import Identity
 from app.parsers.bilibili import PARSER_VERSION as BILIBILI_PARSER_VERSION
@@ -258,6 +258,10 @@ async def _ingest_one(
 
     # 已存在：原始数据不可覆盖，只更新观测字段
     _touch_last_seen(existing, utcnow())
+    # 所属分区已被删除时，内容归给当前目标的分区，否则同一来源改挂到别的分区后会一直“新增 0 条”。
+    adopted = existing.community not in COMMUNITIES and community in COMMUNITIES
+    if adopted:
+        existing.community = community
     if source_id is not None:
         existing.source_id = source_id
     if normalized.url and not existing.url:
@@ -299,7 +303,7 @@ async def _ingest_one(
             )
             existing.content_hash = fingerprint
     await _add_changed_snapshot(session, existing, normalized)
-    return False, changed, existing.id, str(identity)
+    return adopted, changed, existing.id, str(identity)
 
 
 async def _recent_bodies(session: AsyncSession, content_id: int) -> list[tuple]:

@@ -280,7 +280,18 @@ async def delete_community_admin(
     if count and not purge_targets:
         raise HTTPException(status.HTTP_409_CONFLICT, f"该分区下仍有 {count} 个采集目标，请勾选同时清理目标后再删除")
     if count and purge_targets:
+        from app.services.ingest import sync_source_official_identity, target_source_external_id
+
+        official = [
+            (t.platform, t.target_value)
+            for t in (await session.scalars(select(CollectTarget).where(CollectTarget.community == key))).all()
+            if t.is_official
+        ]
         await session.execute(delete(CollectTarget).where(CollectTarget.community == key))
+        await session.flush()
+        # 和单个删除目标一致：连带删掉的官方目标也要立即重算来源的官方身份。
+        for platform, value in official:
+            await sync_source_official_identity(session, platform, target_source_external_id(platform, value))
     disabled, deleted, overrides, custom = _unpack_communities_raw(raw)
     if key in BUILTIN_COMMUNITIES:
         deleted.add(key)
