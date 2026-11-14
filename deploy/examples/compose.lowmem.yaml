@@ -1,0 +1,25 @@
+# 2~4 GB 内存主机的资源上限覆盖示例（可选）：
+# 复制为本地 compose.override.yaml（已在 .gitignore 中忽略）即可自动叠加：
+#   cp deploy/examples/compose.lowmem.yaml compose.override.yaml
+#   docker compose pull && docker compose up -d
+x-logging: &bounded_logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mysql:
+    mem_limit: 1536m
+    logging: *bounded_logs
+  redis:
+    mem_limit: 64m
+    command: ["redis-server", "--maxmemory", "48mb", "--maxmemory-policy", "volatile-lru"]
+    logging: *bounded_logs
+  api:
+    mem_limit: 512m
+  web:
+    mem_limit: 256m
+  collector:
+    mem_limit: 768m
+    stop_grace_period: 180s

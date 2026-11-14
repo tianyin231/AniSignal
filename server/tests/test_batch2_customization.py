@@ -1030,3 +1030,37 @@ async def test_delete_community_with_purge_resyncs_official_source(client, admin
     session.expire_all()
     source = await session.scalar(select(Source).where(Source.external_id == "someofficial"))
     assert source.identity == "unknown"
+
+    # 批量接口（目标启停/删除、分区批量删除）同样要立即同步 Source 官方身份。
+    created2 = await client.post(
+        "/api/admin/communities", headers=admin_headers,
+        json={"key": "tmpofc2", "label": "临时分区二", "color": "#0ea5e9"},
+    )
+    assert created2.status_code == 201
+    target2 = await client.post(
+        "/api/admin/collect-targets", headers=admin_headers,
+        json={
+            "platform": "x", "target_type": "account_dynamics", "target_value": "someofficial",
+            "display_name": "某官方", "interval_minutes": 60, "community": "tmpofc2", "is_official": True,
+        },
+    )
+    assert target2.status_code == 201
+    tid2 = target2.json()["id"]
+    session.expire_all()
+    assert (await session.scalar(select(Source).where(Source.external_id == "someofficial"))).identity == "official"
+
+    await client.post("/api/admin/collect-targets/batch", headers=admin_headers, json={"action": "disable", "ids": [tid2]})
+    session.expire_all()
+    assert (await session.scalar(select(Source).where(Source.external_id == "someofficial"))).identity == "unknown"
+
+    await client.post("/api/admin/collect-targets/batch", headers=admin_headers, json={"action": "enable", "ids": [tid2]})
+    session.expire_all()
+    assert (await session.scalar(select(Source).where(Source.external_id == "someofficial"))).identity == "official"
+
+    batch_del = await client.post(
+        "/api/admin/communities/batch", headers=admin_headers,
+        json={"action": "delete", "keys": ["tmpofc2"], "purge_targets": True},
+    )
+    assert batch_del.status_code == 200
+    session.expire_all()
+    assert (await session.scalar(select(Source).where(Source.external_id == "someofficial"))).identity == "unknown"

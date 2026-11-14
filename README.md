@@ -125,12 +125,15 @@ cp .env.example .env
 | `ANISIGNAL_PUBLIC_BASE_URL` | 推荐 | 对外完整访问基址（本机试用保持 `http://127.0.0.1:8090`；正式上线填 `https://你的域名`） |
 | `WEB_PORT` | 否 | 宿主机监听地址（默认 `127.0.0.1:8090` 供反代转发；局域网直连可改为 `0.0.0.0:8090`） |
 
-**2. 一键拉起服务**
+**2. 拉取镜像并启动**
 
 ```bash
+docker compose pull
 docker compose up -d
 docker compose ps
 ```
+
+> 后续升级：`git pull && docker compose pull && docker compose up -d --remove-orphans`（若需锁定固定版本，可在 `.env` 中设置 `ANISIGNAL_IMAGE=ghcr.io/tianyin231/anisignal:1.2.0`）。
 
 **3. 浏览器内完成 3 步初始化**
 

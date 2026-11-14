@@ -127,12 +127,15 @@ Edit the core settings in `.env`:
 | `ANISIGNAL_PUBLIC_BASE_URL` | Recommended | External site URL (`http://127.0.0.1:8090` locally, or `https://signal.example.com` in production) |
 | `WEB_PORT` | No | Host bind address (`127.0.0.1:8090` behind a reverse proxy, or `0.0.0.0:8090` for direct LAN access) |
 
-**2. Launch the stack**
+**2. Pull & launch the stack**
 
 ```bash
+docker compose pull
 docker compose up -d
 docker compose ps
 ```
+
+> Upgrading later: `git pull && docker compose pull && docker compose up -d --remove-orphans` (or pin a release tag via `ANISIGNAL_IMAGE=ghcr.io/tianyin231/anisignal:1.2.0` in `.env`).
 
 **3. Complete 3-step onboarding in the browser**
 

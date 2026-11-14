@@ -37,7 +37,7 @@ cp .env.example .env
 | `ANISIGNAL_PUBLIC_BASE_URL` | 推荐 | `http://127.0.0.1:8090` | 对外完整访问基址（如 `https://signal.example.com`），自动同步至前端 Canonical/OG、Sitemap、robots.txt、RSS 与邮件链接。 |
 | `WEB_PORT` | 否 | `127.0.0.1:8090` | 宿主机监听绑定。默认仅监听本机回环供反代转发；局域网/NAS 直连可改为 `0.0.0.0:8090`。 |
 | `DATA_DIR` | 否 | `./data` | MySQL、Redis 与可选本地文件的持久化目录。 |
-| `ANISIGNAL_IMAGE` | 否 | `ghcr.io/tianyin231/anisignal:latest` | 自定义镜像地址或固定版本标签（生产环境推荐锁定具体版本号如 `ghcr.io/tianyin231/anisignal:1.1.0`，避免代码仓库与浮动 `latest` 镜像版本错位）。 |
+| `ANISIGNAL_IMAGE` | 否 | `ghcr.io/tianyin231/anisignal:latest` | 自定义镜像地址或固定版本标签（生产环境推荐锁定具体版本号如 `ghcr.io/tianyin231/anisignal:1.2.0`，避免代码仓库与浮动 `latest` 镜像版本错位）。 |
 | `ANISIGNAL_EGRESS_ALLOW_CIDRS` | 否 | 空 | 出站 SSRF 额外放行网段。宿主机开启 Clash / mihomo TUN `fake-ip` 时设为 `198.18.0.0/15`（云元数据 `169.254.169.254` 始终拦截）。 |
 | `ANISIGNAL_MAIL_HOURLY_LIMIT` | 否 | `100` | 配置 SMTP 后的全站每小时验证码发信上限，防止接口被刷信。 |
 | `ANISIGNAL_YOUTUBE_API_KEY` | 否 | 空 | 可选 YouTube Data API v3 密钥；不填默认走免密钥频道 RSS。 |
@@ -45,12 +45,13 @@ cp .env.example .env
 ### 2.2 启动与验活
 
 ```bash
+docker compose pull
 docker compose up -d
 docker compose ps
 docker compose logs --tail=80 api web collector
 ```
 
-> 若修改了本地前后端源码，执行 `docker compose up -d --build` 重新构建本地镜像即可。
+> 若修改了本地前后端源码，执行 `docker compose up -d --build` 重新构建本地镜像即可；如需限制单容器内存上限，可执行 `cp deploy/examples/compose.lowmem.yaml compose.override.yaml`（本地覆盖文件默认不入版本库）。
 
 - `api`、`web` 与 `collector` 共用同一份镜像层（不额外占磁盘），但按单职责独立运行与独立输出日志：
   - `api` 启动时自动通过 MySQL `GET_LOCK` 互斥执行 `alembic upgrade head`（新库通过 `0057_baseline` 一步建齐全部数据表，不写入任何作者私站演示数据），随后以前台单进程运行 FastAPI（内部 `:8000`）；
@@ -128,6 +129,8 @@ docker compose up -d --remove-orphans
 ```
 
 （若你基于本地修改构建镜像，改为执行 `docker compose up -d --build --remove-orphans`。）
+
+- **旧版 B 站 Cookie 文件迁移**：早期以宿主机 `0600` 文件方式挂载 `cookies.txt` 的老实例升级到非 root 镜像后，可执行一次 `docker compose exec -T --user root api python -m app.bilibili_login --import-to-db --cookie-file /run/anisignal/bilibili/cookies.txt` 将凭据导入数据库，后续不再依赖宿主机文件权限。
 
 ### 首次启动失败自救
 - 查看具体报错：`docker compose logs api web mysql`

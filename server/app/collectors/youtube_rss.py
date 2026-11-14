@@ -74,7 +74,7 @@ class YoutubeRssCollector:
             follow_redirects=True,
             **http_proxy_kwargs(self),
         ) as client:
-            resp = await client.get(f"https://www.youtube.com/{quote(handle)}", timeout=self._timeout)
+            resp = await client.get(f"https://www.youtube.com/{quote(handle, safe='@')}", timeout=self._timeout)
             resp.raise_for_status()
         m = _CANONICAL_RE.search(resp.text) or _EXTERNAL_ID_RE.search(resp.text)
         if not m:

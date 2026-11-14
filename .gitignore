@@ -8,6 +8,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+compose.override.yaml
+deploy/local/
 data/
 backups/
 *.db
