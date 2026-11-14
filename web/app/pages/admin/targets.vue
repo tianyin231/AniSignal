@@ -506,6 +506,9 @@ function formatLastError(err: string | null): string {
   if (/BiliRiskControlError|风控|-352/.test(err)) {
     return '未登录时动态接口常被风控，可在本页上方扫码登录提高成功率'
   }
+  if (/error '(404|5\d\d)\b[^']*' for url '[^']*\/feeds\/videos\.xml/.test(err)) {
+    return 'YouTube RSS 间歇性故障，系统会在 2 小时内自动重试；也可在 .env 配置 YouTube API Key 兜底'
+  }
   return err
 }
 

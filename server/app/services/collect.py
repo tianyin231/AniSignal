@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community, official_merch_bilibili_sources
+from app.services.collect_errors import YOUTUBE_RSS_RETRY_MAX_MINUTES, is_youtube_rss_transient
 from app.collectors.base import CollectorDeferred, CollectorError, platform_slot
 from app.collectors.bilibili import BilibiliCollector, merge_detail_text
 from app.collectors.kuro import KuroCollector
@@ -601,6 +602,11 @@ def next_run_with_jitter(target: CollectTarget, now: datetime | None = None) -> 
             # 匿名动态可能自行恢复；端点已有 30 分钟熔断，不再叠加 8–16 小时等待。
             # 保留管理员设置的长采集间隔。
             backoff = min(backoff, max(1.0, 60 / target.interval_minutes))
+        elif is_youtube_rss_transient(target.platform, target.last_error):
+            # YouTube RSS 间歇性 404/5xx 是上游故障，退避封顶约 2 小时，不再拖到 32 小时；
+            # 管理员本就设置了更长间隔时保留原间隔。
+            cap = max(1.0, YOUTUBE_RSS_RETRY_MAX_MINUTES / target.interval_minutes)
+            backoff = min(backoff, cap)
     base = target.interval_minutes * 60 * backoff
     if target.platform == "x":
         return now + timedelta(seconds=random.uniform(max(1800, base * 0.75), base * 1.25))

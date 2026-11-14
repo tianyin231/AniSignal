@@ -24,6 +24,7 @@ from app.parsers.youtube import parse_rss_item
 from app.models import CustomFeed, CustomFeedItem, CustomFeedSource, CustomSourceItem, CustomCollectRun, NotificationDelivery, User
 from app.parsers.bilibili import parse_dynamic, parse_video
 from app.services.notifications import beijing_today
+from app.services.collect_errors import YOUTUBE_RSS_RETRY_MAX_MINUTES, is_youtube_rss_transient
 from app.services.collector_proxy import fetch_with_fallback
 from app.services.custom_policy import claim_collection_budget, shared_source
 from app.schemas.content import NormalizedContent
@@ -262,7 +263,10 @@ async def _run_shared_source(session, redis, source_id, stats):
             stats["deferred"] += 1
         else:
             source.consecutive_failures += 1
-            source.next_run_at = utcnow() + timedelta(minutes=min(interval * 2 ** min(source.consecutive_failures, 8), 1440))
+            cap = 1440
+            if is_youtube_rss_transient(source.platform, source.last_error):
+                cap = max(interval, YOUTUBE_RSS_RETRY_MAX_MINUTES)
+            source.next_run_at = utcnow() + timedelta(minutes=min(interval * 2 ** min(source.consecutive_failures, 8), cap))
             stats["failed"] += 1
             logger.warning("custom source %s failed: %s", source_id, source.last_error)
         if run_id:
