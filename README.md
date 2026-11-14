@@ -97,7 +97,7 @@ flowchart LR
     N --> API
     API --> W["Web 信号台 · web (Nuxt 4 SSR)"]
     API --> M["邮件早报与即时提醒"]
-    API --> B["AstrBot 插件 · QQ 群与私聊"]
+    API --> B["AstrBot / DSH 插件 · QQ 群与私聊"]
 ```
 
 生产环境采用职责清晰的 **5 容器编排**（`mysql`、`redis`、`api`、`web`、`collector`）：`api`、`web` 与 `collector` 共享同一份多架构镜像层，不重复占用磁盘，日志与扩缩容彼此独立（`collector` 内置基于 Redis 的分布式选主与任务互斥锁，可直接水平扩容）。本地开发则可退化为 **SQLite + 进程内队列**，零容器依赖直接启动。
@@ -160,15 +160,25 @@ npm ci
 npm run dev
 ```
 
-## 接入 QQ 机器人（AstrBot）
+## 接入 QQ 机器人（AstrBot / DeepSeek Harness）
 
-配套插件源码位于 [`integrations/astrbot_plugin_anisignal`](integrations/astrbot_plugin_anisignal)，同步发布于独立仓库 [AstrBot_Plugin_AniSignal](https://github.com/tianyin231/AstrBot_Plugin_AniSignal)，支持 QQ 官方机器人与 OneBot v11（NapCat 等）：
+配套插件在主仓库 [`integrations/`](integrations) 内开发测试，并分别同步发布至独立仓库，均同时支持官方 QQ Bot 与 OneBot v11（NapCat 等）：
+
+### AstrBot 插件（[`AstrBot_Plugin_AniSignal`](https://github.com/tianyin231/AstrBot_Plugin_AniSignal)）
+
+源码位于 [`integrations/astrbot_plugin_anisignal`](integrations/astrbot_plugin_anisignal)：
 
 1. 在 AstrBot 管理面板打开 **「插件管理 → 从链接安装」**，填入 `https://github.com/tianyin231/AstrBot_Plugin_AniSignal`；
 2. 在插件配置中填写 AniSignal 实例地址与机器人授权密钥；
-3. 在群聊或私聊发送 `/情报订阅` 或 `/帮助`，即可按群定制接收分区、早报图文卡片、即时快讯与关键词查询。
+3. 在群聊或私聊发送 `/情报订阅` 或 `/帮助`，即可按群定制接收分区、早报图文卡片、即时快讯与关键词查询。详见[AstrBot 插件说明](integrations/astrbot_plugin_anisignal/README.md)。
 
-详细指令与渲染效果见[插件说明文档](integrations/astrbot_plugin_anisignal/README.md)。
+### DeepSeek Harness (`dsh`) 插件（[`DSH_Plugin_AniSignal`](https://github.com/tianyin231/DSH_Plugin_AniSignal)）
+
+源码位于 [`integrations/dsh_plugin_anisignal`](integrations/dsh_plugin_anisignal)，同时兼容 `@tencent-connect/dsh-qqbot` 与 `dsh-onebot-qq` / `dsh-qq-onebot`：
+
+1. 在 DSH Profile 中通过 GitHub 安装 `https://codeload.github.com/tianyin231/DSH_Plugin_AniSignal/tar.gz/refs/heads/main`；
+2. 打开 DSH **「设置 → AniSignal 情报助手」** 填入用户 Token 并一键勾选已识别的 QQ 会话；
+3. 支持轻量级 SVG/PNG 早报卡片渲染（可选 `@resvg/resvg-js`）与自然语言工具查询、展开及提醒。详见[DSH 插件说明](integrations/dsh_plugin_anisignal/README.md)。
 
 ## 文档导航
 

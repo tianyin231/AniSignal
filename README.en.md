@@ -99,7 +99,7 @@ flowchart LR
     N --> API
     API --> W["Web Signal Desk · web (Nuxt 4 SSR)"]
     API --> M["Email Digests & Instant Alerts"]
-    API --> B["AstrBot Plugin · QQ Groups & DMs"]
+    API --> B["AstrBot / DSH Plugins · QQ Groups & DMs"]
 ```
 
 Production runs a clean **5-container topology** (`mysql`, `redis`, `api`, `web`, `collector`): `api`, `web`, and `collector` share a single multi-arch image without duplicating disk layers while isolating logs and scaling (`collector` uses Redis-backed leader election and per-target locks for safe horizontal scaling). For local development, the entire backend drops down to **SQLite + an in-process queue** with zero container dependencies.
@@ -162,15 +162,12 @@ npm ci
 npm run dev
 ```
 
-## QQ Bot Integration (AstrBot)
+## QQ Bot Integration (AstrBot & DeepSeek Harness)
 
-The companion plugin lives in [`integrations/astrbot_plugin_anisignal`](integrations/astrbot_plugin_anisignal) and is published to [AstrBot_Plugin_AniSignal](https://github.com/tianyin231/AstrBot_Plugin_AniSignal) for both official QQ bots and OneBot v11 (NapCat):
+Companion plugins live under [`integrations/`](integrations) and are synced to standalone release repositories, both supporting official QQ bots and OneBot v11 (NapCat):
 
-1. In the AstrBot dashboard, open **Plugin Management → Install from Link** and enter `https://github.com/tianyin231/AstrBot_Plugin_AniSignal`;
-2. Configure your AniSignal URL and bot access key;
-3. Send `/情报订阅` or `/帮助` in a group or DM to subscribe to sections, illustrated morning briefs, instant alerts, and keyword queries.
-
-See the [plugin README](integrations/astrbot_plugin_anisignal/README.md) for full command reference.
+- **AstrBot** ([`AstrBot_Plugin_AniSignal`](https://github.com/tianyin231/AstrBot_Plugin_AniSignal), source in [`integrations/astrbot_plugin_anisignal`](integrations/astrbot_plugin_anisignal)): install via **Plugin Management → Install from Link** (`https://github.com/tianyin231/AstrBot_Plugin_AniSignal`), configure your AniSignal URL and user token, then send `/情报订阅` or `/帮助`. See the [AstrBot plugin README](integrations/astrbot_plugin_anisignal/README.md).
+- **DeepSeek Harness (`dsh`)** ([`DSH_Plugin_AniSignal`](https://github.com/tianyin231/DSH_Plugin_AniSignal), source in [`integrations/dsh_plugin_anisignal`](integrations/dsh_plugin_anisignal)): compatible with `@tencent-connect/dsh-qqbot`, `dsh-onebot-qq`, and `dsh-qq-onebot`, with native DSH Settings UI, LLM tools, and lightweight SVG/PNG brief cards. See the [DSH plugin README](integrations/dsh_plugin_anisignal/README.md).
 
 ## Documentation
 

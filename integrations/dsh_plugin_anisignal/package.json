@@ -1,0 +1,84 @@
+{
+  "name": "dsh-plugin-anisignal",
+  "version": "1.14.7",
+  "description": "AniSignal 情报助手（DeepSeek Harness 插件）：在 QQ 群聊与私聊中提供分区订阅、每日速报卡片、即时快讯、商品履约进展与定时提醒。",
+  "author": "AniSignal",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "anisignal",
+    "qqbot",
+    "onebot",
+    "napcat",
+    "cordis",
+    "plugin"
+  ],
+  "engines": {
+    "node": ">=20.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tianyin231/DSH_Plugin_AniSignal.git"
+  },
+  "homepage": "https://github.com/tianyin231/DSH_Plugin_AniSignal#readme",
+  "bugs": {
+    "url": "https://github.com/tianyin231/DSH_Plugin_AniSignal/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    },
+    "install": {
+      "preferred": "tarball",
+      "tarball": "https://codeload.github.com/tianyin231/DSH_Plugin_AniSignal/tar.gz/refs/heads/main",
+      "zip": "https://codeload.github.com/tianyin231/DSH_Plugin_AniSignal/zip/refs/heads/main",
+      "git": "https://github.com/tianyin231/DSH_Plugin_AniSignal.git"
+    }
+  }
+}
