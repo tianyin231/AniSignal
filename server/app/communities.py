@@ -344,6 +344,30 @@ async def sync_communities(session) -> dict:
     return raw if isinstance(raw, dict) else {"disabled_builtins": [], "deleted_builtins": [], "builtin_overrides": {}, "custom": []}
 
 
+FRESH_INSTALL_ACTIVE = ("ai",)
+
+
+async def seed_fresh_install_communities(session) -> bool:
+    """全新空库首次启动时只保留 AI 分区启用，其余内置分区先隐藏，导入预设或手动启用时再出现。
+
+    只在「从没保存过分区配置、没有任何采集目标和内容」时写一次；已有站点（哪怕从没改过分区）不受影响。
+    """
+    from sqlalchemy import func, select
+
+    from app.models import CollectTarget, RawContent
+    from app.services.settings import get_setting, set_setting
+
+    if await get_setting(session, "communities") is not None:
+        return False
+    if await session.scalar(select(func.count(CollectTarget.id))) or await session.scalar(select(func.count(RawContent.id))):
+        return False
+    await set_setting(session, "communities", {
+        "disabled_builtins": [k for k in BUILTIN_COMMUNITIES if k not in FRESH_INSTALL_ACTIVE],
+        "deleted_builtins": [], "builtin_overrides": {}, "custom": [],
+    })
+    return True
+
+
 async def ensure_communities_synced(session, *, force: bool = False) -> None:
     if not force and _last_sync_at and (time.monotonic() - _last_sync_at) < _SYNC_TTL_SECONDS:
         return

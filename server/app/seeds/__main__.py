@@ -8,8 +8,23 @@ from app.db import SessionLocal
 from app.seeds import import_preset_targets, load_preset_packs
 
 
+async def _restore_communities(session, communities: list[str] | None) -> None:
+    """和后台「导入预设」一致：导入的预设分区如果被隐藏或删除过，顺带恢复启用。"""
+    from app.services.settings import get_setting, set_setting
+
+    raw = await get_setting(session, "communities")
+    if not isinstance(raw, dict):
+        return
+    wanted = set(communities if communities is not None else load_preset_packs())
+    disabled = [k for k in raw.get("disabled_builtins") or [] if k not in wanted]
+    deleted = [k for k in raw.get("deleted_builtins") or [] if k not in wanted]
+    if disabled != (raw.get("disabled_builtins") or []) or deleted != (raw.get("deleted_builtins") or []):
+        await set_setting(session, "communities", {**raw, "disabled_builtins": disabled, "deleted_builtins": deleted})
+
+
 async def _run(communities: list[str] | None) -> None:
     async with SessionLocal() as session:
+        await _restore_communities(session, communities)
         result = await import_preset_targets(session, communities)
     print(json.dumps(result, ensure_ascii=False))
 

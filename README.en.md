@@ -138,7 +138,7 @@ docker compose ps
 
 Open **`http://127.0.0.1:8090/admin`** and enter `ANISIGNAL_ADMIN_TOKEN` (you can bind your personal site account as an admin on first login so future visits enter `/admin` directly from the avatar menu):
 
-1. **Sections & Sources (`/admin/targets`)**: Create custom sections, import preset packs in one click, and optionally scan a QR code for Bilibili login.
+1. **Sections & Sources (`/admin/targets`)**: On a fresh install only the AI section is enabled; other built-in sections stay hidden until you import their preset pack or enable them. Create custom sections, import preset packs in one click, and optionally scan a QR code for Bilibili login.
 2. **AI Models (optional, `/admin/ai`)**: Connect any OpenAI-compatible endpoint to unlock summaries, calendar extraction, merch discovery, and curated AI News.
 3. **Email & Branding (optional, `/admin/settings` & `/admin/users`)**: Configure SMTP for digests and password resets, or manage verification codes directly in `/admin/users`.
 
