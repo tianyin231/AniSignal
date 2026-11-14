@@ -220,3 +220,9 @@ Developer tools and agent hosts: `ChatGPT(codex)` · `Claude Code` · `ZCode` ·
 </a>
 
 </div>
+
+## Random Wallpaper Credits
+
+The optional random backgrounds are provided by [Yeqing Blog's random anime image API](https://www.yeqing.net/blog/acg-api/). Thanks to Yeqing for maintaining and sharing the service. Its Go implementation is open source under the MIT license at [Yeqingky/acg-api](https://github.com/Yeqingky/acg-api).
+
+The service collects images from the internet and may include AI-generated images. Image copyrights belong to their respective creators; see the [service's image copyright statement](https://www.yeqing.net/blog/acg-api/#版权声明).

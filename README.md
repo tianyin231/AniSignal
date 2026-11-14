@@ -218,3 +218,9 @@ Copyright © 2026 tianyin231 与贡献者。本项目基于 [GNU AGPL-3.0](LICEN
 </a>
 
 </div>
+
+## 随机壁纸来源
+
+站点可选的随机背景由[夜轻Blog 的随机二次元图片 API](https://www.yeqing.net/blog/acg-api/)提供，感谢夜轻的维护与分享。服务代码使用 Go 编写，以 MIT 协议开源于 [Yeqingky/acg-api](https://github.com/Yeqingky/acg-api)。
+
+图片由该服务从互联网收集，可能包含 AI 生成图片，版权归原作者所有；具体说明见[服务文档中的版权声明](https://www.yeqing.net/blog/acg-api/#版权声明)。
