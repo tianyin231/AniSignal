@@ -74,7 +74,8 @@ function remove(row: CustomFeedRow) {
 }
 function statusOf(row: CustomFeedRow) {
   if (row.status !== 'active') return { label: '管理员已停用', dot: 'bg-hot' }
-  return row.enabled ? { label: '采集中', dot: 'bg-ok' } : { label: '已暂停', dot: 'bg-faint' }
+  if (!row.enabled) return { label: '已暂停', dot: 'bg-faint' }
+  return row.last_error ? { label: '采集失败', dot: 'bg-hot' } : { label: '采集中', dot: 'bg-ok' }
 }
 function lastCollected(row: CustomFeedRow) {
   const ts = toTimestamp(row.last_collected_at)
@@ -195,6 +196,7 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
             <span>· 每 {{ row.interval_minutes }} 分钟</span>
             <span>· {{ lastCollected(row) }}</span>
           </p>
+          <p v-if="row.enabled && row.last_error" class="mt-1 text-xs text-hot">上次采集失败：{{ row.last_error }}</p>
           <p v-if="row.min_views || row.filters?.include?.length || row.filters?.exclude?.length" class="mt-1 text-xs text-faint">
             <template v-if="row.min_views">播放 ≥ {{ row.min_views.toLocaleString('zh-CN') }}　</template>
             <template v-if="row.filters?.include?.length">包含：{{ row.filters.include.join('、') }}　</template>

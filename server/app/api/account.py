@@ -520,7 +520,10 @@ async def _ensure_safe_custom_target(kind: str, target: str) -> None:
         try:
             await public_feed_url(target)
         except CollectorError as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+            from app.services.collect_errors import user_facing_error
+
+            # 普通用户看不到也改不了服务端配置，提示里不带解析地址和环境变量名。
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, user_facing_error("rss", str(exc))) from exc
 
 
 def _validate_custom_payload(body: dict, *, partial: bool = False, default_kind: str = "") -> dict:
@@ -598,6 +601,13 @@ async def my_custom_feeds(
         ).scalars()
     )
     counts = await count_feed_items(session, [f.id for f in feeds])
+    from app.models import CustomFeedSource
+    from app.services.collect_errors import user_facing_error
+
+    source_ids = {f.source_id for f in feeds if f.source_id}
+    errors = dict((await session.execute(
+        select(CustomFeedSource.id, CustomFeedSource.last_error).where(CustomFeedSource.id.in_(source_ids))
+    )).all()) if source_ids else {}
     return [
         {
             "id": f.id,
@@ -612,6 +622,8 @@ async def my_custom_feeds(
             "status": f.status,
             "item_count": counts.get(f.id, 0),
             "last_collected_at": f.last_collected_at,
+            # 只给友好文案，不回显上游 URL 或服务端配置项。
+            "last_error": user_facing_error(f.platform, errors.get(f.source_id)),
             "interval_minutes": f.interval_minutes,
             "filters": f.filters,
             "created_at": f.created_at,
