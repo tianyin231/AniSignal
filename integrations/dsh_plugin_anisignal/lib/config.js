@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-export const VERSION = '1.14.7';
+export const VERSION = '1.14.8';
 export const UMO_PATTERN = /^[^:]+:(FriendMessage|GroupMessage):[^:]+$/;
 export const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 

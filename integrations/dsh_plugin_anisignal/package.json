@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-anisignal",
-  "version": "1.14.7",
+  "version": "1.14.8",
   "description": "AniSignal 情报助手（DeepSeek Harness 插件）：在 QQ 群聊与私聊中提供分区订阅、每日速报卡片、即时快讯、商品履约进展与定时提醒。",
   "author": "AniSignal",
   "license": "AGPL-3.0-or-later",
@@ -27,6 +27,9 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "ajv": "^8.17.1"
   },
   "keywords": [
     "deepseek-harness",

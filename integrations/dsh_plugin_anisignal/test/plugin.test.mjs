@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
+import Ajv from 'ajv';
 
 import { buildBriefCardSvg, renderBriefCardPng, wrapCardLines } from '../lib/card.js';
 import {
@@ -16,6 +17,7 @@ import {
   normalizeViewSubmission,
   toPluginTarget,
   toServerTarget,
+  VERSION,
 } from '../lib/config.js';
 import { AniSignalService } from '../lib/index.js';
 import { OutboundDispatcher } from '../lib/senders.js';
@@ -28,6 +30,31 @@ function withTempDir(fn) {
     .then(() => fn(dir))
     .finally(() => rmSync(dir, { recursive: true, force: true }));
 }
+
+test('tools: all model-facing schemas pass standard JSON Schema validation', () => {
+  const validator = new Ajv({ allErrors: true });
+  const definitions = AniSignalService.prototype.createToolDefinitions.call({});
+  assert.deepEqual(definitions.map((tool) => tool.name), [
+    'anisignal_query', 'anisignal_expand', 'anisignal_subscription',
+    'anisignal_reminder', 'anisignal_session_info',
+  ]);
+
+  for (const tool of definitions) {
+    for (const [name, schema] of Object.entries({ parameters: tool.parameters, output: tool.output.schema })) {
+      assert.ok(validator.validateSchema(schema), `${tool.name}.${name}: ${validator.errorsText()}`);
+      assert.doesNotThrow(() => validator.compile(schema), `${tool.name}.${name} must compile`);
+    }
+    const result = { text: '查询结果', items: [{ title: '公告', verified: true }], error: null };
+    assert.ok(validator.compile(tool.output.schema)(result), `${tool.name} accepts its JSON object result`);
+    const rendered = tool.output.render({}, result);
+    assert.deepEqual(JSON.parse(rendered[0].text), result);
+  }
+});
+
+test('release: package and runtime versions match', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.version, VERSION);
+});
 
 test('config: toServerTarget, secret preservation, and applySubscription', () => {
   const base = defaultConfig();

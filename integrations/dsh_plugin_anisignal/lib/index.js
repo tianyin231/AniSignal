@@ -707,7 +707,8 @@ export class AniSignalService {
 
   createToolDefinitions() {
     const jsonOut = {
-      schema: { type: 'json' },
+      // 注册接口接收标准 JSON Schema；这些工具统一返回对象。
+      schema: { type: 'object' },
       render: (_args, value) => [{
         type: 'text',
         text: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
