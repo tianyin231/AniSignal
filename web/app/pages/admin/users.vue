@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AdminDelivery, AdminUser, AdminUserDetail, AdminUserList } from '~/utils/admin-types'
+import type { AdminBotCapacity, AdminDelivery, AdminUser, AdminUserDetail, AdminUserList } from '~/utils/admin-types'
 import { fmtTime } from '~/utils/admin-types'
 import { copyText } from '~/utils/clipboard'
 import { Ban, CheckCircle2, Copy, KeyRound, Mail, RotateCw, Search, Send } from 'lucide-vue-next'
@@ -85,12 +85,21 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize))
 const detail = ref<AdminUserDetail | null>(null)
 const detailLoading = ref(false)
 const showDetail = ref(false)
+const capacityBusy = ref(false)
+const capacityForm = reactive<{ max_bot_clients: number | '', max_bot_targets: number | '' }>({ max_bot_clients: '', max_bot_targets: '' })
+
+function applyBotCapacity(capacity: AdminBotCapacity) {
+  capacityForm.max_bot_clients = capacity.overrides.max_bot_clients ?? ''
+  capacityForm.max_bot_targets = capacity.overrides.max_bot_targets ?? ''
+}
 
 async function openDetail(user: AdminUser) {
   detailLoading.value = true
+  detail.value = null
   showDetail.value = true
   try {
     detail.value = await api<AdminUserDetail>(`/api/admin/users/${user.id}`)
+    applyBotCapacity(detail.value.bot_capacity)
   } catch (exc: any) {
     toast.err(`详情加载失败：${exc?.message ?? exc}`)
     showDetail.value = false
@@ -100,7 +109,30 @@ async function openDetail(user: AdminUser) {
 }
 
 function closeDetail() {
+  if (capacityBusy.value) return
   showDetail.value = false
+}
+
+async function saveBotCapacity(reset = false) {
+  if (!detail.value || capacityBusy.value) return
+  const userId = detail.value.id
+  capacityBusy.value = true
+  try {
+    const capacity = await api<AdminBotCapacity>(`/api/admin/users/${userId}/bot-capacity`, {
+      method: 'PATCH',
+      body: {
+        max_bot_clients: reset || capacityForm.max_bot_clients === '' ? null : capacityForm.max_bot_clients,
+        max_bot_targets: reset || capacityForm.max_bot_targets === '' ? null : capacityForm.max_bot_targets,
+      },
+    })
+    detail.value.bot_capacity = capacity
+    applyBotCapacity(capacity)
+    toast.ok(reset ? '机器人推送容量已恢复默认' : '机器人推送容量已保存')
+  } catch (exc: any) {
+    toast.err(`容量保存失败：${exc?.data?.detail ?? exc?.message ?? exc}`)
+  } finally {
+    capacityBusy.value = false
+  }
 }
 
 /* ---------- 单发邮件模态框 ---------- */
@@ -491,7 +523,7 @@ const deliveryStatusLabel: Record<string, string> = {
                 >
                   <CheckCircle2 :size="12" class="mr-0.5 inline" />激活
                 </button>
-                <button class="min-h-9 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="openDetail(u)">详情</button>
+                <button class="min-h-9 rounded px-2 text-xs text-blue-600 hover:underline dark:text-blue-300" @click="openDetail(u)">详情 / 容量</button>
                 <button
                   v-if="u.status === 'active'"
                   class="min-h-9 rounded px-2 text-xs hover:underline disabled:cursor-wait"
@@ -555,7 +587,7 @@ const deliveryStatusLabel: Record<string, string> = {
     <Teleport to="body">
       <div v-if="showDetail" class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-[10vh]">
         <div class="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" @click="closeDetail" />
-        <div class="popover relative w-full max-w-xl p-5">
+        <div class="popover relative w-full max-w-xl p-5" role="dialog" aria-label="用户详情与推送容量" aria-modal="true">
           <div class="flex flex-wrap items-start justify-between gap-2">
             <div class="min-w-0">
               <h2 class="truncate text-sm font-semibold text-ink">{{ detail?.email }}</h2>
@@ -567,12 +599,33 @@ const deliveryStatusLabel: Record<string, string> = {
                 class="rounded-md border border-line px-2.5 py-1.5 text-xs text-ink-2 transition-colors hover:bg-chip"
                 @click="openMail(detail)"
               >发邮件</button>
-              <button class="text-xs text-faint hover:text-ink-2" @click="closeDetail">关闭</button>
+              <button class="text-xs text-faint hover:text-ink-2 disabled:opacity-50" :disabled="capacityBusy" @click="closeDetail">关闭</button>
             </div>
           </div>
           <p v-if="detail?.status === 'banned'" class="mt-3 rounded-md bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
             已封禁{{ detail?.banned_at ? `（${fmtTime(detail.banned_at)}）` : '' }}{{ detail?.banned_reason ? `：${detail.banned_reason}` : '' }}
           </p>
+          <p v-if="detailLoading" class="mt-4 text-sm text-muted">正在加载用户详情…</p>
+          <form v-if="detail && !detailLoading" class="mt-4 rounded-lg border border-line p-3.5" aria-label="机器人推送容量" @submit.prevent="saveBotCapacity()">
+            <h3 class="text-sm font-medium text-ink">机器人推送容量</h3>
+            <p class="mt-1 text-xs text-muted">留空使用默认配额；会话数为该用户所有接入合计。</p>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+              <label class="text-xs text-ink-2">
+                机器人接入上限（Token）
+                <input v-model.number="capacityForm.max_bot_clients" type="number" min="1" max="100" step="1" :disabled="capacityBusy" :placeholder="`默认 ${detail.bot_capacity.default_max_bot_clients}`" class="input mt-1 block w-full px-3 py-2 text-sm">
+                <span class="mt-1 block text-faint">已用 {{ detail.bot_capacity.bot_clients_used }} / {{ detail.bot_capacity.max_bot_clients }} · 默认 {{ detail.bot_capacity.default_max_bot_clients }}</span>
+              </label>
+              <label class="text-xs text-ink-2">
+                启用会话上限
+                <input v-model.number="capacityForm.max_bot_targets" type="number" min="1" max="1000" step="1" :disabled="capacityBusy" :placeholder="`默认 ${detail.bot_capacity.default_max_bot_targets}`" class="input mt-1 block w-full px-3 py-2 text-sm">
+                <span class="mt-1 block text-faint">已用 {{ detail.bot_capacity.bot_targets_used }} / {{ detail.bot_capacity.max_bot_targets }} · 默认 {{ detail.bot_capacity.default_max_bot_targets }}</span>
+              </label>
+            </div>
+            <div class="mt-3 flex flex-wrap justify-end gap-2">
+              <button type="button" class="btn-ghost px-3 py-2 text-xs" :disabled="capacityBusy || (detail.bot_capacity.overrides.max_bot_clients === null && detail.bot_capacity.overrides.max_bot_targets === null)" @click="saveBotCapacity(true)">恢复默认</button>
+              <button type="submit" class="btn-primary px-3 py-2 text-xs" :disabled="capacityBusy">{{ capacityBusy ? '保存中…' : '保存容量' }}</button>
+            </div>
+          </form>
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
               <h3 class="text-xs font-medium text-faint">关键词订阅（{{ detail?.keywords.length ?? 0 }}）</h3>

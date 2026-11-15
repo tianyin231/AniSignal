@@ -8,6 +8,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,8 +16,10 @@ from app.api.auth import _current_user
 from app.api.deps import get_queue, require_admin
 from app.clock import utcnow
 from app.db import get_session
-from app.models import NotificationDelivery, User, UserKeyword
+from app.models import NotificationDelivery, SiteSetting, User, UserKeyword
+from app.services.account_limits import quota_view
 from app.services.auth import revoke_all_sessions
+from app.services.custom_policy import get_policy, insert_ignoring_duplicate
 from app.services.email_templates import notice_email
 from app.services.notifications import beijing_today
 from app.services.queue import BaseQueue
@@ -29,6 +32,24 @@ router = APIRouter(prefix="/api/admin/users", dependencies=[Depends(require_admi
 BROADCAST_CHUNK = 50
 MAX_BROADCAST_TARGETS = 20_000
 _EMAIL_SUBJECT_MAX = 200
+
+
+class BotCapacityBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_bot_clients: int | None = Field(default=None, ge=1, le=100, strict=True)
+    max_bot_targets: int | None = Field(default=None, ge=1, le=1000, strict=True)
+
+
+async def _bot_capacity(session: AsyncSession, user_id: int) -> dict:
+    policy = await get_policy(session)
+    quota = await quota_view(session, user_id)
+    override = policy["user_overrides"].get(str(user_id), {})
+    return {
+        **{key: quota[key] for key in ("max_bot_clients", "max_bot_targets", "bot_clients_used", "bot_targets_used")},
+        "default_max_bot_clients": policy["max_bot_clients_per_user"],
+        "default_max_bot_targets": policy["max_bot_targets_per_user"],
+        "overrides": {key: override.get(key) for key in ("max_bot_clients", "max_bot_targets")},
+    }
 
 
 async def _require_smtp(session: AsyncSession) -> None:
@@ -157,6 +178,7 @@ async def user_detail(user_id: int, session: AsyncSession = Depends(get_session)
     ) or 0
     return {
         **_user_out(user, len(keywords), is_admin=user.id in admin_ids),
+        "bot_capacity": await _bot_capacity(session, user_id),
         "keywords": [
             {"id": k.id, "keyword": k.keyword, "enabled": k.enabled, "created_at": k.created_at}
             for k in keywords
@@ -175,6 +197,41 @@ async def user_detail(user_id: int, session: AsyncSession = Depends(get_session)
             for d in deliveries
         ],
     }
+
+
+@router.patch("/{user_id}/bot-capacity")
+async def update_bot_capacity(user_id: int, body: BotCapacityBody, session: AsyncSession = Depends(get_session)):
+    await _get_user_or_404(session, user_id)
+    # 与创建 Token、启用会话共用用户锁，容量调整期间不会插入新的接入或会话。
+    await session.scalar(select(User).where(User.id == user_id).with_for_update())
+    await insert_ignoring_duplicate(session, SiteSetting, key="custom_feed_policy", value={})
+    row = await session.scalar(select(SiteSetting).where(SiteSetting.key == "custom_feed_policy")
+        .with_for_update().execution_options(populate_existing=True))
+    policy = dict(row.value or {})
+    overrides = dict(policy.get("user_overrides", {}))
+    override = dict(overrides.get(str(user_id), {}))
+    for key, value in body.model_dump(exclude_unset=True).items():
+        if value is None:
+            override.pop(key, None)
+        else:
+            override[key] = value
+
+    capacity = await _bot_capacity(session, user_id)
+    for key, used_key, label in (("max_bot_clients", "bot_clients_used", "机器人接入"),
+                                 ("max_bot_targets", "bot_targets_used", "启用会话")):
+        limit = override.get(key, capacity[f"default_{key}"])
+        if limit < capacity[used_key]:
+            raise HTTPException(409, f"当前已有 {capacity[used_key]} 个{label}，请先停用多余项后再降低容量")
+
+    if override:
+        overrides[str(user_id)] = override
+    else:
+        overrides.pop(str(user_id), None)
+    # 只改这个用户的两个 Bot 额度，其余用户、全站默认值和采集/通知额度均保留。
+    row.value = {**policy, "user_overrides": overrides}
+    await session.commit()
+    logger.info("admin updated bot capacity for user %s: %s", user_id, body.model_dump(exclude_unset=True))
+    return await _bot_capacity(session, user_id)
 
 
 @router.patch("/{user_id}")

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.models import BotDelivery, CustomFeed, NotificationDelivery
 from app.services.account_limits import claim_notification, quota_view
 from app.services.notifications import send_admin_email
-from app.services.settings import set_setting
+from app.services.settings import get_setting, set_setting
 from tests.test_user_bot_tokens import account, issue, settings
 
 
@@ -135,3 +135,74 @@ async def test_admin_mail_does_not_consume_customer_notification_budget(session,
     monkeypatch.setattr('app.services.notifications.send_email', send)
     assert (await send_admin_email(session, mail.id))['status'] == 'sent'
     assert (await quota_view(session, user.id))['notifications_used'] == 1
+
+
+async def test_user_management_shows_bot_capacity_and_requires_admin_to_edit(client, session, admin_headers):
+    user, cookie = await account(session)
+    response = await client.get(f'/api/admin/users/{user.id}', headers=admin_headers)
+    capacity = response.json()['bot_capacity']
+    assert capacity == {
+        'max_bot_clients': 1, 'max_bot_targets': 3, 'bot_clients_used': 0, 'bot_targets_used': 0,
+        'default_max_bot_clients': 1, 'default_max_bot_targets': 3,
+        'overrides': {'max_bot_clients': None, 'max_bot_targets': None},
+    }
+    path = f'/api/admin/users/{user.id}/bot-capacity'
+    assert (await client.patch(path, headers=cookie, json={'max_bot_clients': 2})).status_code in (401, 403)
+    for invalid in ({'max_bot_clients': 0}, {'max_bot_clients': 101}, {'max_bot_clients': True},
+                    {'max_bot_targets': 1001}, {'max_bot_targets': 1.5}, {'daily_notifications': 999}):
+        assert (await client.patch(path, headers=admin_headers, json=invalid)).status_code == 422
+    assert (await client.patch('/api/admin/users/99999/bot-capacity', headers=admin_headers,
+                               json={'max_bot_clients': 2})).status_code == 404
+
+
+async def test_user_bot_capacity_changes_are_enforced_and_preserve_defaults_and_other_quotas(client, session, admin_headers):
+    owner, cookie = await account(session)
+    other, other_cookie = await account(session, 'other@example.com')
+    stored = {
+        'custom_hourly_budget': 42,
+        'user_overrides': {
+            str(owner.id): {'max_feeds': 9, 'daily_notifications': 400},
+            str(other.id): {'max_bot_clients': 2, 'max_bot_targets': 7},
+        },
+    }
+    await set_setting(session, 'custom_feed_policy', stored)
+    path = f'/api/admin/users/{owner.id}/bot-capacity'
+    response = await client.patch(path, headers=admin_headers, json={'max_bot_clients': 2, 'max_bot_targets': 5})
+    assert response.status_code == 200
+    assert response.json()['default_max_bot_clients'] == 1 and response.json()['default_max_bot_targets'] == 3
+    policy = await get_setting(session, 'custom_feed_policy')
+    assert policy == {**stored, 'user_overrides': {**stored['user_overrides'], str(owner.id): {
+        **stored['user_overrides'][str(owner.id)], 'max_bot_clients': 2, 'max_bot_targets': 5,
+    }}}
+    first, key1 = await issue(client, cookie, 'AstrBot')
+    second, key2 = await issue(client, cookie, 'DSH')
+    assert (await client.post('/api/account/bot-clients', headers=cookie, json={'name': '第三个'})).status_code == 409
+    targets = [settings(f'qq:GroupMessage:{i}') for i in range(3)]
+    assert (await client.post('/api/bot/configuration', headers=key1, json={'targets': targets})).status_code == 200
+    assert (await client.post('/api/bot/configuration', headers=key2, json={'targets': targets[:2]})).status_code == 200
+    assert (await client.post('/api/bot/configuration', headers=key2, json={'targets': targets})).status_code == 409
+    snapshot = (await client.get(f'/api/admin/users/{owner.id}', headers=admin_headers)).json()['bot_capacity']
+    assert snapshot['bot_clients_used'] == 2 and snapshot['bot_targets_used'] == 5
+    for lowered in ({'max_bot_clients': 1}, {'max_bot_targets': 4}, {'max_bot_clients': None, 'max_bot_targets': None}):
+        assert (await client.patch(path, headers=admin_headers, json=lowered)).status_code == 409
+    assert (await get_setting(session, 'custom_feed_policy')) == policy
+    other_quota = (await client.get('/api/account/bot-clients/quota', headers=other_cookie)).json()
+    assert other_quota['max_bot_clients'] == 2 and other_quota['max_bot_targets'] == 7
+
+    # 先停用超出的接入，再恢复默认；其他配额覆盖项仍保留。
+    assert (await client.delete(f"/api/account/bot-clients/{second['id']}", headers=cookie)).status_code == 200
+    reset = await client.patch(path, headers=admin_headers, json={'max_bot_clients': None, 'max_bot_targets': None})
+    assert reset.status_code == 200
+    assert reset.json()['max_bot_clients'] == 1 and reset.json()['max_bot_targets'] == 3
+    assert (await get_setting(session, 'custom_feed_policy')) == stored
+    quota = (await client.get('/api/account/bot-clients/quota', headers=cookie)).json()
+    assert quota['daily_notifications'] == 400 and quota['max_feeds'] == 9
+
+
+async def test_restoring_bot_capacity_removes_only_bot_overrides(client, session, admin_headers):
+    user, _ = await account(session)
+    path = f'/api/admin/users/{user.id}/bot-capacity'
+    assert (await client.patch(path, headers=admin_headers, json={'max_bot_clients': 2})).status_code == 200
+    response = await client.patch(path, headers=admin_headers, json={'max_bot_clients': None})
+    assert response.status_code == 200 and response.json()['max_bot_clients'] == 1
+    assert (await get_setting(session, 'custom_feed_policy')) == {'user_overrides': {}}

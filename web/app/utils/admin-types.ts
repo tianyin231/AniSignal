@@ -62,7 +62,18 @@ export interface AdminDelivery {
   sent_at: string | null
 }
 
+export interface AdminBotCapacity {
+  max_bot_clients: number
+  max_bot_targets: number
+  bot_clients_used: number
+  bot_targets_used: number
+  default_max_bot_clients: number
+  default_max_bot_targets: number
+  overrides: { max_bot_clients: number | null, max_bot_targets: number | null }
+}
+
 export interface AdminUserDetail extends AdminUser {
+  bot_capacity: AdminBotCapacity
   keywords: AdminUserKeyword[]
   sent_total: number
   recent_deliveries: AdminDelivery[]
