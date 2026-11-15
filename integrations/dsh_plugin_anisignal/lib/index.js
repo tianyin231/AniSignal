@@ -28,6 +28,7 @@ import {
 } from './config.js';
 import { OutboundDispatcher } from './senders.js';
 import { SessionResolver } from './session-resolver.js';
+import { PluginUpdateChecker } from './updates.js';
 import {
   currentBeijingLabel,
   detailsHint,
@@ -99,6 +100,7 @@ export class AniSignalService {
       ...options.dispatcherOptions,
     });
     this.cardOptions = options.cardOptions || {};
+    this.updateChecker = options.updateChecker || new PluginUpdateChecker({ fetchImpl: this.fetchImpl });
 
     this.targets = {}; // umo -> server target row
     this.identity = {};
@@ -142,6 +144,7 @@ export class AniSignalService {
       base_url: disk.base_url !== 'https://anisignal.xyz' ? disk.base_url : (patch.base_url || disk.base_url),
       tools_key: disk.tools_key || patch.tools_key || '',
       card_font_path: disk.card_font_path || patch.card_font_path || '',
+      auto_check_updates: this.#statMtime() === -1 ? patch.auto_check_updates !== false : disk.auto_check_updates,
       qqbot_app_id: disk.qqbot_app_id || patch.qqbot_app_id || '',
       qqbot_app_secret: disk.qqbot_app_secret || patch.qqbot_app_secret || '',
       onebot_http_url: disk.onebot_http_url || patch.onebot_http_url || '',
@@ -960,6 +963,39 @@ export class AniSignalService {
     const disposers = [
       webServer.register({
         kind: 'exact',
+        path: '/anisignal/updates',
+        handler: async (req, res) => {
+          if (!trustedOrigin(req)) return sendJson(res, 403, { error: 'forbidden' });
+          if (req.method !== 'GET' && req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' });
+          let body = {};
+          if (req.method === 'POST') {
+            try {
+              body = await readJsonBody(req);
+            } catch {
+              return sendJson(res, 400, { error: '无效请求内容' });
+            }
+            if (body.auto_check !== undefined) {
+              if (typeof body.auto_check !== 'boolean') return sendJson(res, 400, { error: '自动检查设置应为开关值' });
+              const saved = await this.#withConfigLock(() => {
+                if (body.revision && body.revision !== configurationRevision(this.config)) return false;
+                this.saveLocalConfig({ ...this.config, auto_check_updates: body.auto_check });
+                return true;
+              });
+              if (!saved) return sendJson(res, 409, { error: '配置已在其他窗口更新，请刷新后重试' });
+            }
+          }
+          const manualCheck = req.method === 'POST' && body.auto_check === undefined;
+          if (manualCheck || this.config.auto_check_updates) {
+            await this.updateChecker.check({ force: manualCheck });
+          }
+          sendJson(res, 200, {
+            update: { ...this.updateChecker.snapshot(), auto_check: this.config.auto_check_updates },
+            revision: configurationRevision(this.config),
+          });
+        },
+      }),
+      webServer.register({
+        kind: 'exact',
         path: '/anisignal/settings',
         handler: async (req, res) => {
           if (!trustedOrigin(req)) return sendJson(res, 403, { error: 'forbidden' });
@@ -1103,7 +1139,14 @@ export class AniSignalService {
     }, 15_000);
     outboxTimer.unref?.();
 
-    this.#timers.push(syncTimer, outboxTimer);
+    const checkUpdates = () => {
+      if (this.config.auto_check_updates) void this.updateChecker.check();
+    };
+    checkUpdates();
+    const updateTimer = setInterval(checkUpdates, 60_000);
+    updateTimer.unref?.();
+
+    this.#timers.push(syncTimer, outboxTimer, updateTimer);
   }
 
   stop() {

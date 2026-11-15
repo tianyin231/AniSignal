@@ -4,6 +4,7 @@ export interface AniSignalPatchConfig {
   base_url?: string;
   tools_key?: string;
   card_font_path?: string;
+  auto_check_updates?: boolean;
   qqbot_app_id?: string;
   qqbot_app_secret?: string;
   qqbot_markdown?: boolean;

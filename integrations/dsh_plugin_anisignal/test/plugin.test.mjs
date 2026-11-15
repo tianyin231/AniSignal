@@ -545,6 +545,8 @@ test('client.js: registers module with window.__ModuleLoader__ and mounts settin
       },
     },
   });
-  assert.equal(registered.length, 1);
+  assert.equal(registered.length, 2);
   assert.equal(registered[0].meta.id, 'anisignal');
+  assert.equal(registered[1].meta.id, 'anisignal-updates');
+  assert.equal(registered[1].comp({ subject: { kind: 'bundle', pkg: { name: 'another-plugin' } } }), null);
 });

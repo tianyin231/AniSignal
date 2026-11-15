@@ -126,6 +126,142 @@
       const h = React.createElement;
       const { useState, useEffect, useCallback } = React;
 
+      function PluginUpdates({ pluginContext, revision, onRevision }) {
+        const [update, setUpdate] = useState(null);
+        const [busy, setBusy] = useState('checking');
+        const [notice, setNotice] = useState(null);
+        const [restartRequired, setRestartRequired] = useState(false);
+
+        const readUpdate = useCallback(async (body) => {
+          const resp = await fetch('/anisignal/updates', body === undefined
+            ? { cache: 'no-store' }
+            : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+          setUpdate(data.update);
+          return data;
+        }, []);
+
+        useEffect(() => {
+          let active = true;
+          const refresh = async (initial = false) => {
+            try {
+              await readUpdate();
+            } catch (err) {
+              if (active) setNotice({ kind: 'err', text: `读取更新状态失败：${err?.message || err}` });
+            } finally {
+              if (active && initial) setBusy('');
+            }
+          };
+          void refresh(true);
+          // 展示后台定时检查的结果；外部版本查询本身有六小时缓存。
+          const timer = setInterval(() => { void refresh(); }, 60_000);
+          return () => { active = false; clearInterval(timer); };
+        }, [readUpdate]);
+
+        const handleCheck = async () => {
+          setBusy('checking');
+          setNotice(null);
+          try {
+            await readUpdate({});
+          } catch (err) {
+            setNotice({ kind: 'err', text: `检查更新失败：${err?.message || err}` });
+          } finally {
+            setBusy('');
+          }
+        };
+
+        const handlePreference = async (autoCheck) => {
+          setBusy('preference');
+          setNotice(null);
+          const previous = update;
+          setUpdate((prev) => ({ ...prev, auto_check: autoCheck }));
+          try {
+            const data = await readUpdate({ auto_check: autoCheck, revision });
+            onRevision?.(data.revision);
+            setNotice({ kind: 'ok', text: autoCheck ? '已开启自动检查更新' : '已关闭自动检查更新' });
+          } catch (err) {
+            setUpdate(previous);
+            setNotice({ kind: 'err', text: `保存更新设置失败：${err?.message || err}` });
+          } finally {
+            setBusy('');
+          }
+        };
+
+        const handleInstall = async () => {
+          setBusy('installing');
+          setNotice({ kind: 'ok', text: '正在交给 DSH 安装更新，期间插件可能暂时重载…' });
+          try {
+            const manager = pluginContext?.remote?.pluginManager;
+            if (!manager) throw new Error('当前 DSH 未提供插件更新接口，请升级 DSH');
+            const listed = await manager.listBundles();
+            if (!listed.ok) throw new Error(listed.error?.message || '无权读取插件列表');
+            const bundle = listed.value.find((item) => item.name === PACKAGE_NAME);
+            if (bundle?.update !== 'git') {
+              throw new Error('当前安装方式不支持直接更新。请在 DSH 插件页改用 github:tianyin231/DSH_Plugin_AniSignal 安装一次，之后即可使用更新按钮');
+            }
+            const answer = await manager.updateBundle(PACKAGE_NAME, update.latest_version, {
+              spec: update.spec,
+              requestId: crypto.randomUUID(),
+            });
+            if (!answer.ok) throw new Error(answer.error?.message || '更新请求失败');
+            const { result, restore } = answer.value;
+            if (result.application !== 'applied' && result.application !== 'restart-required') {
+              const restored = restore?.application === 'applied' || restore?.application === 'restart-required';
+              throw new Error((result.error?.diagnostic || result.error?.code || '更新未完成')
+                + (restored ? '；DSH 已恢复旧版本' : '；请到 DSH 插件页查看安装详情'));
+            }
+            setRestartRequired(result.application === 'restart-required');
+            setNotice({ kind: 'ok', text: result.application === 'restart-required'
+              ? `v${update.latest_version} 已安装，重启 DSH 后生效`
+              : `已更新至 v${update.latest_version}，重新打开插件页面即可查看` });
+            setUpdate((prev) => ({ ...prev, available: false,
+              current_version: result.application === 'applied' ? update.latest_version : prev.current_version }));
+          } catch (err) {
+            setNotice({ kind: 'err', text: `更新失败：${err?.message || err}` });
+          } finally {
+            setBusy('');
+          }
+        };
+
+        return h('section', { className: 'anisg-card', 'aria-label': '插件更新' },
+          h('div', { className: 'anisg-between' },
+            h('div', { className: 'anisg-row' },
+              h('strong', null, '插件更新'),
+              update ? h('span', { className: 'anisg-badge' }, `当前 v${update.current_version}`) : null,
+              update?.available ? h('span', { className: 'anisg-badge anisg-badge-ok' }, `发现新版 v${update.latest_version}`)
+                : (update?.latest_version && !update.error && !restartRequired ? h('span', null, '已是最新版本') : null),
+            ),
+            h('div', { className: 'anisg-row' },
+              h('button', { type: 'button', className: 'anisg-btn', onClick: handleCheck, disabled: Boolean(busy) || restartRequired },
+                busy === 'checking' ? '检查中…' : '检查更新'),
+              h('button', {
+                type: 'button', className: 'anisg-btn anisg-btn-primary', onClick: handleInstall,
+                disabled: Boolean(busy) || !update?.available || Boolean(update?.error) || restartRequired,
+              }, busy === 'installing' ? '更新中…' : (update?.available ? `更新至 v${update.latest_version}` : '更新插件')),
+            ),
+          ),
+          h('div', { className: 'anisg-row', style: { marginTop: '10px' } },
+            h('label', { className: 'anisg-row' },
+              h('input', {
+                type: 'checkbox', checked: update?.auto_check !== false, disabled: Boolean(busy) || !update,
+                onChange: (event) => handlePreference(event.target.checked),
+              }),
+              busy === 'preference' ? '保存中…' : '自动检查更新（每 6 小时）',
+            ),
+            update?.checked_at ? h('span', { className: 'anisg-hint' }, `上次检查：${new Date(update.checked_at).toLocaleString()}`) : null,
+          ),
+          update?.error ? h('div', { className: 'anisg-msg anisg-msg-err', role: 'status', style: { marginTop: '10px', marginBottom: 0 } },
+            `检查更新失败：${update.error}，可点击「检查更新」重试`) : null,
+          notice ? h('div', { className: `anisg-msg anisg-msg-${notice.kind}`, role: 'status', style: { marginTop: '10px', marginBottom: 0 } }, notice.text) : null,
+        );
+      }
+
+      function AniSignalDetailUpdates({ subject, pluginContext }) {
+        if (subject?.kind !== 'bundle' || subject.pkg?.name !== PACKAGE_NAME) return null;
+        return h(PluginUpdates, { pluginContext });
+      }
+
       function TargetEditor({ target, index, catalog, onChange, onRemove }) {
         const [expanded, setExpanded] = useState(index === 0 || !target.umo);
         const sub = target.subscription || {};
@@ -440,7 +576,7 @@
         );
       }
 
-      function AniSignalSettingsSection() {
+      function AniSignalSettingsSection({ pluginContext }) {
         const [view, setView] = useState(null);
         const [loading, setLoading] = useState(true);
         const [saving, setSaving] = useState(false);
@@ -574,6 +710,12 @@
           ),
 
           banner ? h('div', { className: `anisg-msg ${banner.kind === 'ok' ? 'anisg-msg-ok' : 'anisg-msg-err'}` }, banner.text) : null,
+
+          h(PluginUpdates, {
+            pluginContext,
+            revision: view?.revision,
+            onRevision: (revision) => setView((prev) => prev ? { ...prev, revision } : prev),
+          }),
 
           h('div', { className: 'anisg-card' },
             h('div', { className: 'anisg-between' },
@@ -749,8 +891,8 @@
         );
       }
 
-      function AniSignalPage() {
-        return h('div', { className: 'anisg-page' }, h(AniSignalSettingsSection));
+      function AniSignalPage({ pluginContext }) {
+        return h('div', { className: 'anisg-page' }, h(AniSignalSettingsSection, { pluginContext }));
       }
 
       function OpenAniSignalAction({ subject, packageName, onOpen }) {
@@ -766,7 +908,7 @@
 
       return {
         name: 'anisignal-client',
-        inject: ['slots'],
+        inject: ['slots', 'remote', 'remote.pluginManager'],
         apply(ctx) {
           installStyles();
           const disposers = [];
@@ -776,7 +918,14 @@
               id: 'anisignal',
               order: 8,
               label: 'AniSignal 情报助手',
+              inject: () => ({ pluginContext: ctx }),
             }, AniSignalSettingsSection)));
+            disposers.push(ctx.slots.inject('plugins.detail.section', () => ctx.slots.register({
+              name: 'plugins.detail.section',
+              id: 'anisignal-updates',
+              order: 20,
+              inject: () => ({ pluginContext: ctx }),
+            }, AniSignalDetailUpdates)));
           }
 
           if (typeof ctx.inject === 'function') {
@@ -787,6 +936,7 @@
               const stopMain = pageSlots.inject('main', () => pageSlots.register({
                 name: 'main',
                 key: MAIN_PANEL_ID,
+                inject: () => ({ pluginContext: pageCtx }),
               }, AniSignalPage));
               const stopAction = pageSlots.inject('plugins.detail.actions', () => pageSlots.register({
                 name: 'plugins.detail.actions',

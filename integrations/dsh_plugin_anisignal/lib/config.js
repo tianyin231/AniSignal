@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-export const VERSION = '1.14.8';
+export const VERSION = '1.14.9';
 export const UMO_PATTERN = /^[^:]+:(FriendMessage|GroupMessage):[^:]+$/;
 export const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -151,6 +151,7 @@ export function defaultConfig() {
     base_url: 'https://anisignal.xyz',
     tools_key: '',
     card_font_path: '',
+    auto_check_updates: true,
     configuration_imported: false,
     qqbot_app_id: '',
     qqbot_app_secret: '',
@@ -385,6 +386,7 @@ export function normalizeStoredConfig(raw) {
     base_url: baseUrl,
     tools_key: typeof r.tools_key === 'string' ? r.tools_key.trim() : '',
     card_font_path: typeof r.card_font_path === 'string' ? r.card_font_path.trim() : '',
+    auto_check_updates: r.auto_check_updates !== false,
     configuration_imported: Boolean(r.configuration_imported),
     qqbot_app_id: typeof r.qqbot_app_id === 'string' ? r.qqbot_app_id.trim() : '',
     qqbot_app_secret: typeof r.qqbot_app_secret === 'string' ? r.qqbot_app_secret.trim() : '',
