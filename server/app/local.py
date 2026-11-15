@@ -3,9 +3,8 @@
 零依赖跑通面板全链路（不需要 Docker / MySQL / Redis）：
 - SQLite（./server/local.db）自动建表；
 - 采集任务在当前进程内执行（LocalQueue），调度循环由 API lifespan 启动；
-- 首次启动播种两个演示目标：
-  * 鸣潮官网公告（kuro_cn，真实公开 CDN 数据，开箱即采）
-  * B 站关键词搜索（默认停用；如需本地测试 B 站采集，可从 github.com/tamnd/bilibili-cli/releases 下载对应系统的 bili 二进制放入 PATH）
+- 与正式部署一样从空库开始，在管理看板导入需要的预设信源；
+- B 站采集需安装 bili CLI 并放入 PATH，或设置 ANISIGNAL_BILI_BIN。
 
 启动后打开 web（npm run dev）访问 http://localhost:3000/admin，
 Token 默认 local-dev（可用 ANISIGNAL_ADMIN_TOKEN 覆盖）。
@@ -22,54 +21,17 @@ os.environ.setdefault("ANISIGNAL_NEWS_UNIFIED_ENABLED", "true")
 
 import uvicorn  # noqa: E402
 
-from app.clock import utcnow  # noqa: E402
 from app.config import get_settings  # noqa: E402
-from app.db import SessionLocal, engine  # noqa: E402
-from app.models import Base, CollectTarget  # noqa: E402
-
-SEED_TARGETS = [
-    dict(
-        platform="kuro_cn",
-        target_type="notices",
-        target_value="default",
-        display_name="鸣潮官网公告（国服·真实数据）",
-        interval_minutes=30,
-        enabled=True,
-    ),
-    dict(
-        platform="bilibili",
-        target_type="keyword_search",
-        target_value="鸣潮",
-        display_name="B站搜索·鸣潮（需 Docker 内运行）",
-        interval_minutes=60,
-        enabled=False,
-    ),
-    dict(
-        platform="bilibili",
-        target_type="keyword_search",
-        target_value="碧蓝航线",
-        display_name="B站搜索·碧蓝航线（需 Docker 内运行）",
-        interval_minutes=60,
-        enabled=False,
-        community="blhx",
-    ),
-]
+from app.db import engine  # noqa: E402
+from app.models import Base  # noqa: E402
 
 
 async def init_db() -> None:
     async with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            # 浏览页面的读事务不应阻塞后台采集写入。
+            await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
         await conn.run_sync(Base.metadata.create_all)
-
-    from sqlalchemy import func, select
-
-    async with SessionLocal() as session:
-        count = await session.scalar(select(func.count(CollectTarget.id)))
-        if not count:
-            session.add_all(
-                [CollectTarget(**spec, next_run_at=utcnow()) for spec in SEED_TARGETS]
-            )
-            await session.commit()
-            print("已播种演示目标：鸣潮官网公告（启用）+ B站搜索·鸣潮 / 碧蓝航线（停用，带分区标记）")
 
 
 def main() -> None:

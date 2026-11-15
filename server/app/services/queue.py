@@ -105,6 +105,8 @@ class LocalQueue(BaseQueue):
 
     def __init__(self) -> None:
         self._redis = LocalRedis()
+        # SQLite 只有一个写入者，本地采集依次执行，避免多信源事务抢写。
+        self._collect_lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
         self._ai_jobs: set[tuple[str, int]] = set()
         self._ai_slots = asyncio.Semaphore(2)
@@ -191,7 +193,8 @@ class LocalQueue(BaseQueue):
 
     async def _run(self, run_collection, target_id: int) -> None:
         try:
-            await run_collection(self._redis, target_id)
+            async with self._collect_lock:
+                await run_collection(self._redis, target_id)
         except Exception:  # noqa: BLE001 - 与 arq worker 行为一致：单任务失败不终止
             logger.exception("local collect task %s failed", target_id)
 

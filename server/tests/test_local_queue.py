@@ -45,3 +45,32 @@ async def test_local_queue_task_failure_isolated(monkeypatch):
         await asyncio.sleep(0)
     # 失败被吞掉（与 arq worker 行为一致），队列可用
     assert await queue.pending_count() == 0
+
+
+async def test_local_queue_serializes_collections(monkeypatch):
+    entered: list[int] = []
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    second_finished = asyncio.Event()
+
+    async def collect(redis, target_id):
+        entered.append(target_id)
+        if target_id == 1:
+            first_entered.set()
+            await release_first.wait()
+        else:
+            second_finished.set()
+
+    monkeypatch.setattr(collect_module, "run_collection", collect)
+    queue = LocalQueue()
+    try:
+        await queue.enqueue_collect(1)
+        await asyncio.wait_for(first_entered.wait(), timeout=1)
+        await queue.enqueue_collect(2)
+        await asyncio.sleep(0)
+        assert entered == [1]
+        release_first.set()
+        await asyncio.wait_for(second_finished.wait(), timeout=1)
+        assert entered == [1, 2]
+    finally:
+        await queue.aclose()
