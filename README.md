@@ -234,3 +234,12 @@ Copyright © 2026 tianyin231 与贡献者。本项目基于 [GNU AGPL-3.0](LICEN
 站点可选的随机背景由[夜轻Blog 的随机二次元图片 API](https://www.yeqing.net/blog/acg-api/)提供，感谢夜轻的维护与分享。服务代码使用 Go 编写，以 MIT 协议开源于 [Yeqingky/acg-api](https://github.com/Yeqingky/acg-api)。
 
 图片由该服务从互联网收集，可能包含 AI 生成图片，版权归原作者所有；具体说明见[服务文档中的版权声明](https://www.yeqing.net/blog/acg-api/#版权声明)。
+
+## B 站采集组件（bili CLI）
+
+本项目的 B 站公开内容采集（关键词搜索、UP 主投稿与动态读取）依赖开源命令行工具 [`tamnd/bilibili-cli`](https://github.com/tamnd/bilibili-cli)（`bili` CLI，`v0.3.0`），感谢 [tamnd](https://github.com/tamnd)（Duc-Tam Nguyen）的维护与分享。该工具使用 Go 编写，基于 [Apache-2.0](https://github.com/tamnd/bilibili-cli/blob/main/LICENSE) 协议开源：
+
+- **容器部署**：官方镜像在构建阶段已内置 `ghcr.io/tamnd/bili:0.3.0`，开箱即用，无需额外安装。
+- **本地源码开发**：如需在免 Docker 模式下调试 B 站采集，可从 [tamnd/bilibili-cli Releases](https://github.com/tamnd/bilibili-cli/releases) 下载对应平台的可执行文件放入 `PATH`（或通过 `ANISIGNAL_BILI_BIN` 指定路径）。
+
+`bili` 为独立的第三方客户端工具，与哔哩哔哩官方无关联；请在遵守源站服务条款的前提下合理访问公开数据。

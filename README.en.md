@@ -223,3 +223,12 @@ Developer tools and agent hosts: `ChatGPT(codex)` · `Claude Code` · `ZCode` ·
 The optional random backgrounds are provided by [Yeqing Blog's random anime image API](https://www.yeqing.net/blog/acg-api/). Thanks to Yeqing for maintaining and sharing the service. Its Go implementation is open source under the MIT license at [Yeqingky/acg-api](https://github.com/Yeqingky/acg-api).
 
 The service collects images from the internet and may include AI-generated images. Image copyrights belong to their respective creators; see the [service's image copyright statement](https://www.yeqing.net/blog/acg-api/#版权声明).
+
+## Bilibili Collector Dependency (bili CLI)
+
+Public Bilibili collection (keyword search, uploader videos, and user dynamics) relies on the open-source CLI [`tamnd/bilibili-cli`](https://github.com/tamnd/bilibili-cli) (`bili` CLI, `v0.3.0`). Thanks to [tamnd](https://github.com/tamnd) (Duc-Tam Nguyen) for maintaining and sharing it. The tool is written in Go and released under the [Apache-2.0](https://github.com/tamnd/bilibili-cli/blob/main/LICENSE) license:
+
+- **Docker deployments**: The official AniSignal image bundles `ghcr.io/tamnd/bili:0.3.0` at build time, so no separate installation is needed.
+- **Local source development**: To test Bilibili collection without Docker, download a matching binary from [tamnd/bilibili-cli Releases](https://github.com/tamnd/bilibili-cli/releases) into your `PATH` (or set `ANISIGNAL_BILI_BIN`).
+
+`bili` is an independent client unaffiliated with Bilibili; please access public data responsibly within Bilibili's terms of service.
