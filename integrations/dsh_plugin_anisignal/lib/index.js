@@ -253,14 +253,12 @@ export class AniSignalService {
         }
       }
 
-      if (result?.catalog?.channels && typeof result.catalog.channels === 'object') {
+      if (result?.catalog) {
         const formatted = {};
-        for (const [k, v] of Object.entries(result.catalog.channels)) {
+        for (const [k, v] of Object.entries(result.catalog.channels || {})) {
           formatted[k] = formatChannelLabel(v);
         }
-        if (Object.keys(formatted).length > 0) {
-          this.catalog = { ...result.catalog, channels: formatted };
-        }
+        this.catalog = { ...result.catalog, channels: Object.keys(formatted).length ? formatted : this.catalog.channels };
       }
 
       this.identity = identity;
@@ -903,6 +901,7 @@ export class AniSignalService {
         query_tools: QUERY_TOOLS,
         calendar_kinds: CALENDAR_KINDS,
         channels: this.catalog.channels,
+        custom_feeds: this.configurationReady ? (this.catalog.custom_feeds || []) : [],
       },
       targets: structuredClone(this.config.targets),
       server_targets: Object.fromEntries(

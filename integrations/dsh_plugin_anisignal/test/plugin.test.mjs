@@ -416,7 +416,10 @@ test('service: outbox pendingAck retries receipt without duplicate delivery & ch
         return new Response(JSON.stringify({
           identity: { client_id: 1, user: { id: 7, display_name: 'Tester' } },
           targets: payload.targets,
-          catalog: { channels: { 'wuwa:official:bilibili': '鸣潮_官方_B' } },
+          catalog: {
+            channels: { 'wuwa:official:bilibili': '鸣潮_官方_B' },
+            custom_feeds: [{ id: 17, platform: 'xiaoheihe', kind: 'xhh_account', name: '作者监控', owned: true }],
+          },
         }), { status: 200 });
       }
       if (url.endsWith('/api/bot/outbox/claim')) {
@@ -463,6 +466,9 @@ test('service: outbox pendingAck retries receipt without duplicate delivery & ch
     await service.refreshCycle();
     assert.equal(service.configurationReady, true);
     assert.equal(service.catalog.channels['wuwa:official:bilibili'], '鸣潮 · 官方 · B站');
+    assert.deepEqual((await service.buildViewState()).catalog.custom_feeds, [
+      { id: 17, platform: 'xiaoheihe', kind: 'xhh_account', name: '作者监控', owned: true },
+    ]);
 
     // First outbox cycle delivers once, fails on ack -> sets pendingAck
     await service.consumeOutboxOnce();

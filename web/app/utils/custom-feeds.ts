@@ -3,6 +3,9 @@ import { platformMeta, type Platform } from './data.ts'
 export const XIAOHEIHE_MONITOR = {
   kind: 'hot_posts', platform: 'xiaoheihe', target: 'hot', name: '小黑盒热帖',
 } as const
+export const XIAOHEIHE_ACCOUNT_MONITOR = {
+  kind: 'xhh_account', platform: 'xiaoheihe', name: '小黑盒账号',
+} as const
 
 export function customKindLabel(kind: string) {
   return ({
@@ -13,6 +16,7 @@ export function customKindLabel(kind: string) {
     notices: '官方公告',
     account_dynamics: '官方动态',
     [XIAOHEIHE_MONITOR.kind]: XIAOHEIHE_MONITOR.name,
+    [XIAOHEIHE_ACCOUNT_MONITOR.kind]: XIAOHEIHE_ACCOUNT_MONITOR.name,
   } as Record<string, string>)[kind] || '定制监控'
 }
 

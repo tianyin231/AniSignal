@@ -28,6 +28,7 @@ from app.services.notifications import beijing_today, create_delivery, enabled_k
 from app.services.feed_preferences import preference_conditions
 from app.services.hidden_communities import PLATFORM_TOKENS, account_blocks, normalize_hidden, normalize_platforms
 from app.services.queue import BaseQueue
+from app.services.xiaoheihe import XIAOHEIHE_ACCOUNT_KIND, XIAOHEIHE_INTERVAL_MINUTES, XIAOHEIHE_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -490,6 +491,7 @@ _KIND_DEFAULT_PLATFORM = {
     "feed": "rss",
     "channel_rss": "youtube",
     "hot_posts": "xiaoheihe",
+    XIAOHEIHE_ACCOUNT_KIND: XIAOHEIHE_KEY,
 }
 _YT_CHANNEL_RE = _re.compile(r"^(?:UC[A-Za-z0-9_-]{20,30}|@[A-Za-z0-9._-]{3,30})$")
 
@@ -503,6 +505,13 @@ def _normalize_youtube_channel(raw: str) -> str:
 def _validate_custom_target(kind: str, target: str) -> str:
     if kind == "hot_posts" and target != "hot":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择小黑盒热帖")
+    if kind == XIAOHEIHE_ACCOUNT_KIND:
+        from app.parsers.xiaoheihe import account_target
+
+        try:
+            return account_target(target)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     if kind == "uid":
         if not target.isdigit():
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
@@ -516,7 +525,15 @@ def _validate_custom_target(kind: str, target: str) -> str:
 
 
 async def _resolve_custom_target(session: AsyncSession, kind: str, target: str) -> str:
-    """YouTube 监控填的是 @handle 时，创建/修改那一刻解析成 UC 频道 ID。"""
+    """创建或修改时将分享标识解析成平台的稳定账号 ID。"""
+    if kind == XIAOHEIHE_ACCOUNT_KIND and not target.isdecimal():
+        from app.collectors.base import CollectorError
+        from app.collectors.xiaoheihe import resolve_account_uid
+
+        try:
+            return await resolve_account_uid(target)
+        except CollectorError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "暂时无法解析小黑盒主页，请稍后重试或填写数字 UID") from None
     if kind != "channel_rss" or not target.startswith("@"):
         return target
     from app.collectors.base import CollectorError
@@ -671,11 +688,15 @@ async def create_custom_feed(
     from app.services.custom_policy import check_admission, shared_source, user_quota, request_interval
     quota = await user_quota(session, user.id)
     interval = payload["interval_minutes"] or quota["min_interval_minutes"]
+    if payload["kind"] == XIAOHEIHE_ACCOUNT_KIND:
+        interval = max(interval, XIAOHEIHE_INTERVAL_MINUTES)
     await check_admission(session, user.id, payload["platform"], payload["kind"], payload["target_value"], interval)
-    if payload["platform"] == "xiaoheihe" and await session.scalar(select(CustomFeed.id).where(
-        CustomFeed.user_id == user.id, CustomFeed.platform == "xiaoheihe",
+    if payload["platform"] == XIAOHEIHE_KEY and await session.scalar(select(CustomFeed.id).where(
+        CustomFeed.user_id == user.id, CustomFeed.platform == XIAOHEIHE_KEY,
+        CustomFeed.kind == payload["kind"], CustomFeed.target_value == payload["target_value"],
     ).limit(1)):
-        raise HTTPException(status.HTTP_409_CONFLICT, "已关注小黑盒热帖")
+        message = "已监控该小黑盒账号" if payload["kind"] == XIAOHEIHE_ACCOUNT_KIND else "已关注小黑盒热帖"
+        raise HTTPException(status.HTTP_409_CONFLICT, message)
     source = await shared_source(session, payload["platform"], payload["kind"], payload["target_value"])
     request_interval(source, interval)
     feed = CustomFeed(

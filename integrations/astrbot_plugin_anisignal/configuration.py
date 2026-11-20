@@ -236,7 +236,12 @@ def update_catalog(config, catalog, identity, *, synced_at="", sync_error=""):
             group = {key: label(value).split(" · ", 1)[-1] for key, value in options.items() if key.startswith(community + ":")}
             metadata.update(options=list(group), labels=list(group.values()))
     feeds = catalog.get("custom_feeds", [])
-    feed_options = {row["id"]: f"{row['name']} · {'我的监控' if row['owned'] else '公共监控'}" for row in feeds}
+    feed_options = {}
+    for row in feeds:
+        name = row["name"]
+        if row.get("kind") == "xhh_account" and "小黑盒账号" not in name:
+            name = f"{name} · 小黑盒账号"
+        feed_options[row["id"]] = f"{name} · {'我的监控' if row['owned'] else '公共监控'}"
     items["subscription"]["items"]["custom_feed_ids"].update(options=list(feed_options), labels=list(feed_options.values()))
     presets = catalog.get("custom_presets", {})
     # 现有站点预设已并入对应游戏分区的官方来源；没有预设时隐藏这个旧字段，免得被当成缺少权限。

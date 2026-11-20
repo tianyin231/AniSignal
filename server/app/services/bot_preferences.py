@@ -34,7 +34,7 @@ async def catalog(session, client_id):
         "communities": {key: meta.label for key, meta in COMMUNITIES.items()},
         "channels": channel_options(),
         "custom_presets": {key: p["name"] for key, p in CUSTOM_PRESETS.items() if not p.get("community")},
-        "custom_feeds": [{"id": f.id, "name": f.name, "platform": f.platform,
+        "custom_feeds": [{"id": f.id, "name": f.name, "platform": f.platform, "kind": f.kind,
                           "owned": bool(user and f.user_id == user.id), "public": f.is_public} for f in feeds],
         "preferences": {"communities": preferences.get("communities", []),
                         "exclude_keywords": preferences.get("exclude_keywords", []), "keywords": keywords},

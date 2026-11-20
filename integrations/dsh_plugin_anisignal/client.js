@@ -282,6 +282,7 @@
         const communities = catalog?.communities || [];
         const queryTools = catalog?.query_tools || [];
         const channelsMap = catalog?.channels || {};
+        const customFeeds = catalog?.custom_feeds || [];
         const selectedComms = new Set(sub.communities || []);
         const filteredChannels = Object.entries(channelsMap).filter(([chKey]) => {
           const prefix = chKey.split(':')[0];
@@ -389,6 +390,21 @@
                 }),
               ),
             ) : null,
+
+            h('div', { className: 'anisg-field', style: { marginTop: '6px' } },
+              h('label', { className: 'anisg-label' }, '我的监控与公共监控'),
+              customFeeds.length ? h('div', { className: 'anisg-chips' }, customFeeds.map((feed) => {
+                const selected = (sub.custom_feed_ids || []).includes(feed.id);
+                const source = feed.kind === 'xhh_account' && !feed.name.includes('小黑盒账号') ? ' · 小黑盒账号' : '';
+                return h('button', {
+                  key: feed.id,
+                  type: 'button',
+                  className: `anisg-chip ${selected ? 'anisg-chip-on' : ''}`,
+                  'aria-pressed': selected,
+                  onClick: () => patch('subscription', { custom_feed_ids: toggleInList(sub.custom_feed_ids, feed.id) }),
+                }, `${feed.name}${source} · ${feed.owned ? '我的监控' : '公共监控'}`);
+              })) : h('span', { className: 'anisg-muted' }, '在 AniSignal 账号中心创建监控后，刷新设置查看。'),
+            ),
 
             h('div', { className: 'anisg-grid', style: { marginTop: '6px' } },
               h('div', { className: 'anisg-field' },

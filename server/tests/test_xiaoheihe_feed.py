@@ -1,10 +1,12 @@
-from datetime import timedelta
+from contextlib import asynccontextmanager
+from datetime import timedelta, timezone
 
 from sqlalchemy import select
 
 from app.clock import utcnow
 from app.collectors.base import CollectorError
 from app.collectors.rss import RssCollector, parse_feed
+from app.collectors import xiaoheihe as account_collector
 from app.config import get_settings
 from app.models import CustomFeed, User
 from app.schemas.content import FetchResult
@@ -141,3 +143,49 @@ async def test_xiaoheihe_public_source_is_shared_and_keeps_posts_on_failure(clie
     assert stale["items"] == ready["items"]
     assert stale["feed_status"]["updated_at"] == ready["feed_status"]["updated_at"]
     assert stale["feed_status"]["stale"]
+
+
+async def test_xiaoheihe_account_links_resolve_and_share_one_poll(client, session, monkeypatch):
+    calls = []
+    alias = "abc012def345"
+    now = utcnow()
+
+    async def public_posts(http, url, *, params, retries, timeout):
+        assert "cookie" not in http.headers and "authorization" not in http.headers
+        uid = "42" if params["userid"] == alias else params["userid"]
+        calls.append((params["userid"], params["offset"], params["limit"], retries))
+        post = {"userid": int(uid), "title": f"账号 {uid} 的帖子",
+                "share_url": f"https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=post{uid}",
+                "create_at": str(int(now.replace(tzinfo=timezone.utc).timestamp()))}
+        return {"status": "ok", "result": {"user": {"userid": int(uid), "username": "公开作者"},
+                                            "post_links": [post, {**post, "userid": 9999}]}}
+
+    @asynccontextmanager
+    async def slot(*args):
+        yield
+
+    monkeypatch.setattr(account_collector, "get_json", public_posts)
+    monkeypatch.setattr("app.services.custom_feeds.platform_slot", slot)
+    await set_setting(session, "custom_feed_policy", {"open_beta": True})
+    path = "/api/account/custom-feeds"
+    for number, target in enumerate(("00042", f"https://xiaoheihe.cn/app/user/profile/{alias}?from=share")):
+        user = User(email=f"xhh-account-{number}@example.org", password_hash=hash_password("test-password"), is_verified=True)
+        session.add(user)
+        await session.commit()
+        client.cookies.set("anisignal_session", await create_session(session, user))
+        response = await client.post(path, json={"name": "作者监控", "kind": "xhh_account", "target_value": target})
+        assert response.status_code == 201, response.text
+
+    assert (await client.post(path, json={"name": "另一个账号", "kind": "xhh_account", "target_value": "56"})).status_code == 201
+    assert (await client.post(path, json={"name": "热帖", "kind": "hot_posts", "target_value": "hot"})).status_code == 201
+    assert (await client.post(path, json={"name": "错域名", "kind": "xhh_account",
+        "target_value": "https://xiaoheihe.cn.example.org/app/user/profile/42"})).status_code == 400
+    watchers = (await session.scalars(select(CustomFeed).where(CustomFeed.target_value == "42").order_by(CustomFeed.id))).all()
+    assert len(watchers) == 2 and watchers[0].source_id == watchers[1].source_id
+    assert (await sweep_custom_feeds(session, None))["new_items"] == 3
+    assert sorted(calls) == [("42", 0, 20, 0), ("56", 0, 20, 0), (alias, 0, 1, 0)]
+    detail = (await client.get(f"/api/custom/feeds/{watchers[-1].id}")).json()
+    assert detail["source_url"] == "https://www.xiaoheihe.cn/app/user/profile/42"
+    assert len(detail["items"]) == 1 and detail["items"][0]["published_at"]
+    assert detail["items"][0]["url"] == "https://www.xiaoheihe.cn/app/bbs/link/post42"
+    assert (await client.get("/api/contents", params={"community": "xiaoheihe"})).json()["total"] == 0

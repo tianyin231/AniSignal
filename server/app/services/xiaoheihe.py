@@ -16,6 +16,7 @@ from app.services.ingest import ingest_items
 
 XIAOHEIHE_KEY = Platform.XIAOHEIHE.value
 XIAOHEIHE_KIND = "hot_posts"
+XIAOHEIHE_ACCOUNT_KIND = "xhh_account"
 XIAOHEIHE_TARGET = "hot"
 XIAOHEIHE_INTERVAL_MINUTES = 120
 XIAOHEIHE_LIMIT = 30

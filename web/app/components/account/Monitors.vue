@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Eye, EyeOff, Mail, MailX, Pause, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import type { CustomFeedRow } from '~/composables/useAccountCenter'
-import { customKindLabel, XIAOHEIHE_MONITOR } from '~/utils/custom-feeds'
+import { customKindLabel, XIAOHEIHE_ACCOUNT_MONITOR, XIAOHEIHE_MONITOR } from '~/utils/custom-feeds'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
 // 定制监控：自建 B 站关键词 / UP 主、RSS/Atom 订阅、YouTube 频道抓取源。公开的会出现在"定制监控"频道，私有的仅自己可见。
@@ -17,6 +17,7 @@ const KINDS = [
   { key: 'feed', platform: 'rss', label: 'RSS / Atom', fieldLabel: 'RSS / Atom 地址', placeholder: 'https://example.com/feed.xml' },
   { key: 'channel_rss', platform: 'youtube', label: 'YouTube 频道', fieldLabel: '频道链接、@handle 或频道 ID', placeholder: 'https://www.youtube.com/@xxx、@xxx 或 UC...' },
   { key: XIAOHEIHE_MONITOR.kind, platform: XIAOHEIHE_MONITOR.platform, label: XIAOHEIHE_MONITOR.name, fieldLabel: '', placeholder: '' },
+  { key: XIAOHEIHE_ACCOUNT_MONITOR.kind, platform: XIAOHEIHE_ACCOUNT_MONITOR.platform, label: XIAOHEIHE_ACCOUNT_MONITOR.name, fieldLabel: '小黑盒 UID 或个人主页链接', placeholder: '例如 12345678 或 https://xiaoheihe.cn/app/user/profile/12345678' },
 ] as const
 type MonitorKind = typeof KINDS[number]['key']
 
@@ -26,7 +27,8 @@ const editing = ref<number | null>(null)
 const draft = reactive({ name: '', target_value: '', min_views: 0, interval_minutes: 30, includeText: '', excludeText: '' })
 
 const activeKindMeta = computed(() => KINDS.find(k => k.key === form.kind) ?? KINDS[0])
-const isXiaoheihe = computed(() => form.kind === XIAOHEIHE_MONITOR.kind)
+const isXiaoheihe = computed(() => activeKindMeta.value.platform === XIAOHEIHE_MONITOR.platform)
+const isHotPosts = computed(() => form.kind === XIAOHEIHE_MONITOR.kind)
 const existingXiaoheihe = computed(() => customFeeds.value.find(row => row.kind === XIAOHEIHE_MONITOR.kind))
 const kindFieldLabel = (kind: string) => KINDS.find(k => k.key === kind)?.fieldLabel ?? '监控目标'
 
@@ -43,7 +45,7 @@ function openCreate() {
 }
 function selectKind(kind: MonitorKind) {
   form.kind = kind
-  if (isXiaoheihe.value && !form.name.trim()) form.name = XIAOHEIHE_MONITOR.name
+  if (isXiaoheihe.value && !form.name.trim()) form.name = activeKindMeta.value.label
 }
 if (route.query.source === XIAOHEIHE_MONITOR.platform) selectKind(XIAOHEIHE_MONITOR.kind)
 
@@ -53,7 +55,7 @@ async function create() {
     ...rest,
     platform: activeKindMeta.value.platform,
     name: rest.name.trim(),
-    target_value: isXiaoheihe.value ? XIAOHEIHE_MONITOR.target : rest.target_value.trim(),
+    target_value: isHotPosts.value ? XIAOHEIHE_MONITOR.target : rest.target_value.trim(),
     interval_minutes: isXiaoheihe.value ? undefined : rest.interval_minutes,
     min_views: rest.kind === 'keyword' ? Number(rest.min_views) || 0 : 0,
     filters: isXiaoheihe.value ? {} : { include: words(includeText), exclude: words(excludeText) },
@@ -73,10 +75,14 @@ function startEdit(row: CustomFeedRow) {
 }
 async function saveEdit(row: CustomFeedRow) {
   const { includeText, excludeText, ...rest } = draft
-  const ok = await center.patchCustom(row, row.kind === XIAOHEIHE_MONITOR.kind ? { name: rest.name.trim() } : {
-    ...rest, name: rest.name.trim(), target_value: rest.target_value.trim(),
-    filters: { include: words(includeText), exclude: words(excludeText) },
-  }, '监控已更新。')
+  const changes: Record<string, unknown> = { name: rest.name.trim() }
+  if (row.kind !== XIAOHEIHE_MONITOR.kind) changes.target_value = rest.target_value.trim()
+  if (row.platform !== XIAOHEIHE_MONITOR.platform) {
+    changes.interval_minutes = rest.interval_minutes
+    changes.min_views = rest.min_views
+    changes.filters = { include: words(includeText), exclude: words(excludeText) }
+  }
+  const ok = await center.patchCustom(row, changes, '监控已更新。')
   if (ok) editing.value = null
 }
 function remove(row: CustomFeedRow) {
@@ -85,7 +91,8 @@ function remove(row: CustomFeedRow) {
 function statusOf(row: CustomFeedRow) {
   if (row.status !== 'active') return { label: '管理员已停用', dot: 'bg-hot' }
   if (!row.enabled) return { label: '已暂停', dot: 'bg-faint' }
-  if (row.kind === XIAOHEIHE_MONITOR.kind) return row.last_error ? { label: '更新暂缓', dot: 'bg-warn' } : { label: '已关注', dot: 'bg-ok' }
+  if (row.platform === XIAOHEIHE_MONITOR.platform && row.last_error) return { label: '更新暂缓', dot: 'bg-warn' }
+  if (row.kind === XIAOHEIHE_MONITOR.kind) return { label: '已关注', dot: 'bg-ok' }
   return row.last_error ? { label: '采集失败', dot: 'bg-hot' } : { label: '采集中', dot: 'bg-ok' }
 }
 function lastCollected(row: CustomFeedRow) {
@@ -124,7 +131,7 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
       <UiNotice v-if="!loading.custom && !errors.custom && !customQuota.admitted" tone="warn" class="mt-4">当前账号还没有开通公测名额，请联系管理员。</UiNotice>
 
       <form v-if="creating" class="mt-5 rounded-xl border border-line bg-canvas/60 p-4" @submit.prevent="create">
-        <div class="grid grid-cols-2 gap-1 rounded-xl bg-chip p-1 text-xs sm:grid-cols-5 sm:text-sm" role="radiogroup" aria-label="监控类型">
+        <div class="grid grid-cols-2 gap-1 rounded-xl bg-chip p-1 text-xs sm:grid-cols-3 sm:text-sm lg:grid-cols-6" role="radiogroup" aria-label="监控类型">
           <button
             v-for="kind in KINDS"
             :key="kind.key"
@@ -139,7 +146,7 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
           </button>
         </div>
         <div class="mt-4 grid gap-3 sm:grid-cols-2">
-          <label v-if="!isXiaoheihe" class="text-xs font-medium text-ink-2">{{ activeKindMeta.fieldLabel }}
+          <label v-if="!isHotPosts" class="text-xs font-medium text-ink-2">{{ activeKindMeta.fieldLabel }}
             <input
               v-model="form.target_value"
               required
@@ -172,9 +179,9 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
           <label class="inline-flex cursor-pointer items-center gap-2 text-sm text-ink-2"><input v-model="form.push_enabled" type="checkbox" class="checkbox"> 新内容邮件推送</label>
         </div>
         <p class="mt-2 text-xs text-faint">推送需开启邮件通知；每个监控每天最多一封新内容摘要。</p>
-        <p v-if="isXiaoheihe && existingXiaoheihe" class="mt-2 text-sm text-muted">已关注小黑盒热帖。<NuxtLink :to="`/custom/${existingXiaoheihe.id}`" class="link">查看监控</NuxtLink></p>
+        <p v-if="isHotPosts && existingXiaoheihe" class="mt-2 text-sm text-muted">已关注小黑盒热帖。<NuxtLink :to="`/custom/${existingXiaoheihe.id}`" class="link">查看监控</NuxtLink></p>
         <div class="mt-4 flex gap-2">
-          <button type="submit" class="btn-primary h-9 px-4" :disabled="customBusy || !canCreate || (isXiaoheihe && Boolean(existingXiaoheihe))">{{ customBusy ? '创建中…' : isXiaoheihe ? '关注热帖' : '创建监控' }}</button>
+          <button type="submit" class="btn-primary h-9 px-4" :disabled="customBusy || !canCreate || (isHotPosts && Boolean(existingXiaoheihe))">{{ customBusy ? '创建中…' : isHotPosts ? '关注热帖' : '创建监控' }}</button>
           <button type="button" class="h-9 rounded-[10px] px-3 text-sm text-muted hover:bg-chip hover:text-ink" @click="creating = false">取消</button>
         </div>
       </form>
@@ -202,10 +209,10 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
             </span>
           </div>
           <NuxtLink :to="`/custom/${row.id}`" class="mt-2.5 line-clamp-1 text-base font-bold text-ink hover:text-brand-ink">{{ row.name }}</NuxtLink>
-          <p v-if="row.kind !== XIAOHEIHE_MONITOR.kind" class="mono mt-0.5 truncate text-xs text-faint">{{ row.kind === 'uid' ? `UID ${row.target_value}` : row.target_value }}</p>
+          <p v-if="row.kind !== XIAOHEIHE_MONITOR.kind" class="mono mt-0.5 truncate text-xs text-faint">{{ row.kind === 'uid' || row.kind === XIAOHEIHE_ACCOUNT_MONITOR.kind ? `UID ${row.target_value}` : row.target_value }}</p>
           <p class="mt-3 flex flex-wrap items-baseline gap-x-2 text-xs text-muted">
             <span><span class="num text-[15px] font-bold text-ink">{{ row.item_count }}</span> 条</span>
-            <span v-if="row.kind !== XIAOHEIHE_MONITOR.kind">· 每 {{ row.interval_minutes }} 分钟</span>
+            <span v-if="row.platform !== XIAOHEIHE_MONITOR.platform">· 每 {{ row.interval_minutes }} 分钟</span>
             <span>· {{ lastCollected(row) }}</span>
           </p>
           <p v-if="row.enabled && row.last_error" class="mt-1 text-xs text-hot">上次采集失败：{{ row.last_error }}</p>
@@ -216,7 +223,7 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
           </p>
           <div class="min-h-3 flex-1" aria-hidden="true" />
           <div class="flex flex-wrap items-center gap-0.5 border-t border-line-soft pt-2">
-            <button v-if="row.kind !== XIAOHEIHE_MONITOR.kind" type="button" :class="action" :disabled="customBusy || row.status !== 'active' || !row.enabled" :title="row.enabled ? '立即刷新采集' : '恢复监控后可手动抓取'" @click="center.triggerCustom(row)"><RefreshCw :size="13" />抓取</button>
+            <button v-if="row.platform !== XIAOHEIHE_MONITOR.platform" type="button" :class="action" :disabled="customBusy || row.status !== 'active' || !row.enabled" :title="row.enabled ? '立即刷新采集' : '恢复监控后可手动抓取'" @click="center.triggerCustom(row)"><RefreshCw :size="13" />抓取</button>
             <button type="button" :class="action" :disabled="customBusy" @click="startEdit(row)"><Pencil :size="13" />编辑</button>
             <button type="button" :class="action" :disabled="customBusy" :aria-label="`${row.is_public ? '设为私有' : '公开'}：${row.name}`" @click="center.patchCustom(row, { is_public: !row.is_public }, row.is_public ? '已设为私有。' : '已公开到定制监控频道。')">
               <EyeOff v-if="row.is_public" :size="13" /><Eye v-else :size="13" />{{ row.is_public ? '设为私有' : '公开' }}
@@ -234,8 +241,8 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
         <form v-else class="grid gap-3" @submit.prevent="saveEdit(row)">
           <p class="text-sm font-bold text-ink">编辑监控</p>
           <label class="text-xs font-medium text-ink-2">监控名称<input v-model="draft.name" required maxlength="64" class="input mt-1.5 h-9 w-full font-normal"></label>
-          <template v-if="row.kind !== XIAOHEIHE_MONITOR.kind">
-            <label class="text-xs font-medium text-ink-2">{{ kindFieldLabel(row.kind) }}<input v-model="draft.target_value" required maxlength="128" :type="row.kind === 'feed' ? 'url' : 'text'" :pattern="row.kind === 'uid' ? '[0-9]+' : undefined" class="input mt-1.5 h-9 w-full font-normal"></label>
+          <label v-if="row.kind !== XIAOHEIHE_MONITOR.kind" class="text-xs font-medium text-ink-2">{{ kindFieldLabel(row.kind) }}<input v-model="draft.target_value" required maxlength="128" :type="row.kind === 'feed' ? 'url' : 'text'" :pattern="row.kind === 'uid' ? '[0-9]+' : undefined" class="input mt-1.5 h-9 w-full font-normal"></label>
+          <template v-if="row.platform !== XIAOHEIHE_MONITOR.platform">
             <div class="grid grid-cols-2 gap-3">
               <label v-if="row.kind === 'keyword'" class="text-xs font-medium text-ink-2">最低播放量<input v-model.number="draft.min_views" type="number" required min="0" max="10000000" class="input mt-1.5 h-9 w-full font-normal"></label>
               <label class="text-xs font-medium text-ink-2">采集间隔（分钟）<input v-model.number="draft.interval_minutes" type="number" required :min="Math.min(row.interval_minutes, customQuota.min_interval_minutes)" max="1440" class="input mt-1.5 h-9 w-full font-normal"></label>

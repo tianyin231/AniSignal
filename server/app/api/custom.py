@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.custom_presets import custom_preset
 from app.models import CustomFeed, CustomFeedItem, User
+from app.parsers.xiaoheihe import account_url
 from app.services.auth import get_user_by_token
 from app.services.urls import safe_link, safe_media_url
+from app.services.xiaoheihe import XIAOHEIHE_ACCOUNT_KIND, XIAOHEIHE_KIND
 
 router = APIRouter(prefix="/api/custom")
 
@@ -37,6 +39,8 @@ async def _optional_user(request: Request, session: AsyncSession) -> User | None
 
 
 def _default_source_url(feed: CustomFeed) -> str | None:
+    if feed.kind == XIAOHEIHE_ACCOUNT_KIND:
+        return account_url(feed.target_value)
     if feed.platform == "bilibili" and feed.kind == "uid" and feed.target_value.isdigit():
         return f"https://space.bilibili.com/{feed.target_value}"
     if feed.platform == "youtube" and feed.kind == "channel_rss":
@@ -62,7 +66,7 @@ def _feed_out(feed: CustomFeed, owner_name: str | None, item_count: int | None =
         "owner_name": owner_name if feed.user_id is not None else "AniSignal · 站点维护",
         "site_managed": feed.user_id is None,
         "community": preset.get("community"),
-        "target_label": "小黑盒热帖" if feed.platform == "xiaoheihe" else preset.get("target_label", feed.target_value),
+        "target_label": "小黑盒热帖" if feed.kind == XIAOHEIHE_KIND else preset.get("target_label", feed.target_value),
         "description": preset.get("description", ""),
         "source_url": preset.get("source_url") or _default_source_url(feed),
         "item_count": item_count,
