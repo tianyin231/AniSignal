@@ -193,8 +193,8 @@ AniSignal was built through iterative pair-programming between a human developer
 | Organization | Models |
 | :--- | :--- |
 | **Anthropic** | `Claude Opus 5.5` |
-| **OpenAI** | `GPT-6.2 Sol` (Codex) · `GPT-6.1 Sol` · `GPT-6 Astra` · `GPT-5.6 Sol` |
-| **Google DeepMind** | `Gemini 4 Hydrogen` and `Gemini 4 Neon` (Google Antigravity) · `Gemini 4 Carbon` · `Gemini 3.8 Flash` |
+| **OpenAI** | `GPT-6.2 Sol` · `GPT-6.1 Sol` · `GPT-6 Astra` · `GPT-5.6 Sol` |
+| **Google DeepMind** | `Gemini 4 Hydrogen` · `Gemini 4 Neon` · `Gemini 4 Carbon` · `Gemini 3.8 Flash` |
 | **xAI** | `Grok 4.7` |
 | **StepFun** | `Step 5 Preview` |
 | **Zhipu AI** | `GLM-5.3` · `GLM-5.3 Flash` |
