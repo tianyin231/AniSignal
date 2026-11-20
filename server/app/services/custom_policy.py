@@ -125,7 +125,7 @@ async def shared_source(session, platform, kind, target):
 
 
 def request_interval(source, interval):
-    if source.last_success_at and source.next_run_at and not source.last_error:
+    if source.platform != "xiaoheihe" and source.last_success_at and source.next_run_at and not source.last_error:
         source.next_run_at = min(source.next_run_at, source.last_success_at + timedelta(minutes=interval))
 
 

@@ -7,7 +7,8 @@ import { isRedundantExcerpt } from '~/utils/text'
 
 const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean; deltaView?: number | null }>()
 const { mediaMode } = useSiteConfig()
-const detailTo = computed(() => props.to ?? `/contents/${props.item.id}`)
+const shareUrl = computed(() => !props.to && props.item.platform === 'xiaoheihe' ? props.item.originalUrl : undefined)
+const detailTo = computed(() => props.to ?? shareUrl.value ?? `/contents/${props.item.id}`)
 const coverFailed = ref(false)
 watch(() => props.item.cover, () => (coverFailed.value = false))
 
@@ -52,7 +53,7 @@ const excerpt = computed(() => {
 
 <template>
   <article class="flex border-b border-line-soft last:border-0">
-    <NuxtLink :to="detailTo" class="group flex min-w-0 flex-1 gap-4 px-4 py-3.5 transition-colors hover:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-5">
+    <NuxtLink :to="detailTo" :external="Boolean(shareUrl)" :target="shareUrl ? '_blank' : undefined" class="group flex min-w-0 flex-1 gap-4 px-4 py-3.5 transition-colors hover:bg-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:px-5">
       <div v-if="showCover" class="relative aspect-video w-28 shrink-0 self-start overflow-hidden rounded-[10px] bg-chip sm:w-40">
         <img
           :src="imageUrl(item.cover, 320)"
@@ -71,19 +72,24 @@ const excerpt = computed(() => {
       <div class="min-w-0 flex-1">
         <p class="line-clamp-2 text-[15px] font-semibold leading-normal text-ink group-hover:text-brand-ink">{{ item.title }}</p>
         <p v-if="excerpt" class="mt-1 line-clamp-2 text-[13px] leading-relaxed text-muted">{{ excerpt }}</p>
-        <p v-else-if="item.previewMode === 'external_only'" class="mt-1 text-xs text-amber-700 dark:text-amber-300">
+        <p v-else-if="!shareUrl && item.previewMode === 'external_only'" class="mt-1 text-xs text-amber-700 dark:text-amber-300">
           平台公开接口未返回正文或图片，可直接打开原文核对。
         </p>
         <div class="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
           <span v-if="item.identity === 'official'" class="inline-flex h-5 items-center gap-0.5 rounded-md bg-brand-soft px-1.5 font-semibold text-brand-ink">
             <BadgeCheck :size="12" aria-hidden="true" />官方
           </span>
-          <span v-else-if="item.identity !== 'unknown'" :class="identityMeta[item.identity]?.text">{{ identityMeta[item.identity]?.label }}</span>
+          <span v-else-if="!shareUrl && item.identity !== 'unknown'" :class="identityMeta[item.identity]?.text">{{ identityMeta[item.identity]?.label }}</span>
           <span v-if="community" class="inline-flex items-center gap-1.5 text-ink-2">
             <span class="size-[7px] rounded-full" :class="community.dot" aria-hidden="true" />{{ community.label }}
           </span>
           <span class="max-w-[14rem] truncate">{{ showCover ? item.account : `${platform.label} · ${item.account}` }}</span>
-          <span class="mono text-faint">{{ item.publishedAt }}</span>
+          <span v-if="!shareUrl" class="mono text-faint">{{ item.publishedAt }}</span>
+          <span v-if="shareUrl && item.metrics?.like != null" class="num">{{ item.metrics.like.toLocaleString('zh-CN') }} 赞</span>
+          <span v-if="shareUrl && item.metrics?.reply != null" class="num">{{ item.metrics.reply.toLocaleString('zh-CN') }} 评论</span>
+          <span v-if="shareUrl" class="inline-flex items-center gap-0.5 text-brand-ink">
+            查看原帖 <ArrowUpRight :size="12" aria-hidden="true" />
+          </span>
           <span v-if="viewLabel" class="num font-semibold sm:hidden" :class="isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }} 播放</span>
           <span v-if="deltaLabel" class="num rounded-full bg-hot/10 px-1.5 py-0.5 text-[11px] font-bold text-hot">{{ deltaLabel }} / 24h</span>
           <span v-if="item.translated" class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>
@@ -107,7 +113,7 @@ const excerpt = computed(() => {
       <ImageIcon :size="13" aria-hidden="true" />图片
     </a>
     <a
-      v-if="item.previewMode === 'external_only' && item.originalUrl"
+      v-if="!shareUrl && item.previewMode === 'external_only' && item.originalUrl"
       :href="item.originalUrl"
       target="_blank"
       rel="noopener"

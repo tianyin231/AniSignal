@@ -23,6 +23,40 @@ const pageSize = 50
 const error = ref<string | null>(null)
 const loading = ref(false)
 const busyId = ref<number | null>(null)
+const topicPartitions = computed(() => adminCommunities.value.filter(c => c.domain === 'feed'))
+const showShareForm = ref(false)
+const addingShare = ref(false)
+const share = reactive({ community: '', url: '', title: '', author: '', like: '', reply: '' })
+
+function toggleShareForm() {
+  showShareForm.value = !showShareForm.value
+  if (showShareForm.value && !topicPartitions.value.some(c => c.key === share.community)) {
+    const selected = topicPartitions.value.find(c => c.key === communityFilter.value)
+    share.community = selected?.key ?? topicPartitions.value.find(c => c.key === 'xiaoheihe')?.key ?? topicPartitions.value[0]?.key ?? ''
+  }
+}
+
+async function addShare() {
+  if (addingShare.value) return
+  addingShare.value = true
+  try {
+    const result = await api<{ id: number, created: boolean }>('/api/admin/contents/xiaoheihe', {
+      method: 'POST', body: {
+        ...share,
+        like: share.like === '' ? null : Number(share.like),
+        reply: share.reply === '' ? null : Number(share.reply),
+      },
+    })
+    toast.ok(result.created ? `已收录 #${result.id}` : `这篇帖子已收录为 #${result.id}`)
+    Object.assign(share, { url: '', title: '', author: '', like: '', reply: '' })
+    showShareForm.value = false
+    await refresh()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? exc?.message ?? '收录失败')
+  } finally {
+    addingShare.value = false
+  }
+}
 
 async function refresh() {
   loading.value = true
@@ -191,6 +225,9 @@ async function rereview(item: ContentItem) {
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :aria-expanded="showShareForm" @click="toggleShareForm">
+          {{ showShareForm ? '收起录入' : '收录小黑盒帖子' }}
+        </button>
         <input
           v-model="q"
           placeholder="标题关键词"
@@ -237,7 +274,7 @@ async function rereview(item: ContentItem) {
           {{ loading ? '查询中…' : '查询' }}
         </button>
         <button
-          v-if="communityFilter"
+          v-if="communityFilter && !topicPartitions.some(c => c.key === communityFilter)"
           class="cursor-pointer rounded-md border border-blue-500/40 px-4 py-2 text-sm text-blue-600 transition-colors hover:bg-blue-500/10 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-300"
           :disabled="rereviewBusy || loading"
           title="清除该分区全部 AI 判定并重新审核"
@@ -247,6 +284,41 @@ async function rereview(item: ContentItem) {
         </button>
       </div>
     </div>
+
+    <section v-if="showShareForm" class="panel p-4">
+      <form v-if="topicPartitions.length" class="grid gap-3 sm:grid-cols-2" @submit.prevent="addShare">
+        <label class="grid gap-1 text-sm">
+          主题流分区
+          <select v-model="share.community" class="select px-3 py-2" required>
+            <option v-for="c in topicPartitions" :key="c.key" :value="c.key">{{ c.label }}</option>
+          </select>
+        </label>
+        <label class="grid gap-1 text-sm">
+          公开分享链接
+          <input v-model.trim="share.url" type="url" class="input px-3 py-2" maxlength="512" required>
+        </label>
+        <label class="grid gap-1 text-sm">
+          原帖标题
+          <input v-model.trim="share.title" class="input px-3 py-2" maxlength="240" required>
+        </label>
+        <label class="grid gap-1 text-sm">
+          原作者昵称
+          <input v-model.trim="share.author" class="input px-3 py-2" maxlength="64" required>
+        </label>
+        <label class="grid gap-1 text-sm">
+          点赞数（可选）
+          <input v-model="share.like" type="number" min="0" max="2147483647" class="input px-3 py-2">
+        </label>
+        <label class="grid gap-1 text-sm">
+          评论数（可选）
+          <input v-model="share.reply" type="number" min="0" max="2147483647" class="input px-3 py-2">
+        </label>
+        <button type="submit" class="btn-primary justify-self-start px-4 py-2 text-sm" :disabled="addingShare">
+          {{ addingShare ? '正在收录…' : '收录帖子' }}
+        </button>
+      </form>
+      <NuxtLink v-else to="/admin/targets" class="link text-sm">先创建一个主题流分区</NuxtLink>
+    </section>
 
     <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
 
@@ -284,8 +356,9 @@ async function rereview(item: ContentItem) {
               >{{ item.tier === 'core' ? '核心来源' : item.tier === 'general' ? '泛关键词' : '无匹配' }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5">
+              <span v-if="item.platform === 'xiaoheihe'" class="text-xs text-muted">公开原帖</span>
               <span
-                v-if="reviewBadge(item)"
+                v-else-if="reviewBadge(item)"
                 class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
                 :class="reviewBadge(item)!.class"
                 :title="item.review?.reason"
@@ -317,6 +390,7 @@ async function rereview(item: ContentItem) {
                 </button>
                 <button
                   class="grid size-7 place-items-center rounded-md border border-line text-ink-2 transition-colors hover:bg-chip disabled:opacity-40"
+                  v-if="item.platform !== 'xiaoheihe' && !topicPartitions.some(c => c.key === item.community)"
                   title="重新走 AI 审核"
                   :disabled="busyId === item.id"
                   @click="rereview(item)"

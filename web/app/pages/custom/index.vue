@@ -6,7 +6,7 @@ import { customFeedBadge, customKindLabel } from '~/utils/custom-feeds'
 import { loginRoute } from '~/utils/safe-redirect'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
-useSeoMeta({ title: '定制监控 · AniSignal', description: '自由监控任意感兴趣的内容：B 站关键词、UP 主、RSS/Atom 订阅与 YouTube 频道，随时启停管理。' })
+useSeoMeta({ title: '定制监控 · AniSignal', description: '选择 B 站、RSS / Atom、YouTube 或小黑盒热帖，随时启停监控。' })
 
 interface CustomFeedCard {
   id: number
@@ -114,7 +114,7 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
   <div>
     <section class="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div class="wall-heading">
-        <p class="mono mb-1.5 text-xs tracking-wide text-muted">自建任意关键词 · UP 主 · RSS 订阅 · YouTube 频道 · 随时管理</p>
+        <p class="mono mb-1.5 text-xs tracking-wide text-muted">B 站 · RSS 订阅 · YouTube · 小黑盒</p>
         <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">定制监控</h1>
       </div>
       <div class="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:gap-2.5">
@@ -186,7 +186,6 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
             <div class="min-w-0 flex-1">
               <h2 id="mine-title" class="text-base font-bold text-ink">我的监控源</h2>
               <p v-if="quota" class="text-xs text-muted">{{ quota.admitted ? `已用 ${quota.used}/${quota.max_feeds} 个` : '尚未开通公测名额' }}</p>
-              <p v-else class="text-xs text-muted">支持关键词 / UP 主 / RSS / YouTube</p>
             </div>
           </header>
 
@@ -203,6 +202,7 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
                   <span class="num shrink-0 text-xs text-faint">{{ row.item_count }}</span>
                 </NuxtLink>
                 <button
+                  v-if="row.platform !== 'xiaoheihe'"
                   type="button"
                   class="grid size-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-chip hover:text-ink disabled:opacity-40"
                   :disabled="mineBusyId === row.id || !row.enabled || row.status !== 'active'"
@@ -236,7 +236,7 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
           </template>
           <template v-else>
             <ul class="mt-4 space-y-2 text-[13px] text-ink-2">
-              <li>· 自建任意关键词、UP 主、RSS 订阅或 YouTube 频道</li>
+              <li>· 选择 B 站关键词或 UP 主、RSS 订阅、YouTube 频道、小黑盒热帖</li>
               <li>· 随时一键启停、立即抓取、设置包含词与排除词</li>
               <li>· 可设为私有独享，或公开到这里与大家共享</li>
             </ul>

@@ -1,5 +1,9 @@
 import { platformMeta, type Platform } from './data.ts'
 
+export const XIAOHEIHE_MONITOR = {
+  kind: 'hot_posts', platform: 'xiaoheihe', target: 'hot', name: '小黑盒热帖',
+} as const
+
 export function customKindLabel(kind: string) {
   return ({
     uid: 'UP 主监控',
@@ -8,11 +12,12 @@ export function customKindLabel(kind: string) {
     channel_rss: 'YouTube 频道',
     notices: '官方公告',
     account_dynamics: '官方动态',
+    [XIAOHEIHE_MONITOR.kind]: XIAOHEIHE_MONITOR.name,
   } as Record<string, string>)[kind] || '定制监控'
 }
 
 export function customPlatformBadge(platform: string, contentType: string) {
-  return ({ youtube: 'YT', rss: 'RSS', x: 'X', game_official: '官' } as Record<string, string>)[platform]
+  return ({ youtube: 'YT', rss: 'RSS', x: 'X', game_official: '官', xiaoheihe: '盒' } as Record<string, string>)[platform]
     || (contentType === 'dynamic' ? '动' : 'B')
 }
 

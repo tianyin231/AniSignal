@@ -1,6 +1,6 @@
 // 领域模型与演示数据，对应设计文档 §7；全部为 mock，时间基准 2026-08-16
 
-export type Platform = 'bilibili' | 'weibo' | 'x' | 'youtube' | 'web' | 'kuro' | 'miyoushe' | 'kuro_cn' | 'kuro_global' | 'rss' | 'game_official'
+export type Platform = 'bilibili' | 'weibo' | 'x' | 'youtube' | 'web' | 'kuro' | 'miyoushe' | 'kuro_cn' | 'kuro_global' | 'rss' | 'game_official' | 'xiaoheihe'
 export type Identity = 'official' | 'seeded' | 'user' | 'media' | 'merchant' | 'unknown'
 export type Region = 'cn' | 'global'
 
@@ -106,6 +106,7 @@ export const platformMeta: Record<Platform, { label: string; short: string; badg
   web: { label: '官网', short: '网', badge: 'bg-sky-600' },
   kuro: { label: '库街区', short: '库', badge: 'bg-teal-600' },
   miyoushe: { label: '米游社', short: '米', badge: 'bg-sky-500' },
+  xiaoheihe: { label: '小黑盒', short: '盒', badge: 'bg-zinc-800 dark:bg-zinc-700' },
   kuro_cn: { label: '库街区·国服', short: '库', badge: 'bg-sky-600' },
   kuro_global: { label: '库街区·国际服', short: '际', badge: 'bg-cyan-600' },
 }

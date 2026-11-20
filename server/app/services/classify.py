@@ -105,7 +105,10 @@ async def load_rules(session: AsyncSession) -> list[ClassificationRule]:
 def classify_content(
     normalized: NormalizedContent, rules: list[ClassificationRule], community: str = DEFAULT_COMMUNITY
 ) -> str | None:
-    if get_community(community).domain == "news":
+    domain = get_community(community).domain
+    if domain == "feed":
+        return None
+    if domain == "news":
         # 准入由资讯审核处理，不能让游戏词典把模型更新分到商品履约。
         return Category.AI_NEWS
     haystack = " ".join(

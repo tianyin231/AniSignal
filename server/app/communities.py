@@ -46,7 +46,7 @@ class CommunityMeta:
     bili_mid_setting: str | None  # config 中官方 B 站 UID 属性名
     official_bili_mid_default: str | None  # 配置缺失或自定义分区的官方 UID
     extra_names: tuple[str, ...] = ()
-    domain: str = "game"  # game | news（news 分区采用资讯筛选）
+    domain: str = "game"  # game | news | feed（独立主题流）
     source_aliases: tuple[str, ...] = ()
     source_exclusions: tuple[str, ...] = ()
     official_merch_bili_sources: tuple[tuple[str, str], ...] = ()
@@ -208,6 +208,12 @@ BUILTIN_COMMUNITIES: dict[str, CommunityMeta] = {
         official_bili_mid_default=None, domain="news",
         platforms=("rss", "bilibili", "x"),
     ),
+    "xiaoheihe": CommunityMeta(
+        key="xiaoheihe", label="小黑盒", en="HeyBox",
+        game_name="小黑盒", bare_name="小黑盒", game_note="", other_games_examples="",
+        color="blue", bili_mid_setting=None, official_bili_mid_default=None,
+        domain="feed", platforms=("xiaoheihe",),
+    ),
 }
 
 COMMUNITIES: dict[str, CommunityMeta] = dict(BUILTIN_COMMUNITIES)
@@ -237,20 +243,22 @@ def build_custom_meta(raw: dict) -> CommunityMeta:
     key = str(raw.get("key") or "").strip().lower()
     label = str(raw.get("label") or key).strip()[:32]
     en = str(raw.get("en") or label).strip()[:64]
-    # 自定义分区统一走通用内容流（/?community=<key>），确保无 AI 时 RSS/视频/动态也能直接展示。
-    domain = "game"
+    # 旧自定义分区按游戏运行，只有显式选择主题流时才切换。
+    domain = "feed" if raw.get("domain") == "feed" else "game"
     color = normalize_community_color(raw.get("color"), default="blue")
     bili_mid = str(raw.get("official_bili_mid") or "").strip() or None
     aliases = tuple(dict.fromkeys(str(x).strip() for x in (raw.get("aliases") or []) if str(x).strip()))
     platforms = tuple(raw.get("platforms") or ("bilibili", "youtube", "rss", "x"))
+    if domain == "feed" and "xiaoheihe" not in platforms:
+        platforms += ("xiaoheihe",)
     note = f"不要把《{label}》写成其它游戏或无关作品；"
     return CommunityMeta(
         key=key,
         label=label,
         en=en,
-        game_name=f"《{label}》",
+        game_name=label if domain == "feed" else f"《{label}》",
         bare_name=label,
-        game_note=note,
+        game_note="" if domain == "feed" else note,
         other_games_examples="",
         color=color,
         bili_mid_setting=None,
@@ -344,11 +352,11 @@ async def sync_communities(session) -> dict:
     return raw if isinstance(raw, dict) else {"disabled_builtins": [], "deleted_builtins": [], "builtin_overrides": {}, "custom": []}
 
 
-FRESH_INSTALL_ACTIVE = ("ai",)
+FRESH_INSTALL_ACTIVE = ("ai", "xiaoheihe")
 
 
 async def seed_fresh_install_communities(session) -> bool:
-    """全新空库首次启动时只保留 AI 分区启用，其余内置分区先隐藏，导入预设或手动启用时再出现。
+    """全新空库首次启动时只启用独立信源，其余内置分区先隐藏，导入预设或手动启用时再出现。
 
     只在「从没保存过分区配置、没有任何采集目标和内容」时写一次；已有站点（哪怕从没改过分区）不受影响。
     """
@@ -488,6 +496,10 @@ def community_keys() -> tuple[str, ...]:
     return tuple(COMMUNITIES)
 
 
+def feed_community_keys() -> tuple[str, ...]:
+    return tuple(key for key, meta in COMMUNITIES.items() if meta.domain == "feed")
+
+
 def community_pattern() -> str:
     """正则表示（兼容旧测试/工具调用）。"""
     return "^(%s)$" % "|".join(COMMUNITIES)
@@ -505,7 +517,9 @@ def community_conditions(column, community: str | None, hidden=()) -> list:
     if not is_all_community(community):
         return [column == community]
     blocked = set(hidden or ())
-    active_keys = [k for k, m in COMMUNITIES.items() if m.active and k not in blocked]
+    active_keys = [
+        k for k, m in COMMUNITIES.items() if m.active and m.domain != "feed" and k not in blocked
+    ]
     return [column.in_(active_keys)] if active_keys else [column == "__none__"]
 
 
@@ -530,5 +544,6 @@ def crosstalk_names(community_key: str) -> tuple[str, ...]:
 def game_name_boilerplate() -> tuple[str, ...]:
     names: list[str] = []
     for meta in COMMUNITIES.values():
-        names.extend(meta.game_names)
+        if meta.domain != "feed":
+            names.extend(meta.game_names)
     return tuple(names)

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RefreshCw } from 'lucide-vue-next'
+import { communityHomeTo, communityMeta } from '~/composables/useGameSection'
 import type { ApiEventBrief, ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto, PublicSource } from '~/composables/usePublicApi'
 import { toRawItem, utcTimestamp } from '~/utils/public-utils'
 import { ongoingActivities, upNextItems } from '~/utils/schedule'
@@ -8,6 +9,10 @@ useSeoMeta({ title: '首页 · AniSignal' })
 definePageMeta({ middleware: [(to) => { if (to.query.community === 'ai') return navigateTo('/ai') }] })
 
 const route = useRoute()
+const requestedCommunity = communityMeta(String(route.query.community || ''))
+if (requestedCommunity?.domain === 'feed') {
+  await navigateTo(communityHomeTo(requestedCommunity.key))
+}
 const router = useRouter()
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const referenceTime = useState('home-reference-time', () => Date.now())

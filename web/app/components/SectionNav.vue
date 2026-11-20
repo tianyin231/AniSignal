@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { communityMeta } from '~/composables/useGameSection'
+import { communityHomeTo, communityMeta } from '~/composables/useGameSection'
 
 /**
  * 栏目导航（总览 / 官方动态 / 活动日历 / 事件 / 商品追踪 / 内容库）。
@@ -16,11 +16,8 @@ const scope = computed(() => {
   return community.value
 })
 
-const homeTo = computed(() => {
-  if (scope.value === 'all') return { path: '/' }
-  if (scope.value === 'ai') return { path: '/ai' }
-  return { path: '/', query: { community: scope.value } }
-})
+const homeTo = computed(() => communityHomeTo(scope.value))
+const isTopic = computed(() => communityMeta(scope.value)?.domain === 'feed')
 
 const links = computed(() => [
   { key: 'home', label: '总览', to: homeTo.value, active: route.path === '/' || route.path === '/ai' },
@@ -30,7 +27,7 @@ const links = computed(() => [
     { path: '/events', label: '事件', gameOnly: true },
     { path: '/products', label: '商品追踪', gameOnly: true },
     { path: '/contents', label: '内容库' },
-  ].filter(item => !(item.gameOnly && scope.value === 'ai')).map(item => ({
+  ].filter(item => !isTopic.value && !(item.gameOnly && scope.value === 'ai')).map(item => ({
     key: item.path,
     label: item.label,
     to: { path: item.path, query: { community: scope.value } },

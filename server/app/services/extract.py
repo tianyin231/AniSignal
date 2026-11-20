@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
+from app.communities import feed_community_keys, get_community
 from app.models import BotTarget, ContentSchedule, RawContent, RedeemCode, Source, ContentVersion
 from app.services.ai import ai_available, chat, get_ai_config, record_usage, retry_allowed
 
@@ -217,6 +218,8 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
     if pair is None:
         return {"status": "skipped", "reason": "content_not_found"}
     raw, version, identity = pair
+    if get_community(raw.community).domain == "feed":
+        return {"status": "skipped", "reason": "topic_feed"}
     if (identity or "unknown") != "official":
         return {"status": "skipped", "reason": "not_official"}
     title = (version.title if version else None) or ""
@@ -359,6 +362,7 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
 async def sweep_extractions(session: AsyncSession, limit: int = EXTRACT_BATCH_LIMIT) -> dict:
     """扫一批待抽取的官方内容（30 天内、未抽取、未下架）。"""
     cutoff = utcnow() - timedelta(days=EXTRACT_WINDOW_DAYS)
+    feed_partitions = feed_community_keys()
     latest_parsed = select(func.max(ContentVersion.parsed_at)).where(
         ContentVersion.raw_content_id == RawContent.id,
     ).correlate(RawContent).scalar_subquery()
@@ -371,6 +375,7 @@ async def sweep_extractions(session: AsyncSession, limit: int = EXTRACT_BATCH_LI
                 RawContent.hidden.is_(False),
                 RawContent.extracted_at.is_(None),
                 RawContent.collected_at >= cutoff,
+                *([RawContent.community.notin_(feed_partitions)] if feed_partitions else []),
                 retry_allowed("extract_entities", latest_parsed),
             )
             .order_by(RawContent.id.desc())

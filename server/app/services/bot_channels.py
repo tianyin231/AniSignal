@@ -20,6 +20,8 @@ def channel_options() -> dict[str, str]:
         if meta.domain == "news":
             options[f"{community}:news"] = f"{meta.label}_快讯"
             continue
+        if meta.domain != "game":
+            continue
         for identity, label in (("official", "官方"), ("community", "社区")):
             for platform, (suffix, _) in PLATFORMS.items():
                 options[f"{community}:{identity}:{platform}"] = f"{meta.label}_{label}_{suffix}"
@@ -60,6 +62,8 @@ def item_channels(item: dict) -> list[str]:
         return []
     if COMMUNITIES[community].domain == "news":
         return [f"{community}:news"]
+    if COMMUNITIES[community].domain != "game":
+        return []
     identity = "official" if item.get("identity") == "official" else "community"
     platform = next((key for key, (_, members) in PLATFORMS.items() if item.get("platform") in members), None)
     return [f"{community}:{identity}:{platform}"] if platform else []

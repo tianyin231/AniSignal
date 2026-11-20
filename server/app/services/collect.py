@@ -376,7 +376,8 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 collector.set_community(target.community)
             from app.communities import sync_communities
             await sync_communities(session)
-            is_news = get_community(target.community).domain == "news"
+            domain = get_community(target.community).domain
+            is_news = domain == "news"
             if isinstance(collector, BilibiliCollector):
                 if hasattr(collector, "set_cookies"):
                     from app.services.bilibili_session import get_db_cookies
@@ -463,7 +464,7 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     postprocess_errors.append(f"dynamic backfill failed: {type(exc).__name__}: {exc}")
                     logger.warning("empty DRAW backfill failed", exc_info=True)
             match_stats = None
-            if stats.touched_content_ids and not is_news:
+            if stats.touched_content_ids and domain == "game":
                 from app.services.similarity import match_official_contents
 
                 try:
@@ -482,7 +483,7 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 except Exception as exc:  # noqa: BLE001 - AI 匹配不得阻断采集主链路
                     postprocess_errors.append(f"official content matching failed: {type(exc).__name__}: {exc}")
                     logger.exception("official content matching failed")
-            if not is_news and (stats.items_new or stats.items_updated or (match_stats and match_stats.decisions)):
+            if domain == "game" and (stats.items_new or stats.items_updated or (match_stats and match_stats.decisions)):
                 # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
                 # 先结束旧事务：可重复读下，取到聚合锁后仍读旧快照，看不到上一轮刚写入的证据。
                 await session.commit()
@@ -502,7 +503,7 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 if foreign and hasattr(redis, "enqueue_job"):
                     for content_id in stats.touched_content_ids:
                         await redis.enqueue_job("translate_content", content_id)
-                if not is_news and stats.touched_content_ids and hasattr(redis, "enqueue_job"):
+                if stats.touched_content_ids and hasattr(redis, "enqueue_job"):
                     await enqueue_review_jobs(redis, stats.touched_content_ids)
         except CollectorDeferred as exc:
             retry_at = exc.retry_at

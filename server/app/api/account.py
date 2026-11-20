@@ -489,6 +489,7 @@ _KIND_DEFAULT_PLATFORM = {
     "keyword": "bilibili",
     "feed": "rss",
     "channel_rss": "youtube",
+    "hot_posts": "xiaoheihe",
 }
 _YT_CHANNEL_RE = _re.compile(r"^(?:UC[A-Za-z0-9_-]{20,30}|@[A-Za-z0-9._-]{3,30})$")
 
@@ -500,6 +501,8 @@ def _normalize_youtube_channel(raw: str) -> str:
 
 
 def _validate_custom_target(kind: str, target: str) -> str:
+    if kind == "hot_posts" and target != "hot":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择小黑盒热帖")
     if kind == "uid":
         if not target.isdigit():
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
@@ -544,14 +547,14 @@ def _validate_custom_payload(body: dict, *, partial: bool = False, default_kind:
 
     kind = str(body.get("kind") or "").strip()
     if kind and kind not in _KIND_DEFAULT_PLATFORM:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控类型只支持 keyword / uid / feed / channel_rss")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "不支持的监控类型")
     effective_kind = kind or default_kind
     raw_platform = body.get("platform")
     platform = str(raw_platform).strip() if raw_platform is not None else (_KIND_DEFAULT_PLATFORM.get(kind, "bilibili") if not partial else "")
     if kind and platform and (platform, kind) not in CUSTOM_SPECS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"不支持的平台与监控类型组合：{platform}/{kind}")
-    if not kind and platform and platform not in {"bilibili", "rss", "youtube"}:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "定制平台仅支持 bilibili / rss / youtube")
+    if not kind and platform and platform not in _KIND_DEFAULT_PLATFORM.values():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "不支持的监控平台")
     name = str(body.get("name") or "").strip()
     if ("name" in body or not partial) and not 1 <= len(name) <= 64:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控名称需为 1 至 64 字")
@@ -669,6 +672,10 @@ async def create_custom_feed(
     quota = await user_quota(session, user.id)
     interval = payload["interval_minutes"] or quota["min_interval_minutes"]
     await check_admission(session, user.id, payload["platform"], payload["kind"], payload["target_value"], interval)
+    if payload["platform"] == "xiaoheihe" and await session.scalar(select(CustomFeed.id).where(
+        CustomFeed.user_id == user.id, CustomFeed.platform == "xiaoheihe",
+    ).limit(1)):
+        raise HTTPException(status.HTTP_409_CONFLICT, "已关注小黑盒热帖")
     source = await shared_source(session, payload["platform"], payload["kind"], payload["target_value"])
     request_interval(source, interval)
     feed = CustomFeed(
@@ -740,7 +747,7 @@ async def update_custom_feed(
     if payload["interval_minutes"] is not None:
         feed.interval_minutes = payload["interval_minutes"]
         feed.next_run_at = None
-        if feed.source_id:
+        if feed.source_id and feed.platform != "xiaoheihe":
             from app.models import CustomFeedSource
             source = await session.get(CustomFeedSource, feed.source_id)
             if source and not source.last_error:
@@ -770,7 +777,7 @@ async def collect_my_custom_feed_now(
     if feed.last_collected_at and (now - feed.last_collected_at) < timedelta(minutes=5):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "刚刚采集过，请至少间隔 5 分钟再手动刷新")
     feed.next_run_at = None
-    if feed.source_id:
+    if feed.source_id and feed.platform != "xiaoheihe":
         from app.models import CustomFeedSource
         source = await session.get(CustomFeedSource, feed.source_id)
         if source and not source.last_error:

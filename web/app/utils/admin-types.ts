@@ -121,6 +121,7 @@ export const platformLabels: Record<string, string> = {
   rss: 'RSS 新闻源',
   bilibili: 'B站',
   miyoushe: '米游社',
+  xiaoheihe: '小黑盒',
   kuro_cn: '库街区·国服',
   kuro_global: '库街区·国际服',
   youtube: 'YouTube',

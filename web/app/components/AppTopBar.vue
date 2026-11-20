@@ -3,7 +3,7 @@ import { avatarGradient, displayName } from '~/utils/avatars'
 import { loginRoute } from '~/utils/safe-redirect'
 import { PROJECT_GITHUB_URL } from '~/utils/project'
 import type { RouteLocationRaw } from 'vue-router'
-import { communityClasses, useHiddenCommunities } from '~/composables/useGameSection'
+import { communityClasses, communityHomeTo, useHiddenCommunities } from '~/composables/useGameSection'
 
 const route = useRoute()
 const { t } = useSiteConfig()
@@ -20,7 +20,7 @@ const allChannels = computed(() => [
     label: c.key === 'ai' ? 'AI 快讯' : c.label,
     nav: communityClasses(c.color).nav,
     dot: communityClasses(c.color).dot,
-    to: (c.key === 'ai' ? '/ai' : { path: '/', query: { community: c.key } }) as RouteLocationRaw,
+    to: communityHomeTo(c.key),
   })),
 ])
 

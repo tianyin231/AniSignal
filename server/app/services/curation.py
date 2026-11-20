@@ -22,6 +22,7 @@ from app.communities import (
     DEFAULT_COMMUNITY,
     community_conditions,
     ensure_communities_synced,
+    feed_community_keys,
     get_community,
 )
 from app.models import (
@@ -649,6 +650,7 @@ async def _review_candidates(
     session: AsyncSession, ids: list[int], tracked_products: list[dict], *, force: bool = False
 ) -> list[dict]:
     latest = _latest_version_subquery()
+    feed_partitions = feed_community_keys()
     rows = list(
         (
             await session.execute(
@@ -660,7 +662,11 @@ async def _review_candidates(
                     & (ContentVersion.version == latest.c.version),
                 )
                 .join(Source, RawContent.source_id == Source.id, isouter=True)
-                .where(RawContent.id.in_(ids))
+                .where(
+                    RawContent.id.in_(ids),
+                    RawContent.platform != "xiaoheihe",
+                    *([RawContent.community.notin_(feed_partitions)] if feed_partitions else []),
+                )
                 .order_by(RawContent.id)
             )
         ).all()

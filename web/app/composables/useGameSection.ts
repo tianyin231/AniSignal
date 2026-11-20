@@ -7,7 +7,7 @@
  * - 默认分区若已被管理员隐藏，自动落到首个启用的分区。
  */
 
-import type { PublicSiteConfig } from '~/composables/useSiteConfig'
+import type { PublicSiteConfig, SiteCommunityItem } from '~/composables/useSiteConfig'
 import {
   type CommunityColorValue,
   type NamedCommunityColor,
@@ -25,7 +25,7 @@ export interface GameCommunity {
   en: string
   /** 分区主题色：支持 8 种语义色键或任意 #RRGGBB 十六进制色 */
   color: CommunityColor
-  domain?: 'game' | 'news'
+  domain?: SiteCommunityItem['domain']
   platforms?: string[]
   active?: boolean
   builtin?: boolean
@@ -48,6 +48,7 @@ export const GAME_COMMUNITIES: GameCommunity[] = [
   { key: 'nikke', label: 'NIKKE', en: 'Goddess of Victory: NIKKE', color: 'orange', domain: 'game', builtin: true, active: true },
   { key: 'infinitynikki', label: '无限暖暖', en: 'Infinity Nikki', color: 'violet', domain: 'game', builtin: true, active: true },
   { key: 'ai', label: 'AI', en: 'AI News', color: 'teal', domain: 'news', builtin: true, active: true },
+  { key: 'xiaoheihe', label: '小黑盒', en: 'HeyBox', color: 'blue', domain: 'feed', platforms: ['xiaoheihe'], builtin: true, active: true },
 ]
 
 export type GameCommunityKey = string
@@ -110,6 +111,12 @@ export function communityMeta(key?: string | null): GameCommunity | undefined {
   return all.find(c => c.key === key) ?? (loaded ? undefined : GAME_COMMUNITIES.find(c => c.key === key))
 }
 
+export function communityHomeTo(key: string) {
+  if (key === 'all') return { path: '/' }
+  if (key === 'ai') return { path: '/ai' }
+  return { path: communityMeta(key)?.domain === 'feed' ? '/contents' : '/', query: { community: key } }
+}
+
 /** 频道主题类：十六进制色走动态 .ch-hex-*，未改色内置分区走专属 .ch-*，其余按语义色映射。 */
 export function channelThemeClass(key?: string | null): string {
   const meta = communityMeta(key)
@@ -145,7 +152,8 @@ function normalizeFilterPlatforms(raw: string[]): string[] {
 export function platformsForCommunity(community: string): string[] {
   const { active } = readSiteCommunities()
   if (community === 'all') {
-    const dynamicAll = active.flatMap(c => c.platforms?.length ? normalizeFilterPlatforms(c.platforms) : (PLATFORMS_BY_COMMUNITY[c.key] ?? ['bilibili']))
+    const dynamicAll = active.filter(c => c.domain !== 'feed')
+      .flatMap(c => c.platforms?.length ? normalizeFilterPlatforms(c.platforms) : (PLATFORMS_BY_COMMUNITY[c.key] ?? ['bilibili']))
     return [...new Set([...dynamicAll, ...Object.values(PLATFORMS_BY_COMMUNITY).flat()])]
   }
   const meta = communityMeta(community)
@@ -158,7 +166,8 @@ export function useCommunityScope({ gameOnly = false } = {}) {
   const { community } = useGameSection()
   const scope = computed<string>(() => {
     const query = String(route.query.community || '')
-    if (query === 'all' || (gameOnly && community.value === 'ai')) return 'all'
+    const domain = communityMeta(community.value)?.domain
+    if (query === 'all' || (gameOnly && (domain === 'news' || domain === 'feed'))) return 'all'
     return community.value
   })
   return { scope, isAll: computed(() => scope.value === 'all') }
@@ -302,7 +311,7 @@ export function useGameSection() {
   async function selectCommunity(key: string) {
     if (!validKeys.value.has(key)) return
     rememberCommunity(key)
-    await router.push(key === 'ai' ? { path: '/ai' } : { path: '/', query: { community: key } })
+    await router.push(communityHomeTo(key))
   }
 
   if (import.meta.client) onMounted(hydrate)

@@ -4,7 +4,7 @@ import re
 from datetime import date, datetime
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, Field, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, field_validator, model_validator
 
 from app.services.urls import safe_link, safe_link_list, safe_media_url
 
@@ -128,7 +128,7 @@ class CommunityCreate(BaseModel):
     label: str = Field(min_length=1, max_length=32)
     en: str = Field(default="", max_length=64)
     color: str = Field(default="blue", pattern=COLOR_PATTERN)
-    domain: str = Field(default="game", pattern="^(game|news)$")
+    domain: str = Field(default="game", pattern="^(game|news|feed)$")
     official_bili_mid: str | None = Field(default=None, max_length=24, pattern=r"^(\d{1,20})?$")
     aliases: list[str] = Field(default_factory=list, max_length=16)
     active: bool = True
@@ -138,7 +138,7 @@ class CommunityUpdate(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=32)
     en: str | None = Field(default=None, max_length=64)
     color: str | None = Field(default=None, pattern=COLOR_PATTERN)
-    domain: str | None = Field(default=None, pattern="^(game|news)$")
+    domain: str | None = Field(default=None, pattern="^(game|news|feed)$")
     official_bili_mid: str | None = Field(default=None, max_length=24, pattern=r"^(\d{1,20})?$")
     aliases: list[str] | None = Field(default=None, max_length=16)
     active: bool | None = None
@@ -203,6 +203,15 @@ class OverviewOut(BaseModel):
     total_contents: int
 
 
+class XiaoheiheShareCreate(BaseModel):
+    community: CommunitySlug
+    url: str = Field(max_length=512)
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
+    author: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    like: int | None = Field(default=None, ge=0, le=2_147_483_647)
+    reply: int | None = Field(default=None, ge=0, le=2_147_483_647)
+
+
 class ContentItemOut(BaseModel):
     id: int
     platform: Platform
@@ -248,11 +257,18 @@ class PublicContentItem(BaseModel):
     delta_view: int | None = None
 
 
+class ContentFeedStatus(BaseModel):
+    automatic: bool
+    updated_at: datetime | None
+    stale: bool = False
+
+
 class PublicContentList(BaseModel):
     items: list[PublicContentItem]
     total: int
     # 账号中心关注流附加：近 24 小时新采集的命中条数（公开接口不返回）
     new_today: int | None = None
+    feed_status: ContentFeedStatus | None = None
 
 
 class ContentMetricPoint(BaseModel):

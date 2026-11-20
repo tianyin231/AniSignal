@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.clock import utcnow
+from app.communities import feed_community_keys
 from app.services.feed_preferences import preference_conditions
 from app.models import (
     ContentTranslation,
@@ -176,6 +177,7 @@ async def load_candidates(
         .subquery()
     )
     published = func.coalesce(RawContent.published_at, RawContent.collected_at)
+    feed_partitions = feed_community_keys()
     query = (
         select(RawContent, ContentVersion, Source, ContentTranslation)
         .options(defer(RawContent.raw_json), defer(Source.raw_json))
@@ -191,6 +193,8 @@ async def load_candidates(
         .where(
             published >= start_at,
             published < end_at,
+            RawContent.platform != "xiaoheihe",
+            *([RawContent.community.notin_(feed_partitions)] if feed_partitions else []),
             *preference_conditions(preferences),
             *([RawContent.community == community] if community != "all" else []),
             *([RawContent.collected_at > collected_after] if collected_after else []),

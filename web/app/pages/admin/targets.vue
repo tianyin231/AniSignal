@@ -11,6 +11,7 @@ useSeoMeta({ title: '分区与信源定制 · AniSignal 管理看板' })
 
 interface AdminCommunityRow extends SiteCommunityItem {
   target_count: number
+  share_count: number
 }
 interface DeletedBuiltinItem {
   key: string
@@ -162,12 +163,13 @@ const communityRows = ref<AdminCommunityRow[]>([])
 const deletedBuiltins = ref<DeletedBuiltinItem[]>([])
 const communityBusy = ref(false)
 const editingCommunityKey = ref<string | null>(null)
+const editingCommunity = computed(() => communityRows.value.find(row => row.key === editingCommunityKey.value))
 const communityForm = reactive({
   key: '',
   label: '',
   en: '',
   color: 'blue' as SiteCommunityItem['color'],
-  domain: 'game' as 'game' | 'news',
+  domain: 'feed' as SiteCommunityItem['domain'],
   official_bili_mid: '',
   aliases: '',
 })
@@ -182,7 +184,7 @@ async function loadCommunities() {
 
 function resetCommunityForm() {
   editingCommunityKey.value = null
-  Object.assign(communityForm, { key: '', label: '', en: '', color: 'blue', domain: 'game', official_bili_mid: '', aliases: '' })
+  Object.assign(communityForm, { key: '', label: '', en: '', color: 'blue', domain: 'feed', official_bili_mid: '', aliases: '' })
 }
 
 function startEditCommunity(row: AdminCommunityRow) {
@@ -207,7 +209,6 @@ async function saveCommunity() {
     return
   }
   communityBusy.value = true
-  const editingRow = editingCommunityKey.value ? communityRows.value.find(c => c.key === editingCommunityKey.value) : null
   const payload = {
     label: communityForm.label.trim(),
     en: communityForm.en.trim() || communityForm.label.trim(),
@@ -215,7 +216,7 @@ async function saveCommunity() {
     domain: communityForm.domain,
     official_bili_mid: communityForm.official_bili_mid.trim() || null,
     aliases: communityForm.aliases.split(/[,，]/).map(s => s.trim()).filter(Boolean),
-    active: editingRow ? editingRow.active : true,
+    active: editingCommunity.value?.active ?? true,
   }
   try {
     if (editingCommunityKey.value) {
@@ -273,7 +274,7 @@ async function batchCommunities(keys: string[], action: 'enable' | 'disable' | '
 }
 
 function hideEmptyCommunities() {
-  const emptyKeys = communityRows.value.filter(c => c.active && c.target_count === 0).map(c => c.key)
+  const emptyKeys = communityRows.value.filter(c => c.active && !c.target_count && !c.share_count).map(c => c.key)
   if (!emptyKeys.length) {
     toast.info('当前所有启用分区均已有采集目标')
     return
@@ -286,7 +287,7 @@ function hideEmptyCommunities() {
 }
 
 function deleteEmptyCommunities() {
-  const emptyKeys = communityRows.value.filter(c => c.target_count === 0).map(c => c.key)
+  const emptyKeys = communityRows.value.filter(c => !c.target_count && !c.share_count).map(c => c.key)
   if (!emptyKeys.length) {
     toast.info('当前没有无信源的空分区')
     return
@@ -392,6 +393,7 @@ const combos: Record<string, string[]> = {
   x: ['account_dynamics'],
   rss: ['feed'],
 }
+const collectPlatforms = Object.keys(platformLabels).filter(platform => platform in combos)
 
 const form = reactive({
   platform: 'bilibili',
@@ -724,7 +726,8 @@ async function remove(target: CollectTarget) {
           <span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: colorToHex(row.color) }" aria-hidden="true" />
           <span class="font-medium">{{ row.label }}</span>
           <span class="mono text-[11px] text-faint">({{ row.target_count }})</span>
-          <span v-if="!row.builtin" class="rounded bg-blue-500/10 px-1 py-0.5 text-[10px] text-blue-600 dark:text-blue-300">自建</span>
+          <span v-if="row.domain === 'feed'" class="text-faint">主题流<span v-if="row.share_count"> · {{ row.share_count }} 篇收录</span></span>
+          <span v-else-if="!row.builtin" class="rounded bg-blue-500/10 px-1 py-0.5 text-[10px] text-blue-600 dark:text-blue-300">自建</span>
           <button type="button" class="ml-1 text-brand-ink hover:underline" :disabled="communityBusy" @click="toggleCommunityActive(row)">
             {{ row.active ? '隐藏' : '启用' }}
           </button>
@@ -778,7 +781,13 @@ async function remove(target: CollectTarget) {
           aria-label="英文副标题"
           class="input px-3 py-2 text-sm"
         >
+        <select v-model="communityForm.domain" :disabled="editingCommunity?.builtin" aria-label="分区模式" class="select px-3 py-2 text-sm">
+          <option value="feed">主题流</option>
+          <option value="game">游戏雷达</option>
+          <option v-if="editingCommunity?.domain === 'news'" value="news">AI 快讯</option>
+        </select>
         <input
+          v-if="communityForm.domain !== 'feed'"
           v-model="communityForm.official_bili_mid"
           placeholder="官方B站UID（可选）"
           aria-label="官方 B 站 UID"
@@ -908,7 +917,7 @@ async function remove(target: CollectTarget) {
     <form id="collect-target-form" class="panel grid gap-3 p-5 sm:grid-cols-[9rem_9rem_1fr_6rem_auto]" @submit.prevent="create">
       <p v-if="editingId" class="col-span-full text-sm font-medium">编辑采集目标 #{{ editingId }}</p>
       <select v-model="form.platform" aria-label="平台" :disabled="editingId !== null" class="select px-3 py-2 text-sm">
-        <option v-for="(label, value) in platformLabels" :key="value" :value="value">{{ label }}</option>
+        <option v-for="value in collectPlatforms" :key="value" :value="value">{{ platformLabels[value] }}</option>
       </select>
       <select v-model="form.target_type" aria-label="采集类型" :disabled="editingId !== null" class="select px-3 py-2 text-sm">
         <option v-for="type in availableTypes" :key="type" :value="type">{{ targetTypeLabels[type] ?? type }}</option>

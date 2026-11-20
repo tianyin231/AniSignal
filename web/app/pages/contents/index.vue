@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { Flame, Search } from 'lucide-vue-next'
+import { Flame, Plus, Search } from 'lucide-vue-next'
 import type { PublicContentList } from '~/composables/usePublicApi'
 import { toRawItem } from '~/utils/public-utils'
-import { platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
+import { communityMeta, platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
 import { platformMeta, type Platform } from '~/utils/data'
+import { fmtTime } from '~/utils/admin-types'
 
-useSeoMeta({ title: '内容库 · AniSignal', description: '多平台采集的官方与社区内容，可按分区、平台和时间筛选。' })
 const { t } = useSiteConfig()
 
 const route = useRoute()
@@ -14,17 +14,25 @@ const pageSize = 30
 // 后端公开列表的分页上界是 10000（MAX_PUBLIC_OFFSET），折算成页数后前后端一致；
 // 不夹这一层的话，超过该页时请求会 422，页面却还显示「下一页」
 const MAX_PAGE = Math.floor(10_000 / pageSize) + 1
-const page = computed(() => Math.min(MAX_PAGE, Math.max(1, Number(route.query.page) || 1)))
 const platform = computed(() => String(route.query.platform || ''))
 const q = computed(() => String(route.query.q || ''))
-const tab = computed(() => String(route.query.tab || 'latest'))
+const { scope, isAll } = useCommunityScope()
+const isXiaoheihe = computed(() => scope.value === 'xiaoheihe')
+const page = computed(() => isXiaoheihe.value ? 1 : Math.min(MAX_PAGE, Math.max(1, Number(route.query.page) || 1)))
+const topic = computed(() => {
+  const meta = communityMeta(scope.value)
+  return meta?.domain === 'feed' ? meta : undefined
+})
+const tab = computed(() => topic.value ? 'latest' : String(route.query.tab || 'latest'))
 const searchInput = ref(q.value)
 watch(q, (v) => (searchInput.value = v))
 
+useSeoMeta({
+  title: () => `${isXiaoheihe.value ? '小黑盒热帖' : topic.value?.label ?? '内容库'} · AniSignal`,
+  description: () => topic.value ? undefined : '多平台采集的官方与社区内容，可按分区、平台和时间筛选。',
+})
 
 const { api } = usePublicApi()
-// community=all（首页聚合进入）时跨分区展示并逐行标注分区
-const { scope, isAll } = useCommunityScope()
 const contentsRequest = useLazyAsyncData(
   () => `contents-${scope.value}-${platform.value}-${q.value}-${page.value}-${tab.value}`,
   (_app, { signal }) => api<PublicContentList>('/api/contents', {
@@ -33,8 +41,10 @@ const contentsRequest = useLazyAsyncData(
       community: scope.value,
       limit: pageSize,
       offset: (page.value - 1) * pageSize,
-      ...(platform.value ? { platform: platform.value } : {}),
-      ...(q.value ? { q: q.value } : {}),
+      ...(isXiaoheihe.value ? { sort: 'hot' } : {
+        ...(platform.value ? { platform: platform.value } : {}),
+        ...(q.value ? { q: q.value } : {}),
+      }),
     },
   }),
   { enabled: computed(() => tab.value !== 'trending') },
@@ -45,6 +55,7 @@ const trendingRequest = useLazyAsyncData(
   { enabled: computed(() => tab.value === 'trending'), watch: [tab] },
 )
 const [{ data, status, error }, { data: trendingData, status: trendingStatus, error: trendingError }] = await Promise.all([contentsRequest, trendingRequest])
+const feedStatus = computed(() => data.value?.feed_status)
 const retry = () => tab.value === 'trending' ? trendingRequest.refresh() : contentsRequest.refresh()
 
 const list = computed(() =>
@@ -74,9 +85,24 @@ function applyQuery(patch: Record<string, string | undefined>) {
 
 <template>
   <div>
-    <h1 class="sr-only">内容库</h1>
-    <SectionNav />
-    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <header v-if="isXiaoheihe" class="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <div class="wall-surface px-1">
+        <h1 class="text-2xl font-bold text-ink">{{ feedStatus?.automatic === false ? '小黑盒精选' : '小黑盒热帖' }}</h1>
+        <div v-if="feedStatus?.updated_at || feedStatus?.stale" class="mt-1.5 flex flex-wrap gap-x-3 text-xs text-muted">
+          <time v-if="feedStatus.updated_at" class="mono" :datetime="feedStatus.updated_at">更新于 {{ fmtTime(feedStatus.updated_at) }}</time>
+          <span v-if="feedStatus.stale" class="text-warn" role="status">更新暂缓</span>
+        </div>
+      </div>
+      <NuxtLink to="/account?tab=custom&create=1&source=xiaoheihe" class="btn-primary inline-flex h-9 items-center gap-1.5 px-3.5">
+        <Plus :size="15" aria-hidden="true" />关注热帖
+      </NuxtLink>
+    </header>
+    <h1 v-else-if="topic" class="wall-heading mb-5 text-2xl font-bold text-ink">{{ topic.label }}</h1>
+    <template v-else>
+      <h1 class="sr-only">内容库</h1>
+      <SectionNav />
+    </template>
+    <div v-if="!isXiaoheihe" class="mb-3 flex flex-wrap items-center justify-between gap-3">
       <form v-if="tab !== 'trending'" class="flex items-center gap-2" role="search" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
         <div class="relative">
           <Search :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" aria-hidden="true" />
@@ -84,7 +110,7 @@ function applyQuery(patch: Record<string, string | undefined>) {
         </div>
         <button type="submit" class="btn-primary h-10 px-4">搜索</button>
       </form>
-      <div class="flex gap-0.5 rounded-[10px] bg-chip p-[3px]" role="tablist" aria-label="排序">
+      <div v-if="!topic" class="flex gap-0.5 rounded-[10px] bg-chip p-[3px]" role="tablist" aria-label="排序">
         <button
           type="button"
           role="tab"
@@ -108,7 +134,7 @@ function applyQuery(patch: Record<string, string | undefined>) {
       </div>
     </div>
 
-    <div v-if="tab !== 'trending'" class="mb-4 flex flex-wrap gap-1.5" aria-label="平台筛选">
+    <div v-if="!isXiaoheihe && tab !== 'trending'" class="mb-4 flex flex-wrap gap-1.5" aria-label="平台筛选">
       <button
         type="button"
         class="h-8 rounded-full px-3.5 text-[13px] transition-colors"
@@ -142,9 +168,9 @@ function applyQuery(patch: Record<string, string | undefined>) {
         :delta-view="tab === 'trending' ? trendingDelta.get(item.id) ?? 0 : 0"
       />
       <p v-if="!list.length" class="px-4 py-10 text-center text-sm text-slate-400">
-        {{ tab === 'trending' ? '24 小时内还没有明显的热度变化。' : '没有匹配的内容。' }}
+        {{ isXiaoheihe ? '暂无小黑盒帖子。' : tab === 'trending' ? '24 小时内还没有明显的热度变化。' : '没有匹配的内容。' }}
       </p>
-      <div v-if="tab !== 'trending' && totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
+      <div v-if="!isXiaoheihe && tab !== 'trending' && totalPages > 1" class="flex items-center justify-between border-t border-slate-200/80 px-4 py-2.5 text-xs text-slate-400 dark:border-zinc-800 dark:text-zinc-500">
         <span>共 {{ data?.total ?? 0 }} 条</span>
         <div class="flex items-center gap-3">
           <button :disabled="page <= 1" class="disabled:opacity-40 hover:text-slate-600 dark:hover:text-zinc-300" @click="applyQuery({ page: String(page - 1) })">« 上一页</button>

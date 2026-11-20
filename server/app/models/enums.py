@@ -12,6 +12,7 @@ class Platform(StrEnum):
     KURO_GLOBAL = "kuro_global"
     YOUTUBE = "youtube"
     X = "x"
+    XIAOHEIHE = "xiaoheihe"
     RSS = "rss"
     GAME_OFFICIAL = "game_official"
 
@@ -38,6 +39,7 @@ class Community(StrEnum):
     NIKKE = "nikke"
     INFINITYNIKKI = "infinitynikki"
     AI = "ai"
+    XIAOHEIHE = "xiaoheihe"
 
 
 # 分区展示名（唯一权威是 communities 注册表，此处派生保持兼容）

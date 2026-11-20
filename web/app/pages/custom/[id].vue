@@ -73,7 +73,7 @@ useSeoMeta({ title: () => `${data.value?.name ?? '定制监控'} · 定制化 ·
 const badge = computed(() => customFeedBadge(data.value?.platform ?? ''))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 const goPage = (value: number) => router.replace({ query: { ...route.query, page: value > 1 ? value : undefined } })
-const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', rss: 'RSS', x: 'X', game_official: '官网' }
+const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', rss: 'RSS', x: 'X', game_official: '官网', xiaoheihe: '小黑盒' }
 const triggering = ref(false)
 const triggerMsg = ref('')
 async function triggerCollect() {
@@ -139,7 +139,7 @@ const emptyText = computed(() => {
         <div class="wall-heading flex min-w-0 items-start gap-4">
           <span class="grid size-12 shrink-0 place-items-center rounded-2xl text-base font-bold text-white shadow-card" :class="badge.badge" :title="badge.label">{{ badge.short }}</span>
           <div class="min-w-0">
-            <p class="mono text-xs tracking-wide text-muted">{{ customKindLabel(data.kind) }} · {{ data.target_label || data.target_value }}</p>
+            <p v-if="data.platform !== 'xiaoheihe'" class="mono text-xs tracking-wide text-muted">{{ customKindLabel(data.kind) }} · {{ data.target_label || data.target_value }}</p>
             <h1 class="mt-1 text-[24px] font-bold leading-tight text-ink sm:text-[28px]">{{ data.name }}</h1>
             <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
               <span class="rounded px-1.5 py-0.5 font-medium" :class="data.site_managed ? 'bg-brand-soft text-brand-ink' : 'bg-chip text-ink-2'">{{ data.site_managed ? '站点维护' : data.owner_name || '匿名用户' }}</span>
@@ -154,8 +154,11 @@ const emptyText = computed(() => {
           <a v-if="data.source_url" :href="data.source_url" target="_blank" rel="noopener" class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 transition-colors hover:text-ink">
             <ExternalLink :size="14" /> 源地址
           </a>
+          <NuxtLink v-if="data.platform === 'xiaoheihe'" to="/contents?community=xiaoheihe" class="inline-flex h-9 items-center rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 hover:text-ink">
+            小黑盒分区
+          </NuxtLink>
           <button
-            v-if="data.is_owner && data.enabled && data.status === 'active'"
+            v-if="data.platform !== 'xiaoheihe' && data.is_owner && data.enabled && data.status === 'active'"
             type="button"
             class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 transition-colors hover:bg-chip hover:text-ink disabled:opacity-50"
             :disabled="triggering"
@@ -223,7 +226,7 @@ const emptyText = computed(() => {
             <p v-if="data.description" class="mt-2 text-[13px] leading-relaxed text-muted">{{ data.description }}</p>
             <dl class="mt-3 divide-y divide-line-soft border-t border-line-soft text-[13px]">
               <div class="flex justify-between gap-3 py-2"><dt class="text-muted">类型</dt><dd class="text-ink-2">{{ customKindLabel(data.kind) }}</dd></div>
-              <div class="flex justify-between gap-3 py-2"><dt class="text-muted">监控对象</dt><dd class="min-w-0 truncate text-ink-2">{{ data.target_label || data.target_value }}</dd></div>
+              <div v-if="data.platform !== 'xiaoheihe'" class="flex justify-between gap-3 py-2"><dt class="text-muted">监控对象</dt><dd class="min-w-0 truncate text-ink-2">{{ data.target_label || data.target_value }}</dd></div>
               <div v-if="data.min_views > 0" class="flex justify-between gap-3 py-2"><dt class="text-muted">播放量门槛</dt><dd class="num text-ink-2">≥ {{ data.min_views.toLocaleString('zh-CN') }}</dd></div>
               <div class="flex justify-between gap-3 py-2"><dt class="text-muted">维护者</dt><dd class="text-ink-2">{{ data.site_managed ? 'AniSignal' : data.owner_name || '匿名用户' }}</dd></div>
             </dl>

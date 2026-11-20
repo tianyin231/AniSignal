@@ -26,6 +26,8 @@ def test_registry_matches_enum():
     for meta in COMMUNITIES.values():
         assert meta.label and meta.bare_name and meta.color
         assert meta.game_name
+        if meta.domain == "feed":
+            continue
         assert meta.game_note
         # 前 two 项必须是《X》与裸名；变体（extra_names）跟在后面
         assert meta.game_names[:2] == (f"《{meta.bare_name}》", meta.bare_name)
@@ -81,14 +83,14 @@ def test_get_community_fallback():
     assert get_community("blhx").key == "blhx"
 
 
-async def test_fresh_install_only_keeps_ai_partition_active(session):
-    """F55：全新空库首次启动只启用 AI 分区；已有配置、目标或内容的站点不受影响。"""
+async def test_fresh_install_keeps_independent_sources_active(session):
+    """全新空库首次启动启用独立信源；已有站点不受影响。"""
     from app.communities import BUILTIN_COMMUNITIES, COMMUNITIES, seed_fresh_install_communities, sync_communities
     from app.services.settings import get_setting
 
     assert await seed_fresh_install_communities(session) is True
     await sync_communities(session)
-    assert [k for k, m in COMMUNITIES.items() if m.active] == ["ai"]
+    assert [k for k, m in COMMUNITIES.items() if m.active] == ["ai", "xiaoheihe"]
     assert set(COMMUNITIES) == set(BUILTIN_COMMUNITIES)  # 只是隐藏，随时可启用
     stored = await get_setting(session, "communities")
     # 已有配置后再启动不会重复写入

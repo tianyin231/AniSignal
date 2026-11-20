@@ -272,7 +272,7 @@ export function createAccountCenter() {
   const createCustom = (body: Record<string, unknown>) => mutateCustom(async () => {
     await $fetch('/api/account/custom-feeds', { method: 'POST', body })
     await fetchCustom()
-  }, '创建失败，请检查后重试。', '监控已创建，后台会开始采集。')
+  }, '创建失败，请检查后重试。', body.kind === 'hot_posts' ? '已关注小黑盒热帖。' : '监控已创建，后台会开始采集。')
   const patchCustom = (row: CustomFeedRow, body: Record<string, unknown>, okText: string) => mutateCustom(async () => {
     const res = await $fetch<{ target_value?: string }>(`/api/account/custom-feeds/${row.id}`, { method: 'PATCH', body })
     Object.assign(row, body, res?.target_value ? { target_value: res.target_value } : {})

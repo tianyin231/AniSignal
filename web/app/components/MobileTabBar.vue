@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CalendarDays, House, Layers, Package, UserRound } from 'lucide-vue-next'
-import { communityMeta } from '~/composables/useGameSection'
+import { communityHomeTo, communityMeta } from '~/composables/useGameSection'
 
 // 手机端底部主导航（lg 以下）：首页 / 日历 / 事件 / 商品 / 我的；栏目链接沿用当前分区视角
 const route = useRoute()
@@ -8,14 +8,10 @@ const { user } = useAuth()
 
 const scope = computed(() => {
   const query = String(route.query.community || '')
-  if (communityMeta(query)) return query
-  return 'all'
+  const meta = communityMeta(query)
+  return meta && meta.domain !== 'feed' ? meta.key : 'all'
 })
-const home = computed(() => {
-  if (scope.value === 'all') return { path: '/' }
-  if (scope.value === 'ai') return { path: '/ai' }
-  return { path: '/', query: { community: scope.value } }
-})
+const home = computed(() => communityHomeTo(scope.value))
 
 // 事件和商品只在游戏分区产生，AI 频道下改看跨分区
 const gameScope = computed(() => scope.value === 'ai' ? 'all' : scope.value)

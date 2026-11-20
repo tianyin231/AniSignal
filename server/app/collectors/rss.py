@@ -149,6 +149,16 @@ def parse_feed(body: bytes, feed_url: str, *, config=None, limit=20) -> list[dic
             "first_party": bool(config.get("first_party")), "owner_key": config.get("owner_key"),
             "participation_mode": config.get("participation_mode", "editorial"), "tier": config.get("tier", "T2"),
             "media": list(dict.fromkeys(media))[:12]})
+        if config.get("engagement"):
+            # RSS 的 comments 也可能是评论页链接，仅读数值字段。
+            for key, names in (("like", {"likes"}), ("reply", {"comments", "total"})):
+                for element in entry:
+                    value = (element.text or "").strip()
+                    if tag(element) in names and 0 < len(value) <= 10 and value.isdecimal():
+                        count = int(value)
+                        if count <= 2_147_483_647:
+                            rows[-1][key] = count
+                            break
     rows.sort(key=lambda row: row["published"] or "", reverse=True)
     return rows[:limit]
 

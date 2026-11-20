@@ -72,6 +72,7 @@ from app.schemas.api import (
     RunTriggerOut,
     TargetBatchRequest,
     TargetImportPresetsRequest,
+    XiaoheiheShareCreate,
 )
 from app.services.queue import BaseQueue
 from app.services.views import events_to_out, product_to_out, products_to_out
@@ -117,12 +118,18 @@ async def _admin_communities_payload(session: AsyncSession) -> dict:
     counts = dict(
         (await session.execute(select(CollectTarget.community, func.count(CollectTarget.id)).group_by(CollectTarget.community))).all()
     )
+    share_counts = dict((await session.execute(
+        select(RawContent.community, func.count(RawContent.id))
+        .where(RawContent.platform == Platform.XIAOHEIHE)
+        .group_by(RawContent.community)
+    )).all())
     items = []
     for meta in COMMUNITIES.values():
         row = community_to_public_dict(meta)
         row["official_bili_mid"] = meta.official_bili_mid_default or ""
         row["aliases"] = list(meta.extra_names)
         row["target_count"] = int(counts.get(meta.key, 0))
+        row["share_count"] = int(share_counts.get(meta.key, 0))
         items.append(row)
     deleted_builtins = [
         {"key": k, "label": BUILTIN_COMMUNITIES[k].label}
@@ -668,6 +675,31 @@ async def overview(
 
 
 # ---------- 内容浏览 ----------
+
+
+@router.post("/contents/xiaoheihe")
+async def add_xiaoheihe_share(body: XiaoheiheShareCreate, session: AsyncSession = Depends(get_session)):
+    from app.parsers.xiaoheihe import parse_share
+    from app.services.ingest import ingest_items
+
+    meta = get_community(body.community)
+    if meta.domain != "feed":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择主题流分区")
+    raw = body.model_dump(exclude={"community"})
+    try:
+        post = parse_share(raw)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请填写小黑盒公开帖子链接") from exc
+    raw["url"] = post.url
+    stats = await ingest_items(session, "xiaoheihe_share", [raw], body.community, skip_existing=True)
+    stored = await session.scalar(select(RawContent).where(
+        RawContent.platform == post.platform, RawContent.external_id == post.external_id,
+    ))
+    if stored is None:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "收录失败")
+    if stored.community != body.community:
+        raise HTTPException(status.HTTP_409_CONFLICT, "该帖子已收录到其他分区")
+    return {"id": stored.id, "created": bool(stats.items_new)}
 
 
 @router.get("/contents", response_model=ContentListOut)

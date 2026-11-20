@@ -229,9 +229,13 @@ async def list_contents(
     session: AsyncSession = Depends(get_session),
 ):
     from app.services.classify import HIDDEN_CATEGORIES
+    from app.services.xiaoheihe import XIAOHEIHE_KEY, XIAOHEIHE_LIMIT, xiaoheihe_feed_status
 
+    is_xiaoheihe = community == XIAOHEIHE_KEY
     blocks = request_blocks(request).scoped(community)
     conditions: list = community_conditions(RawContent.community, community, blocks.communities)
+    if is_xiaoheihe:
+        conditions.append(RawContent.platform == XIAOHEIHE_KEY)
     if platform:
         conditions.append(
             RawContent.platform.in_(("kuro_cn", "kuro_global"))
@@ -247,7 +251,7 @@ async def list_contents(
         conditions.append(Source.identity == identity)
     if exclude_identity:
         conditions.append((Source.identity != exclude_identity) | Source.identity.is_(None))
-    if sort == "hot" and published_within_hours is None:
+    if sort == "hot" and published_within_hours is None and not is_xiaoheihe:
         published_within_hours = HOT_DEFAULT_WINDOW_HOURS
     if published_within_hours:
         conditions.append(RawContent.published_at >= utcnow() - timedelta(hours=published_within_hours))
@@ -283,21 +287,31 @@ async def list_contents(
         return query.join(Source, RawContent.source_id == Source.id, isouter=True) if identity or exclude_identity else query
 
     page_query = matching(RawContent.id)
+    published = RawContent.published_at
+    if is_xiaoheihe:
+        published = func.coalesce(RawContent.published_at, RawContent.collected_at)
+        recent = matching(RawContent.id).order_by(published.desc(), RawContent.id.desc()).limit(XIAOHEIHE_LIMIT).subquery()
+        page_query = page_query.where(RawContent.id.in_(select(recent.c.id)))
     if sort == "hot":
         from app.models import MetricSnapshot
 
         # 标量子查询按 (raw_content_id, id) 索引逐条取最新指标；写成 JOIN 关联子查询时 MySQL 用不上主键。
-        views = (
-            select(cast(MetricSnapshot.metrics["view"].as_string(), BigInteger))
+        score = cast(MetricSnapshot.metrics["view"].as_string(), BigInteger)
+        if is_xiaoheihe:
+            score = func.coalesce(cast(MetricSnapshot.metrics["like"].as_string(), BigInteger), 0) + func.coalesce(
+                cast(MetricSnapshot.metrics["reply"].as_string(), BigInteger), 0,
+            )
+        latest_score = (
+            select(score)
             .where(MetricSnapshot.raw_content_id == RawContent.id)
             .order_by(MetricSnapshot.id.desc())
             .limit(1)
             .correlate(RawContent)
             .scalar_subquery()
         )
-        page_query = page_query.order_by(func.coalesce(views, 0).desc())
+        page_query = page_query.order_by(func.coalesce(latest_score, 0).desc())
     page_ids = list(await session.scalars(page_query.order_by(
-        RawContent.published_at.desc(), RawContent.id.desc(),
+        published.desc(), RawContent.id.desc(),
     ).limit(limit).offset(offset)))
     rows = await session.execute(
         select(RawContent, Source.name, Source.identity, ContentVersion)
@@ -340,6 +354,8 @@ async def list_contents(
     items = candidates
 
     total = await session.scalar(matching(func.count())) or 0
+    if is_xiaoheihe:
+        return PublicContentList(items=items, total=min(total, XIAOHEIHE_LIMIT), feed_status=await xiaoheihe_feed_status(session))
     return PublicContentList(items=items, total=total)
 
 
@@ -453,6 +469,7 @@ async def sitemap(request: Request, session: AsyncSession = Depends(get_session)
 
     entries: list[tuple[str, datetime | None]] = [(path, None) for path in _SITEMAP_PAGES]
     entries.extend((f"/?community={key}", None) for key, meta in COMMUNITIES.items() if meta.domain == "game")
+    entries.extend((f"/contents?community={key}", None) for key, meta in COMMUNITIES.items() if meta.active and meta.domain == "feed")
     products = await session.execute(select(ProductModel.slug, ProductModel.community, ProductModel.fulfillment_updated_at))
     entries.extend((f"/products/{slug}?community={community}", updated) for slug, community, updated in products)
     events = await session.execute(

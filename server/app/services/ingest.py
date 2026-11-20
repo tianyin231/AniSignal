@@ -28,6 +28,8 @@ from app.parsers.miyoushe import parse_post
 from app.parsers.youtube import PARSER_VERSION as YOUTUBE_PARSER_VERSION
 from app.parsers.youtube import parse_rss_item
 from app.parsers.x import PARSER_VERSION as X_PARSER_VERSION, parse_post as parse_x_post
+from app.parsers.xiaoheihe import PARSER_VERSION as XIAOHEIHE_PARSER_VERSION
+from app.parsers.xiaoheihe import parse_share as parse_xiaoheihe_share
 from app.parsers.rss import PARSER_VERSION as RSS_PARSER_VERSION, parse_item as parse_feed_item
 from app.parsers.game_official import PARSER_VERSION as GAME_OFFICIAL_PARSER_VERSION, parse_notice as parse_game_notice
 from app.collectors.nikke import parse_notice as parse_nikke_notice
@@ -65,6 +67,7 @@ PARSERS: dict[str, tuple] = {
     "miyoushe_posts": (parse_post, MIYOUSHE_PARSER_VERSION),
     "youtube_rss": (parse_rss_item, YOUTUBE_PARSER_VERSION),
     "x_posts": (parse_x_post, X_PARSER_VERSION),
+    "xiaoheihe_share": (parse_xiaoheihe_share, XIAOHEIHE_PARSER_VERSION),
     "rss_feed": (parse_feed_item, RSS_PARSER_VERSION),
     "game_official_notices": (parse_game_notice, GAME_OFFICIAL_PARSER_VERSION),
     "nikke_notices": (parse_nikke_notice, "1"),
@@ -152,12 +155,14 @@ async def ingest_items(
     community: str = DEFAULT_COMMUNITY,
     *,
     force_official: bool | str = False,
+    skip_existing: bool = False,
 ) -> IngestStats:
     if fetch_kind not in PARSERS:
         raise ValueError(f"no parser registered for fetch_kind={fetch_kind}")
     parse, parser_version = PARSERS[fetch_kind]
     rules = await load_rules(session)
     stats = IngestStats(items_found=len(items))
+    write_options = {"skip_existing": True} if skip_existing else {}
     for raw in items:
         try:
             normalized = parse(raw)
@@ -174,7 +179,8 @@ async def ingest_items(
                 # 否则事务作废，同批其余内容和这轮的健康记录都写不进去。
                 async with session.begin_nested():
                     is_new, changed, content_id, identity = await _ingest_one(
-                        session, normalized, raw, parser_version, rules, community, force_official
+                        session, normalized, raw, parser_version, rules, community, force_official,
+                        **write_options,
                     )
             except IntegrityError:
                 # 撞唯一键说明对方已提交。可重复读的旧快照看不到那一行，重试前先提交换新快照，
@@ -182,7 +188,8 @@ async def ingest_items(
                 await session.commit()
                 async with session.begin_nested():
                     is_new, changed, content_id, identity = await _ingest_one(
-                        session, normalized, raw, parser_version, rules, community, force_official
+                        session, normalized, raw, parser_version, rules, community, force_official,
+                        **write_options,
                     )
             stats.items_new += int(is_new)
             stats.items_updated += int(changed)
@@ -214,12 +221,11 @@ async def _ingest_one(
     rules: list,
     community: str = DEFAULT_COMMUNITY,
     force_official: bool | str = False,
+    *,
+    skip_existing: bool = False,
 ) -> tuple[bool, bool, int, str]:
     """返回 (is_new, fingerprint_changed, content_id, source_identity)。"""
     from app.services.statistics import record_content_stat
-
-    source_id, identity = await _upsert_source(session, normalized, force_official=force_official)
-    fingerprint = content_fingerprint(normalized)
 
     existing = await session.scalar(
         select(RawContent).where(
@@ -227,6 +233,11 @@ async def _ingest_one(
             RawContent.external_id == normalized.external_id,
         )
     )
+    if existing is not None and skip_existing:
+        identity = await session.scalar(select(Source.identity).where(Source.id == existing.source_id))
+        return False, False, existing.id, identity or str(Identity.UNKNOWN)
+    source_id, identity = await _upsert_source(session, normalized, force_official=force_official)
+    fingerprint = content_fingerprint(normalized)
     if existing is None:
         content = RawContent(
             platform=normalized.platform,
@@ -496,7 +507,9 @@ async def reparse_contents(
     rules = await load_rules(session)
     checked = updated = failed = 0
     for content in rows:
-        kind = {"x": "x_posts", "rss": "rss_feed"}.get(content.platform) or _REPARSE_KIND.get(content.content_type)
+        kind = {"x": "x_posts", "rss": "rss_feed", "xiaoheihe": "xiaoheihe_share"}.get(
+            content.platform
+        ) or _REPARSE_KIND.get(content.content_type)
         if (content.raw_json or {}).get("archive_source") == "custom_source_items":
             kind = "custom_source_archive"
         elif content.platform == "game_official":

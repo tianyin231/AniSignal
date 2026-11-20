@@ -26,7 +26,7 @@ export interface SiteCommunityItem {
   label: string
   en: string
   color: CommunityColorValue
-  domain: 'game' | 'news'
+  domain: 'game' | 'news' | 'feed'
   platforms: string[]
   active: boolean
   builtin: boolean
