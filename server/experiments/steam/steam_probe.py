@@ -39,7 +39,7 @@ def main():
             params={"json": 1, "appids": TEST_APP, "language": "schinese", "filter": "recent",
                     "review_type": "all", "purchase_type": "all", "num_per_page": 1,
                     "start_offset": 0}).json().get("success") == 1))
-    with LOG.open("a") as f:
+    with LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     cells = [f"{k}={rec[k]['status']}({rec[k]['ms']}ms)" for k in ("detail", "online", "spy", "reviews")]
     print(f"[{rec['ts'][:19]}] " + "  ".join(cells))

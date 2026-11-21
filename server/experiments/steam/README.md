@@ -57,7 +57,11 @@ probe:   detail/online/spy/reviews 四面 ok（223-705ms）
    key（非登录态，公开数据令牌）一条路——见会话结论，本程序不含；
 2. 匿名 per-user 数据仅评价者切片（playtime_at_review / num_games_owned /
    num_reviews），已包含在评价记录里；
-3. 未 soak：长期频率曲线与 IP 惩罚盒恢复周期待 DL01 部署后观测。
+3. **SteamSpy 云机房 403 限制（2026-11-21 线上实测）**：AWS 等云机房 IP 访问
+   `steamspy.com/api.php` 会被 Cloudflare 挑战拦截（HTTP 403）。可设置
+   `STEAM_SKIP_SPY=1` 跳过；好评/差评统计仍可通过 `ajaxappreviews` 的
+   `query_summary` 获取并记入 `rounds.jsonl`；
+4. 未 soak：长期频率曲线与 IP 惩罚盒恢复周期待部署后观测。
 
 ## 快速开始
 

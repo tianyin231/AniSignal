@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS reviews(
   created INT, updated INT);
 CREATE TABLE IF NOT EXISTS rounds(
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, round INT, new_reviews INT, errors TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_rounds ON rounds(ts);
 CREATE TABLE IF NOT EXISTS probes(
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, detail TEXT, online TEXT, spy TEXT, reviews TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_probes ON probes(ts);
@@ -43,7 +44,7 @@ def build():
         p = raw / name
         if not p.exists():
             return
-        for line in p.read_text().splitlines():
+        for line in p.read_text(encoding="utf-8").splitlines():
             try:
                 yield json.loads(line)
             except ValueError:
@@ -72,12 +73,12 @@ def build():
                            json.dumps(r.get("errors"), ensure_ascii=False)[:200]))
         n["rounds"] += cur.rowcount
         for community, g in (r.get("games") or {}).items():
-            con.execute("INSERT OR IGNORE INTO games(community,name,app_id) VALUES (?,?,?) "
-                        "ON CONFLICT(community) DO UPDATE SET name=excluded.name",
+            con.execute("INSERT INTO games(community,name,app_id) VALUES (?,?,?) "
+                        "ON CONFLICT(community) DO UPDATE SET name=excluded.name, app_id=excluded.app_id",
                         (community, g.get("name"), g.get("app_id")))
     p = ROOT / "stability" / "log.jsonl"
     if p.exists():
-        for line in p.read_text().splitlines():
+        for line in p.read_text(encoding="utf-8").splitlines():
             try:
                 r = json.loads(line)
             except ValueError:
@@ -108,7 +109,8 @@ def main():
             print(f"  Spy {r['community']}: 中位 {r['median_forever']}min | owners {r['owners']}")
     elif len(sys.argv) >= 2 and sys.argv[1] == "latest":
         for r in query("SELECT community, voted_up, substr(text,1,60) t, playtime_at_review p FROM reviews ORDER BY created DESC LIMIT 10"):
-            print(f"  [{r['community']}] {'推荐' if r['voted_up'] else '不推荐'} {r['p']}h: {r['t']}")
+            hours = (r["p"] or 0) / 60
+            print(f"  [{r['community']}] {'推荐' if r['voted_up'] else '不推荐'} {hours:.1f}h: {r['t']}")
     elif len(sys.argv) >= 3 and sys.argv[1] == "sql":
         for r in query(sys.argv[2]):
             print("  " + " | ".join(f"{k}={str(v)[:50]}" for k, v in r.items()))

@@ -16,7 +16,6 @@
 
 import json
 import os
-import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -37,6 +36,7 @@ ROUND_INTERVAL = float(os.environ.get("STEAM_INTERVAL", "1800"))
 SPACING = float(os.environ.get("STEAM_SPACING", "2.5"))
 REVIEW_PAGES = int(os.environ.get("STEAM_REVIEW_PAGES", "3"))   # 每轮每游戏翻几页评价
 REVIEW_PAGE_SIZE = 100                                        # API 上限
+SKIP_SPY = os.environ.get("STEAM_SKIP_SPY", "").lower() in {"1", "true", "yes"}
 
 # AniSignal 社区 -> (显示名, Steam appid)（2026-11-19 storesearch 解析；
 # 崩铁/原神/方舟/碧蓝/NIKKE 不在 Steam，见 README）
@@ -44,21 +44,21 @@ GAMES = {
     "wuwa": ("鸣潮", 3513350),
     "zzz": ("绝区零", 4162040),
     "endfield": ("明日方舟：终末地", 4732690),
-    "infinitenikki": ("无限暖暖", 3164330),
+    "infinitynikki": ("无限暖暖", 3164330),
 }
 
 
 def load_state() -> dict:
     if STATE.exists():
         try:
-            return json.loads(STATE.read_text())
+            return json.loads(STATE.read_text(encoding="utf-8"))
         except ValueError:
             pass
     return {"seen_reviews": {}, "last_round": 0, "rounds": 0, "errors": 0}
 
 
 def save_state(st):
-    STATE.write_text(json.dumps(st, ensure_ascii=False))
+    STATE.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
 
 
 def client() -> httpx.Client:
@@ -68,40 +68,54 @@ def client() -> httpx.Client:
                         timeout=30, follow_redirects=True)
 
 
-def fetch_app_detail(c, appid: int) -> dict | None:
-    r = c.get(f"{BASE_STORE}/api/appdetails", params={"appids": appid, "l": "schinese"})
-    if r.status_code != 200:
+def _get_json(c, url: str, params: dict) -> dict | None:
+    try:
+        r = c.get(url, params=params)
+        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+            return None
+        data = r.json()
+        return data if isinstance(data, dict) else None
+    except (httpx.HTTPError, ValueError):
         return None
-    return (r.json().get(str(appid)) or {}).get("data")
+
+
+def fetch_app_detail(c, appid: int) -> dict | None:
+    payload = _get_json(c, f"{BASE_STORE}/api/appdetails", {"appids": appid, "l": "schinese"})
+    return ((payload or {}).get(str(appid)) or {}).get("data")
 
 
 def fetch_online(c, appid: int) -> int | None:
-    r = c.get(f"{BASE_API}/ISteamUserStats/GetNumberOfCurrentPlayers/v1/", params={"appid": appid})
-    if r.status_code != 200:
-        return None
-    return (r.json().get("response") or {}).get("player_count")
+    payload = _get_json(c, f"{BASE_API}/ISteamUserStats/GetNumberOfCurrentPlayers/v1/", {"appid": appid})
+    return ((payload or {}).get("response") or {}).get("player_count")
 
 
 def fetch_spy(c, appid: int) -> dict | None:
-    r = c.get(BASE_SPY, params={"request": "appdetails", "appid": appid})
-    if r.status_code != 200:
-        return None
-    return r.json()
+    return _get_json(c, BASE_SPY, {"request": "appdetails", "appid": appid})
 
 
-def fetch_reviews(c, appid: int, community: str, st: dict, ts: str) -> list[dict]:
-    """翻页拉最新评价，遇到已见 recommendationid 即停（增量）。"""
-    out, seen, dup = [], st.setdefault("seen_reviews", {}), 0
+def fetch_reviews(c, appid: int, community: str, st: dict, ts: str) -> tuple[list[dict], dict | None]:
+    """翻页拉最新评价，遇到已见 recommendationid 即停（增量），同时带回好评汇总。"""
+    out, seen, dup, summary = [], st.setdefault("seen_reviews", {}), 0, None
     now = time.time()
     for page in range(REVIEW_PAGES):
-        r = c.get(f"{BASE_STORE}/ajaxappreviews/{appid}",
-                  params={"json": 1, "appids": appid, "language": "schinese", "filter": "recent",
-                          "review_type": "all", "purchase_type": "all",
-                          "num_per_page": REVIEW_PAGE_SIZE, "start_offset": page * REVIEW_PAGE_SIZE})
-        if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
+        payload = _get_json(
+            c,
+            f"{BASE_STORE}/ajaxappreviews/{appid}",
+            {"json": 1, "appids": appid, "language": "schinese", "filter": "recent",
+             "review_type": "all", "purchase_type": "all",
+             "num_per_page": REVIEW_PAGE_SIZE, "start_offset": page * REVIEW_PAGE_SIZE},
+        )
+        if payload is None:
             st["errors"] = st.get("errors", 0) + 1
             break
-        reviews = r.json().get("reviews") or []
+        if page == 0 and isinstance(payload.get("query_summary"), dict):
+            qs = payload["query_summary"]
+            summary = {
+                "score_desc": qs.get("review_score_desc"),
+                "total_positive": qs.get("total_positive"),
+                "total_negative": qs.get("total_negative"),
+            }
+        reviews = payload.get("reviews") or []
         if not reviews:
             break
         fresh = []
@@ -129,10 +143,11 @@ def fetch_reviews(c, appid: int, community: str, st: dict, ts: str) -> list[dict
         if not fresh:
             break  # 整页都见过，无需再翻
         time.sleep(SPACING)
-    with (RAW / "reviews.jsonl").open("a") as f:
-        for rec in out:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    return out
+    if out:
+        with (RAW / "reviews.jsonl").open("a", encoding="utf-8") as f:
+            for rec in out:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return out, summary
 
 
 def collect():
@@ -160,22 +175,25 @@ def collect():
             g["online"] = fetch_online(c, appid)
             if g["online"] is None:
                 rec["errors"].append(f"{community} online")
-            with (RAW / "online.jsonl").open("a") as f:
+            with (RAW / "online.jsonl").open("a", encoding="utf-8") as f:
                 f.write(json.dumps({"ts": ts, "community": community, "app_id": appid,
                                     "online": g["online"]}, ensure_ascii=False) + "\n")
             time.sleep(SPACING)
-            spy = fetch_spy(c, appid)
-            if spy:
-                g["spy"] = {"owners": spy.get("owners"), "average_forever": spy.get("average_forever"),
-                            "median_forever": spy.get("median_forever"), "userscore": spy.get("userscore"),
-                            "positive": spy.get("positive"), "negative": spy.get("negative")}
-                with (RAW / "spy.jsonl").open("a") as f:
-                    f.write(json.dumps({"ts": ts, "community": community, "app_id": appid, **g["spy"]},
-                                       ensure_ascii=False) + "\n")
-            else:
-                rec["errors"].append(f"{community} spy")
-            time.sleep(SPACING)
-            reviews = fetch_reviews(c, appid, community, st, ts)
+            if not SKIP_SPY:
+                spy = fetch_spy(c, appid)
+                if spy:
+                    g["spy"] = {"owners": spy.get("owners"), "average_forever": spy.get("average_forever"),
+                                "median_forever": spy.get("median_forever"), "userscore": spy.get("userscore"),
+                                "positive": spy.get("positive"), "negative": spy.get("negative")}
+                    with (RAW / "spy.jsonl").open("a", encoding="utf-8") as f:
+                        f.write(json.dumps({"ts": ts, "community": community, "app_id": appid, **g["spy"]},
+                                           ensure_ascii=False) + "\n")
+                else:
+                    rec["errors"].append(f"{community} spy")
+                time.sleep(SPACING)
+            reviews, review_summary = fetch_reviews(c, appid, community, st, ts)
+            if review_summary:
+                g["review_summary"] = review_summary
             g["new_reviews"] = len(reviews)
             rec["new_reviews"] += len(reviews)
             rec["games"][community] = g
@@ -185,7 +203,7 @@ def collect():
     cutoff = now - 7 * 86400
     st["seen_reviews"] = {k: v for k, v in st["seen_reviews"].items() if v > cutoff}
     save_state(st)
-    with (RAW / "rounds.jsonl").open("a") as f:
+    with (RAW / "rounds.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     print(f"round {rec['round']}: 新评价 {rec['new_reviews']} | 错误 {len(rec['errors'])} {rec['errors'][:2]}")
 

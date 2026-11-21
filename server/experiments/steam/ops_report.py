@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 from pathlib import Path
 
 ROOT = Path(os.environ.get("STEAM_HOME") or Path(__file__).resolve().parent)
@@ -12,7 +11,7 @@ def read_jsonl(path):
     if not path.exists():
         return []
     out = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         try:
             out.append(json.loads(line))
         except ValueError:
