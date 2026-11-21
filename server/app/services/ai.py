@@ -381,7 +381,7 @@ async def translate_content(session: AsyncSession, content_id: int) -> dict:
     if pair is None:
         return {"status": "skipped", "reason": "content_not_found"}
     raw, version = pair
-    if raw.platform not in ("kuro_global", "youtube", "x") and not (
+    if raw.platform not in ("kuro_global", "youtube", "x", "steam") and not (
         raw.platform == "game_official" and get_community(raw.community).official_notice_region == "global"
     ):
         return {"status": "skipped", "reason": "not_foreign_platform"}

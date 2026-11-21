@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { RefreshCw } from 'lucide-vue-next'
 import { communityHomeTo, communityMeta } from '~/composables/useGameSection'
-import type { ApiEventBrief, ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto, PublicSource } from '~/composables/usePublicApi'
+import type { ApiEventBrief, ApiEventList, PublicContentList, PublicContentItem, CalendarDto, CodesDto, PublicSource, SteamPulseResponse } from '~/composables/usePublicApi'
 import { toRawItem, utcTimestamp } from '~/utils/public-utils'
 import { ongoingActivities, upNextItems } from '~/utils/schedule'
 
@@ -147,12 +147,28 @@ const sourcesRequest = useLazyAsyncData(
   { watch: [homeCommunity] },
 )
 
+const steamPulseRequest = useLazyAsyncData(
+  () => `home-steam-${homeCommunity.value}`,
+  async (_app, { signal }): Promise<SteamPulseResponse | null> => {
+    if (aggregate.value) return null
+    try {
+      return await api<SteamPulseResponse>('/api/steam/pulse', {
+        query: { community: homeCommunity.value, hours: 168 },
+        signal,
+      })
+    } catch {
+      return null
+    }
+  },
+  { watch: [homeCommunity, aggregate] },
+)
+
 const requests = [feedRequest, eventsRequest, highlightsRequest, trendingRequest, calendarRequest, codesRequest, pulseRequest, sourcesRequest]
 // 频道入口与其他首屏数据并行预取，客户端挂载时直接复用缓存，避免头图二次展开。
 const { fetchOnce: fetchOfficialLinks } = useOfficialLinks(homeCommunity)
 const officialLinksRequest = import.meta.server && !aggregate.value ? fetchOfficialLinks() : Promise.resolve()
 // 服务端首屏等全部数据；客户端切换频道时先渲染结构、各区块随数据到达再填充
-await Promise.all([...requests, officialLinksRequest])
+await Promise.all([...requests, steamPulseRequest, officialLinksRequest])
 const { data: feedData, status: feedStatus } = feedRequest
 const { data: eventsData } = eventsRequest
 const { data: highlightsData, status: highlightsStatus } = highlightsRequest
@@ -161,6 +177,9 @@ const { data: calendarData } = calendarRequest
 const { data: codesData } = codesRequest
 const { data: pulseData } = pulseRequest
 const { data: sourcesData } = sourcesRequest
+const { data: steamPulseData } = steamPulseRequest
+
+const steamApps = computed(() => (aggregate.value ? [] : steamPulseData.value?.apps ?? []))
 
 const featuredHighlights = computed(() => (highlightsData.value?.items ?? []).map(toRawItem))
 const trendingList = computed(() => (trendingData.value?.items ?? []).map(toRawItem))
@@ -215,6 +234,7 @@ async function refreshHome() {
   try {
     await Promise.all([
       ...requests.map(request => request.refresh()),
+      steamPulseRequest.refresh(),
       refreshNuxtData(`status-product-${homeCommunity.value}`),
     ])
   }
@@ -416,6 +436,7 @@ onBeforeUnmount(() => {
       <aside class="flex min-w-0 flex-col gap-5" aria-label="首页侧栏">
         <!-- 桌面端右栏放不下时，履约追踪排在侧栏第一位 -->
         <StatusCard v-if="featuredHighlights.length && !statusInline" embedded class="hidden lg:block" />
+        <SteamPulseCard v-if="!aggregate && steamApps.length" :apps="steamApps" />
         <TrendingCard :items="trendingList" :deltas="trendingDelta" :more-to="{ path: '/contents', query: { ...sectionQuery, tab: 'trending' } }" />
         <EventsCard :events="eventsData?.items ?? []" :show-community="aggregate" :more-to="{ path: '/events', query: sectionQuery }" />
         <CodesCard :codes="codesData?.items ?? []" :show-community="aggregate" />

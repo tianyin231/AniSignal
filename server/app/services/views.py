@@ -33,6 +33,7 @@ _REGION_OF_PLATFORM = {
     "kuro_cn": "cn",
     "kuro_global": "global",
     "game_official": "cn",
+    "steam": "global",
     "youtube": "global",
 }
 

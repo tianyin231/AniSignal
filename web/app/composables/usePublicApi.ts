@@ -374,6 +374,38 @@ export interface ContentDetail {
   preview_mode: 'full' | 'partial' | 'external_only'
 }
 
+export interface SteamPulsePoint {
+  ts: string
+  player_count: number
+}
+
+export interface SteamPulseApp {
+  app_id: number
+  name: string
+  store_url: string
+  player_count: number | null
+  peak_24h: number | null
+  peak_window: number | null
+  global_positive: number | null
+  global_negative: number | null
+  global_rate: number | null
+  global_score_desc: string | null
+  global_score_label: string | null
+  cn_positive: number | null
+  cn_negative: number | null
+  cn_rate: number | null
+  price_formatted: string | null
+  discount_percent: number
+  captured_at: string
+  series: SteamPulsePoint[]
+}
+
+export interface SteamPulseResponse {
+  community: string
+  hours: number
+  apps: SteamPulseApp[]
+}
+
 export function usePublicApi() {
   const config = useRuntimeConfig()
   // SSR 直连 FastAPI；浏览器走同源（Nitro routeRules 代理）

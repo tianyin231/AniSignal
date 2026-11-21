@@ -117,7 +117,11 @@ async def test_thinning_keeps_the_only_snapshot_of_a_stale_item(session):
     session.add(MetricSnapshot(raw_content_id=raw.id, metrics={"view": 1}, captured_at=now - timedelta(days=200)))
     await session.commit()
 
-    assert (await run_retention(session, now=now)) == {"versions_removed": 0, "snapshots_removed": 0}
+    assert (await run_retention(session, now=now)) == {
+        "versions_removed": 0,
+        "snapshots_removed": 0,
+        "steam_snapshots_removed": 0,
+    }
 
 
 class FakeRedis:

@@ -334,7 +334,7 @@ async def translate_missing(session: AsyncSession = Depends(get_session), queue=
 
     translated = select(CT.raw_content_id).where(CT.raw_content_id == RawContent.id).exists()
     query = select(RawContent.id).where(
-        RawContent.platform.in_(["kuro_global", "youtube"]), ~translated,
+        RawContent.platform.in_(["kuro_global", "youtube", "steam"]), ~translated,
     )
     remaining = await session.scalar(select(func.count()).select_from(query.subquery()))
     ids = list(await session.scalars(query.order_by(RawContent.collected_at.desc(), RawContent.id.desc()).limit(50)))

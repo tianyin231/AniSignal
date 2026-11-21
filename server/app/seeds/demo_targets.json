@@ -2,6 +2,7 @@
   "wuwa": [
     {"platform": "kuro_cn", "target_type": "notices", "target_value": "default", "display_name": "鸣潮官网公告（国服）", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "kuro_global", "target_type": "notices", "target_value": "default", "display_name": "鸣潮官网公告（国际服）", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "steam", "target_type": "notices", "target_value": "3513350", "display_name": "鸣潮 · Steam 官方公告与在线", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "1955897084", "display_name": "鸣潮官方账号动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3493082584582776", "display_name": "库洛游戏周边·官方周边动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "keyword_search", "target_value": "鸣潮", "display_name": "B站搜索·鸣潮社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["鸣潮", "鳴潮", "Wuthering Waves", "WuWa"]},
@@ -36,6 +37,7 @@
   ],
   "endfield": [
     {"platform": "game_official", "target_type": "notices", "target_value": "endfield", "display_name": "终末地官网公告", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
+    {"platform": "steam", "target_type": "notices", "target_value": "4732690", "display_name": "终末地 · Steam 官方公告与在线", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "1265652806", "display_name": "终末地官方账号动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "keyword_search", "target_value": "终末地", "display_name": "B站搜索·终末地社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true},
     {"platform": "youtube", "target_type": "channel_rss", "target_value": "UCowPaVRBzg8CE6K4CB6LJfw", "display_name": "终末地 YouTube 官方", "interval_minutes": 60, "min_views": 0, "tier": "core", "enabled": true},
@@ -43,6 +45,7 @@
     {"platform": "x", "target_type": "account_dynamics", "target_value": "akendfield", "display_name": "终末地 X 官方（需自备 X/RSS 网关）", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": false}
   ],
   "zzz": [
+    {"platform": "steam", "target_type": "notices", "target_value": "4162040", "display_name": "绝区零 · Steam 官方公告与在线", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "1636034895", "display_name": "绝区零·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "keyword_search", "target_value": "绝区零", "display_name": "B站搜索·绝区零社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["绝区零", "絕區零", "Zenless Zone Zero", "ZZZ"]}
   ],
@@ -72,6 +75,7 @@
     {"platform": "x", "target_type": "account_dynamics", "target_value": "nikke_en", "display_name": "NIKKE 国际服 · 官方 X（需自备网关）", "interval_minutes": 120, "min_views": 0, "tier": "core", "enabled": false}
   ],
   "infinitynikki": [
+    {"platform": "steam", "target_type": "notices", "target_value": "3164330", "display_name": "无限暖暖 · Steam 官方公告与在线", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "account_dynamics", "target_value": "3461576715667734", "display_name": "无限暖暖·官方动态", "interval_minutes": 30, "min_views": 0, "tier": "core", "enabled": true},
     {"platform": "bilibili", "target_type": "keyword_search", "target_value": "无限暖暖", "display_name": "B站搜索·无限暖暖社区", "interval_minutes": 60, "min_views": 10000, "tier": "general", "enabled": true, "co_terms": ["无限暖暖", "無限暖暖", "Infinity Nikki"]}
   ],

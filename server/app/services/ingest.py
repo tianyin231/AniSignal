@@ -31,6 +31,8 @@ from app.parsers.x import PARSER_VERSION as X_PARSER_VERSION, parse_post as pars
 from app.parsers.xiaoheihe import PARSER_VERSION as XIAOHEIHE_PARSER_VERSION
 from app.parsers.xiaoheihe import parse_post as parse_xiaoheihe_post
 from app.parsers.xiaoheihe import parse_share as parse_xiaoheihe_share
+from app.parsers.steam import PARSER_VERSION as STEAM_PARSER_VERSION
+from app.parsers.steam import parse_notice as parse_steam_notice
 from app.parsers.rss import PARSER_VERSION as RSS_PARSER_VERSION, parse_item as parse_feed_item
 from app.parsers.game_official import PARSER_VERSION as GAME_OFFICIAL_PARSER_VERSION, parse_notice as parse_game_notice
 from app.collectors.nikke import parse_notice as parse_nikke_notice
@@ -70,6 +72,7 @@ PARSERS: dict[str, tuple] = {
     "x_posts": (parse_x_post, X_PARSER_VERSION),
     "xiaoheihe_share": (parse_xiaoheihe_share, XIAOHEIHE_PARSER_VERSION),
     "xiaoheihe_posts": (parse_xiaoheihe_post, XIAOHEIHE_PARSER_VERSION),
+    "steam_notices": (parse_steam_notice, STEAM_PARSER_VERSION),
     "rss_feed": (parse_feed_item, RSS_PARSER_VERSION),
     "game_official_notices": (parse_game_notice, GAME_OFFICIAL_PARSER_VERSION),
     "nikke_notices": (parse_nikke_notice, "1"),
@@ -117,7 +120,7 @@ def _is_builtin_official(platform: str, external_id: str) -> bool:
             if ":" in part
         }
         return external_id.lower() in accounts
-    return platform in ("game_official", "kuro_cn", "kuro_global", "miyoushe")
+    return platform in ("game_official", "kuro_cn", "kuro_global", "miyoushe", "steam")
 
 
 async def sync_source_official_identity(
@@ -509,7 +512,7 @@ async def reparse_contents(
     rules = await load_rules(session)
     checked = updated = failed = 0
     for content in rows:
-        kind = {"x": "x_posts", "rss": "rss_feed", "xiaoheihe": "xiaoheihe_posts"}.get(
+        kind = {"x": "x_posts", "rss": "rss_feed", "xiaoheihe": "xiaoheihe_posts", "steam": "steam_notices"}.get(
             content.platform
         ) or _REPARSE_KIND.get(content.content_type)
         if (content.raw_json or {}).get("archive_source") == "custom_source_items":

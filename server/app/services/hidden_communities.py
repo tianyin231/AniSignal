@@ -29,6 +29,7 @@ BLOCKABLE_PLATFORMS: dict[str, dict[str, tuple[str, ...]]] = {
         "x": ("x",),
         "kuro": ("kuro", "kuro_cn", "kuro_global"),
         "miyoushe": ("miyoushe",),
+        "steam": ("steam",),
         "game_official": ("game_official", "web"),
     },
     AI_COMMUNITY: {

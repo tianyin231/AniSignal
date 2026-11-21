@@ -415,26 +415,35 @@ def test_baseline_migration_compiles_for_mysql_and_matches_models():
     from alembic.operations import Operations
     from app.models import Base
 
-    path = Path(__file__).parents[1] / "alembic/versions/0057_baseline.py"
-    spec = importlib.util.spec_from_file_location("baseline_migration", path)
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+    versions_dir = Path(__file__).parents[1] / "alembic/versions"
+    migrations = []
+    for path in sorted(versions_dir.glob("*.py")):
+        spec = importlib.util.spec_from_file_location(f"mig_{path.stem}", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        migrations.append(mod)
 
     engine = sa.create_engine("sqlite://")
     with engine.begin() as connection:
         with Operations.context(MigrationContext.configure(connection)):
-            migration.upgrade()
-            assert "news_groupings" in sa.inspect(connection).get_table_names()
+            for mod in migrations:
+                mod.upgrade()
+            table_names = sa.inspect(connection).get_table_names()
+            assert "news_groupings" in table_names
+            assert "steam_app_snapshots" in table_names
             diffs = compare_metadata(MigrationContext.configure(connection), Base.metadata)
             assert diffs == []
-            migration.downgrade()
+            for mod in reversed(migrations):
+                mod.downgrade()
         assert sa.inspect(connection).get_table_names() == []
 
     output = io.StringIO()
     with Operations.context(MigrationContext.configure(dialect_name="mysql", opts={"as_sql": True, "output_buffer": output})):
-        migration.upgrade()
+        for mod in migrations:
+            mod.upgrade()
     sql = output.getvalue()
     assert "CREATE TABLE news_groupings" in sql
+    assert "CREATE TABLE steam_app_snapshots" in sql
     assert "FOREIGN KEY(story_id) REFERENCES events" in sql
     assert "CHARSET=utf8mb4 COLLATE utf8mb4_unicode_ci" in sql
     assert "INSERT INTO" not in sql

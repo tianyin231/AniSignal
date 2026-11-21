@@ -66,7 +66,7 @@ DEFAULT_RULES: list[tuple[str, str, int]] = [
 HIDDEN_CATEGORIES = {"chat", "other", "promotion"}
 
 # 官方身份 + 这些平台的内容未命中词典时按官方公告归类
-_OFFICIAL_FALLBACK_PLATFORMS = {"kuro_cn", "kuro_global"}
+_OFFICIAL_FALLBACK_PLATFORMS = {"kuro_cn", "kuro_global", "steam"}
 
 
 async def seed_defaults(session: AsyncSession, *, commit: bool = True) -> int:

@@ -30,6 +30,7 @@ from app.collectors.youtube_rss import YoutubeRssCollector
 from app.collectors.rss import RssCollector
 from app.collectors.x import XCollector
 from app.collectors.xiaoheihe import XiaoheiheCollector
+from app.collectors.steam import SteamCollector
 from app.collectors.game_official import GameOfficialCollector
 from app.config import get_settings
 from app.db import SessionLocal
@@ -84,6 +85,7 @@ _COLLECTORS = {
     "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
     "x": XCollector,
     "xiaoheihe": XiaoheiheCollector,
+    "steam": SteamCollector,
     "game_official": GameOfficialCollector,
     "kuro_cn": lambda: KuroCollector(Platform.KURO_CN),
     "kuro_global": lambda: KuroCollector(Platform.KURO_GLOBAL),
@@ -455,6 +457,18 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     else False
                 ),
             )
+            if isinstance(collector, SteamCollector) and collector.last_snapshot:
+                from app.services.steam import save_steam_snapshot
+
+                try:
+                    await save_steam_snapshot(session, target.community, collector.last_snapshot)
+                    await session.commit()
+                except Exception as exc:  # noqa: BLE001 - 遥测快照落库失败不得阻断官方公告采集
+                    postprocess_errors.append(f"steam snapshot failed: {type(exc).__name__}: {exc}")
+                    logger.warning("steam snapshot save failed for target %s", target.id, exc_info=True)
+                    await session.rollback()
+                    target = await session.get(CollectTarget, target_id)
+                    run = await session.get(CollectRun, run_id)
             if is_news and hasattr(redis, "enqueue_job"):
                 from app.services.ai_news import pending_news_ids
 
@@ -506,7 +520,7 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 if agg.touched_event_ids and hasattr(redis, "enqueue_job"):
                     for event_id in agg.touched_event_ids:
                         await redis.enqueue_job("summarize_event", event_id)
-                foreign = target.platform in ("youtube", "kuro_global", "x") or (
+                foreign = target.platform in ("youtube", "kuro_global", "x", "steam") or (
                     target.platform == "game_official" and get_community(target.community).official_notice_region == "global")
                 if foreign and hasattr(redis, "enqueue_job"):
                     for content_id in stats.touched_content_ids:

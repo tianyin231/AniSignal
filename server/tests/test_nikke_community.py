@@ -89,7 +89,7 @@ async def test_seed_and_archive_preserve_history_frequency_subscription_and_old_
     await session.refresh(feed)
     assert not feed.enabled and feed.is_public
     targets = list(await session.scalars(select(CollectTarget)))
-    assert len(targets) == 5
+    assert len(targets) == 6
     assert next(t for t in targets if t.community == "nikke" and t.platform == "game_official").interval_minutes == 75
     result = await promote_nikke(session)
     assert result == {"imported": 1, "already_present": 0, "subscriptions_migrated": 1}

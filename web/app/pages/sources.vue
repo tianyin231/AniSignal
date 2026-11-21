@@ -23,6 +23,7 @@ const regionLabel: Record<string, string> = {
   miyoushe: '国内',
   kuro_cn: '国服',
   kuro_global: '国际服',
+  steam: '国际服',
   youtube: '海外',
   x: '海外',
   rss: '通用',

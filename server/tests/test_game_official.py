@@ -116,15 +116,15 @@ async def test_seed_is_idempotent_and_preserves_existing_frequency(session):
     from app.seeds import import_preset_targets
 
     first = await import_preset_targets(session, ["genshin", "endfield"])
-    assert first["added"] == 13
+    assert first["added"] == 14
     target = await session.scalar(select(CollectTarget).where(CollectTarget.target_value == "401742377"))
     target.interval_minutes = 75
     await session.commit()
 
     second = await import_preset_targets(session, ["genshin", "endfield"])
-    assert second["added"] == 0 and second["skipped"] == 13
+    assert second["added"] == 0 and second["skipped"] == 14
     rows = list(await session.scalars(select(CollectTarget)))
-    assert len(rows) == 13
+    assert len(rows) == 14
     assert next(row for row in rows if row.target_value == "401742377").interval_minutes == 75
     for community in ("genshin", "endfield"):
         assert {row.platform for row in rows if row.community == community} >= {"bilibili", "game_official", "youtube"}

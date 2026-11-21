@@ -73,6 +73,7 @@ const PLATFORM_MEDIA: { key: string; label: string }[] = [
   { key: 'kuro_global', label: '库街区·国际服' },
   { key: 'miyoushe', label: '米游社' },
   { key: 'xiaoheihe', label: '小黑盒' },
+  { key: 'steam', label: 'Steam' },
   { key: 'x', label: 'X' },
 ]
 const mediaVisibility = reactive({

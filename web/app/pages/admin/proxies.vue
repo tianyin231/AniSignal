@@ -30,7 +30,7 @@ const editing = ref<string | null>(null)
 const edit = reactive({ label: '', scheme: 'http', host: '', port: 80, username: '', password: '', clearPassword: false })
 const names: Record<string, string> = {
   bilibili: 'B 站（含定制监控）', x: 'X', youtube: 'YouTube', rss: 'RSS 订阅 / 原文抓取',
-  miyoushe: '米游社', kuro_cn: '库洛国服官网', kuro_global: '库洛国际官网',
+  miyoushe: '米游社', kuro_cn: '库洛国服官网', kuro_global: '库洛国际官网', steam: 'Steam',
 }
 const activeCount = computed(() => pool.value.entries.filter(entry => entry.enabled).length)
 const routeRows = computed(() => order.value.map(id => {

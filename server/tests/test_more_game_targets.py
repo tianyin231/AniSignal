@@ -52,7 +52,7 @@ async def test_seed_preserves_existing_settings_and_filters_roco(session):
     await import_preset_targets(session, communities)
     await import_preset_targets(session, communities)
     rows = list(await session.scalars(select(CollectTarget)))
-    assert len(rows) == 12
+    assert len(rows) == 13
     await session.refresh(manual)
     assert not manual.enabled and manual.interval_minutes == 75 and manual.config == {"manual": True}
     for row in rows:

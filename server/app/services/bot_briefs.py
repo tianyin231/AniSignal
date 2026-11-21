@@ -497,7 +497,7 @@ async def select_brief_items(session, items: list[dict], now: datetime, *, limit
 
 
 PLATFORM_LABELS = {"bilibili": "B站", "miyoushe": "米游社", "kuro_cn": "库街区", "kuro_global": "库街区国际服",
-                   "youtube": "YouTube", "x": "X", "weibo": "微博"}
+                   "steam": "Steam", "youtube": "YouTube", "x": "X", "weibo": "微博"}
 _NUMBERS = "①②③④⑤⑥⑦⑧⑨⑩"
 # 正文版式版本；发送前只重排这一版快照，旧快照的文案里已自带来源行。
 LAYOUT = 2

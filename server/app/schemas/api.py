@@ -41,6 +41,7 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     ("xiaoheihe", "keyword_search"): re.compile(r"^[^\x00-\x1f\x7f]{1,64}$"),
     ("xiaoheihe", "account_dynamics"): re.compile(r"^(?:\d{1,20}|[0-9a-f]{12})$"),
     ("xiaoheihe", "feed"): re.compile(r"^[a-zA-Z0-9_-]{1,32}$"),
+    ("steam", "notices"): re.compile(r"^\d{1,10}$"),
     ("kuro_cn", "notices"): re.compile(r"^default$"),
     ("kuro_global", "notices"): re.compile(r"^default$"),
     ("game_official", "notices"): re.compile(r"^(genshin|endfield|nikke)$"),
@@ -85,6 +86,10 @@ def validate_target_value(platform: object, target_type: object, value: object) 
         from app.parsers.xiaoheihe import account_target
 
         text = account_target(text)
+    if plat == "steam" and ttype == "notices":
+        from app.parsers.steam import extract_app_id
+
+        text = extract_app_id(text)
     pattern = _TARGET_VALUE_RULES.get((plat, ttype))
     if pattern is not None and not pattern.fullmatch(text):
         raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")

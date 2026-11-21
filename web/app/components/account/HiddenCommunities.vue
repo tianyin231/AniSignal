@@ -13,7 +13,7 @@ const games = computed(() =>
   activeCommunities.value.map(game => ({ ...game, label: game.key === 'ai' ? 'AI 快讯' : game.label, dot: communityClasses(game.color).dot })),
 )
 const PLATFORM_GROUPS = [
-  { scope: 'game', label: '游戏分区', keys: ['bilibili', 'youtube', 'x', 'kuro', 'miyoushe', 'game_official'] },
+  { scope: 'game', label: '游戏分区', keys: ['bilibili', 'youtube', 'x', 'kuro', 'miyoushe', 'game_official', 'steam'] },
   { scope: 'ai', label: 'AI 快讯', keys: ['bilibili', 'x', 'rss'] },
 ] as const
 const platformGroups = PLATFORM_GROUPS.map(group => ({

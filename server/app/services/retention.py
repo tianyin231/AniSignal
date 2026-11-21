@@ -122,7 +122,10 @@ async def thin_metric_snapshots(session: AsyncSession, *, now: datetime | None =
 
 
 async def run_retention(session: AsyncSession, *, now: datetime | None = None) -> dict:
+    from app.services.steam import thin_steam_snapshots
+
     return {
         "versions_removed": await compact_versions(session),
         "snapshots_removed": await thin_metric_snapshots(session, now=now),
+        "steam_snapshots_removed": await thin_steam_snapshots(session, now=now),
     }

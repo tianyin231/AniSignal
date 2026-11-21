@@ -50,6 +50,7 @@ _REGION_OF_PLATFORM = {
     "miyoushe": "cn",
     "kuro_cn": "cn",
     "kuro_global": "global",
+    "steam": "global",
     "youtube": "global",
     "game_official": "cn",
 }
@@ -297,7 +298,7 @@ def _cluster_category(cluster: list[ContentRow]) -> str:
 
 def _canonical_row(cluster: list[ContentRow]) -> ContentRow:
     """跨语言事件优先使用中文官方标题，时间仍由最早证据计算。"""
-    platform_rank = {"bilibili": 0, "kuro_cn": 1, "kuro_global": 2, "youtube": 3}
+    platform_rank = {"bilibili": 0, "kuro_cn": 1, "kuro_global": 2, "steam": 2, "youtube": 3}
     return min(cluster, key=lambda row: (platform_rank.get(row.platform, 9), _sort_key(row)))
 
 

@@ -13,6 +13,7 @@ class Platform(StrEnum):
     YOUTUBE = "youtube"
     X = "x"
     XIAOHEIHE = "xiaoheihe"
+    STEAM = "steam"
     RSS = "rss"
     GAME_OFFICIAL = "game_official"
 

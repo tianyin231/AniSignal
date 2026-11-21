@@ -1312,6 +1312,18 @@ async def _fetch_wallpaper_bytes(url: str) -> tuple[bytes, str]:
     return resp.content, content_type
 
 
+@router.get("/steam/pulse")
+async def steam_pulse(
+    community: str = COMMUNITY_QUERY_DEP,
+    hours: int = Query(default=168, ge=24, le=720),
+    session: AsyncSession = Depends(get_session),
+):
+    """分区的 Steam 实时在线人数与好评率趋势；未接入 Steam 的分区返回空列表。"""
+    from app.services.steam import get_steam_pulse
+
+    return await get_steam_pulse(session, community, hours=hours)
+
+
 @router.get("/wallpaper")
 async def wallpaper_info():
     """随机壁纸：返回图床原图直连地址（每次调用基本不同，由浏览器直连 CDN 显示）。"""

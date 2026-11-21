@@ -72,7 +72,7 @@ BUILTIN_COMMUNITIES: dict[str, CommunityMeta] = {
         official_bili_mid_default="1955897084",
         source_aliases=("Wuthering Waves", "WuWa", "鳴潮"),
         official_merch_bili_sources=(("3493082584582776", "库洛游戏周边"),),
-        platforms=("bilibili", "youtube", "kuro"),
+        platforms=("bilibili", "youtube", "kuro", "steam"),
     ),
     "blhx": CommunityMeta(
         key="blhx", label="碧蓝航线", en="Azur Lane",
@@ -125,7 +125,7 @@ BUILTIN_COMMUNITIES: dict[str, CommunityMeta] = {
         color="lime", bili_mid_setting="endfield_bili_mid", official_bili_mid_default="1265652806",
         extra_names=("明日方舟：终末地", "明日方舟:终末地", "明日方舟终末地", "終末地"),
         source_aliases=("Arknights Endfield", "Arknights: Endfield", "Endfield", "终末地", "終末地"),
-        platforms=("bilibili", "youtube", "game_official", "x"),
+        platforms=("bilibili", "youtube", "game_official", "x", "steam"),
     ),
     "zzz": CommunityMeta(
         key="zzz", label="绝区零", en="Zenless Zone Zero",
@@ -134,7 +134,7 @@ BUILTIN_COMMUNITIES: dict[str, CommunityMeta] = {
         other_games_examples="（如原神、星穹铁道、因缘精灵、鸣潮等）",
         color="orange", bili_mid_setting="zenless_bili_mid", official_bili_mid_default="1636034895",
         extra_names=("絕區零",), source_aliases=("Zenless Zone Zero", "ZZZ"),
-        platforms=("bilibili", "miyoushe"),
+        platforms=("bilibili", "miyoushe", "steam"),
     ),
     "petitplanet": CommunityMeta(
         key="petitplanet", label="星布谷地", en="Petit Planet",
@@ -198,7 +198,7 @@ BUILTIN_COMMUNITIES: dict[str, CommunityMeta] = {
         other_games_examples="（如奇迹暖暖、闪耀暖暖、星布谷地、原神等）",
         color="violet", bili_mid_setting="infinity_nikki_bili_mid", official_bili_mid_default="3461576715667734",
         extra_names=("無限暖暖",), source_aliases=("Infinity Nikki",),
-        platforms=("bilibili",),
+        platforms=("bilibili", "steam"),
     ),
     "ai": CommunityMeta(
         key="ai", label="AI", en="AI News",
@@ -248,7 +248,7 @@ def build_custom_meta(raw: dict) -> CommunityMeta:
     color = normalize_community_color(raw.get("color"), default="blue")
     bili_mid = str(raw.get("official_bili_mid") or "").strip() or None
     aliases = tuple(dict.fromkeys(str(x).strip() for x in (raw.get("aliases") or []) if str(x).strip()))
-    platforms = tuple(raw.get("platforms") or ("bilibili", "youtube", "rss", "x"))
+    platforms = tuple(raw.get("platforms") or ("bilibili", "youtube", "rss", "x", "steam"))
     if domain == "feed" and "xiaoheihe" not in platforms:
         platforms += ("xiaoheihe",)
     note = f"不要把《{label}》写成其它游戏或无关作品；"

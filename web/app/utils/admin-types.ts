@@ -124,6 +124,7 @@ export const platformLabels: Record<string, string> = {
   xiaoheihe: '小黑盒',
   kuro_cn: '库街区·国服',
   kuro_global: '库街区·国际服',
+  steam: 'Steam',
   youtube: 'YouTube',
   x: 'X',
 }

@@ -11,7 +11,7 @@ export function utcTimestamp(value: string | null | undefined): number {
 }
 
 export const regionOf = (platform: string): Region =>
-  ['kuro_global', 'youtube'].includes(platform) ? 'global' : 'cn'
+  ['kuro_global', 'youtube', 'steam'].includes(platform) ? 'global' : 'cn'
 
 export const categoryMeta: Record<string, { label: string }> = {
   ai_news: { label: 'AI 快讯' },

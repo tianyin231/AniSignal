@@ -36,6 +36,7 @@ from app.models.run import CollectRun
 from app.models.setting import SiteSetting
 from app.models.source import Source
 from app.models.statistics import CollectionDailyStat, ContentDailyStat
+from app.models.steam import SteamAppSnapshot
 from app.models.user import EmailCode, NotificationDelivery, User, UserKeyword, UserSession
 
 from app.models.news_archive import NewsArchive
@@ -60,6 +61,7 @@ __all__ = [
     "Source",
     "ContentDailyStat",
     "CollectionDailyStat",
+    "SteamAppSnapshot",
     "RawContent",
     "ContentVersion",
     "ContentSchedule",
