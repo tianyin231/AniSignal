@@ -413,3 +413,153 @@ async def test_steam_snapshot_dedup_and_retention_thinning(session):
     assert _score_label("No user reviews") == "暂无评测"
     assert _score_label("5 user reviews") == "评测较少"
     assert _score_label("Overwhelmingly Positive") == "好评如潮"
+
+
+@pytest.mark.asyncio
+async def test_steam_aggregate_pulse_sorts_by_ccu_and_respects_hidden_blocks(client, session):
+    now = utcnow()
+    session.add_all([
+        CollectTarget(community="wuwa", platform="steam", target_type="notices", target_value="3513350", display_name="鸣潮", enabled=True),
+        CollectTarget(community="zzz", platform="steam", target_type="notices", target_value="4162040", display_name="绝区零", enabled=True),
+        SteamAppSnapshot(community="wuwa", app_id=3513350, name="Wuthering Waves", player_count=8200, global_positive=85, global_negative=15, global_score_desc="Very Positive", captured_at=now),
+        SteamAppSnapshot(community="zzz", app_id=4162040, name="绝区零", player_count=12500, global_positive=90, global_negative=10, global_score_desc="Very Positive", captured_at=now),
+        # 定制监控快照不得泄漏到公开聚合首页
+        SteamAppSnapshot(community="custom", app_id=2358720, name="黑神话：悟空", player_count=99999, captured_at=now),
+    ])
+    await session.commit()
+
+    resp = await client.get("/api/steam/pulse", params={"community": "all", "hours": 168})
+    assert resp.status_code == 200
+    apps = resp.json()["apps"]
+    assert [a["community"] for a in apps] == ["zzz", "wuwa"]
+    assert all(a["app_id"] != 2358720 for a in apps)
+
+    # 屏蔽分区 wuwa 后只保留 zzz（需带有效登录会话 Cookie）
+    client.cookies.set("anisignal_session", "dummy-session")
+    client.cookies.set("anisignal_hidden", "wuwa")
+    resp_hidden_comm = await client.get("/api/steam/pulse", params={"community": "all"})
+    assert [a["community"] for a in resp_hidden_comm.json()["apps"]] == ["zzz"]
+
+    # 屏蔽来源平台 game:steam 后全空
+    client.cookies.set("anisignal_hidden", "game:steam")
+    resp_hidden_plat = await client.get("/api/steam/pulse", params={"community": "all"})
+    assert resp_hidden_plat.json()["apps"] == []
+    client.cookies.clear()
+
+
+@pytest.mark.asyncio
+async def test_steam_custom_monitor_end_to_end(client, admin_headers, session, monkeypatch):
+    from contextlib import asynccontextmanager
+    from app.models import CustomFeed, User
+    from app.services.auth import create_session, hash_password
+    from app.services.custom_feeds import sweep_custom_feeds
+    from app.services.settings import set_setting
+    import app.services.custom_feeds as cf
+
+    await set_setting(session, "custom_feed_policy", {"open_beta": True, "min_interval_minutes": 30})
+    user = User(email="steam_user@example.com", password_hash=hash_password("pass123456"), display_name="Steam玩家", is_verified=True, status="active")
+    session.add(user)
+    await session.commit()
+    token = await create_session(session, user)
+    client.cookies.set("anisignal_session", token)
+
+    # 非法链接拦截
+    bad = await client.post("/api/account/custom-feeds", json={
+        "name": "无效Steam",
+        "kind": "steam_app",
+        "platform": "steam",
+        "target_value": "https://example.com/app/2358720",
+        "interval_minutes": 60,
+    })
+    assert bad.status_code == 400
+
+    # 支持粘贴商店链接，自动规范化为纯数字 AppID
+    create_resp = await client.post("/api/account/custom-feeds", json={
+        "name": "黑神话：悟空 Steam",
+        "kind": "steam_app",
+        "platform": "steam",
+        "target_value": "https://store.steampowered.com/app/2358720/Black_Myth_Wukong/",
+        "interval_minutes": 60,
+        "is_public": True,
+    })
+    assert create_resp.status_code == 201, create_resp.text
+    feed = create_resp.json()
+    feed_row = await session.get(CustomFeed, feed["id"])
+    assert feed_row is not None
+    assert feed_row.target_value == "2358720"
+    assert feed_row.platform == "steam"
+    assert feed_row.kind == "steam_app"
+
+    async def _fake_get_json(_client, url, *, params=None, **_kwargs):
+        params = dict(params or {})
+        if url == STEAM_NEWS_URL:
+            return {
+                "appnews": {
+                    "appid": 2358720,
+                    "newsitems": [
+                        {
+                            "gid": "888001",
+                            "title": "Black Myth: Wukong Patch 1.0.20",
+                            "contents": "Performance improvements and bug fixes.",
+                            "date": int(utcnow().timestamp()) - 120,
+                            "feedname": "steam_community_announcements",
+                        }
+                    ],
+                }
+            }
+        if url == STEAM_APPDETAILS_URL:
+            return {
+                "2358720": {
+                    "success": True,
+                    "data": {
+                        "name": "黑神话：悟空",
+                        "is_free": False,
+                        "price_overview": {"final_formatted": "¥ 268.00", "discount_percent": 20},
+                    },
+                }
+            }
+        if url == STEAM_ONLINE_URL:
+            return {"response": {"player_count": 45600, "result": 1}}
+        if "/ajaxappreviews/" in url:
+            if params["language"] == "all":
+                return {"success": 1, "query_summary": {"total_positive": 96000, "total_negative": 4000, "review_score_desc": "Overwhelmingly Positive"}}
+            return {"success": 1, "query_summary": {"total_positive": 85000, "total_negative": 3000, "review_score_desc": "Overwhelmingly Positive"}}
+        raise AssertionError(url)
+
+    @asynccontextmanager
+    async def _slot(_redis, _platform, _seconds):
+        yield
+
+    monkeypatch.setattr("app.collectors.steam.get_json", _fake_get_json)
+    monkeypatch.setattr(cf, "platform_slot", _slot)
+
+    stats = await sweep_custom_feeds(session, None)
+    assert stats["new_items"] == 1
+    assert stats["failed"] == 0
+
+    # 定制监控详情页返回官方公告 + steam_pulse 实时数据 + 商店链接
+    detail_resp = await client.get(f"/api/custom/feeds/{feed['id']}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    assert detail["source_url"] == "https://store.steampowered.com/app/2358720/"
+    assert detail["total"] == 1
+    assert detail["items"][0]["title"] == "Black Myth: Wukong Patch 1.0.20"
+    pulse = detail["steam_pulse"]
+    assert pulse is not None
+    assert pulse["app_id"] == 2358720
+    assert pulse["name"] == "黑神话：悟空"
+    assert pulse["player_count"] == 45600
+    assert pulse["global_rate"] == 96.0
+    assert pulse["global_score_label"] == "好评如潮"
+    assert pulse["price_formatted"] == "¥ 268.00"
+    assert pulse["discount_percent"] == 20
+
+    # 定制监控条目不污染主内容库与主站聚合 Steam 脉冲
+    assert await session.scalar(select(RawContent).where(RawContent.platform == "steam")) is None
+    assert (await client.get("/api/steam/pulse", params={"community": "all"})).json()["apps"] == []
+
+    # 管理端按 kind=steam_app 筛选可用
+    admin_list = await client.get("/api/admin/custom-feeds", headers=admin_headers, params={"kind": "steam_app"})
+    assert admin_list.status_code == 200
+    assert admin_list.json()["total"] == 1
+    assert await session.get(CustomFeed, feed["id"]) is not None

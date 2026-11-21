@@ -15,12 +15,14 @@ from app.collectors.base import CollectorDeferred, platform_slot
 from app.collectors.bilibili import BilibiliCollector
 from app.collectors.nikke import NikkeCollector, parse_notice
 from app.collectors.rss import RssCollector
+from app.collectors.steam import SteamCollector
 from app.collectors.x import XCollector
 from app.collectors.xiaoheihe import XiaoheiheCollector
 from app.collectors.youtube_api import YoutubeApiCollector
 from app.communities import ensure_communities_synced
 from app.custom_presets import CUSTOM_PRESETS, custom_preset
 from app.parsers.rss import parse_item as parse_rss_feed_item
+from app.parsers.steam import parse_notice as parse_steam_notice
 from app.parsers.x import parse_post
 from app.parsers.xiaoheihe import parse_post as parse_xiaoheihe_post
 from app.parsers.youtube import parse_rss_item
@@ -48,11 +50,13 @@ logger = logging.getLogger(__name__)
 
 SWEEP_BATCH = 20
 PUSH_MAX_ITEMS = 5
+STEAM_APP_KIND = "steam_app"
 CUSTOM_SPECS = {
     ("bilibili", "uid"),
     ("bilibili", "keyword"),
     ("rss", "feed"),
     ("youtube", "channel_rss"),
+    ("steam", STEAM_APP_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_ACCOUNT_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_KEYWORD_KIND),
@@ -70,6 +74,8 @@ def _collector(platform: str):
         return NikkeCollector()
     if platform == "youtube":
         return YoutubeApiCollector()
+    if platform == "steam":
+        return SteamCollector()
     if platform == "x":
         return XCollector()
     if platform == XIAOHEIHE_KEY:
@@ -93,14 +99,15 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
         raise ValueError(f"unsupported custom kind: {source.platform}/{source.kind}")
     if source.platform == "x":
         collector.redis = redis
-    use_fetch_result = bool(preset) or source.platform in {"rss", "youtube", XIAOHEIHE_KEY}
+    use_fetch_result = bool(preset) or source.platform in {"rss", "youtube", "steam", XIAOHEIHE_KEY}
     async def fetch():
         if source.platform == "x":
             # X 自己按全局 30–90 秒间隔读取，主页/全文共用冷却；不叠加一个宽松槽位。
             return await collector.fetch(source.kind, source.target_value, 10)
         async with platform_slot(redis, source.platform, 5.0):
             if use_fetch_result:
-                return await collector.fetch(source.kind, source.target_value, 30 if preset else 20)
+                fetch_kind = "notices" if source.platform == "steam" else source.kind
+                return await collector.fetch(fetch_kind, source.target_value, 30 if preset else 20)
             if source.kind == "uid":
                 return await collector.user_dynamics(source.target_value, 20)
             return await collector.search_videos(source.target_value, 30)
@@ -109,10 +116,19 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
         from app.services.custom_policy import record_collection_requests
 
         await record_collection_requests(session, source.platform, getattr(collector, "request_count", 0))
+    if isinstance(collector, SteamCollector) and collector.last_snapshot and session is not None:
+        from app.services.steam import save_steam_snapshot
+
+        try:
+            async with session.begin_nested():
+                await save_steam_snapshot(session, "custom", collector.last_snapshot)
+        except Exception:  # noqa: BLE001 - 定制监控遥测落库失败不得阻断公告抓取
+            logger.warning("custom steam snapshot save failed for source %s", source.id, exc_info=True)
     if use_fetch_result:
         parse = {
             "game_official": parse_notice,
             "youtube": parse_rss_item,
+            "steam": parse_steam_notice,
             "x": parse_post,
             "rss": parse_rss_feed_item,
             XIAOHEIHE_KEY: parse_xiaoheihe_post,

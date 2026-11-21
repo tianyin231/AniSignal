@@ -83,7 +83,10 @@ async def _feed_or_404(session: AsyncSession, feed_id: int) -> CustomFeed:
 @router.get("")
 async def list_custom_feeds(
     q: str = Query(default="", max_length=120, description="监控名/目标/用户邮箱搜索"),
-    kind: str = Query(default="", pattern="^(|uid|keyword|feed|notices|channel_rss|account_dynamics)$"),
+    kind: str = Query(
+        default="",
+        pattern="^(|uid|keyword|feed|notices|channel_rss|steam_app|account_dynamics|hot_posts|xhh_account|xhh_keyword)$",
+    ),
     feed_status: str = Query(default="", pattern="^(|active|disabled)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),

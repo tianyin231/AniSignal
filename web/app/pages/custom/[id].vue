@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Settings2 } from 'lucide-vue-next'
+import type { SteamPulseApp } from '~/composables/usePublicApi'
 import { apiErrorDetail } from '~/utils/api-errors'
-import { customFeedBadge, customKindLabel, XIAOHEIHE_ACCOUNT_MONITOR, XIAOHEIHE_MONITOR } from '~/utils/custom-feeds'
+import { customFeedBadge, customKindLabel, STEAM_MONITOR, XIAOHEIHE_ACCOUNT_MONITOR, XIAOHEIHE_MONITOR } from '~/utils/custom-feeds'
 import { imageSrcset, imageUrl } from '~/utils/image'
 import { fmtShort, relativeTime, toTimestamp } from '~/utils/schedule'
 
@@ -35,6 +36,7 @@ interface CustomFeedDetail {
   enabled: boolean
   status: string
   is_owner: boolean
+  steam_pulse?: SteamPulseApp | null
   items: CustomItem[]
 }
 interface FeedCard { id: number, name: string, platform: string, item_count: number, target_label: string, target_value: string }
@@ -73,7 +75,7 @@ useSeoMeta({ title: () => `${data.value?.name ?? '定制监控'} · 定制化 ·
 const badge = computed(() => customFeedBadge(data.value?.platform ?? ''))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 const goPage = (value: number) => router.replace({ query: { ...route.query, page: value > 1 ? value : undefined } })
-const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', rss: 'RSS', x: 'X', game_official: '官网', xiaoheihe: '小黑盒' }
+const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', rss: 'RSS', x: 'X', game_official: '官网', xiaoheihe: '小黑盒', steam: 'Steam' }
 const triggering = ref(false)
 const triggerMsg = ref('')
 async function triggerCollect() {
@@ -152,7 +154,7 @@ const emptyText = computed(() => {
         </div>
         <div class="flex flex-wrap gap-2">
           <a v-if="data.source_url" :href="data.source_url" target="_blank" rel="noopener" class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 transition-colors hover:text-ink">
-            <ExternalLink :size="14" /> {{ data.kind === XIAOHEIHE_ACCOUNT_MONITOR.kind ? '打开小黑盒主页' : '源地址' }}
+            <ExternalLink :size="14" /> {{ data.kind === XIAOHEIHE_ACCOUNT_MONITOR.kind ? '打开小黑盒主页' : data.kind === STEAM_MONITOR.kind ? '打开 Steam 商店' : '源地址' }}
           </a>
           <NuxtLink v-if="data.kind === XIAOHEIHE_MONITOR.kind" to="/contents?community=xiaoheihe" class="inline-flex h-9 items-center rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 hover:text-ink">
             小黑盒分区
@@ -221,6 +223,7 @@ const emptyText = computed(() => {
         </section>
 
         <aside class="space-y-4 lg:sticky lg:top-[88px]">
+          <SteamPulseCard v-if="data.steam_pulse" :apps="[data.steam_pulse]" layout="sidebar" />
           <section class="panel p-5" aria-labelledby="about-title">
             <h2 id="about-title" class="text-base font-bold text-ink">关于此监控</h2>
             <p v-if="data.description" class="mt-2 text-[13px] leading-relaxed text-muted">{{ data.description }}</p>

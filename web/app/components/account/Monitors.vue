@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { Eye, EyeOff, Mail, MailX, Pause, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import type { CustomFeedRow } from '~/composables/useAccountCenter'
-import { customKindLabel, XIAOHEIHE_ACCOUNT_MONITOR, XIAOHEIHE_KEYWORD_MONITOR, XIAOHEIHE_MONITOR } from '~/utils/custom-feeds'
+import { customKindLabel, STEAM_MONITOR, XIAOHEIHE_ACCOUNT_MONITOR, XIAOHEIHE_KEYWORD_MONITOR, XIAOHEIHE_MONITOR } from '~/utils/custom-feeds'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
-// 定制监控：自建 B 站关键词 / UP 主、RSS/Atom 订阅、YouTube 频道、小黑盒账号 / 关键词抓取源。公开的会出现在"定制监控"频道，私有的仅自己可见。
+// 定制监控：自建 B 站关键词 / UP 主、RSS/Atom 订阅、YouTube 频道、Steam 游戏、小黑盒账号 / 关键词抓取源。公开的会出现在"定制监控"频道，私有的仅自己可见。
 const route = useRoute()
 const center = useAccountCenter()
 const { customFeeds, customQuota, customBusy, customError, customMessage, loading, errors } = center
@@ -16,6 +16,7 @@ const ALL_KINDS = [
   { key: 'uid', platform: 'bilibili', label: 'B 站 UP 主', fieldLabel: 'UP 主 UID', placeholder: '纯数字，空间主页地址里的那串数字' },
   { key: 'feed', platform: 'rss', label: 'RSS / Atom', fieldLabel: 'RSS / Atom 地址', placeholder: 'https://example.com/feed.xml' },
   { key: 'channel_rss', platform: 'youtube', label: 'YouTube 频道', fieldLabel: '频道链接、@handle 或频道 ID', placeholder: 'https://www.youtube.com/@xxx、@xxx 或 UC...' },
+  { key: STEAM_MONITOR.kind, platform: STEAM_MONITOR.platform, label: STEAM_MONITOR.name, fieldLabel: 'Steam AppID 或商店链接', placeholder: '例如 3513350 或 https://store.steampowered.com/app/3513350/' },
   { key: XIAOHEIHE_ACCOUNT_MONITOR.kind, platform: XIAOHEIHE_ACCOUNT_MONITOR.platform, label: XIAOHEIHE_ACCOUNT_MONITOR.name, fieldLabel: '小黑盒 UID 或个人主页链接', placeholder: '例如 12345678 或 https://xiaoheihe.cn/app/user/profile/12345678' },
   { key: XIAOHEIHE_KEYWORD_MONITOR.kind, platform: XIAOHEIHE_KEYWORD_MONITOR.platform, label: XIAOHEIHE_KEYWORD_MONITOR.name, fieldLabel: '小黑盒搜索关键词', placeholder: '例如：兑换码、联名键盘、鸣潮' },
   { key: XIAOHEIHE_MONITOR.kind, platform: XIAOHEIHE_MONITOR.platform, label: XIAOHEIHE_MONITOR.name, fieldLabel: '', placeholder: '' },
@@ -55,7 +56,9 @@ function selectKind(kind: MonitorKind) {
   if (kind === XIAOHEIHE_MONITOR.kind && !form.name.trim()) form.name = XIAOHEIHE_MONITOR.name
 }
 watch(() => [customQuota.value.xiaoheihe_hot_enabled, customQuota.value.xiaoheihe_keyword_enabled] as const, ([hotOk, kwOk]) => {
-  if (route.query.source === XIAOHEIHE_MONITOR.platform && form.kind === 'keyword') {
+  if (route.query.source === STEAM_MONITOR.platform && form.kind === 'keyword') {
+    selectKind(STEAM_MONITOR.kind)
+  } else if (route.query.source === XIAOHEIHE_MONITOR.platform && form.kind === 'keyword') {
     selectKind(hotOk ? XIAOHEIHE_MONITOR.kind : (kwOk ? XIAOHEIHE_KEYWORD_MONITOR.kind : XIAOHEIHE_ACCOUNT_MONITOR.kind))
   }
 }, { immediate: true })
@@ -121,7 +124,7 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
             定制监控 <span class="rounded bg-brand-soft px-1.5 py-0.5 text-[11px] font-semibold text-brand-ink">公测</span>
           </h2>
           <p class="mt-1 text-xs leading-relaxed text-muted">
-            选择 B 站、RSS / Atom、YouTube 或小黑盒。公开的监控会展示在<NuxtLink to="/custom" class="link">定制监控频道</NuxtLink>，私有的仅自己可见。
+            选择 B 站、RSS / Atom、YouTube、Steam 游戏或小黑盒。公开的监控会展示在<NuxtLink to="/custom" class="link">定制监控频道</NuxtLink>，私有的仅自己可见。
           </p>
         </div>
         <button v-if="!creating" type="button" class="btn-primary inline-flex h-9 items-center gap-1 px-3.5" :disabled="!canCreate || loading.custom" @click="openCreate">

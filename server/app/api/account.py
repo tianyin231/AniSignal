@@ -497,6 +497,7 @@ _KIND_DEFAULT_PLATFORM = {
     "keyword": "bilibili",
     "feed": "rss",
     "channel_rss": "youtube",
+    "steam_app": "steam",
     "hot_posts": "xiaoheihe",
     XIAOHEIHE_ACCOUNT_KIND: XIAOHEIHE_KEY,
     XIAOHEIHE_KEYWORD_KIND: XIAOHEIHE_KEY,
@@ -533,6 +534,13 @@ def _validate_custom_target(kind: str, target: str) -> str:
         if not _YT_CHANNEL_RE.fullmatch(chan):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "请填写 YouTube 频道链接、@handle 或以 UC 开头的频道 ID")
         return chan
+    if kind == "steam_app":
+        from app.parsers.steam import extract_app_id
+
+        try:
+            return extract_app_id(target)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     return target
 
 

@@ -150,7 +150,6 @@ const sourcesRequest = useLazyAsyncData(
 const steamPulseRequest = useLazyAsyncData(
   () => `home-steam-${homeCommunity.value}`,
   async (_app, { signal }): Promise<SteamPulseResponse | null> => {
-    if (aggregate.value) return null
     try {
       return await api<SteamPulseResponse>('/api/steam/pulse', {
         query: { community: homeCommunity.value, hours: 168 },
@@ -160,7 +159,7 @@ const steamPulseRequest = useLazyAsyncData(
       return null
     }
   },
-  { watch: [homeCommunity, aggregate] },
+  { watch: [homeCommunity] },
 )
 
 const requests = [feedRequest, eventsRequest, highlightsRequest, trendingRequest, calendarRequest, codesRequest, pulseRequest, sourcesRequest]
@@ -179,7 +178,7 @@ const { data: pulseData } = pulseRequest
 const { data: sourcesData } = sourcesRequest
 const { data: steamPulseData } = steamPulseRequest
 
-const steamApps = computed(() => (aggregate.value ? [] : steamPulseData.value?.apps ?? []))
+const steamApps = computed(() => steamPulseData.value?.apps ?? [])
 
 const featuredHighlights = computed(() => (highlightsData.value?.items ?? []).map(toRawItem))
 const trendingList = computed(() => (trendingData.value?.items ?? []).map(toRawItem))
@@ -357,6 +356,12 @@ onBeforeUnmount(() => {
       部分内容暂时加载失败。<button type="button" class="ml-1 underline" :disabled="refreshing" @click="refreshHome">重新加载</button>
     </section>
 
+    <SteamPulseCard
+      v-if="steamApps.length"
+      :apps="steamApps"
+      :layout="aggregate ? 'overview' : 'banner'"
+    />
+
     <!-- 精选大图 16:9 定高，右栏最后一张卡吸收余量保持底边对齐 -->
     <div v-if="featuredHighlights.length" class="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <FeaturedHero :items="featuredHighlights" :show-community="aggregate" />
@@ -436,7 +441,6 @@ onBeforeUnmount(() => {
       <aside class="flex min-w-0 flex-col gap-5" aria-label="首页侧栏">
         <!-- 桌面端右栏放不下时，履约追踪排在侧栏第一位 -->
         <StatusCard v-if="featuredHighlights.length && !statusInline" embedded class="hidden lg:block" />
-        <SteamPulseCard v-if="!aggregate && steamApps.length" :apps="steamApps" />
         <TrendingCard :items="trendingList" :deltas="trendingDelta" :more-to="{ path: '/contents', query: { ...sectionQuery, tab: 'trending' } }" />
         <EventsCard :events="eventsData?.items ?? []" :show-community="aggregate" :more-to="{ path: '/events', query: sectionQuery }" />
         <CodesCard :codes="codesData?.items ?? []" :show-community="aggregate" />

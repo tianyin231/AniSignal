@@ -255,8 +255,12 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <option value="keyword">关键词监控</option>
           <option value="feed">RSS 订阅</option>
           <option value="channel_rss">YouTube 频道</option>
+          <option value="steam_app">Steam 游戏</option>
           <option value="notices">官方公告</option>
           <option value="account_dynamics">官方动态</option>
+          <option value="xhh_account">小黑盒账号</option>
+          <option value="xhh_keyword">小黑盒关键词</option>
+          <option value="hot_posts">小黑盒热帖</option>
         </select>
         <select
           v-model="statusFilter"

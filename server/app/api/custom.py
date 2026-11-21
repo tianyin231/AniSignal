@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_session
 from app.custom_presets import custom_preset
 from app.models import CustomFeed, CustomFeedItem, User
+from app.parsers.steam import store_url as steam_store_url
 from app.parsers.xiaoheihe import account_url
 from app.services.auth import get_user_by_token
 from app.services.urls import safe_link, safe_media_url
@@ -47,6 +48,8 @@ def _default_source_url(feed: CustomFeed) -> str | None:
         return safe_link(f"https://www.youtube.com/channel/{feed.target_value}")
     if feed.platform == "rss" and feed.kind == "feed":
         return safe_link(feed.target_value)
+    if feed.platform == "steam" and feed.target_value.isdigit():
+        return steam_store_url(feed.target_value)
     return None
 
 
@@ -189,12 +192,18 @@ async def feed_detail(
             )
         ).scalars()
     )
+    steam_pulse = None
+    if feed.platform == "steam" and feed.target_value.isdigit():
+        from app.services.steam import get_steam_app_pulse
+
+        steam_pulse = await get_steam_app_pulse(session, int(feed.target_value), hours=168)
     return {
         **_feed_out(feed, owner_name, total),
         "total": total,
         "page": page,
         "page_size": page_size,
         "is_owner": is_owner,
+        "steam_pulse": steam_pulse,
         "items": [
             {
                 "id": item.id,

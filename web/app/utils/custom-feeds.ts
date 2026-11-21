@@ -9,6 +9,9 @@ export const XIAOHEIHE_ACCOUNT_MONITOR = {
 export const XIAOHEIHE_KEYWORD_MONITOR = {
   kind: 'xhh_keyword', platform: 'xiaoheihe', name: '小黑盒关键词',
 } as const
+export const STEAM_MONITOR = {
+  kind: 'steam_app', platform: 'steam', name: 'Steam 游戏',
+} as const
 
 export function customKindLabel(kind: string) {
   return ({
@@ -18,6 +21,7 @@ export function customKindLabel(kind: string) {
     channel_rss: 'YouTube 频道',
     notices: '官方公告',
     account_dynamics: '官方动态',
+    [STEAM_MONITOR.kind]: STEAM_MONITOR.name,
     [XIAOHEIHE_MONITOR.kind]: XIAOHEIHE_MONITOR.name,
     [XIAOHEIHE_ACCOUNT_MONITOR.kind]: XIAOHEIHE_ACCOUNT_MONITOR.name,
     [XIAOHEIHE_KEYWORD_MONITOR.kind]: XIAOHEIHE_KEYWORD_MONITOR.name,
@@ -25,7 +29,7 @@ export function customKindLabel(kind: string) {
 }
 
 export function customPlatformBadge(platform: string, contentType: string) {
-  return ({ youtube: 'YT', rss: 'RSS', x: 'X', game_official: '官', xiaoheihe: '盒' } as Record<string, string>)[platform]
+  return ({ youtube: 'YT', rss: 'RSS', x: 'X', game_official: '官', xiaoheihe: '盒', steam: 'S' } as Record<string, string>)[platform]
     || (contentType === 'dynamic' ? '动' : 'B')
 }
 

@@ -6,7 +6,7 @@ import { customFeedBadge, customKindLabel } from '~/utils/custom-feeds'
 import { loginRoute } from '~/utils/safe-redirect'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
-useSeoMeta({ title: '定制监控 · AniSignal', description: '选择 B 站、RSS / Atom、YouTube 或小黑盒热帖，随时启停监控。' })
+useSeoMeta({ title: '定制监控 · AniSignal', description: '选择 B 站、RSS / Atom、YouTube、Steam 游戏或小黑盒，随时启停监控。' })
 
 interface CustomFeedCard {
   id: number
@@ -114,7 +114,7 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
   <div>
     <section class="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div class="wall-heading">
-        <p class="mono mb-1.5 text-xs tracking-wide text-muted">B 站 · RSS 订阅 · YouTube · 小黑盒</p>
+        <p class="mono mb-1.5 text-xs tracking-wide text-muted">B 站 · RSS 订阅 · YouTube · Steam · 小黑盒</p>
         <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">定制监控</h1>
       </div>
       <div class="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:gap-2.5">

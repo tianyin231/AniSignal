@@ -381,6 +381,7 @@ export interface SteamPulsePoint {
 
 export interface SteamPulseApp {
   app_id: number
+  community?: string | null
   name: string
   store_url: string
   player_count: number | null
