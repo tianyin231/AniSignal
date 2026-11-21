@@ -125,7 +125,9 @@ async def test_steam_collector_fetches_news_snapshot_and_caches_details(monkeypa
                 }
             }
         if url == STEAM_APPDETAILS_URL:
-            assert params["cc"] == "cn"
+            if params.get("cc") == "cn":
+                # 模拟锁国区游戏（如鸣潮 / 绝区零 / 终末地）在 cc=cn 下返回 success=False
+                return {"3513350": {"success": False}}
             return {
                 "3513350": {
                     "success": True,

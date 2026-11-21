@@ -77,13 +77,18 @@ class SteamCollector:
         cached = _DETAIL_CACHE.get(app_id)
         if cached and cached[0] > now - _DETAIL_CACHE_TTL:
             return cached[1]
-        payload = await self._optional_json(
-            client,
-            STEAM_APPDETAILS_URL,
+        # 优先按国区拿人民币标价；若锁国区返回 success=false，自动回退默认商店区读取名称与免费/全局价。
+        data = None
+        for params in (
             {"appids": app_id, "l": "schinese", "cc": "cn"},
-        )
-        entry = (payload or {}).get(str(app_id)) if isinstance(payload, dict) else None
-        data = entry.get("data") if isinstance(entry, dict) and entry.get("success") else None
+            {"appids": app_id, "l": "schinese"},
+        ):
+            payload = await self._optional_json(client, STEAM_APPDETAILS_URL, params)
+            entry = (payload or {}).get(str(app_id)) if isinstance(payload, dict) else None
+            candidate = entry.get("data") if isinstance(entry, dict) and entry.get("success") else None
+            if isinstance(candidate, dict):
+                data = candidate
+                break
         if not isinstance(data, dict):
             return cached[1] if cached else {}
         price_overview = data.get("price_overview") if isinstance(data.get("price_overview"), dict) else {}
