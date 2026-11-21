@@ -26,6 +26,7 @@ const links = computed(() => [
     { path: '/calendar', label: '活动日历' },
     { path: '/events', label: '事件', gameOnly: true },
     { path: '/products', label: '商品追踪', gameOnly: true },
+    { path: '/steam', label: 'Steam', gameOnly: true },
     { path: '/contents', label: '内容库' },
   ].filter(item => !isTopic.value && !(item.gameOnly && scope.value === 'ai')).map(item => ({
     key: item.path,

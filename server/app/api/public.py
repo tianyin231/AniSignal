@@ -395,7 +395,7 @@ _RSS_TTL_SECONDS = 300
 _SITEMAP_CACHE: dict[str, tuple[float, str]] = {}
 _SITEMAP_TTL_SECONDS = 3600
 _SITEMAP_PAGES = (
-    "/", "/ai", "/ai/reports", "/ai/sources", "/official", "/calendar", "/events", "/products", "/contents",
+    "/", "/ai", "/ai/reports", "/ai/sources", "/official", "/calendar", "/events", "/products", "/steam", "/contents",
     "/sources", "/stats", "/about", "/intro", "/project",
 )
 

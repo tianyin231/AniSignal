@@ -223,7 +223,7 @@ const emptyText = computed(() => {
         </section>
 
         <aside class="space-y-4 lg:sticky lg:top-[88px]">
-          <SteamPulseCard v-if="data.steam_pulse" :apps="[data.steam_pulse]" layout="sidebar" />
+          <SteamPulseCard v-if="data.steam_pulse" :apps="[data.steam_pulse]" />
           <section class="panel p-5" aria-labelledby="about-title">
             <h2 id="about-title" class="text-base font-bold text-ink">关于此监控</h2>
             <p v-if="data.description" class="mt-2 text-[13px] leading-relaxed text-muted">{{ data.description }}</p>

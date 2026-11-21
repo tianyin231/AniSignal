@@ -209,7 +209,7 @@ export function useActiveChannel() {
   return { active }
 }
 
-const GAME_ONLY_PATH = /^\/(events|products)(\/|$)/
+const GAME_ONLY_PATH = /^\/(events|products|steam)(\/|$)/
 const DETAIL_PATH = /^\/(contents|events)\/[^/]+$/
 
 export const HIDDEN_COMMUNITIES_COOKIE = 'anisignal_hidden'
