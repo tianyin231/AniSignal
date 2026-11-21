@@ -6,6 +6,9 @@ export const XIAOHEIHE_MONITOR = {
 export const XIAOHEIHE_ACCOUNT_MONITOR = {
   kind: 'xhh_account', platform: 'xiaoheihe', name: '小黑盒账号',
 } as const
+export const XIAOHEIHE_KEYWORD_MONITOR = {
+  kind: 'xhh_keyword', platform: 'xiaoheihe', name: '小黑盒关键词',
+} as const
 
 export function customKindLabel(kind: string) {
   return ({
@@ -17,6 +20,7 @@ export function customKindLabel(kind: string) {
     account_dynamics: '官方动态',
     [XIAOHEIHE_MONITOR.kind]: XIAOHEIHE_MONITOR.name,
     [XIAOHEIHE_ACCOUNT_MONITOR.kind]: XIAOHEIHE_ACCOUNT_MONITOR.name,
+    [XIAOHEIHE_KEYWORD_MONITOR.kind]: XIAOHEIHE_KEYWORD_MONITOR.name,
   } as Record<string, string>)[kind] || '定制监控'
 }
 

@@ -29,6 +29,7 @@ from app.schemas.api import (
 _REGION_OF_PLATFORM = {
     "bilibili": "cn",
     "miyoushe": "cn",
+    "xiaoheihe": "cn",
     "kuro_cn": "cn",
     "kuro_global": "global",
     "game_official": "cn",

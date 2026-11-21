@@ -11,7 +11,9 @@ from app.communities import DEFAULT_COMMUNITY
 
 
 def supports_view_threshold(platform: str, target_type: str) -> bool:
-    return platform == "bilibili" and target_type in {"keyword_search", "account_videos"}
+    return (platform == "bilibili" and target_type in {"keyword_search", "account_videos"}) or (
+        platform == "xiaoheihe" and target_type == "keyword_search"
+    )
 
 
 class CollectTarget(Base):

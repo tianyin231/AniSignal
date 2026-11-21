@@ -395,7 +395,9 @@
               h('label', { className: 'anisg-label' }, '我的监控与公共监控'),
               customFeeds.length ? h('div', { className: 'anisg-chips' }, customFeeds.map((feed) => {
                 const selected = (sub.custom_feed_ids || []).includes(feed.id);
-                const source = feed.kind === 'xhh_account' && !feed.name.includes('小黑盒账号') ? ' · 小黑盒账号' : '';
+                const source = feed.kind === 'xhh_account' && !feed.name.includes('小黑盒账号')
+                  ? ' · 小黑盒账号'
+                  : (feed.kind === 'xhh_keyword' && !feed.name.includes('小黑盒关键词') ? ' · 小黑盒关键词' : '');
                 return h('button', {
                   key: feed.id,
                   type: 'button',

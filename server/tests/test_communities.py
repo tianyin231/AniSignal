@@ -90,7 +90,7 @@ async def test_fresh_install_keeps_independent_sources_active(session):
 
     assert await seed_fresh_install_communities(session) is True
     await sync_communities(session)
-    assert [k for k, m in COMMUNITIES.items() if m.active] == ["ai", "xiaoheihe"]
+    assert [k for k, m in COMMUNITIES.items() if m.active] == ["ai"]
     assert set(COMMUNITIES) == set(BUILTIN_COMMUNITIES)  # 只是隐藏，随时可启用
     stored = await get_setting(session, "communities")
     # 已有配置后再启动不会重复写入

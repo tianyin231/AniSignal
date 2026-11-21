@@ -352,7 +352,7 @@ async def sync_communities(session) -> dict:
     return raw if isinstance(raw, dict) else {"disabled_builtins": [], "deleted_builtins": [], "builtin_overrides": {}, "custom": []}
 
 
-FRESH_INSTALL_ACTIVE = ("ai", "xiaoheihe")
+FRESH_INSTALL_ACTIVE = ("ai",)
 
 
 async def seed_fresh_install_communities(session) -> bool:

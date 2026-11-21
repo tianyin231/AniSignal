@@ -39,9 +39,12 @@ test('动态十六进制主题样式同时输出浅色与深色 CSS 规则并自
   assert.equal(css.split('.ch-hex-ef4444{').length - 1, 1)
 })
 
-test('定制监控类型与平台徽章支持 RSS 与 YouTube 频道', () => {
+test('定制监控类型与平台徽章支持 RSS、YouTube 频道与小黑盒', () => {
   assert.equal(customKindLabel('feed'), 'RSS 订阅')
   assert.equal(customKindLabel('channel_rss'), 'YouTube 频道')
+  assert.equal(customKindLabel('xhh_account'), '小黑盒账号')
+  assert.equal(customKindLabel('xhh_keyword'), '小黑盒关键词')
   assert.equal(customPlatformBadge('rss', 'article'), 'RSS')
   assert.equal(customPlatformBadge('youtube', 'video'), 'YT')
+  assert.equal(customPlatformBadge('xiaoheihe', 'post'), '盒')
 })

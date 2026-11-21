@@ -52,8 +52,10 @@ class Settings(BaseSettings):
     # YouTube Data API v3 key（配置后 YouTube 目标改走官方接口，RSS 作为失败回退）
     youtube_api_key: str = ""
 
-    # 运营方配置的一路公开 RSS/Atom，只收录指向小黑盒公开原帖的条目。
+    # 运营方配置的一路公开 RSS/Atom 或独立小黑盒只读网关（DB site_settings 优先，此处兜底）。
     xiaoheihe_feed_url: str = ""
+    xiaoheihe_bridge_url: str = ""
+    xiaoheihe_bridge_token: str = ""
 
     # 允许的跨域来源（逗号分隔；web 部署地址变化时在此追加）
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"

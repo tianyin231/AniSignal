@@ -202,7 +202,7 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
                   <span class="num shrink-0 text-xs text-faint">{{ row.item_count }}</span>
                 </NuxtLink>
                 <button
-                  v-if="row.platform !== 'xiaoheihe'"
+                  v-if="row.kind !== 'hot_posts'"
                   type="button"
                   class="grid size-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-chip hover:text-ink disabled:opacity-40"
                   :disabled="mineBusyId === row.id || !row.enabled || row.status !== 'active'"

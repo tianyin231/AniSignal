@@ -16,12 +16,13 @@ from app.collectors.bilibili import BilibiliCollector
 from app.collectors.nikke import NikkeCollector, parse_notice
 from app.collectors.rss import RssCollector
 from app.collectors.x import XCollector
-from app.collectors.xiaoheihe import collect_account_posts
+from app.collectors.xiaoheihe import XiaoheiheCollector
 from app.collectors.youtube_api import YoutubeApiCollector
 from app.communities import ensure_communities_synced
 from app.custom_presets import CUSTOM_PRESETS, custom_preset
 from app.parsers.rss import parse_item as parse_rss_feed_item
 from app.parsers.x import parse_post
+from app.parsers.xiaoheihe import parse_post as parse_xiaoheihe_post
 from app.parsers.youtube import parse_rss_item
 from app.models import CustomFeed, CustomFeedItem, CustomFeedSource, CustomSourceItem, CustomCollectRun, NotificationDelivery, User
 from app.parsers.bilibili import parse_dynamic, parse_video
@@ -29,15 +30,17 @@ from app.services.notifications import beijing_today
 from app.services.collect_errors import YOUTUBE_RSS_RETRY_MAX_MINUTES, is_youtube_rss_transient
 from app.services.collector_proxy import fetch_with_fallback
 from app.services.custom_policy import claim_collection_budget, shared_source
+from app.services.settings import get_effective_xiaoheihe
 from app.services.xiaoheihe import (
     XIAOHEIHE_ACCOUNT_KIND,
     XIAOHEIHE_INTERVAL_MINUTES,
     XIAOHEIHE_KEY,
+    XIAOHEIHE_KEYWORD_KIND,
     XIAOHEIHE_KIND,
     XIAOHEIHE_TARGET,
     get_xiaoheihe_source,
     refresh_xiaoheihe_items,
-    xiaoheihe_feed_url,
+    xiaoheihe_hot_configured,
 )
 from app.schemas.content import NormalizedContent
 
@@ -52,6 +55,7 @@ CUSTOM_SPECS = {
     ("youtube", "channel_rss"),
     (XIAOHEIHE_KEY, XIAOHEIHE_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_ACCOUNT_KIND),
+    (XIAOHEIHE_KEY, XIAOHEIHE_KEYWORD_KIND),
 }
 CUSTOM_KINDS = {k for _, k in CUSTOM_SPECS}
 CUSTOM_PLATFORMS = {p for p, _ in CUSTOM_SPECS}
@@ -68,27 +72,28 @@ def _collector(platform: str):
         return YoutubeApiCollector()
     if platform == "x":
         return XCollector()
+    if platform == XIAOHEIHE_KEY:
+        return XiaoheiheCollector()
     raise ValueError(f"unsupported custom platform: {platform}")
 
 
 async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> list:
-    """抓取并解析定制源；平台礼貌间隔与主采集共享同一个 Redis 槽。"""
-    if source.platform == XIAOHEIHE_KEY:
-        if source.kind == XIAOHEIHE_ACCOUNT_KIND:
-            async with platform_slot(redis, source.platform, 5.0):
-                return await collect_account_posts(source.target_value)
+    """抓取并解析定制源；平台礼貌间隔与代理池回退与主采集完全一致。"""
+    if source.platform == XIAOHEIHE_KEY and source.kind == XIAOHEIHE_KIND:
         return await refresh_xiaoheihe_items(session)
     collector = _collector(source.platform)
     if hasattr(collector, "set_cookies") and session is not None:
         from app.services.bilibili_session import get_db_cookies
 
         collector.set_cookies(await get_db_cookies(session))
+    if isinstance(collector, XiaoheiheCollector):
+        collector.configure(await get_effective_xiaoheihe(session))
     preset = custom_preset(source.platform, source.kind, source.target_value)
     if not preset and (source.platform, source.kind) not in CUSTOM_SPECS:
         raise ValueError(f"unsupported custom kind: {source.platform}/{source.kind}")
     if source.platform == "x":
         collector.redis = redis
-    use_fetch_result = bool(preset) or source.platform in {"rss", "youtube"}
+    use_fetch_result = bool(preset) or source.platform in {"rss", "youtube", XIAOHEIHE_KEY}
     async def fetch():
         if source.platform == "x":
             # X 自己按全局 30–90 秒间隔读取，主页/全文共用冷却；不叠加一个宽松槽位。
@@ -105,7 +110,13 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
 
         await record_collection_requests(session, source.platform, getattr(collector, "request_count", 0))
     if use_fetch_result:
-        parse = {"game_official": parse_notice, "youtube": parse_rss_item, "x": parse_post, "rss": parse_rss_feed_item}[source.platform]
+        parse = {
+            "game_official": parse_notice,
+            "youtube": parse_rss_item,
+            "x": parse_post,
+            "rss": parse_rss_feed_item,
+            XIAOHEIHE_KEY: parse_xiaoheihe_post,
+        }[source.platform]
         items = [parse(item) for item in raw_items.items]
         return sorted(items, key=lambda item: item.published_at.timestamp() if item.published_at else 0, reverse=True)
     parse = parse_dynamic if source.kind == "uid" else parse_video
@@ -141,7 +152,7 @@ async def distribute_custom_feed(session: AsyncSession, feed: CustomFeed) -> int
             for key, value in values.items():
                 setattr(item, key, value)
             continue
-        if feed.kind == "keyword" and feed.min_views > 0 and view < feed.min_views:
+        if feed.kind in {"keyword", XIAOHEIHE_KEYWORD_KIND} and feed.min_views > 0 and view < feed.min_views:
             continue
         text = f"{n.title or ''}\n{n.text or ''}".casefold()
         filters = feed.filters or {}
@@ -230,11 +241,10 @@ async def _run_shared_source(session, redis, source_id, stats):
     try:
         source = await session.get(CustomFeedSource, source_id, populate_existing=True)
         feeds = list(await session.scalars(_active_feeds().where(CustomFeed.source_id == source_id).execution_options(populate_existing=True)))
-        is_xiaoheihe = source.platform == XIAOHEIHE_KEY
-        is_hot_posts = is_xiaoheihe and source.kind == XIAOHEIHE_KIND
+        is_hot_posts = source.platform == XIAOHEIHE_KEY and source.kind == XIAOHEIHE_KIND
         if not feeds and not is_hot_posts:
             return
-        interval = XIAOHEIHE_INTERVAL_MINUTES if is_xiaoheihe else min(f.interval_minutes for f in feeds)
+        interval = XIAOHEIHE_INTERVAL_MINUTES if is_hot_posts else min(f.interval_minutes for f in feeds)
         if source.next_run_at is None or source.next_run_at <= now:
             await claim_collection_budget(session, source.platform, custom=True)
             run = CustomCollectRun(source_id=source_id)
@@ -259,7 +269,7 @@ async def _run_shared_source(session, redis, source_id, stats):
             source.next_run_at = source.last_success_at + timedelta(minutes=interval)
             run.items_found = len(items)
             await session.commit()
-        elif source.last_success_at is None or (not is_xiaoheihe and (source.consecutive_failures or source.last_error)):
+        elif source.last_success_at is None or (not is_hot_posts and (source.consecutive_failures or source.last_error)):
             stats["deferred"] += 1
             return
         # 采集期间用户可能修改目标、条件或开关，分发前重新读个人订阅。
@@ -326,15 +336,19 @@ async def sweep_custom_feeds(session: AsyncSession, redis, limit: int = SWEEP_BA
         .where(or_(CustomFeedSource.lease_until.is_(None), CustomFeedSource.lease_until < now))
         .where(or_(CustomFeedSource.next_run_at.is_(None), CustomFeedSource.next_run_at <= now,
             CustomFeedSource.last_success_at.is_not(None) & or_(
-                CustomFeedSource.last_error.is_(None), CustomFeedSource.platform == XIAOHEIHE_KEY)))
+                CustomFeedSource.last_error.is_(None),
+                (CustomFeedSource.platform == XIAOHEIHE_KEY) & (CustomFeedSource.kind == XIAOHEIHE_KIND))))
         .group_by(CustomFeed.source_id).order_by(func.min(func.coalesce(CustomFeed.next_run_at, CustomFeed.created_at))).limit(limit)))
     await ensure_communities_synced(session)
-    if xiaoheihe_feed_url():
-        source = await get_xiaoheihe_source(session)
-        if source is None:
-            source = await shared_source(session, XIAOHEIHE_KEY, XIAOHEIHE_KIND, XIAOHEIHE_TARGET)
-        if source.id not in sources and (source.next_run_at is None or source.next_run_at <= now):
-            sources = [source.id, *sources][:limit]
+    hot_source = await get_xiaoheihe_source(session)
+    if await xiaoheihe_hot_configured(session):
+        if hot_source is None:
+            hot_source = await shared_source(session, XIAOHEIHE_KEY, XIAOHEIHE_KIND, XIAOHEIHE_TARGET)
+        if hot_source.id not in sources and (hot_source.next_run_at is None or hot_source.next_run_at <= now):
+            sources = [hot_source.id, *sources][:limit]
+    elif hot_source is not None and hot_source.id in sources:
+        # 未配置外部热帖源时不再空转刷假成功，已有历史记录原样保留。
+        sources = [sid for sid in sources if sid != hot_source.id]
     await session.commit()
     stats = {"feeds": 0, "sources": 0, "new_items": 0, "pushed": 0, "failed": 0, "deferred": 0}
     for source_id in sources:

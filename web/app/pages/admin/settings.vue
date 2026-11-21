@@ -52,6 +52,18 @@ const ai = reactive({ base_url: '', model: '' })
 // ---------- 公告 ----------
 const announcement = reactive({ enabled: false, level: 'info', text: '', link: '' })
 
+// ---------- 小黑盒采集源 ----------
+interface XiaoheiheView {
+  bridge_url: string
+  bridge_token_set: boolean
+  feed_url: string
+  keyword_enabled: boolean
+  hot_enabled: boolean
+}
+const xiaoheihe = reactive({ bridge_url: '', bridge_token: '', feed_url: '', clear_token: false })
+const xiaoheiheInfo = ref<XiaoheiheView | null>(null)
+const xiaoheiheTestResult = ref('')
+
 // ---------- 媒体可见性 ----------
 interface MediaModesView { image: string; video: string }
 const PLATFORM_MEDIA: { key: string; label: string }[] = [
@@ -60,6 +72,7 @@ const PLATFORM_MEDIA: { key: string; label: string }[] = [
   { key: 'kuro_cn', label: '库街区·国服' },
   { key: 'kuro_global', label: '库街区·国际服' },
   { key: 'miyoushe', label: '米游社' },
+  { key: 'xiaoheihe', label: '小黑盒' },
   { key: 'x', label: 'X' },
 ]
 const mediaVisibility = reactive({
@@ -109,7 +122,7 @@ async function refresh() {
   loadFailed.value = false
   loaded.value = false
   error.value = ''
-  let data: { smtp: SmtpView; onepush: OnePushView; ai: AiView; announcement: typeof announcement; texts: Record<string, string>; media_visibility?: any }
+  let data: { smtp: SmtpView; onepush: OnePushView; ai: AiView; announcement: typeof announcement; texts: Record<string, string>; media_visibility?: any; xiaoheihe?: XiaoheiheView }
   try {
     data = await api('/api/admin/settings')
   } catch (exc: any) {
@@ -136,6 +149,13 @@ async function refresh() {
   const mv = data.media_visibility ?? { default: { image: 'show', video: 'show' }, platforms: {} }
   mediaVisibility.default = { image: mv.default?.image ?? 'show', video: mv.default?.video ?? 'show' }
   mediaVisibility.platforms = mv.platforms ?? {}
+  if (data.xiaoheihe) {
+    xiaoheiheInfo.value = data.xiaoheihe
+    xiaoheihe.bridge_url = data.xiaoheihe.bridge_url || ''
+    xiaoheihe.feed_url = data.xiaoheihe.feed_url || ''
+    xiaoheihe.bridge_token = ''
+    xiaoheihe.clear_token = false
+  }
   loaded.value = true
 }
 
@@ -238,6 +258,44 @@ async function saveAnnouncement() {
     toast.ok('公告已保存' + (announcement.enabled ? '并启用' : '（当前关闭）'))
   } catch (exc: any) {
     error.value = exc?.data?.detail ?? '保存失败'
+  } finally {
+    endBusy()
+  }
+}
+
+async function saveXiaoheihe() {
+  if (!guardLoaded()) return
+  startBusy('saveXiaoheihe')
+  error.value = notice.value = ''
+  try {
+    xiaoheiheInfo.value = await api<XiaoheiheView>('/api/admin/settings/xiaoheihe', {
+      method: 'PUT',
+      body: xiaoheihe,
+    })
+    xiaoheihe.bridge_token = ''
+    xiaoheihe.clear_token = false
+    toast.ok('小黑盒采集源配置已保存')
+  } catch (exc: any) {
+    error.value = exc?.data?.detail ?? '保存失败'
+    toast.err(error.value)
+  } finally {
+    endBusy()
+  }
+}
+
+async function testXiaoheihe() {
+  if (!guardLoaded() || busy.value) return
+  startBusy('testXiaoheihe')
+  xiaoheiheTestResult.value = ''
+  try {
+    const result = await api<{ ok: boolean; message: string }>('/api/admin/settings/xiaoheihe/test', {
+      method: 'POST',
+    })
+    xiaoheiheTestResult.value = `${stamp()} · ${result.message}`
+    result.ok ? toast.ok('小黑盒采集源连通正常') : toast.err('小黑盒采集源测试失败')
+  } catch (exc: any) {
+    xiaoheiheTestResult.value = `${stamp()} · ${exc?.data?.detail ?? '测试失败'}`
+    toast.err('小黑盒采集源测试失败')
   } finally {
     endBusy()
   }
@@ -432,6 +490,45 @@ async function saveTexts() {
           <Send :size="14" /> {{ busyWhat === 'testOnepush' ? '发送中…' : '发送测试推送' }}
         </button>
         <span v-if="onepushTestResult" class="text-xs" :class="onepushTestResult.includes('失败') || onepushTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ onepushTestResult }}</span>
+      </div>
+    </section>
+
+    <!-- 小黑盒采集源（可选） -->
+    <section class="panel p-5">
+      <h2 class="text-sm font-semibold">小黑盒采集源（独立网关 / RSS）</h2>
+      <p class="mt-1 text-xs leading-relaxed text-muted">
+        小黑盒账号监控内置免签直连，无需额外配置。如需开启<strong>小黑盒关键词搜索</strong>与<strong>热帖流</strong>，可填写独立小黑盒只读网关地址（暴露 <code>/v1/search</code> 与 <code>/v1/hot</code>），或填写一路公开 RSS/Atom 热帖源。
+      </p>
+      <div v-if="xiaoheiheInfo" class="mt-3 flex flex-wrap gap-2 text-xs">
+        <span class="rounded px-2 py-0.5" :class="xiaoheiheInfo.keyword_enabled ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-chip text-muted'">
+          关键词采集：{{ xiaoheiheInfo.keyword_enabled ? '已启用' : '未配置网关' }}
+        </span>
+        <span class="rounded px-2 py-0.5" :class="xiaoheiheInfo.hot_enabled ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-chip text-muted'">
+          热帖流：{{ xiaoheiheInfo.hot_enabled ? '已启用' : '未配置源' }}
+        </span>
+      </div>
+      <div class="mt-4 grid gap-3 sm:grid-cols-2">
+        <label class="block text-xs font-medium text-muted">独立网关基址（支持关键词与热帖）
+          <input v-model="xiaoheihe.bridge_url" type="url" placeholder="https://xhh-bridge.example.com" class="input mt-1 w-full px-3 py-2 text-sm font-normal">
+        </label>
+        <label class="block text-xs font-medium text-muted">网关 Bearer Token {{ xiaoheiheInfo?.bridge_token_set ? '（已设置，留空保留）' : '（可选）' }}
+          <input v-model="xiaoheihe.bridge_token" type="password" autocomplete="new-password" placeholder="留空保留原有 Token" class="input mt-1 w-full px-3 py-2 text-sm font-normal">
+        </label>
+        <label class="block text-xs font-medium text-muted sm:col-span-2">备用公开 RSS / Atom 热帖地址（仅热帖）
+          <input v-model="xiaoheihe.feed_url" type="url" placeholder="https://example.com/heybox.xml" class="input mt-1 w-full px-3 py-2 text-sm font-normal">
+        </label>
+      </div>
+      <label v-if="xiaoheiheInfo?.bridge_token_set" class="mt-3 inline-flex cursor-pointer items-center gap-2 text-xs text-muted">
+        <input v-model="xiaoheihe.clear_token" type="checkbox" class="checkbox"> 保存时清除已存 Token
+      </label>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <button class="btn-primary inline-flex min-h-11 cursor-pointer items-center gap-1.5 px-4 py-2" :disabled="busy || !loaded || loadFailed" @click="saveXiaoheihe">
+          <Save :size="14" /> {{ busyWhat === 'saveXiaoheihe' ? '保存中…' : '保存小黑盒配置' }}
+        </button>
+        <button class="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-md border border-line px-4 py-2 text-sm" :disabled="busy || !loaded || loadFailed" @click="testXiaoheihe">
+          <Send :size="14" /> {{ busyWhat === 'testXiaoheihe' ? '测试中…' : '测试连通性' }}
+        </button>
+        <span v-if="xiaoheiheTestResult" class="text-xs" :class="xiaoheiheTestResult.includes('失败') || xiaoheiheTestResult.includes('未配置') ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'">{{ xiaoheiheTestResult }}</span>
       </div>
     </section>
 

@@ -229,13 +229,11 @@ async def list_contents(
     session: AsyncSession = Depends(get_session),
 ):
     from app.services.classify import HIDDEN_CATEGORIES
-    from app.services.xiaoheihe import XIAOHEIHE_KEY, XIAOHEIHE_LIMIT, xiaoheihe_feed_status
+    from app.services.xiaoheihe import XIAOHEIHE_KEY, xiaoheihe_feed_status
 
     is_xiaoheihe = community == XIAOHEIHE_KEY
     blocks = request_blocks(request).scoped(community)
     conditions: list = community_conditions(RawContent.community, community, blocks.communities)
-    if is_xiaoheihe:
-        conditions.append(RawContent.platform == XIAOHEIHE_KEY)
     if platform:
         conditions.append(
             RawContent.platform.in_(("kuro_cn", "kuro_global"))
@@ -287,19 +285,17 @@ async def list_contents(
         return query.join(Source, RawContent.source_id == Source.id, isouter=True) if identity or exclude_identity else query
 
     page_query = matching(RawContent.id)
-    published = RawContent.published_at
-    if is_xiaoheihe:
-        published = func.coalesce(RawContent.published_at, RawContent.collected_at)
-        recent = matching(RawContent.id).order_by(published.desc(), RawContent.id.desc()).limit(XIAOHEIHE_LIMIT).subquery()
-        page_query = page_query.where(RawContent.id.in_(select(recent.c.id)))
+    published = func.coalesce(RawContent.published_at, RawContent.collected_at) if is_xiaoheihe else RawContent.published_at
     if sort == "hot":
         from app.models import MetricSnapshot
 
         # 标量子查询按 (raw_content_id, id) 索引逐条取最新指标；写成 JOIN 关联子查询时 MySQL 用不上主键。
         score = cast(MetricSnapshot.metrics["view"].as_string(), BigInteger)
         if is_xiaoheihe:
-            score = func.coalesce(cast(MetricSnapshot.metrics["like"].as_string(), BigInteger), 0) + func.coalesce(
-                cast(MetricSnapshot.metrics["reply"].as_string(), BigInteger), 0,
+            score = func.coalesce(
+                score,
+                func.coalesce(cast(MetricSnapshot.metrics["like"].as_string(), BigInteger), 0)
+                + func.coalesce(cast(MetricSnapshot.metrics["reply"].as_string(), BigInteger), 0),
             )
         latest_score = (
             select(score)
@@ -355,7 +351,7 @@ async def list_contents(
 
     total = await session.scalar(matching(func.count())) or 0
     if is_xiaoheihe:
-        return PublicContentList(items=items, total=min(total, XIAOHEIHE_LIMIT), feed_status=await xiaoheihe_feed_status(session))
+        return PublicContentList(items=items, total=total, feed_status=await xiaoheihe_feed_status(session))
     return PublicContentList(items=items, total=total)
 
 

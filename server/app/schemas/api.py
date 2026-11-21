@@ -38,6 +38,9 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     ("bilibili", "account_videos"): re.compile(r"^\d{1,20}$"),
     ("bilibili", "account_dynamics"): re.compile(r"^\d{1,20}$"),
     ("miyoushe", "keyword_search"): re.compile(r"^[^\x00-\x1f\x7f]{1,64}$"),
+    ("xiaoheihe", "keyword_search"): re.compile(r"^[^\x00-\x1f\x7f]{1,64}$"),
+    ("xiaoheihe", "account_dynamics"): re.compile(r"^(?:\d{1,20}|[0-9a-f]{12})$"),
+    ("xiaoheihe", "feed"): re.compile(r"^[a-zA-Z0-9_-]{1,32}$"),
     ("kuro_cn", "notices"): re.compile(r"^default$"),
     ("kuro_global", "notices"): re.compile(r"^default$"),
     ("game_official", "notices"): re.compile(r"^(genshin|endfield|nikke)$"),
@@ -78,6 +81,10 @@ def validate_target_value(platform: object, target_type: object, value: object) 
         raise ValueError("target_value 不能包含制表符/换行等控制字符")
     if plat == "youtube":
         text = normalize_youtube_channel_input(text)
+    if plat == "xiaoheihe" and ttype == "account_dynamics":
+        from app.parsers.xiaoheihe import account_target
+
+        text = account_target(text)
     pattern = _TARGET_VALUE_RULES.get((plat, ttype))
     if pattern is not None and not pattern.fullmatch(text):
         raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")

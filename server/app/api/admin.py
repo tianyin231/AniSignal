@@ -474,6 +474,14 @@ async def create_target(
         body.target_value = _x_target_value(body.target_value, body.target_type, body.interval_minutes)
     if body.platform == "youtube":
         body.target_value = await _resolve_youtube_value(session, body.target_value)
+    if body.platform == "xiaoheihe" and body.target_type == "account_dynamics" and not body.target_value.isdecimal():
+        from app.collectors.base import CollectorError
+        from app.collectors.xiaoheihe import resolve_account_uid
+
+        try:
+            body.target_value = await resolve_account_uid(body.target_value, session=session)
+        except CollectorError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     await _ensure_no_target_conflict(
         session,
         platform=body.platform,
@@ -559,6 +567,14 @@ async def update_target(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
         if target.platform == "youtube":
             next_value = await _resolve_youtube_value(session, next_value)
+        if target.platform == "xiaoheihe" and target.target_type == "account_dynamics" and not next_value.isdecimal():
+            from app.collectors.base import CollectorError
+            from app.collectors.xiaoheihe import resolve_account_uid
+
+            try:
+                next_value = await resolve_account_uid(next_value, session=session)
+            except CollectorError as exc:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
         value_changed = next_value != target.target_value
     if value_changed or next_community != target.community or body.tier is not None or body.co_terms is not None:
         await _ensure_no_target_conflict(

@@ -190,7 +190,7 @@ async def collect_custom_feed_now(
     feed = await _feed_or_404(session, feed_id)
     feed.next_run_at = None
     source = await session.get(CustomFeedSource, feed.source_id) if feed.source_id else None
-    if source and source.platform != "xiaoheihe" and not source.last_error:
+    if source and not (source.platform == "xiaoheihe" and source.kind == "hot_posts") and not source.last_error:
         source.next_run_at = None  # 冷却、预算和租约仍由共享调度执行。
     await session.commit()
     job_id = await queue.enqueue_custom_sweep()

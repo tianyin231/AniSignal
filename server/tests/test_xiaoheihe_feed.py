@@ -154,9 +154,17 @@ async def test_xiaoheihe_account_links_resolve_and_share_one_poll(client, sessio
         assert "cookie" not in http.headers and "authorization" not in http.headers
         uid = "42" if params["userid"] == alias else params["userid"]
         calls.append((params["userid"], params["offset"], params["limit"], retries))
-        post = {"userid": int(uid), "title": f"账号 {uid} 的帖子",
-                "share_url": f"https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=post{uid}",
-                "create_at": str(int(now.replace(tzinfo=timezone.utc).timestamp()))}
+        post = {
+            "userid": int(uid),
+            "title": f"账号 {uid} 的帖子",
+            "description": f"正文摘要 {uid}",
+            "imgs": [f"https://imgheybox.max-c.com/post/{uid}.jpg"],
+            "click": 1234,
+            "comment_num": 56,
+            "link_award_num": 78,
+            "share_url": f"https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=post{uid}",
+            "create_at": str(int(now.replace(tzinfo=timezone.utc).timestamp())),
+        }
         return {"status": "ok", "result": {"user": {"userid": int(uid), "username": "公开作者"},
                                             "post_links": [post, {**post, "userid": 9999}]}}
 
@@ -177,15 +185,181 @@ async def test_xiaoheihe_account_links_resolve_and_share_one_poll(client, sessio
         assert response.status_code == 201, response.text
 
     assert (await client.post(path, json={"name": "另一个账号", "kind": "xhh_account", "target_value": "56"})).status_code == 201
-    assert (await client.post(path, json={"name": "热帖", "kind": "hot_posts", "target_value": "hot"})).status_code == 201
+    # 未配置外部热帖/关键词源时，拒绝创建空壳监控，不再假报成功空转
+    assert (await client.post(path, json={"name": "热帖", "kind": "hot_posts", "target_value": "hot"})).status_code == 400
+    assert (await client.post(path, json={"name": "关键词", "kind": "xhh_keyword", "target_value": "鸣潮"})).status_code == 400
     assert (await client.post(path, json={"name": "错域名", "kind": "xhh_account",
         "target_value": "https://xiaoheihe.cn.example.org/app/user/profile/42"})).status_code == 400
     watchers = (await session.scalars(select(CustomFeed).where(CustomFeed.target_value == "42").order_by(CustomFeed.id))).all()
     assert len(watchers) == 2 and watchers[0].source_id == watchers[1].source_id
     assert (await sweep_custom_feeds(session, None))["new_items"] == 3
-    assert sorted(calls) == [("42", 0, 20, 0), ("56", 0, 20, 0), (alias, 0, 1, 0)]
+    assert sorted(calls) == [("42", 0, 20, 1), ("56", 0, 20, 1), (alias, 0, 1, 0)]
     detail = (await client.get(f"/api/custom/feeds/{watchers[-1].id}")).json()
     assert detail["source_url"] == "https://www.xiaoheihe.cn/app/user/profile/42"
     assert len(detail["items"]) == 1 and detail["items"][0]["published_at"]
     assert detail["items"][0]["url"] == "https://www.xiaoheihe.cn/app/bbs/link/post42"
+    assert detail["items"][0]["cover"] == "https://imgheybox.max-c.com/post/42.jpg"
+    assert detail["items"][0]["view"] == 1234
     assert (await client.get("/api/contents", params={"community": "xiaoheihe"})).json()["total"] == 0
+
+
+async def test_xiaoheihe_standard_targets_and_bridge_keyword_pipeline(
+    client, session, session_factory, admin_headers, monkeypatch
+):
+    from app.models import Event
+    from app.services.collect import run_collection
+
+    now = utcnow()
+    seen_auth: list[str | None] = []
+
+    async def fake_get_json(http, url, *, params, retries, timeout):
+        seen_auth.append(http.headers.get("authorization"))
+        if url.endswith("/bbs/app/profile/user/link/list_v2"):
+            uid = "888"
+            return {
+                "status": "ok",
+                "result": {
+                    "user": {"userid": 888, "username": "小黑盒攻略作者"},
+                    "post_links": [
+                        {
+                            "userid": 888,
+                            "title": "终末地配队实测",
+                            "description": "这是完整的正文内容，带图文与指标。",
+                            "imgs": ["https://imgheybox.max-c.com/guide/1.jpg"],
+                            "click": 8500,
+                            "comment_num": 42,
+                            "link_award_num": 99,
+                            "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=acc888a",
+                            "create_at": str(int(now.replace(tzinfo=timezone.utc).timestamp())),
+                        }
+                    ],
+                },
+            }
+        if url.endswith("/v1/search"):
+            return {
+                "items": [
+                    {
+                        "external_id": "kwlow1",
+                        "title": "低热帖子",
+                        "description": "阅读量不够门槛",
+                        "click": 100,
+                        "comment_num": 1,
+                        "link_award_num": 2,
+                        "author": {"external_id": "101", "name": "玩家甲"},
+                        "published_at": now.isoformat(),
+                    },
+                    {
+                        "external_id": "kwhigh2",
+                        "title": "兑换码汇总帖",
+                        "description": "高阅读关键词命中帖子",
+                        "imgs": ["https://imgheybox.max-c.com/kw/2.jpg"],
+                        "click": 5000,
+                        "comment_num": 30,
+                        "link_award_num": 60,
+                        "author": {"external_id": "102", "name": "玩家乙"},
+                        "published_at": now.isoformat(),
+                    },
+                ]
+            }
+        raise AssertionError(f"unexpected url: {url}")
+
+    @asynccontextmanager
+    async def slot(*args):
+        yield
+
+    monkeypatch.setattr(account_collector, "get_json", fake_get_json)
+    monkeypatch.setattr("app.services.collect.SessionLocal", session_factory)
+    monkeypatch.setattr("app.services.collect.platform_slot", slot)
+    monkeypatch.setattr("app.services.custom_feeds.platform_slot", slot)
+
+    # 1. 后台热配置小黑盒独立网关（Token 脱敏且留空保留）
+    saved = await client.put(
+        "/api/admin/settings/xiaoheihe",
+        headers=admin_headers,
+        json={"bridge_url": "https://xhh-bridge.example.com/", "bridge_token": "secret-token-1", "feed_url": ""},
+    )
+    assert saved.status_code == 200
+    assert saved.json() == {
+        "bridge_url": "https://xhh-bridge.example.com",
+        "bridge_token_set": True,
+        "feed_url": "",
+        "keyword_enabled": True,
+        "hot_enabled": True,
+    }
+    keep = await client.put(
+        "/api/admin/settings/xiaoheihe",
+        headers=admin_headers,
+        json={"bridge_url": "https://xhh-bridge.example.com", "bridge_token": "", "feed_url": ""},
+    )
+    assert keep.status_code == 200 and keep.json()["bridge_token_set"] is True
+
+    # 2. 通过标准 /api/admin/collect-targets 给小黑盒独立分区配置账号与关键词目标
+    acc_target = await client.post(
+        "/api/admin/collect-targets",
+        headers=admin_headers,
+        json={
+            "platform": "xiaoheihe",
+            "target_type": "account_dynamics",
+            "target_value": "https://www.xiaoheihe.cn/app/user/profile/888",
+            "community": "xiaoheihe",
+            "display_name": "攻略作者",
+        },
+    )
+    assert acc_target.status_code == 201, acc_target.text
+    assert acc_target.json()["target_value"] == "888"
+
+    kw_target = await client.post(
+        "/api/admin/collect-targets",
+        headers=admin_headers,
+        json={
+            "platform": "xiaoheihe",
+            "target_type": "keyword_search",
+            "target_value": "兑换码",
+            "community": "xiaoheihe",
+            "min_views": 1000,
+        },
+    )
+    assert kw_target.status_code == 201, kw_target.text
+    assert kw_target.json()["min_views"] == 1000
+
+    # 3. 跑标准主采集管线（隔离在 domain="feed"，不污染主游戏事件链与聚合首页）
+    r1 = await run_collection(None, acc_target.json()["id"])
+    r2 = await run_collection(None, kw_target.json()["id"])
+    assert r1["status"] == "success" and r1["items_new"] == 1
+    assert r2["status"] == "success" and r2["items_new"] == 1  # 低热帖子被 min_views 过滤
+    assert "Bearer secret-token-1" in seen_auth
+
+    listing = (await client.get("/api/contents", params={"community": "xiaoheihe", "sort": "hot"})).json()
+    assert listing["total"] == 2
+    assert [i["title"] for i in listing["items"]] == ["终末地配队实测", "兑换码汇总帖"]
+    assert listing["items"][0]["cover"] == "https://imgheybox.max-c.com/guide/1.jpg"
+    assert listing["items"][0]["text_excerpt"].startswith("这是完整的正文内容")
+    assert listing["items"][0]["metrics"] == {"view": 8500, "reply": 42, "like": 99}
+    assert listing["feed_status"]["automatic"] is True
+
+    # 支持搜索与分页，且完全隔离于首页聚合与游戏事件链
+    searched = (await client.get("/api/contents", params={"community": "xiaoheihe", "q": "兑换码"})).json()
+    assert [i["title"] for i in searched["items"]] == ["兑换码汇总帖"]
+    assert (await client.get("/api/contents", params={"community": "all"})).json()["total"] == 0
+    assert (await session.scalars(select(Event))).all() == []
+    assert (await sweep_extractions(session))["candidates"] == 0
+
+    # 4. 个人定制监控支持 xhh_keyword（与 B 站 keyword 完全对齐：min_views + 过滤词 + 共享抓取）
+    await set_setting(session, "custom_feed_policy", {"open_beta": True})
+    user = User(email="xhh-kw@example.org", password_hash=hash_password("test-password"), is_verified=True)
+    session.add(user)
+    await session.commit()
+    client.cookies.set("anisignal_session", await create_session(session, user))
+    quota = (await client.get("/api/account/custom-quota")).json()
+    assert quota["xiaoheihe_keyword_enabled"] is True and quota["xiaoheihe_hot_enabled"] is True
+
+    created = await client.post(
+        "/api/account/custom-feeds",
+        json={"name": "小黑盒兑换码", "kind": "xhh_keyword", "target_value": "兑换码", "min_views": 1000},
+    )
+    assert created.status_code == 201, created.text
+    assert (await sweep_custom_feeds(session, None))["new_items"] == 1
+    detail = (await client.get(f"/api/custom/feeds/{created.json()['id']}")).json()
+    assert [item["title"] for item in detail["items"]] == ["兑换码汇总帖"]
+    assert detail["items"][0]["view"] == 5000
+    assert detail["items"][0]["cover"] == "https://imgheybox.max-c.com/kw/2.jpg"

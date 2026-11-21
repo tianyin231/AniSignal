@@ -28,7 +28,14 @@ from app.services.notifications import beijing_today, create_delivery, enabled_k
 from app.services.feed_preferences import preference_conditions
 from app.services.hidden_communities import PLATFORM_TOKENS, account_blocks, normalize_hidden, normalize_platforms
 from app.services.queue import BaseQueue
-from app.services.xiaoheihe import XIAOHEIHE_ACCOUNT_KIND, XIAOHEIHE_INTERVAL_MINUTES, XIAOHEIHE_KEY
+from app.services.xiaoheihe import (
+    XIAOHEIHE_ACCOUNT_KIND,
+    XIAOHEIHE_INTERVAL_MINUTES,
+    XIAOHEIHE_KEY,
+    XIAOHEIHE_KEYWORD_KIND,
+    XIAOHEIHE_KIND,
+    xiaoheihe_capabilities,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -492,6 +499,7 @@ _KIND_DEFAULT_PLATFORM = {
     "channel_rss": "youtube",
     "hot_posts": "xiaoheihe",
     XIAOHEIHE_ACCOUNT_KIND: XIAOHEIHE_KEY,
+    XIAOHEIHE_KEYWORD_KIND: XIAOHEIHE_KEY,
 }
 _YT_CHANNEL_RE = _re.compile(r"^(?:UC[A-Za-z0-9_-]{20,30}|@[A-Za-z0-9._-]{3,30})$")
 
@@ -512,6 +520,10 @@ def _validate_custom_target(kind: str, target: str) -> str:
             return account_target(target)
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+    if kind == XIAOHEIHE_KEYWORD_KIND:
+        if len(target) > 64 or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in target):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "小黑盒关键词需为 1 至 64 字且不含控制字符")
+        return target
     if kind == "uid":
         if not target.isdigit():
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "UID 只能是数字")
@@ -531,7 +543,7 @@ async def _resolve_custom_target(session: AsyncSession, kind: str, target: str) 
         from app.collectors.xiaoheihe import resolve_account_uid
 
         try:
-            return await resolve_account_uid(target)
+            return await resolve_account_uid(target, session=session)
         except CollectorError:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "暂时无法解析小黑盒主页，请稍后重试或填写数字 UID") from None
     if kind != "channel_rss" or not target.startswith("@"):
@@ -668,8 +680,16 @@ async def my_custom_feeds(
 @router.get("/custom-quota")
 async def custom_quota(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
     from app.services.custom_policy import user_quota
-    return {**(await user_quota(session, user.id)), "notification_channels": ["email", "astrbot"],
-            "planned_channels": [], "astrbot_requires_authorized_binding": True}
+
+    xhh = await xiaoheihe_capabilities(session)
+    return {
+        **(await user_quota(session, user.id)),
+        "notification_channels": ["email", "astrbot"],
+        "planned_channels": [],
+        "astrbot_requires_authorized_binding": True,
+        "xiaoheihe_keyword_enabled": xhh["keyword_enabled"],
+        "xiaoheihe_hot_enabled": xhh["hot_enabled"],
+    }
 
 
 @router.post("/custom-feeds", status_code=status.HTTP_201_CREATED)
@@ -683,20 +703,30 @@ async def create_custom_feed(
     payload = _validate_custom_payload(body)
     if not payload["name"] or not payload["kind"] or not payload["target_value"]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "名称、监控类型与目标均不能为空")
+    if payload["kind"] in {XIAOHEIHE_KEYWORD_KIND, XIAOHEIHE_KIND}:
+        caps = await xiaoheihe_capabilities(session)
+        if payload["kind"] == XIAOHEIHE_KEYWORD_KIND and not caps["keyword_enabled"]:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "管理员尚未配置小黑盒关键词采集网关")
+        if payload["kind"] == XIAOHEIHE_KIND and not caps["hot_enabled"]:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "管理员尚未配置小黑盒热帖采集源")
     await _ensure_safe_custom_target(payload["kind"], payload["target_value"])
     payload["target_value"] = await _resolve_custom_target(session, payload["kind"], payload["target_value"])
     from app.services.custom_policy import check_admission, shared_source, user_quota, request_interval
     quota = await user_quota(session, user.id)
-    interval = payload["interval_minutes"] or quota["min_interval_minutes"]
-    if payload["kind"] == XIAOHEIHE_ACCOUNT_KIND:
-        interval = max(interval, XIAOHEIHE_INTERVAL_MINUTES)
+    interval = payload["interval_minutes"] or (
+        XIAOHEIHE_INTERVAL_MINUTES if payload["kind"] == XIAOHEIHE_KIND else quota["min_interval_minutes"]
+    )
     await check_admission(session, user.id, payload["platform"], payload["kind"], payload["target_value"], interval)
     if payload["platform"] == XIAOHEIHE_KEY and await session.scalar(select(CustomFeed.id).where(
         CustomFeed.user_id == user.id, CustomFeed.platform == XIAOHEIHE_KEY,
         CustomFeed.kind == payload["kind"], CustomFeed.target_value == payload["target_value"],
     ).limit(1)):
-        message = "已监控该小黑盒账号" if payload["kind"] == XIAOHEIHE_ACCOUNT_KIND else "已关注小黑盒热帖"
-        raise HTTPException(status.HTTP_409_CONFLICT, message)
+        messages = {
+            XIAOHEIHE_ACCOUNT_KIND: "已监控该小黑盒账号",
+            XIAOHEIHE_KEYWORD_KIND: "已监控该小黑盒关键词",
+            XIAOHEIHE_KIND: "已关注小黑盒热帖",
+        }
+        raise HTTPException(status.HTTP_409_CONFLICT, messages.get(payload["kind"], "已创建相同的小黑盒监控"))
     source = await shared_source(session, payload["platform"], payload["kind"], payload["target_value"])
     request_interval(source, interval)
     feed = CustomFeed(
@@ -705,7 +735,7 @@ async def create_custom_feed(
         kind=payload["kind"],
         platform=payload["platform"] or _KIND_DEFAULT_PLATFORM[payload["kind"]],
         target_value=payload["target_value"],
-        min_views=(payload["min_views"] or 0) if payload["kind"] == "keyword" else 0,
+        min_views=(payload["min_views"] or 0) if payload["kind"] in {"keyword", XIAOHEIHE_KEYWORD_KIND} else 0,
         push_enabled=bool(payload["push_enabled"]),
         is_public=bool(payload["is_public"]),
         source_id=source.id,
@@ -768,7 +798,7 @@ async def update_custom_feed(
     if payload["interval_minutes"] is not None:
         feed.interval_minutes = payload["interval_minutes"]
         feed.next_run_at = None
-        if feed.source_id and feed.platform != "xiaoheihe":
+        if feed.source_id and feed.kind != XIAOHEIHE_KIND:
             from app.models import CustomFeedSource
             source = await session.get(CustomFeedSource, feed.source_id)
             if source and not source.last_error:
@@ -798,7 +828,7 @@ async def collect_my_custom_feed_now(
     if feed.last_collected_at and (now - feed.last_collected_at) < timedelta(minutes=5):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "刚刚采集过，请至少间隔 5 分钟再手动刷新")
     feed.next_run_at = None
-    if feed.source_id and feed.platform != "xiaoheihe":
+    if feed.source_id and feed.kind != XIAOHEIHE_KIND:
         from app.models import CustomFeedSource
         source = await session.get(CustomFeedSource, feed.source_id)
         if source and not source.last_error:

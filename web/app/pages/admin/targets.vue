@@ -387,6 +387,7 @@ const combos: Record<string, string[]> = {
   game_official: ['notices'],
   bilibili: ['keyword_search', 'account_videos', 'account_dynamics'],
   miyoushe: ['keyword_search'],
+  xiaoheihe: ['account_dynamics', 'keyword_search', 'feed'],
   kuro_cn: ['notices'],
   kuro_global: ['notices'],
   youtube: ['channel_rss'],
@@ -461,8 +462,11 @@ async function runBatchTargets(action: 'enable' | 'disable' | 'delete', opts?: {
 }
 
 const availableTypes = computed(() => combos[form.platform] ?? [])
-const supportsViews = computed(() => form.community !== 'ai' && form.platform === 'bilibili' && ['keyword_search', 'account_videos'].includes(form.target_type))
-const defaultMinViews = () => (supportsViews.value && form.target_type === 'keyword_search' ? 10000 : 0)
+const supportsViews = computed(() => form.community !== 'ai' && (
+  (form.platform === 'bilibili' && ['keyword_search', 'account_videos'].includes(form.target_type))
+  || (form.platform === 'xiaoheihe' && form.target_type === 'keyword_search')
+))
+const defaultMinViews = () => (supportsViews.value && form.platform === 'bilibili' && form.target_type === 'keyword_search' ? 10000 : 0)
 
 const targetPlaceholder = computed(() => {
   if (form.platform === 'rss') return 'RSS / Atom 地址，如 https://openai.com/news/rss.xml'
@@ -471,6 +475,8 @@ const targetPlaceholder = computed(() => {
   if (form.platform === 'game_official') return '仅支持 genshin / endfield / nikke'
   if (form.platform === 'kuro_cn' || form.platform === 'kuro_global') return '固定填写 default'
   if (form.platform === 'bilibili' && form.target_type !== 'keyword_search') return 'B 站 UP 主数字 UID（如 1955897084）'
+  if (form.platform === 'xiaoheihe' && form.target_type === 'account_dynamics') return '小黑盒数字 UID 或主页链接（如 79109824）'
+  if (form.platform === 'xiaoheihe' && form.target_type === 'feed') return '热帖填 hot，或填小黑盒话题 ID'
   return '搜索关键词（如 鸣潮 周边）'
 })
 

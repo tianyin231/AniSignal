@@ -7,7 +7,8 @@ import { isRedundantExcerpt } from '~/utils/text'
 
 const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean; deltaView?: number | null }>()
 const { mediaMode } = useSiteConfig()
-const shareUrl = computed(() => !props.to && props.item.platform === 'xiaoheihe' ? props.item.originalUrl : undefined)
+const shareUrl = computed(() => !props.to && props.item.platform === 'xiaoheihe' && props.item.previewMode === 'external_only' ? props.item.originalUrl : undefined)
+const viewUnit = computed(() => props.item.platform === 'xiaoheihe' ? '阅读' : '播放')
 const detailTo = computed(() => props.to ?? shareUrl.value ?? `/contents/${props.item.id}`)
 const coverFailed = ref(false)
 watch(() => props.item.cover, () => (coverFailed.value = false))
@@ -85,12 +86,12 @@ const excerpt = computed(() => {
           </span>
           <span class="max-w-[14rem] truncate">{{ showCover ? item.account : `${platform.label} · ${item.account}` }}</span>
           <span v-if="!shareUrl" class="mono text-faint">{{ item.publishedAt }}</span>
-          <span v-if="shareUrl && item.metrics?.like != null" class="num">{{ item.metrics.like.toLocaleString('zh-CN') }} 赞</span>
-          <span v-if="shareUrl && item.metrics?.reply != null" class="num">{{ item.metrics.reply.toLocaleString('zh-CN') }} 评论</span>
+          <span v-if="item.platform === 'xiaoheihe' && item.metrics?.like != null" class="num">{{ item.metrics.like.toLocaleString('zh-CN') }} 赞</span>
+          <span v-if="item.platform === 'xiaoheihe' && item.metrics?.reply != null" class="num">{{ item.metrics.reply.toLocaleString('zh-CN') }} 评论</span>
           <span v-if="shareUrl" class="inline-flex items-center gap-0.5 text-brand-ink">
             查看原帖 <ArrowUpRight :size="12" aria-hidden="true" />
           </span>
-          <span v-if="viewLabel" class="num font-semibold sm:hidden" :class="isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }} 播放</span>
+          <span v-if="viewLabel" class="num font-semibold sm:hidden" :class="isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }} {{ viewUnit }}</span>
           <span v-if="deltaLabel" class="num rounded-full bg-hot/10 px-1.5 py-0.5 text-[11px] font-bold text-hot">{{ deltaLabel }} / 24h</span>
           <span v-if="item.translated" class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>
           <span v-if="item.mergedInto" class="text-brand-ink">已并入事件</span>
@@ -99,7 +100,7 @@ const excerpt = computed(() => {
       </div>
       <div v-if="viewLabel" class="hidden w-16 shrink-0 pt-0.5 text-right sm:block">
         <div class="num text-[15px] font-bold" :class="isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }}</div>
-        <div class="mt-0.5 text-[11px] text-faint">播放</div>
+        <div class="mt-0.5 text-[11px] text-faint">{{ viewUnit }}</div>
       </div>
     </NuxtLink>
     <!-- 行内操作放在整行链接之外，避免嵌套 <a> -->

@@ -147,6 +147,43 @@ def onepush_public_view(onepush: dict) -> dict:
     }
 
 
+async def get_effective_xiaoheihe(session: AsyncSession | None) -> dict:
+    """小黑盒采集源配置：DB 优先，env 兜底。"""
+    env = get_settings()
+    stored = (await get_setting(session, "xiaoheihe")) if session is not None else None
+    stored = stored if isinstance(stored, dict) else {}
+    bridge_url = str(
+        stored["bridge_url"] if "bridge_url" in stored else env.xiaoheihe_bridge_url
+    ).strip().rstrip("/")
+    if stored.get("bridge_token"):
+        bridge_token = str(stored["bridge_token"]).strip()
+    elif stored.get("bridge_token_cleared"):
+        bridge_token = ""
+    else:
+        bridge_token = str(env.xiaoheihe_bridge_token or "").strip()
+    feed_url = str(
+        stored["feed_url"] if "feed_url" in stored else env.xiaoheihe_feed_url
+    ).strip()
+    return {
+        "bridge_url": bridge_url,
+        "bridge_token": bridge_token,
+        "feed_url": feed_url,
+    }
+
+
+def xiaoheihe_public_view(cfg: dict) -> dict:
+    """管理端与能力探测视图：Token 脱敏，只报是否已配置。"""
+    bridge_url = str(cfg.get("bridge_url") or "").strip().rstrip("/")
+    feed_url = str(cfg.get("feed_url") or "").strip()
+    return {
+        "bridge_url": bridge_url,
+        "bridge_token_set": bool(cfg.get("bridge_token")),
+        "feed_url": feed_url,
+        "keyword_enabled": bool(bridge_url),
+        "hot_enabled": bool(bridge_url or feed_url),
+    }
+
+
 async def get_admin_user_ids(session: AsyncSession) -> set[int]:
     stored = await get_setting(session, "admin_users") or {}
     raw_ids = stored.get("user_ids") if isinstance(stored, dict) else None

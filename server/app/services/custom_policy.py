@@ -100,10 +100,10 @@ async def check_admission(session, user_id, platform, kind, target, interval, *,
 
 def canonical_target(kind, target):
     value = target.strip()
-    if kind == "uid":
+    if kind in {"uid", "xhh_account"} and value.isdecimal():
         return str(int(value))
     # YouTube 频道 ID 区分大小写；仅关键词和 X 用户名可折叠大小写。
-    return value.casefold() if kind in {"keyword", "account_dynamics"} else value
+    return value.casefold() if kind in {"keyword", "xhh_keyword", "account_dynamics"} else value
 
 
 async def insert_ignoring_duplicate(session, model, **values):

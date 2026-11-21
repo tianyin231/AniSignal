@@ -94,7 +94,7 @@ const rows = computed(() => (data.value?.items ?? []).map((item) => {
   return {
     ...item,
     platformLabel: PLATFORM_LABEL[item.platform] ?? item.platform,
-    views: item.view ? `${item.view.toLocaleString('zh-CN')} ${item.content_type === 'notice' ? '阅读' : '播放'}` : '',
+    views: item.view ? `${item.view.toLocaleString('zh-CN')} ${item.content_type === 'notice' || item.content_type === 'post' ? '阅读' : '播放'}` : '',
     time: Number.isFinite(ts) ? relativeTime(ts, now.value) : '',
     exactTime: Number.isFinite(ts) ? fmtShort(ts) : '',
   }
@@ -158,7 +158,7 @@ const emptyText = computed(() => {
             小黑盒分区
           </NuxtLink>
           <button
-            v-if="data.platform !== 'xiaoheihe' && data.is_owner && data.enabled && data.status === 'active'"
+            v-if="data.kind !== XIAOHEIHE_MONITOR.kind && data.is_owner && data.enabled && data.status === 'active'"
             type="button"
             class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 transition-colors hover:bg-chip hover:text-ink disabled:opacity-50"
             :disabled="triggering"

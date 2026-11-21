@@ -31,6 +31,9 @@ async def get_all_settings(session: AsyncSession = Depends(get_session)):
         "announcement": await settings_service.get_announcement(session),
         "texts": await settings_service.get_texts(session),
         "media_visibility": await settings_service.get_media_visibility(session),
+        "xiaoheihe": settings_service.xiaoheihe_public_view(
+            await settings_service.get_effective_xiaoheihe(session)
+        ),
     }
 
 
@@ -226,3 +229,52 @@ async def put_texts(body: dict, session: AsyncSession = Depends(get_session)):
         stored[key] = text_val
     await settings_service.set_setting(session, "texts", stored)
     return await settings_service.get_texts(session)
+
+
+@router.put("/xiaoheihe")
+async def put_xiaoheihe(body: dict, session: AsyncSession = Depends(get_session)):
+    """保存小黑盒采集源配置（独立网关 URL/Token + 可选公开 RSS 热帖地址）；Token 留空保留已存值。"""
+    stored = (await settings_service.get_setting(session, "xiaoheihe")) or {}
+    if not isinstance(stored, dict):
+        stored = {}
+
+    raw_bridge = str(body.get("bridge_url") or "").strip().rstrip("/")
+    if raw_bridge and safe_endpoint(raw_bridge) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "采集网关地址必须是有效的 http(s) 地址")
+
+    raw_feed = str(body.get("feed_url") or "").strip()
+    if raw_feed and safe_endpoint(raw_feed) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "公开 RSS 地址必须是有效的 http(s) 地址")
+
+    clear_token = bool(body.get("clear_token"))
+    raw_token = str(body.get("bridge_token") or "").strip()
+    if clear_token:
+        bridge_token = ""
+        token_cleared = True
+    elif raw_token:
+        bridge_token = raw_token
+        token_cleared = False
+    else:
+        bridge_token = str(stored.get("bridge_token") or "")
+        token_cleared = bool(stored.get("bridge_token_cleared")) and not bridge_token
+
+    value = {
+        "bridge_url": raw_bridge,
+        "bridge_token": bridge_token,
+        "bridge_token_cleared": token_cleared,
+        "feed_url": raw_feed,
+    }
+    await settings_service.set_setting(session, "xiaoheihe", value)
+    return settings_service.xiaoheihe_public_view(await settings_service.get_effective_xiaoheihe(session))
+
+
+@router.post("/xiaoheihe/test")
+async def test_xiaoheihe(session: AsyncSession = Depends(get_session)):
+    """测试当前生效的小黑盒采集网关或公开 RSS 连通性。"""
+    from app.collectors.xiaoheihe import XiaoheiheCollector
+
+    cfg = await settings_service.get_effective_xiaoheihe(session)
+    collector = XiaoheiheCollector()
+    collector.configure(cfg)
+    ok, message = await collector.test_connection()
+    return {"ok": ok, "message": message}

@@ -29,6 +29,7 @@ from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
 from app.collectors.rss import RssCollector
 from app.collectors.x import XCollector
+from app.collectors.xiaoheihe import XiaoheiheCollector
 from app.collectors.game_official import GameOfficialCollector
 from app.config import get_settings
 from app.db import SessionLocal
@@ -82,6 +83,7 @@ _COLLECTORS = {
     "miyoushe": lambda: MiyousheCollector(),
     "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
     "x": XCollector,
+    "xiaoheihe": XiaoheiheCollector,
     "game_official": GameOfficialCollector,
     "kuro_cn": lambda: KuroCollector(Platform.KURO_CN),
     "kuro_global": lambda: KuroCollector(Platform.KURO_GLOBAL),
@@ -196,6 +198,7 @@ def filter_relevant(
             views = int(
                 item.get("view_count")
                 or item.get("view")
+                or item.get("click")
                 or (item.get("statistics") or {}).get("view")
                 or 0
             )
@@ -220,6 +223,7 @@ def filter_relevant(
             views = int(
                 item.get("view_count")
                 or item.get("view")
+                or item.get("click")
                 or (item.get("statistics") or {}).get("view")
                 or 0
             )
@@ -393,6 +397,10 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                         filter_relevant([dict(item)], target, product_watch_terms=watch_terms)[0])
             if isinstance(collector, XCollector):
                 collector.redis = redis
+            if isinstance(collector, XiaoheiheCollector):
+                from app.services.settings import get_effective_xiaoheihe
+
+                collector.configure(await get_effective_xiaoheihe(session))
             async def fetch():
                 if isinstance(collector, XCollector):
                     return await collector.fetch(target.target_type, target.target_value, settings.collect_limit)

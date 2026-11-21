@@ -50,7 +50,14 @@ export interface CustomFeedRow {
   interval_minutes: number
   filters: { include?: string[], exclude?: string[] }
 }
-export interface CustomQuota { admitted: boolean, used: number, max_feeds: number, min_interval_minutes: number }
+export interface CustomQuota {
+  admitted: boolean
+  used: number
+  max_feeds: number
+  min_interval_minutes: number
+  xiaoheihe_keyword_enabled?: boolean
+  xiaoheihe_hot_enabled?: boolean
+}
 
 export const ACCOUNT_TABS = [
   { key: 'feed', label: '关注流' },
