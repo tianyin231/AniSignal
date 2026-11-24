@@ -8,14 +8,25 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import and_, exists, or_, select, text, union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.models import ContentTranslation, ContentVersion, Event, Evidence, RawContent
+
+logger = logging.getLogger(__name__)
+
+_REQUIRED_FTS_INDEXES = (
+    "ft_content_versions_title_text",
+    "ft_content_translations_text",
+    "ft_events_title_summary",
+)
+_FTS_CAPABILITY_CACHE: WeakKeyDictionary[object, bool] = WeakKeyDictionary()
 
 # MySQL InnoDB 内置默认停用词（INFORMATION_SCHEMA.INNODB_FT_DEFAULT_STOPWORD）。
 # ngram_token_size=2 时，若词项的所有 2-gram 均在停用词表中，BOOLEAN MODE 必填项会返回 0 行。
@@ -128,7 +139,52 @@ def parse_search_query(q: str | None) -> ParsedSearchQuery:
 
 def is_mysql_session(session: AsyncSession) -> bool:
     bind = session.get_bind()
-    return getattr(getattr(bind, "dialect", None), "name", None) == "mysql"
+    return getattr(getattr(bind, "dialect", None), "name", None) in ("mysql", "mariadb")
+
+
+def reset_fts_capability_cache() -> None:
+    _FTS_CAPABILITY_CACHE.clear()
+
+
+async def supports_mysql_fts(session: AsyncSession) -> bool:
+    """探测并缓存当前数据库是否已具备全部 3 个 ngram FULLTEXT 索引。
+
+    MySQL 8.4 标准部署仅首次查询一次 information_schema.statistics（~0.5ms）即缓存 True；
+    外置 MariaDB / 无 ngram 插件的数据库会缓存 False 并无缝回退到安全 LIKE，避免运行时报错。
+    """
+    if not is_mysql_session(session):
+        return False
+    bind = session.get_bind()
+    cache_key = getattr(bind, "engine", bind)
+    try:
+        cached = _FTS_CAPABILITY_CACHE.get(cache_key)
+    except TypeError:
+        cache_key = None
+        cached = None
+    if cached is not None:
+        return cached
+    try:
+        count = await session.scalar(
+            text(
+                "SELECT COUNT(DISTINCT index_name) "
+                "FROM information_schema.statistics "
+                "WHERE table_schema = DATABASE() "
+                "AND index_name IN (:i1, :i2, :i3)"
+            ).bindparams(
+                i1=_REQUIRED_FTS_INDEXES[0],
+                i2=_REQUIRED_FTS_INDEXES[1],
+                i3=_REQUIRED_FTS_INDEXES[2],
+            )
+        )
+        supported = int(count or 0) == len(_REQUIRED_FTS_INDEXES)
+    except Exception:  # noqa: BLE001 - 临时异常不写缓存，本次安全回退 LIKE
+        logger.warning("探测 MySQL FULLTEXT 索引状态失败，本次查询回退 LIKE", exc_info=True)
+        return False
+    if cache_key is not None:
+        _FTS_CAPABILITY_CACHE[cache_key] = supported
+    if not supported:
+        logger.info("未检测到完整的 ngram FULLTEXT 索引，站内搜索自动使用安全 LIKE 回退")
+    return supported
 
 
 def _content_term_like(term: str):

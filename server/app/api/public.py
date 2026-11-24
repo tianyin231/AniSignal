@@ -336,9 +336,9 @@ async def list_contents(
     if not include_chat:
         conditions.append(ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None))
     if q:
-        from app.services.search import content_search_condition, is_mysql_session
+        from app.services.search import content_search_condition, supports_mysql_fts
 
-        search_cond = content_search_condition(q, use_mysql_fts=is_mysql_session(session))
+        search_cond = content_search_condition(q, use_mysql_fts=await supports_mysql_fts(session))
         if search_cond is not None:
             conditions.append(search_cond)
 
@@ -1034,9 +1034,9 @@ async def list_events(
             )
             conditions.append(EventModel.id.in_(recent_event_ids))
         if q:
-            from app.services.search import event_search_condition, is_mysql_session
+            from app.services.search import event_search_condition, supports_mysql_fts
 
-            search_cond = event_search_condition(q, use_mysql_fts=is_mysql_session(session))
+            search_cond = event_search_condition(q, use_mysql_fts=await supports_mysql_fts(session))
             if search_cond is not None:
                 conditions.append(search_cond)
 

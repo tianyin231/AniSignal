@@ -237,3 +237,100 @@ async def test_events_search_matches_summary_and_translated_evidence(session, cl
     r3 = await client.get("/api/events", params={"community": "wuwa", "q": "亚克力立牌"})
     assert r3.status_code == 200
     assert [item["id"] for item in r3.json()["items"]] == [ev2.id]
+
+
+def test_migration_0060_skips_cleanly_when_ngram_plugin_absent(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    mig_path = Path(__file__).parents[1] / "alembic/versions/0060_ngram_fulltext_search.py"
+    spec = importlib.util.spec_from_file_location("mig_0060_compat", mig_path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    executed: list[str] = []
+
+    class _FakeScalarResult:
+        def __init__(self, value):
+            self._value = value
+
+        def scalar(self):
+            return self._value
+
+    class _FakeBind:
+        def __init__(self, dialect_name: str, has_ngram: bool):
+            self.dialect = SimpleNamespace(name=dialect_name)
+            self._has_ngram = has_ngram
+
+        def execute(self, _stmt):
+            return _FakeScalarResult(1 if self._has_ngram else None)
+
+    monkeypatch.setattr(mod.op, "get_context", lambda: SimpleNamespace(as_sql=False))
+    monkeypatch.setattr(mod.op, "execute", lambda stmt: executed.append(str(stmt)))
+    monkeypatch.setattr(mod, "_inspector", lambda _bind: SimpleNamespace(get_indexes=lambda _t: []))
+
+    # MariaDB / 无 ngram 插件：安全跳过，不执行任何 ALTER TABLE
+    monkeypatch.setattr(mod.op, "get_bind", lambda: _FakeBind("mariadb", has_ngram=False))
+    mod.upgrade()
+    assert executed == []
+
+    # MySQL 8.4（激活 ngram 插件）：正常创建全部 3 个 FULLTEXT 索引
+    monkeypatch.setattr(mod.op, "get_bind", lambda: _FakeBind("mysql", has_ngram=True))
+    mod.upgrade()
+    assert len(executed) == 3
+    assert all("WITH PARSER ngram" in sql for sql in executed)
+
+
+@pytest.mark.asyncio
+async def test_supports_mysql_fts_probing_caching_and_fallback(session):
+    from types import SimpleNamespace
+    from app.services.search import reset_fts_capability_cache, supports_mysql_fts
+
+    reset_fts_capability_cache()
+
+    # 1. SQLite 直接返回 False（不发查询）
+    assert await supports_mysql_fts(session) is False
+
+    class _FakeEngine:
+        def __init__(self, dialect_name: str):
+            self.dialect = SimpleNamespace(name=dialect_name)
+
+    class _FakeSession:
+        def __init__(self, engine, count_or_exc):
+            self._engine = engine
+            self._count_or_exc = count_or_exc
+            self.calls = 0
+
+        def get_bind(self):
+            return self._engine
+
+        async def scalar(self, _stmt):
+            self.calls += 1
+            if isinstance(self._count_or_exc, Exception):
+                raise self._count_or_exc
+            return self._count_or_exc
+
+    # 2. MySQL 8.4 存在全部 3 个索引 -> 返回 True 且仅查询一次（命中缓存）
+    mysql_engine = _FakeEngine("mysql")
+    s_ok = _FakeSession(mysql_engine, 3)
+    assert await supports_mysql_fts(s_ok) is True
+    assert await supports_mysql_fts(s_ok) is True
+    assert s_ok.calls == 1
+
+    # 3. MariaDB / 无索引 -> 返回 False 且仅查询一次（命中缓存）
+    mariadb_engine = _FakeEngine("mariadb")
+    s_no_idx = _FakeSession(mariadb_engine, 0)
+    assert await supports_mysql_fts(s_no_idx) is False
+    assert await supports_mysql_fts(s_no_idx) is False
+    assert s_no_idx.calls == 1
+
+    # 4. 瞬时异常 -> 本次安全回退 False，不污染缓存；恢复后可重新探测到 True
+    flaky_engine = _FakeEngine("mysql")
+    s_flaky = _FakeSession(flaky_engine, RuntimeError("transient"))
+    assert await supports_mysql_fts(s_flaky) is False
+    s_flaky._count_or_exc = 3
+    assert await supports_mysql_fts(s_flaky) is True
+    assert s_flaky.calls == 2
+    reset_fts_capability_cache()
