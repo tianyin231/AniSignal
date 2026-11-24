@@ -137,7 +137,54 @@ def test_collapse_filters_risk_control_image_drops_and_degraded_snapshots():
     kept_r = collapse_substantive_versions([r_v1, r_v2, r_v3], platform="bilibili")
     assert [v.version for v in kept_r] == [2]
 
-    # 6. 管理员手工删图（origin=admin）仍必须完整保留，不被风控过滤误吞
+    # 6. B 站转发动态原本完整带图，风控后退回首行转发语且丢图（且无后续恢复）：忽略退化 v2
+    rep_full = "亲爱的旅行者，特别联动关卡现已正式上线！\n\n互动抽奖 #原神#\n详细活动规则与奖励说明。"
+    rep_drop_v1 = _ver(1, title="亲爱的旅行者，特别联动关卡现已正式上线！", text=rep_full, media=imgs[:2])
+    rep_drop_v2 = _ver(2, title="亲爱的旅行者，特别联动关卡现已正式上线！", text="亲爱的旅行者，特别联动关卡现已正式上线！", media=[], minutes_offset=60)
+    assert [v.version for v in collapse_substantive_versions([rep_drop_v1, rep_drop_v2], platform="bilibili")] == [1]
+
+    # 7. B 站动态图床 bfs/new_dyn 纯换链（正文未变，旧链在 B 站即刻 404 不可比对）：原地升级到最新有效图链
+    dyn_v1 = _ver(1, title="巡游巴士", text="广州站活动详情", media=[imgs[0], imgs[1]])
+    dyn_v2 = _ver(
+        2,
+        title="巡游巴士",
+        text="广州站活动详情",
+        media=[imgs[0], "https://i0.hdslb.com/bfs/new_dyn/zzz999.png"],
+        minutes_offset=60,
+    )
+    kept_dyn = collapse_substantive_versions([dyn_v1, dyn_v2], platform="bilibili")
+    assert [v.version for v in kept_dyn] == [2]
+
+    # B 站视频封面（bfs/archive）与官网公告换图（fastcdn.mihoyo.com）旧图均 200 可比对，仍完整保留
+    vid_v1 = _ver(1, title="活动PV", text="简介", media=["https://i1.hdslb.com/bfs/archive/old_cover.jpg"])
+    vid_v2 = _ver(2, title="活动PV", text="简介", media=["https://i2.hdslb.com/bfs/archive/new_cover.jpg"], minutes_offset=30)
+    assert [v.version for v in collapse_substantive_versions([vid_v1, vid_v2], platform="bilibili")] == [1, 2]
+
+    # 8. X Cloudflare 邮箱反爬脱敏（真实邮箱 <-> [email protected]）不算官方修订，优先保留真实邮箱版
+    cf_v1 = _ver(1, title="Maintenance", text="Contact support: al.cs@yo-star.com", media=["https://pbs.twimg.com/media/X1.jpg"])
+    cf_v2 = _ver(2, title="Maintenance", text="Contact support: [email\xa0protected]", media=["https://pbs.twimg.com/media/X1.jpg"], minutes_offset=30)
+    assert [v.version for v in collapse_substantive_versions([cf_v1, cf_v2], platform="x")] == [1]
+    assert [v.version for v in collapse_substantive_versions([
+        _ver(1, title="Maintenance", text="Contact support: [email\xa0protected]"),
+        _ver(2, title="Maintenance", text="Contact support: al.cs@yo-star.com", minutes_offset=30),
+    ], platform="x")] == [2]
+
+    # 9. B 站解析器升级：占位标题（空/转发动态）升级、跨版本改摘正文片段为标题、pv4->pv5 剥离转发首行均不算作者改稿
+    p_v1 = _ver(1, title="", text="#鸣潮# 活动开启", parser_version="1")
+    p_v2 = _ver(2, title="转发动态", text="#鸣潮# 活动开启", parser_version="3", minutes_offset=10)
+    p_v3 = _ver(3, title="活动开启", text="#鸣潮# 活动开启", parser_version="4", minutes_offset=20)
+    assert [v.version for v in collapse_substantive_versions([p_v1, p_v2, p_v3], platform="bilibili")] == [3]
+
+    syn_text = "#鸣潮#互动抽奖\n「剑仙之道」网页活动开启！"
+    syn_v1 = _ver(1, title="「剑仙之道」网页活动开启！", text=syn_text, parser_version="3")
+    syn_v2 = _ver(2, title="互动抽奖", text=syn_text, parser_version="4", minutes_offset=10)
+    assert [v.version for v in collapse_substantive_versions([syn_v1, syn_v2], platform="bilibili")] == [2]
+
+    rp_v1 = _ver(1, title="转发语第一行", text="转发语第一行\n原动态第一行\n原动态第二行", media=[imgs[0]], parser_version="4")
+    rp_v2 = _ver(2, title="原动态第一行", text="原动态第一行\n原动态第二行", media=[imgs[0]], parser_version="5", minutes_offset=20)
+    assert [v.version for v in collapse_substantive_versions([rp_v1, rp_v2], platform="bilibili")] == [2]
+
+    # 10. 管理员手工删图（origin=admin）仍必须完整保留，不被风控过滤误吞
     adm_v1 = _ver(1, title="公告", text="正文一致", media=[imgs[0]], parser_version="2")
     adm_v2 = _ver(2, title="公告", text="正文一致", media=[], parser_version="2+admin", minutes_offset=10)
     kept_adm = collapse_substantive_versions([adm_v1, adm_v2], platform="bilibili")

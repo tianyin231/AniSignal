@@ -31,6 +31,13 @@ const loadError = ref('')
 const history = ref<ContentVersionHistory | null>(null)
 const selectedFrom = ref<number | null>(null)
 const selectedTo = ref<number | null>(null)
+const brokenMedia = ref<Record<string, boolean>>({})
+
+function markBroken(url: string) {
+  if (!brokenMedia.value[url]) {
+    brokenMedia.value = { ...brokenMedia.value, [url]: true }
+  }
+}
 
 let activeController: AbortController | null = null
 
@@ -140,6 +147,7 @@ watch(() => props.contentId, () => {
   history.value = null
   selectedFrom.value = null
   selectedTo.value = null
+  brokenMedia.value = {}
   if (open.value) {
     fetchDiff()
   }
@@ -380,25 +388,37 @@ watch(() => props.contentId, () => {
               新增图片（{{ diff.media_added.length }}）
             </div>
             <div v-if="imageMode === 'show'" class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <button
-                v-for="m in diff.media_added"
-                :key="`add-${m}`"
-                type="button"
-                aria-label="查看新增图片"
-                class="overflow-hidden rounded-lg border-2 border-emerald-500/45 transition-opacity hover:opacity-90"
-                @click="emit('openImage', m)"
-              >
-                <img
-                  :src="imageUrl(m, 320)"
-                  :srcset="imageSrcset(m, [160, 320])"
-                  sizes="(min-width: 640px) 25vw, 50vw"
-                  alt=""
-                  referrerpolicy="no-referrer"
-                  loading="lazy"
-                  decoding="async"
-                  class="aspect-video w-full object-cover"
+              <template v-for="(m, idx) in diff.media_added" :key="`add-${m}`">
+                <a
+                  v-if="brokenMedia[m]"
+                  :href="m"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="flex aspect-video w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-emerald-500/40 bg-emerald-500/5 px-2 text-center text-[11px] text-emerald-700 hover:underline dark:text-emerald-300"
                 >
-              </button>
+                  <span>图片加载失败</span>
+                  <span class="text-[10px] opacity-75">打开原图 #{{ idx + 1 }}</span>
+                </a>
+                <button
+                  v-else
+                  type="button"
+                  aria-label="查看新增图片"
+                  class="overflow-hidden rounded-lg border-2 border-emerald-500/45 transition-opacity hover:opacity-90"
+                  @click="emit('openImage', m)"
+                >
+                  <img
+                    :src="imageUrl(m, 320)"
+                    :srcset="imageSrcset(m, [160, 320])"
+                    sizes="(min-width: 640px) 25vw, 50vw"
+                    alt=""
+                    referrerpolicy="no-referrer"
+                    loading="lazy"
+                    decoding="async"
+                    class="aspect-video w-full object-cover"
+                    @error="markBroken(m)"
+                  >
+                </button>
+              </template>
             </div>
             <div v-else class="flex flex-wrap gap-2">
               <a
@@ -419,25 +439,37 @@ watch(() => props.contentId, () => {
               移除图片（{{ diff.media_removed.length }}）
             </div>
             <div v-if="imageMode === 'show'" class="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <button
-                v-for="m in diff.media_removed"
-                :key="`rem-${m}`"
-                type="button"
-                aria-label="查看移除图片"
-                class="overflow-hidden rounded-lg border-2 border-red-500/45 opacity-80 transition-opacity hover:opacity-100"
-                @click="emit('openImage', m)"
-              >
-                <img
-                  :src="imageUrl(m, 320)"
-                  :srcset="imageSrcset(m, [160, 320])"
-                  sizes="(min-width: 640px) 25vw, 50vw"
-                  alt=""
-                  referrerpolicy="no-referrer"
-                  loading="lazy"
-                  decoding="async"
-                  class="aspect-video w-full object-cover"
+              <template v-for="(m, idx) in diff.media_removed" :key="`rem-${m}`">
+                <a
+                  v-if="brokenMedia[m]"
+                  :href="m"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="flex aspect-video w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-red-500/35 bg-red-500/5 px-2 text-center text-[11px] text-red-700/80 hover:underline dark:text-red-300/80"
                 >
-              </button>
+                  <span>原图已被源站移除</span>
+                  <span class="text-[10px] opacity-75">原链接 #{{ idx + 1 }}</span>
+                </a>
+                <button
+                  v-else
+                  type="button"
+                  aria-label="查看移除图片"
+                  class="overflow-hidden rounded-lg border-2 border-red-500/45 opacity-80 transition-opacity hover:opacity-100"
+                  @click="emit('openImage', m)"
+                >
+                  <img
+                    :src="imageUrl(m, 320)"
+                    :srcset="imageSrcset(m, [160, 320])"
+                    sizes="(min-width: 640px) 25vw, 50vw"
+                    alt=""
+                    referrerpolicy="no-referrer"
+                    loading="lazy"
+                    decoding="async"
+                    class="aspect-video w-full object-cover"
+                    @error="markBroken(m)"
+                  >
+                </button>
+              </template>
             </div>
             <div v-else class="flex flex-wrap gap-2">
               <a

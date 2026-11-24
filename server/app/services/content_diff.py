@@ -44,6 +44,11 @@ _MIN_INLINE_SIMILARITY = 0.35
 _CONTEXT_LINES = 2
 _MAX_VERSIONS_PER_CONTENT = 60
 
+_BILI_NEW_DYN_PREFIX = "i0.hdslb.com/bfs/new_dyn/"
+_BILI_PLACEHOLDER_TITLES = frozenset({"", "动态", "图文动态", "转发动态", "视频动态"})
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_CF_EMAIL_RE = re.compile(r"\[email\s+protected\]", re.I)
+
 
 @dataclass(frozen=True)
 class VersionInput:
@@ -68,6 +73,7 @@ class SubstantiveVersion:
     media: tuple[str, ...]
     media_keys: tuple[str, ...]
     truncated: bool
+    parser_version: str = ""
 
     @property
     def signature(self) -> tuple[str, str, tuple[str, ...]]:
@@ -179,6 +185,7 @@ def _to_substantive(item: VersionInput) -> SubstantiveVersion:
         media=media,
         media_keys=media_keys,
         truncated=item.truncated,
+        parser_version=(item.parser_version or "").strip(),
     )
 
 
@@ -265,6 +272,62 @@ def _is_x_thumb_media_flip(
     return kinds == {"thumb", "media"}
 
 
+def _is_bili_dynamic_cdn_swap(
+    prev: SubstantiveVersion, curr: SubstantiveVersion, *, platform: str | None
+) -> bool:
+    """B 站动态图床 bfs/new_dyn 换链或后台重存后旧 URL 会立刻 404，纯图床哈希变化且正文未改无法比对。"""
+    if platform != "bilibili" or prev.origin != "source" or curr.origin != "source":
+        return False
+    if prev.title != curr.title or prev.text != curr.text:
+        return False
+    if not prev.media_keys or not curr.media_keys:
+        return False
+    if len(curr.media_keys) < len(prev.media_keys) or set(curr.media_keys).issubset(prev.media_keys):
+        return False
+    return all(key.startswith(_BILI_NEW_DYN_PREFIX) for key in (*prev.media_keys, *curr.media_keys))
+
+
+def _is_cloudflare_email_obfuscation(prev: SubstantiveVersion, curr: SubstantiveVersion) -> bool:
+    """采集经过 Cloudflare 代理时邮箱地址会被替换成 [email protected]，不算源站正文修订。"""
+    if prev.origin != "source" or curr.origin != "source":
+        return False
+    if prev.title != curr.title or prev.media_keys != curr.media_keys:
+        return False
+    if not _CF_EMAIL_RE.search(prev.text) and not _CF_EMAIL_RE.search(curr.text):
+        return False
+    norm_prev = _CF_EMAIL_RE.sub("<email>", _EMAIL_RE.sub("<email>", prev.text))
+    norm_curr = _CF_EMAIL_RE.sub("<email>", _EMAIL_RE.sub("<email>", curr.text))
+    return norm_prev == norm_curr
+
+
+def _is_bili_parser_reformat(
+    prev: SubstantiveVersion, curr: SubstantiveVersion, *, platform: str | None
+) -> bool:
+    """B 站动态解析器升级导致的合成标题补全或转发首行剥离，并非作者改动原文。"""
+    if platform != "bilibili" or prev.origin != "source" or curr.origin != "source":
+        return False
+    if prev.media_keys != curr.media_keys:
+        return False
+    # 1. 正文与图片完全一致，仅旧版占位标题（空/动态/转发动态/图文动态）升级，或解析器跨版本重新摘取正文片段作标题
+    if prev.text == curr.text:
+        if prev.title in _BILI_PLACEHOLDER_TITLES:
+            return True
+        if (
+            prev.parser_version
+            and curr.parser_version
+            and prev.parser_version != curr.parser_version
+            and prev.title in prev.text
+            and curr.title in curr.text
+        ):
+            return True
+    # 2. 解析器版本升级（如 pv=4→pv=5）后剥离了转发动态首行转发语，保留原动态完整正文与配图
+    if prev.parser_version and curr.parser_version and prev.parser_version != curr.parser_version:
+        prev_lines = prev.text.splitlines()
+        if len(prev_lines) >= 2 and curr.text == "\n".join(prev_lines[1:]):
+            return True
+    return False
+
+
 def _is_degraded_capture(
     curr: SubstantiveVersion,
     prev: SubstantiveVersion,
@@ -272,7 +335,7 @@ def _is_degraded_capture(
     *,
     platform: str | None = None,
 ) -> bool:
-    """识别因风控/反爬/重算导致的退化版本（丢全文、丢全部或部分图片、退回历史残缺快照）。
+    """识别因风控/反爬/重算导致的退化版本（丢全文、丢转发原动态、丢图、退回历史残缺快照或反爬脱敏）。
 
     仅作用于源站采集版本（origin == 'source'），绝不屏蔽管理员手工修订。
     """
@@ -284,7 +347,35 @@ def _is_degraded_capture(
     # 2. 退回曾经出现过的残缺补全前快照（如 B 站转发动态补全原动态后，后续再次风控丢回仅转发语）
     if curr.signature in degraded_signatures:
         return True
-    # 3. 标题与正文均未变化，但图片减少/掉零（没有新图替换，只是本轮没采全图片）
+    # 3. 退回截断或丢失转发原动态卡片的残缺态（反向 backfill：如 B 站转发动态风控后仅剩首句转发语且丢图）
+    if set(curr.media_keys).issubset(prev.media_keys):
+        if _is_backfill_transition(curr, prev, platform=platform) and (
+            (prev.media_keys and not curr.media_keys)
+            or curr.truncated
+            or (curr.title == prev.title and prev.text.startswith(curr.text + "\n"))
+        ):
+            return True
+        if (
+            platform == "bilibili"
+            and curr.title == prev.title
+            and curr.text
+            and prev.text.startswith(curr.text + "\n")
+            and ((prev.media_keys and not curr.media_keys) or len(curr.text) <= 270)
+        ):
+            return True
+    # 4. Cloudflare 邮箱反爬脱敏（真实邮箱 → [email protected]）
+    if _is_cloudflare_email_obfuscation(prev, curr) and _CF_EMAIL_RE.search(curr.text) and not _CF_EMAIL_RE.search(prev.text):
+        return True
+    # 5. B 站动态标题退回占位词（正文与图片均未变）
+    if (
+        platform == "bilibili"
+        and curr.text == prev.text
+        and curr.media_keys == prev.media_keys
+        and curr.title in _BILI_PLACEHOLDER_TITLES
+        and prev.title not in _BILI_PLACEHOLDER_TITLES
+    ):
+        return True
+    # 6. 标题与正文均未变化，但图片减少/掉零（没有新图替换，只是本轮没采全图片）
     if curr.title == prev.title and curr.text == prev.text:
         if prev.media_keys and set(curr.media_keys).issubset(prev.media_keys):
             return True
@@ -303,6 +394,21 @@ def _is_media_only_backfill(prev: SubstantiveVersion, curr: SubstantiveVersion) 
         and not prev.media_keys
         and bool(curr.media_keys)
     )
+
+
+def _is_inplace_upgrade(
+    prev: SubstantiveVersion, curr: SubstantiveVersion, *, platform: str | None
+) -> bool:
+    """识别可原地替换当前快照的非修订升级（补图、反爬恢复、解析器格式化升级、B 站动态图床换链）。"""
+    if _is_media_only_backfill(prev, curr):
+        return True
+    if _is_bili_dynamic_cdn_swap(prev, curr, platform=platform):
+        return True
+    if _is_bili_parser_reformat(prev, curr, platform=platform):
+        return True
+    if _is_cloudflare_email_obfuscation(prev, curr) and _CF_EMAIL_RE.search(prev.text) and not _CF_EMAIL_RE.search(curr.text):
+        return True
+    return False
 
 
 def collapse_substantive_versions(
@@ -339,7 +445,7 @@ def collapse_substantive_versions(
             degraded_signatures.add(prev.signature)
             kept[0] = curr
             continue
-        if _is_media_only_backfill(prev, curr):
+        if _is_inplace_upgrade(prev, curr, platform=platform):
             degraded_signatures.add(prev.signature)
             kept[-1] = curr
             continue
