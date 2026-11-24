@@ -291,7 +291,11 @@ async def list_contents(
     if not include_chat:
         conditions.append(ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None))
     if q:
-        conditions.append(ContentVersion.title.like(f"%{q}%"))
+        from app.services.search import content_search_condition, is_mysql_session
+
+        search_cond = content_search_condition(q, use_mysql_fts=is_mysql_session(session))
+        if search_cond is not None:
+            conditions.append(search_cond)
 
     # 直接通过 raw_contents.latest_version_id 主键关联最新版本，避免每页执行关联 NOT EXISTS 或 GROUP BY 衍生表；
     # 仍分两步取：先按覆盖索引定位本页 id，再回表读正文和 JSON，防止宽行排序退化。
@@ -835,7 +839,11 @@ async def list_events(
             )
             conditions.append(EventModel.id.in_(recent_event_ids))
         if q:
-            conditions.append(EventModel.title.like(f"%{q}%"))
+            from app.services.search import event_search_condition, is_mysql_session
+
+            search_cond = event_search_condition(q, use_mysql_fts=is_mysql_session(session))
+            if search_cond is not None:
+                conditions.append(search_cond)
 
         total = await session.scalar(
             select(func.count(EventModel.id))

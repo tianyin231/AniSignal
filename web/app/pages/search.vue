@@ -63,7 +63,7 @@ useSeoMeta({ title: '搜索' })
       <input
         v-model="input"
         type="search"
-        placeholder="搜索事件与内容（标题关键词）"
+        placeholder="搜索事件、正文与译文关键词"
         class="min-w-0 flex-1 bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-zinc-100"
       >
       <button type="submit" class="btn-primary shrink-0 px-3.5 py-1.5">搜索</button>
