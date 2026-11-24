@@ -134,14 +134,6 @@ async def sync_product_signals(
     if before is None:
         before = await build_fulfillment_snapshot(session, product_id)
     product_community = product.community or DEFAULT_COMMUNITY
-    latest = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("version"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     rows = list(
         await session.execute(
             select(Event, RawContent, Source, ContentVersion)
@@ -149,12 +141,7 @@ async def sync_product_signals(
             .join(Evidence, Evidence.event_id == Event.id)
             .join(RawContent, RawContent.id == Evidence.raw_content_id)
             .join(Source, Source.id == RawContent.source_id, isouter=True)
-            .join(latest, latest.c.rid == RawContent.id)
-            .join(
-                ContentVersion,
-                (ContentVersion.raw_content_id == latest.c.rid)
-                & (ContentVersion.version == latest.c.version),
-            )
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
             .where(
                 Event.product_id == product_id,
                 Event.community == product_community,

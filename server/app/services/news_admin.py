@@ -117,10 +117,11 @@ async def content_row(session, key):
 
 
 async def content_search(session, q):
-    latest = select(func.max(ContentVersion.version)).where(ContentVersion.raw_content_id == RawContent.id).correlate(RawContent).scalar_subquery()
-    query = select(RawContent, ContentVersion, ContentReview, Source).join(ContentVersion,
-        (ContentVersion.raw_content_id == RawContent.id) & (ContentVersion.version == latest)).outerjoin(
-        ContentReview, ContentReview.raw_content_id == RawContent.id).outerjoin(Source, Source.id == RawContent.source_id).where(RawContent.community == "ai")
+    query = select(RawContent, ContentVersion, ContentReview, Source).join(
+        ContentVersion, ContentVersion.id == RawContent.latest_version_id
+    ).outerjoin(
+        ContentReview, ContentReview.raw_content_id == RawContent.id
+    ).outerjoin(Source, Source.id == RawContent.source_id).where(RawContent.community == "ai")
     if q:
         alias = await session.get(NewsArchive, ("article", q))
         match = re.fullmatch(r"(?:as|content)-(\d+)", q)

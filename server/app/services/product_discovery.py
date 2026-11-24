@@ -225,23 +225,10 @@ async def discover_merch_candidates(
     if not ai_available(config):
         return {"scanned": 0, "created": 0, "skipped_reason": "ai_not_configured"}
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
-    latest = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("version"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     rows = list(await session.execute(
         select(RawContent, ContentVersion, Source)
         .join(Source, Source.id == RawContent.source_id)
-        .join(latest, latest.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest.c.rid)
-            & (ContentVersion.version == latest.c.version),
-        )
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(MerchScan, MerchScan.raw_content_id == RawContent.id)
         .where(
             Source.identity == "official",

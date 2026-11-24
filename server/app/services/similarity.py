@@ -138,22 +138,9 @@ async def match_official_contents(
 
 
 async def _load_recent_official(session: AsyncSession) -> list[MatchContent]:
-    latest = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("version"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     result = await session.execute(
         select(RawContent, ContentVersion)
-        .join(latest, latest.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest.c.rid)
-            & (ContentVersion.version == latest.c.version),
-        )
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(Source, RawContent.source_id == Source.id)
         .where(
             Source.identity == "official",

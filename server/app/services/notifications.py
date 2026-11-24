@@ -167,27 +167,13 @@ async def load_candidates(
     """None 表示全站早报；关键词通知只取明确命中内容，正文命中交给 AI 复核。"""
     if keywords == [] or content_ids == []:
         return []
-    latest_sq = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("version"),
-        )
-        .where(*([ContentVersion.raw_content_id.in_(content_ids)] if content_ids is not None else []))
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     published = func.coalesce(RawContent.published_at, RawContent.collected_at)
     feed_partitions = feed_community_keys()
     query = (
         select(RawContent, ContentVersion, Source, ContentTranslation)
         .options(defer(RawContent.raw_json), defer(Source.raw_json))
-        .join(latest_sq, latest_sq.c.rid == RawContent.id)
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .where(RawContent.hidden.is_(False), *extra_conditions)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest_sq.c.rid)
-            & (ContentVersion.version == latest_sq.c.version),
-        )
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .join(ContentTranslation, ContentTranslation.raw_content_id == RawContent.id, isouter=True)
         .where(

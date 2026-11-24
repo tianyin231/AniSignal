@@ -46,10 +46,9 @@ async def enrich_items(session, collector, items):
     if not items or getattr(collector, "source_config", {}).get("participation_mode", "editorial") != "editorial":
         return
     ids = [item["id"] for item in items]
-    latest = select(func.max(ContentVersion.version)).where(ContentVersion.raw_content_id == RawContent.id).correlate(RawContent).scalar_subquery()
     cached = {row[0]: row[1:] for row in await session.execute(select(RawContent.external_id,
-        ContentVersion.title, ContentVersion.text, ContentVersion.normalized_json).join(ContentVersion,
-        (ContentVersion.raw_content_id == RawContent.id) & (ContentVersion.version == latest))
+        ContentVersion.title, ContentVersion.text, ContentVersion.normalized_json).join(
+        ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .where(RawContent.platform == "rss", RawContent.external_id.in_(ids)))}
     pending = []
     for item in items:

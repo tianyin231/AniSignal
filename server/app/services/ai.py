@@ -104,8 +104,8 @@ def retry_allowed(task: str, since):
         AiUsage.task == task, AiUsage.ref_id == RawContent.id,
         AiUsage.status == "failed", AiUsage.created_at >= since,
     )
-    attempts = select(func.count(AiUsage.id)).where(*conditions).correlate(RawContent).scalar_subquery()
-    last = select(func.max(AiUsage.created_at)).where(*conditions).correlate(RawContent).scalar_subquery()
+    attempts = select(func.count(AiUsage.id)).where(*conditions).correlate_except(AiUsage).scalar_subquery()
+    last = select(func.max(AiUsage.created_at)).where(*conditions).correlate_except(AiUsage).scalar_subquery()
     return (attempts < 3) & ((last.is_(None)) | (last <= utcnow() - timedelta(minutes=10)))
 
 
@@ -248,25 +248,11 @@ async def summarize_event(
 
     config = await get_ai_config(session)
 
-    latest_sq = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("version"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
-
     rows = await session.execute(
         select(RawContent, ContentVersion, Evidence, Source)
         .join(Evidence, Evidence.raw_content_id == RawContent.id)
         .outerjoin(Source, Source.id == RawContent.source_id)
-        .join(latest_sq, latest_sq.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest_sq.c.rid)
-            & (ContentVersion.version == latest_sq.c.version),
-        )
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .where(Evidence.event_id == event_id, Evidence.role != "excluded", RawContent.hidden.is_(False))
         .order_by(RawContent.published_at.asc())
         .limit(8)
@@ -435,25 +421,12 @@ async def assess_product_stage(session: AsyncSession, product_id: int) -> dict:
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
 
-    latest_sq = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("version"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     rows = list(
         await session.execute(
             select(RawContent, ContentVersion, Event, Source)
             .join(Evidence, Evidence.raw_content_id == RawContent.id)
             .join(Event, Evidence.event_id == Event.id)
-            .join(latest_sq, latest_sq.c.rid == RawContent.id)
-            .join(
-                ContentVersion,
-                (ContentVersion.raw_content_id == latest_sq.c.rid)
-                & (ContentVersion.version == latest_sq.c.version),
-            )
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
             .join(Source, RawContent.source_id == Source.id, isouter=True)
             .where(
                 Event.product_id == product_id,

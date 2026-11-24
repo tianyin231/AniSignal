@@ -133,19 +133,14 @@ async def load_classified_contents(session: AsyncSession, *, communities: set[st
             select(Evidence.raw_content_id).where(Evidence.role == "excluded")
         )
     )
-    latest_versions = (
-        select(ContentVersion.raw_content_id.label("rid"), func.max(ContentVersion.version).label("v"))
-        .group_by(ContentVersion.raw_content_id).subquery()
-    )
     rows = await session.execute(
         select(RawContent, ContentVersion, Source)
         .options(defer(RawContent.raw_json))
-        .join(latest_versions, latest_versions.c.rid == RawContent.id)
-        .join(ContentVersion, (ContentVersion.raw_content_id == RawContent.id) & (ContentVersion.version == latest_versions.c.v))
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(RawContent.hidden.is_(False), *([RawContent.community.in_(communities)] if communities is not None else []))
         .execution_options(populate_existing=True)
-        .order_by(RawContent.id, ContentVersion.version.desc())
+        .order_by(RawContent.id)
     )
     seen: set[int] = set()
     result: list[ContentRow] = []

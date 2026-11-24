@@ -22,19 +22,17 @@ async def enqueue_pending_fulfillment_reviews(
     if not ai_available(await get_ai_config(session)):
         return {"candidates": 0, "queued": 0, "skipped_reason": "ai_not_configured"}
     now = now or utcnow()
-    latest_version = select(func.max(ContentVersion.version)).where(
-        ContentVersion.raw_content_id == RawContent.id,
-    ).correlate(RawContent).scalar_subquery()
     last_attempt = select(func.max(AiUsage.created_at)).where(
         AiUsage.task == "review_content", AiUsage.ref_id == RawContent.id,
     ).correlate(RawContent).scalar_subquery()
     rows = (await session.execute(select(
-        RawContent.id, latest_version.label("version"), ContentReview.fulfillment, Product.id.label("product_id"),
-    ).join(ProductSignalEvidence, ProductSignalEvidence.raw_content_id == RawContent.id)
+        RawContent.id, ContentVersion.version.label("version"), ContentReview.fulfillment, Product.id.label("product_id"),
+    ).join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+    .join(ProductSignalEvidence, ProductSignalEvidence.raw_content_id == RawContent.id)
     .join(ProductSignal, ProductSignal.id == ProductSignalEvidence.signal_id)
     .join(Product, Product.id == ProductSignal.product_id)
     .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id).where(
-        RawContent.hidden.is_(False), latest_version.is_not(None),
+        RawContent.hidden.is_(False),
         ProductSignalEvidence.role != "excluded",
         ProductSignal.active.is_(True), ProductSignal.locked.is_(False),
         ProductSignal.community == RawContent.community, Product.community == RawContent.community,

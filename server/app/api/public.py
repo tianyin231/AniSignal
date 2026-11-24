@@ -293,20 +293,14 @@ async def list_contents(
     if q:
         conditions.append(ContentVersion.title.like(f"%{q}%"))
 
-    # 分两步取：先只按条件定位这一页的 id，再读正文和 JSON。宽字段跟着一起排序时，不限时间窗要 5 秒以上。
-    # 这里的写法都是为了走索引：NOT EXISTS 让 MySQL 选覆盖索引而不是回表读宽行，分组派生表会走唯一索引回表；
-    # 按 published_at 排序才能沿索引够一页就停，线上该字段全部有值，coalesce 只会退回全量排序。
-    newer = aliased(ContentVersion)
-    is_latest = ~exists().where(
-        newer.raw_content_id == ContentVersion.raw_content_id, newer.version > ContentVersion.version,
-    )
-
+    # 直接通过 raw_contents.latest_version_id 主键关联最新版本，避免每页执行关联 NOT EXISTS 或 GROUP BY 衍生表；
+    # 仍分两步取：先按覆盖索引定位本页 id，再回表读正文和 JSON，防止宽行排序退化。
     def matching(*columns):
         query = (
             select(*columns)
             .select_from(RawContent)
-            .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
-            .where(is_latest, *conditions)
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+            .where(*conditions)
         )
         # 只有身份筛选要用来源表
         return query.join(Source, RawContent.source_id == Source.id, isouter=True) if identity or exclude_identity else query
@@ -316,14 +310,15 @@ async def list_contents(
     if sort == "hot":
         from app.models import MetricSnapshot
 
-        # 标量子查询按 (raw_content_id, id) 索引逐条取最新指标；写成 JOIN 关联子查询时 MySQL 用不上主键。
-        score = cast(MetricSnapshot.metrics["view"].as_string(), BigInteger)
+        # 非小黑盒分区直接读取原生整数列 view_count，命中 (raw_content_id, id, view_count) 覆盖索引，免去 JSON_EXTRACT。
         if is_xiaoheihe:
             score = func.coalesce(
-                score,
+                MetricSnapshot.view_count,
                 func.coalesce(cast(MetricSnapshot.metrics["like"].as_string(), BigInteger), 0)
                 + func.coalesce(cast(MetricSnapshot.metrics["reply"].as_string(), BigInteger), 0),
             )
+        else:
+            score = MetricSnapshot.view_count
         latest_score = (
             select(score)
             .where(MetricSnapshot.raw_content_id == RawContent.id)
@@ -339,9 +334,9 @@ async def list_contents(
     rows = await session.execute(
         select(RawContent, Source.name, Source.identity, ContentVersion)
         .options(defer(RawContent.raw_json))
-        .join(ContentVersion, ContentVersion.raw_content_id == RawContent.id)
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(RawContent.id.in_(page_ids), is_latest)
+        .where(RawContent.id.in_(page_ids))
     ) if page_ids else []
     page_rows = {row[0].id: row for row in rows}
     candidates: list[PublicContentItem] = []
@@ -1043,23 +1038,10 @@ async def _collect_official_links(session: AsyncSession, community: str) -> list
     import bleach
     from html import unescape
 
-    latest_sq = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("v"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
     rows = await session.execute(
         select(RawContent, ContentVersion, Source)
-        .join(latest_sq, latest_sq.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest_sq.c.rid)
-            & (ContentVersion.version == latest_sq.c.v),
-        )
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
         .where(
@@ -1124,23 +1106,10 @@ async def _ai_official_links(session: AsyncSession, community: str) -> list[dict
     用户/媒体内容的 AI 提取链接（网盘、二创作者主页等）不属于"官方动态的链接"，
     一律不进面板；标签不可读（如官网英文页的 "information"）时回退来源内容标题。
     """
-    latest_sq = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("v"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
     rows = await session.execute(
         select(RawContent, ContentReview, ContentVersion)
-        .join(latest_sq, latest_sq.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest_sq.c.rid)
-            & (ContentVersion.version == latest_sq.c.v),
-        )
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(

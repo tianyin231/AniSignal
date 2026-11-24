@@ -48,18 +48,9 @@ def _title_condition(keyword: str):
     return func.lower(ContentVersion.title).contains(keyword.lower(), autoescape=True)
 
 
-def _latest_versions():
-    return (
-        select(ContentVersion.raw_content_id.label("rid"), func.max(ContentVersion.version).label("version"))
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
-
-
-def _join_latest(query, latest):
-    return query.select_from(RawContent).join(latest, latest.c.rid == RawContent.id).join(
-        ContentVersion,
-        (ContentVersion.raw_content_id == latest.c.rid) & (ContentVersion.version == latest.c.version),
+def _join_latest(query):
+    return query.select_from(RawContent).join(
+        ContentVersion, ContentVersion.id == RawContent.latest_version_id
     )
 
 
@@ -69,12 +60,11 @@ async def _keyword_counts(
     """每个关键词当前命中的内容条数（单次 union_all 查询）。"""
     if not keywords:
         return {}
-    latest = _latest_versions()
     queries = [
         _join_latest(select(
             literal(k.keyword).label("keyword"),
             func.count(RawContent.id).label("cnt"),
-        ), latest)
+        ))
         .where(_title_condition(k.keyword), RawContent.hidden.is_(False), *preference_conditions(preferences))
         for k in keywords
     ]
@@ -101,7 +91,7 @@ async def overview(
     if any(k.enabled for k in keywords):
         feed_total = (
             await session.scalar(
-                _join_latest(select(func.count(RawContent.id)), _latest_versions())
+                _join_latest(select(func.count(RawContent.id)))
                 .where(
                     or_(*[_title_condition(k.keyword) for k in keywords if k.enabled]),
                     RawContent.hidden.is_(False),
@@ -425,8 +415,7 @@ async def my_feed(
         return PublicContentList(items=[], total=0, new_today=0)
 
     conditions = [or_(*[_title_condition(k.keyword) for k in keywords]), RawContent.hidden.is_(False), *preference_conditions(user.feed_preferences)]
-    latest = _latest_versions()
-    joined = _join_latest(select(func.count(RawContent.id)), latest).where(*conditions)
+    joined = _join_latest(select(func.count(RawContent.id))).where(*conditions)
     total = await session.scalar(joined) or 0
     new_today = (
         await session.scalar(
@@ -436,7 +425,7 @@ async def my_feed(
     )
 
     rows = await session.execute(
-        _join_latest(select(RawContent, Source, ContentVersion), latest)
+        _join_latest(select(RawContent, Source, ContentVersion))
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(*conditions)
         .order_by(RawContent.collected_at.desc(), RawContent.id.desc())

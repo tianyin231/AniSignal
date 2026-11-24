@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -13,8 +14,12 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
+    select,
+    update,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.dialects.mysql import MEDIUMTEXT
 
 from app.clock import utcnow
@@ -28,6 +33,8 @@ class RawContent(Base):
         UniqueConstraint("platform", "external_id", name="uq_raw_content"),
         Index("ix_raw_contents_collected_at", "collected_at"),
         Index("ix_raw_contents_published_at", "published_at"),
+        Index("ix_raw_contents_comm_hidden_pub", "community", "hidden", "published_at", "id"),
+        Index("ix_raw_contents_hidden_pub", "hidden", "published_at", "id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -55,6 +62,9 @@ class RawContent(Base):
     hidden: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # 官方内容实体抽取（日程/兑换码）完成时间；NULL = 待抽取
     extracted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # 指向最新 ContentVersion.id 的冗余指针（不建反向外键，避免级联删除循环依赖）；
+    # 由 ORM after_flush 事件自动同步，消除全表 MAX(version) GROUP BY 衍生表。
+    latest_version_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
 
     versions: Mapped[list["ContentVersion"]] = relationship(
         back_populates="raw_content",
@@ -96,6 +106,7 @@ class MetricSnapshot(Base):
         Index("ix_metric_snapshots_content_time", "raw_content_id", "captured_at"),
         Index("ix_metric_snapshots_time_content", "captured_at", "raw_content_id"),
         Index("ix_metric_snapshots_content_id", "raw_content_id", "id"),
+        Index("ix_metric_snapshots_content_id_view", "raw_content_id", "id", "view_count"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -103,6 +114,8 @@ class MetricSnapshot(Base):
         ForeignKey("raw_contents.id", name="fk_metric_snapshots_raw_content_id_raw_contents", ondelete="CASCADE"),
     )
     metrics: Mapped[dict] = mapped_column(JSON)
+    # 原生整数字段：由 before_insert/before_update 自动从 metrics["view"] 同步，消除 JSON_EXTRACT 全表扫描
+    view_count: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     raw_content: Mapped[RawContent] = relationship(back_populates="snapshots")
@@ -196,6 +209,13 @@ class ContentMatch(Base):
     __table_args__ = (
         UniqueConstraint("left_raw_id", "right_raw_id", name="uq_content_match_pair"),
         Index("ix_content_matches_same_confidence", "is_same_event", "confidence"),
+        Index(
+            "ix_content_matches_same_conf_pair",
+            "is_same_event",
+            "confidence",
+            "left_raw_id",
+            "right_raw_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -242,3 +262,96 @@ class ContentReview(Base):
     news: Mapped[dict | None] = mapped_column(JSON, default=None)
     model: Mapped[str] = mapped_column(String(64))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+def extract_view_count(metrics: dict | None) -> int | None:
+    """从指标 JSON 提取播放量整型值；缺失或非数字返回 None。"""
+    if not isinstance(metrics, dict):
+        return None
+    val = metrics.get("view")
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    if isinstance(val, str):
+        stripped = val.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            try:
+                return int(float(stripped))
+            except ValueError:
+                return None
+    return None
+
+
+@event.listens_for(MetricSnapshot, "before_insert")
+@event.listens_for(MetricSnapshot, "before_update")
+def _sync_snapshot_view_count(_mapper, _connection, target: MetricSnapshot) -> None:
+    target.view_count = extract_view_count(target.metrics)
+
+
+@event.listens_for(Session, "after_flush")
+def _sync_raw_content_latest_version_id(session: Session, _flush_context) -> None:
+    """ContentVersion 写入或删除后，在同一事务内原子同步 raw_contents.latest_version_id。"""
+    new_raw_map = {obj.id: obj for obj in session.new if isinstance(obj, RawContent) and obj.id is not None}
+    deleted_raw_ids = {obj.id for obj in session.deleted if isinstance(obj, RawContent) and obj.id is not None}
+
+    added_by_raw: dict[int, tuple[int, int]] = {}
+    for obj in session.new:
+        if isinstance(obj, ContentVersion) and obj.raw_content_id is not None and obj.id is not None:
+            rid = obj.raw_content_id
+            if rid in deleted_raw_ids:
+                continue
+            rank = (int(obj.version or 0), int(obj.id))
+            prev = added_by_raw.get(rid)
+            if prev is None or rank > prev:
+                added_by_raw[rid] = rank
+
+    deleted_version_raw_ids = {
+        obj.raw_content_id
+        for obj in session.deleted
+        if isinstance(obj, ContentVersion)
+        and obj.raw_content_id is not None
+        and obj.raw_content_id not in deleted_raw_ids
+    }
+
+    if not added_by_raw and not deleted_version_raw_ids:
+        return
+
+    conn = session.connection()
+    raw_table = RawContent.__table__
+    cv_table = ContentVersion.__table__
+
+    # 同批新建的 RawContent 直接写入本批最高版本 id，避免多余子查询。
+    direct_updates: dict[int, int] = {}
+    recompute_raw_ids: set[int] = set(deleted_version_raw_ids)
+    for rid, (_ver, vid) in added_by_raw.items():
+        if rid in new_raw_map and rid not in deleted_version_raw_ids:
+            direct_updates[rid] = vid
+        else:
+            recompute_raw_ids.add(rid)
+
+    updated_values: dict[int, int | None] = {}
+    for rid, vid in direct_updates.items():
+        conn.execute(update(raw_table).where(raw_table.c.id == rid).values(latest_version_id=vid))
+        updated_values[rid] = vid
+
+    for rid in recompute_raw_ids:
+        latest_id = conn.execute(
+            select(cv_table.c.id)
+            .where(cv_table.c.raw_content_id == rid)
+            .order_by(cv_table.c.version.desc(), cv_table.c.id.desc())
+            .limit(1)
+        ).scalar()
+        conn.execute(update(raw_table).where(raw_table.c.id == rid).values(latest_version_id=latest_id))
+        updated_values[rid] = latest_id
+
+    for rid, latest_id in updated_values.items():
+        obj = new_raw_map.get(rid) or session.identity_map.get((RawContent, (rid,), None))
+        if obj is not None:
+            set_committed_value(obj, "latest_version_id", latest_id)

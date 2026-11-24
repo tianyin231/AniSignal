@@ -100,13 +100,10 @@ async def refresh_xiaoheihe_items(session: AsyncSession) -> list[NormalizedConte
         if len(stats.errors) == len(batch):
             raise CollectorError("小黑盒热帖源本轮收录失败")
 
-    latest_version = select(func.max(ContentVersion.version)).where(
-        ContentVersion.raw_content_id == RawContent.id,
-    ).correlate(RawContent).scalar_subquery()
     versions = await session.scalars(select(ContentVersion.normalized_json)
-        .join(RawContent, RawContent.id == ContentVersion.raw_content_id)
+        .join(RawContent, RawContent.latest_version_id == ContentVersion.id)
         .where(RawContent.platform == XIAOHEIHE_KEY, RawContent.community == XIAOHEIHE_KEY,
-               RawContent.hidden.is_(False), ContentVersion.version == latest_version)
+               RawContent.hidden.is_(False))
         .order_by(func.coalesce(RawContent.published_at, RawContent.collected_at).desc(), RawContent.id.desc())
         .limit(XIAOHEIHE_LIMIT))
     return [NormalizedContent.model_validate(version) for version in versions]

@@ -41,16 +41,10 @@ _REGION_OF_PLATFORM = {
 async def _latest_titles(session: AsyncSession, raw_ids: list[int]) -> dict[int, str | None]:
     if not raw_ids:
         return {}
-    latest = (
-        select(ContentVersion.raw_content_id.label("rid"), func.max(ContentVersion.version).label("v"))
-        .where(ContentVersion.raw_content_id.in_(raw_ids))
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     rows = await session.execute(
-        select(ContentVersion.raw_content_id, ContentVersion.title).join(
-            latest, (ContentVersion.raw_content_id == latest.c.rid) & (ContentVersion.version == latest.c.v)
-        )
+        select(RawContent.id, ContentVersion.title)
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+        .where(RawContent.id.in_(raw_ids))
     )
     return dict(rows.all())
 

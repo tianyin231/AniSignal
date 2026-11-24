@@ -120,8 +120,6 @@ async def approved_news_query(session: AsyncSession, *, include_archived=False):
     """网页和机器人共用准入条件，不能拿旧版本的审核结果推送新正文。"""
     from app.services.settings import get_media_visibility, hidden_platforms
 
-    latest = select(ContentVersion.raw_content_id.label("rid"),
-                    func.max(ContentVersion.version).label("version")).group_by(ContentVersion.raw_content_id).subquery()
     news = ContentReview.news
     approved = and_(ContentReview.relevant.is_(True), ContentReview.promotional.is_(False),
         ContentReview.violation.is_(False), news["newsworthy"].as_boolean().is_(True))
@@ -130,9 +128,7 @@ async def approved_news_query(session: AsyncSession, *, include_archived=False):
         approved = or_(approved, news["imported_publication"]["visibility"].as_string() == "public")
     query = (select(RawContent, ContentVersion, Source, ContentReview)
         .options(defer(RawContent.raw_json), defer(ContentVersion.normalized_json))
-        .join(latest, latest.c.rid == RawContent.id)
-        .join(ContentVersion, (ContentVersion.raw_content_id == latest.c.rid)
-              & (ContentVersion.version == latest.c.version))
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(Source, Source.id == RawContent.source_id)
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
         .where(RawContent.community == "ai", RawContent.hidden.is_(False),
@@ -170,14 +166,6 @@ async def raw_news_feed(
     """
     from app.services.settings import get_media_visibility, hidden_platforms
 
-    latest = (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("version"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
     news = ContentReview.news
     review_current = and_(
         ContentReview.raw_content_id.is_not(None),
@@ -202,12 +190,7 @@ async def raw_news_feed(
     query = (
         select(RawContent, ContentVersion, Source, ContentReview)
         .options(defer(RawContent.raw_json))
-        .join(latest, latest.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest.c.rid)
-            & (ContentVersion.version == latest.c.version),
-        )
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(Source, Source.id == RawContent.source_id)
         .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
         .where(
@@ -415,13 +398,8 @@ async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None
     from app.services.ai import retry_allowed
 
     fingerprint = ContentReview.news["content_hash"].as_string()
-    latest_version = select(func.max(ContentVersion.version)).where(
-        ContentVersion.raw_content_id == RawContent.id,
-    ).correlate(RawContent).scalar_subquery()
-    latest_parsed = select(func.max(ContentVersion.parsed_at)).where(
-        ContentVersion.raw_content_id == RawContent.id,
-    ).correlate(RawContent).scalar_subquery()
     query = (select(RawContent.id)
+        .outerjoin(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
         .outerjoin(Source, Source.id == RawContent.source_id)
         .where(
@@ -429,12 +407,12 @@ async def pending_news_ids(session: AsyncSession, external_ids: list[str] | None
             or_(Source.raw_json["participation_mode"].as_string().is_(None),
                 Source.raw_json["participation_mode"].as_string() == "editorial"),
             or_(func.coalesce(RawContent.published_at, RawContent.collected_at) >= utcnow() - timedelta(days=7),
-                and_(RawContent.platform == "rss", latest_version > 1,
-                    latest_parsed >= utcnow() - timedelta(days=7))),
-            retry_allowed("review_content", latest_parsed),
+                and_(RawContent.platform == "rss", ContentVersion.version > 1,
+                    ContentVersion.parsed_at >= utcnow() - timedelta(days=7))),
+            retry_allowed("review_content", ContentVersion.parsed_at),
             (fingerprint.is_(None)) | (fingerprint != RawContent.content_hash)
             | (ContentReview.news["content_version"].as_integer().is_(None))
-            | (ContentReview.news["content_version"].as_integer() != latest_version),
+            | (ContentReview.news["content_version"].as_integer() != ContentVersion.version),
         )
         .order_by(RawContent.published_at.desc(), RawContent.id.desc())
         .limit(30)

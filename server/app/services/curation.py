@@ -372,10 +372,9 @@ async def review_recent_contents(
     session: AsyncSession, *, limit: int = 40, only_missing: bool = True
 ) -> ReviewStats:
     """重算近期内容，供部署回填和管理端手动触发。"""
-    latest = _latest_version_subquery()
     query = (
         select(RawContent.id, ContentReview.raw_content_id)
-        .join(latest, latest.c.rid == RawContent.id)
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
         .where(
             func.coalesce(RawContent.published_at, RawContent.collected_at)
@@ -404,11 +403,9 @@ async def select_trending(
     返回 PublicContentItem 兼容 dict，额外带 delta_view（窗口内播放增量）。
     """
     from app.services import settings as settings_service
-    from sqlalchemy import BigInteger, cast
     from sqlalchemy.orm import aliased, defer
 
     window_start = utcnow() - timedelta(hours=hours)
-    latest = _latest_version_subquery()
     conditions: list = community_conditions(RawContent.community, community, exclude)
     conditions.extend(where)
     conditions.append(RawContent.hidden.is_(False))
@@ -434,9 +431,9 @@ async def select_trending(
     )
     first_snapshot = aliased(MetricSnapshot)
     last_snapshot = aliased(MetricSnapshot)
-    # 显式有符号整数转换同时支持 MySQL / SQLite、数字字符串及缺失的播放量。
-    first_view = func.coalesce(cast(first_snapshot.metrics["view"].as_string(), BigInteger), 0)
-    last_view = func.coalesce(cast(last_snapshot.metrics["view"].as_string(), BigInteger), 0)
+    # 直接使用原生整数列 view_count 算播放增量，彻底消除对 50 万+ JSON 列的 JSON_EXTRACT。
+    first_view = func.coalesce(first_snapshot.view_count, 0)
+    last_view = func.coalesce(last_snapshot.view_count, 0)
     delta = last_view - first_view
     query = (
         select(delta.label("delta_view"), last_snapshot.metrics, RawContent,
@@ -446,12 +443,7 @@ async def select_trending(
         .join(first_snapshot, first_snapshot.id == snap_sq.c.first_id)
         .join(last_snapshot, last_snapshot.id == snap_sq.c.last_id)
         .join(RawContent, RawContent.id == snap_sq.c.rid)
-        .join(latest, latest.c.rid == RawContent.id)
-        .join(
-            ContentVersion,
-            (ContentVersion.raw_content_id == latest.c.rid)
-            & (ContentVersion.version == latest.c.version),
-        )
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .where(*conditions, delta > 0)
         .order_by(delta.desc(), RawContent.id.desc())
@@ -505,17 +497,11 @@ async def select_highlights(
     where: Sequence = (),
 ) -> list[dict]:
     """返回官方与社区混排精选；AI 结果缺失时使用可解释的规则分数。"""
-    latest = _latest_version_subquery()
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
     rows = list(
         await session.execute(
             select(RawContent, Source, ContentVersion, ContentReview)
-            .join(latest, latest.c.rid == RawContent.id)
-            .join(
-                ContentVersion,
-                (ContentVersion.raw_content_id == latest.c.rid)
-                & (ContentVersion.version == latest.c.version),
-            )
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
         .where(
@@ -635,32 +621,15 @@ async def select_highlights(
     return [candidate.item for candidate in selected[:limit]]
 
 
-def _latest_version_subquery():
-    return (
-        select(
-            ContentVersion.raw_content_id.label("rid"),
-            func.max(ContentVersion.version).label("version"),
-        )
-        .group_by(ContentVersion.raw_content_id)
-        .subquery()
-    )
-
-
 async def _review_candidates(
     session: AsyncSession, ids: list[int], tracked_products: list[dict], *, force: bool = False
 ) -> list[dict]:
-    latest = _latest_version_subquery()
     feed_partitions = feed_community_keys()
     rows = list(
         (
             await session.execute(
                 select(RawContent, ContentVersion, Source)
-                .join(latest, latest.c.rid == RawContent.id)
-                .join(
-                    ContentVersion,
-                    (ContentVersion.raw_content_id == latest.c.rid)
-                    & (ContentVersion.version == latest.c.version),
-                )
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
                 .join(Source, RawContent.source_id == Source.id, isouter=True)
                 .where(
                     RawContent.id.in_(ids),
