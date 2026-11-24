@@ -1,6 +1,6 @@
 [project]
 name = "anisignal-server"
-version = "1.2.1"
+version = "1.3.0"
 description = "AniSignal signal desk: collection, traceable events, delivery, and the admin API."
 requires-python = ">=3.12"
 dependencies = [
