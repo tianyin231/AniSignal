@@ -169,6 +169,9 @@ const signedIn = computed(() => loaded.value && !!user.value)
       </article>
     </div>
 
-    <RssSubscribe class="mt-5" />
+    <div class="mt-5 grid gap-5 md:grid-cols-2">
+      <RssSubscribe />
+      <McpConnect />
+    </div>
   </div>
 </template>

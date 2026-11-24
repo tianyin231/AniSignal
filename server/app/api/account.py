@@ -890,6 +890,7 @@ def _feed_token_view(token: str) -> dict:
         "all_path": f"/api/rss/personal/{token}.xml",
         "keywords_path": f"/api/rss/personal/{token}.xml?mode=keywords",
         "revisions_path": f"/api/rss/personal/{token}.xml?mode=revisions",
+        "mcp_path": f"/mcp?token={token}",
     }
 
 

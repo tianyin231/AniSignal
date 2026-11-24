@@ -99,6 +99,7 @@ onBeforeUnmount(center.dispose)
       <div class="space-y-5">
         <AccountBotAccess />
         <RssSubscribe compact personal />
+        <McpConnect compact personal />
       </div>
     </div>
     <AccountMonitors v-else-if="tab === 'custom'" />

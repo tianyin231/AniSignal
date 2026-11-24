@@ -110,6 +110,8 @@ app.include_router(tools_router)
 from app.api.bot_companion import router as companion_router, admin_router as companion_admin_router
 app.include_router(companion_router)
 app.include_router(companion_admin_router)
+from app.api.mcp import router as mcp_router
+app.include_router(mcp_router)
 
 
 @app.get("/api/healthz")

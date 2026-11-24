@@ -180,6 +180,18 @@ npm run dev
 2. 打开 DSH **「设置 → AniSignal 情报助手」** 填入用户 Token 并一键勾选已识别的 QQ 会话；
 3. 支持轻量级 SVG/PNG 早报卡片渲染（可选 `@resvg/resvg-js`）与自然语言工具查询、展开及提醒。详见[DSH 插件说明](integrations/dsh_plugin_anisignal/README.md)。
 
+## 接入 AI 客户端（内置只读 MCP Server）
+
+AniSignal 内置遵循 **Streamable HTTP** 规范的无状态只读 MCP 服务端（`/mcp` 与 `/api/mcp`），支持 Claude Code、Cursor、Windsurf、Antigravity、Cherry Studio 等客户端即插即用：
+
+- **免登录公开接入**：直接填入 `https://anisignal.xyz/mcp`（或你的自建实例 `/mcp`），即可调用全站跨语言检索、活动日历、可用兑换码、官方公告暗改 Diff、聚合事件、周边履约进展、Steam 实时遥测与 AI 精选日报等只读工具与提示词模板。
+- **个人专属接入**：登录账号中心（**通知 → AI 助手接入**）复制带个人令牌的配置（支持 `Authorization: Bearer <token>`、`X-API-Key` 或 `?token=`），自动按账号分区偏好与屏蔽词过滤，并解锁个人关注流与定制监控工具 `get_my_watch_feed`。
+
+```bash
+# Claude Code 一键接入示例（公开只读）
+claude mcp add --transport http anisignal https://anisignal.xyz/mcp
+```
+
 ## 文档导航
 
 | 文档 | 内容概览 |
