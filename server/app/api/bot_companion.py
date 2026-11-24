@@ -46,7 +46,7 @@ async def actor_target(body, session, client_id):
 
 
 class SubscriptionBody(Actor):
-    action: Literal["view", "keywords", "exclude_keywords", "community", "channels", "daily", "updates"] = "view"
+    action: Literal["view", "keywords", "exclude_keywords", "community", "channels", "daily", "updates", "revisions"] = "view"
     value: str = Field(default="", max_length=1300)
 
 
@@ -77,6 +77,10 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
             config["daily_enabled"] = body.value != "off"
             if body.value != "off":
                 config["daily_time"] = body.value
+        elif body.action == "revisions":
+            if body.value not in ("on", "off"):
+                raise HTTPException(422, "官方修订提醒请使用 on 或 off")
+            config["revisions_enabled"] = body.value == "on"
         else:
             if body.value not in ("on", "off"):
                 raise HTTPException(422, "即时推送请使用 on 或 off")
@@ -101,6 +105,7 @@ async def subscription(body: SubscriptionBody, session: AsyncSession = Depends(g
             "exclude_keywords": target.config.get("exclude_keywords", []),
             "keywords": target.config.get("keywords", []), "daily_enabled": target.config.get("daily_enabled", True),
             "daily_time": target.config.get("daily_time", "08:00"), "updates_enabled": target.config.get("updates_enabled", False),
+            "revisions_enabled": target.config.get("revisions_enabled", False),
             "changed": body.action != "view"}
 
 
@@ -212,7 +217,7 @@ class DetailBody(Actor):
 @router.post("/detail")
 async def brief_detail(body: DetailBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     target = await actor_target(body, session, client_id)
-    if not set(target.config.get("tools", [])).intersection({"digest", "news"}):
+    if not set(target.config.get("tools", [])).intersection({"digest", "news", "revisions"}):
         raise HTTPException(403, "此会话未开放资讯查询")
     row = None
     if body.query_id:

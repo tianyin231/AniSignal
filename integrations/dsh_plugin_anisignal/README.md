@@ -53,7 +53,7 @@ sudo apt-get install -y fonts-noto-cjk
 
 仅在已注册且启用的会话中注入上下文说明（`anisignal_session_info` 除外，可在任意会话用于辅助绑定）：
 
-- `anisignal_query`：按会话授权范围查询 `digest`（24h 速报）、`news`（7 日资讯）、`trending`（热度飙升）、`calendar`（活动与维护日程）、`codes`（兑换码）、`products`（商品发货/到货核验）。
+- `anisignal_query`：按会话授权范围查询 `digest`（24h 速报）、`news`（7 日资讯）、`trending`（热度飙升）、`calendar`（活动与维护日程）、`codes`（兑换码）、`products`（商品发货/到货核验）、`revisions`（官方公告修订/抓暗改）。
 - `anisignal_expand`：按最近一次早报或通知编号（1–3）展开完整来源细节。
 - `anisignal_subscription`：查看或口述修改当前会话订阅（群聊需开启「允许聊天改订阅」并匹配管理用户标识）。
 - `anisignal_reminder`：在当前会话创建、查看或取消本人的定时提醒。

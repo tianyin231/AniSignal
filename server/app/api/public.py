@@ -642,6 +642,7 @@ def _render_rss_xml(
     link: str,
     description: str,
     base: str,
+    revisions_mode: bool = False,
 ) -> str:
     from email.utils import format_datetime
     from xml.sax.saxutils import escape
@@ -658,13 +659,18 @@ def _render_rss_xml(
     for item in items:
         published = item.published_at or item.collected_at
         pub_date = format_datetime(published.replace(tzinfo=timezone.utc))
-        item_link = item.url or f"{base}/contents/{item.id}"
+        item_link = f"{base}/contents/{item.id}#revisions" if revisions_mode else (item.url or f"{base}/contents/{item.id}")
+        guid = (
+            f"anisignal-content-{item.id}-rev-{item.revision_count}"
+            if revisions_mode and item.revision_count
+            else f"anisignal-content-{item.id}"
+        )
         parts.extend(
             [
                 "<item>",
                 f"<title>{escape(item.title or item.external_id)}</title>",
                 f"<link>{escape(item_link)}</link>",
-                f"<guid>{escape(f'anisignal-content-{item.id}')}</guid>",
+                f"<guid>{escape(guid)}</guid>",
                 f"<pubDate>{pub_date}</pubDate>",
                 f"<description>{escape(item.text_excerpt or item.title or '')}</description>",
             ]
@@ -683,11 +689,13 @@ async def rss_feed(
     request: Request,
     community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     q: str | None = Query(default=None, max_length=100),
+    revised_only: bool = Query(default=False),
     limit: int = Query(default=30, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
 ):
-    """RSS 2.0 订阅源：默认最新内容流，5 分钟进程内缓存。"""
-    cache_key = f"{community}|{q or ''}|{limit}"
+    """RSS 2.0 订阅源：默认最新内容流，可选 revised_only=true 仅输出实质修订流，5 分钟进程内缓存。"""
+    only_revised = revised_only is True
+    cache_key = f"{community}|{q or ''}|{int(only_revised)}|{limit}"
     cached = _RSS_CACHE.get(cache_key)
     if cached and cached[0] > time.time():
         return Response(content=cached[1], media_type="application/rss+xml; charset=utf-8")
@@ -699,11 +707,11 @@ async def rss_feed(
         platform=None,
         community=community,
         content_type=None,
-        identity=None,
+        identity="official" if only_revised else None,
         exclude_identity=None,
         published_within_hours=None,
         include_chat=False,
-        revised_only=False,
+        revised_only=only_revised,
         sort="time",
         q=q,
         limit=limit,
@@ -712,12 +720,15 @@ async def rss_feed(
     )
     base = public_site_base(request)
     label = "跨分区聚合" if is_all_community(community) else community
+    rss_title = f"AniSignal 官方修订流 · {label}" if only_revised else f"AniSignal 情报流 · {label}"
+    rss_desc = "官方公告与动态实质修订追踪（抓暗改）" if only_revised else "游戏动态与商品履约追踪"
     xml = _render_rss_xml(
         listing.items,
-        title=f"AniSignal 情报流 · {label}",
-        link=base,
-        description="游戏动态与商品履约追踪",
+        title=rss_title,
+        link=f"{base}/official" if only_revised else base,
+        description=rss_desc,
         base=base,
+        revisions_mode=only_revised,
     )
     _RSS_CACHE[cache_key] = (time.time() + _RSS_TTL_SECONDS, xml)
     if len(_RSS_CACHE) > 32:
@@ -730,11 +741,11 @@ async def rss_feed(
 async def personal_rss_feed(
     token: str,
     request: Request,
-    mode: str = Query(default="all", pattern="^(all|keywords)$"),
+    mode: str = Query(default="all", pattern="^(all|keywords|revisions)$"),
     limit: int = Query(default=30, ge=1, le=50),
     session: AsyncSession = Depends(get_session),
 ):
-    """个人专属过滤 RSS：按账号的分区偏好、屏蔽词/屏蔽分区与可选关注词实时过滤。"""
+    """个人专属过滤 RSS：按账号的分区偏好、屏蔽词/屏蔽分区、关注词或官方修订实时过滤。"""
     from html import unescape
     from sqlalchemy import or_
 
@@ -802,6 +813,68 @@ async def personal_rss_feed(
                     for k in keywords
                 ]
             )
+        )
+
+    if mode == "revisions":
+        from app.services.revision_notifications import load_official_revision_events
+
+        allowed_comms = prefs.get("communities") or [
+            key for key in COMMUNITIES if key not in blocks.communities
+        ]
+        rev_events, _ = await load_official_revision_events(
+            session,
+            communities=allowed_comms,
+            exclude_keywords=prefs.get("exclude_keywords") or None,
+            limit=max(limit * 3, 60),
+        )
+        rev_items: list[PublicContentItem] = []
+        for ev in rev_events:
+            if hidden_platforms and ev["platform"] in hidden_platforms:
+                continue
+            if blocks.platforms:
+                comm_meta = COMMUNITIES.get(ev["community"])
+                domain = comm_meta.domain if comm_meta else "game"
+                if f"{domain}:{ev['platform']}" in blocks.platforms:
+                    continue
+            change_head = f"v{ev['from_version']}→v{ev['to_version']}（{ev['change_label']}）"
+            body_lines = [change_head, *(ev.get("change_lines") or [])]
+            rev_items.append(
+                PublicContentItem(
+                    id=ev["content_id"],
+                    platform=ev["platform"],
+                    content_type=ev["content_type"],
+                    external_id=str(ev["content_id"]),
+                    url=ev["detail_url"],
+                    title=f"[修订] {ev['title']}",
+                    text_excerpt="\n".join(body_lines)[:400],
+                    cover=ev.get("image"),
+                    source_name=ev["source"],
+                    identity="official",
+                    published_at=ev["parsed_at"],
+                    collected_at=ev["parsed_at"],
+                    metrics=None,
+                    matched_keywords=[],
+                    category="official_revision",
+                    community=ev["community"],
+                    preview_mode="full",
+                    revision_count=ev["to_version"] - 1,
+                    has_source_revision=True,
+                )
+            )
+            if len(rev_items) >= limit:
+                break
+        xml = _render_rss_xml(
+            rev_items,
+            title="AniSignal 个人订阅 · 官方修订",
+            link=f"{base}/official",
+            description="按个人偏好过滤的官方公告实质修订追踪流",
+            base=base,
+            revisions_mode=True,
+        )
+        return Response(
+            content=xml,
+            media_type="application/rss+xml; charset=utf-8",
+            headers={"Cache-Control": "private, max-age=120"},
         )
 
     rows = await session.execute(

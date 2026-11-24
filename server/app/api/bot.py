@@ -47,6 +47,7 @@ class TargetBody(BaseModel):
     daily_enabled: bool = True
     daily_time: str = Field(default="08:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     updates_enabled: bool = False
+    revisions_enabled: bool = False
     quiet_start: int = Field(default=23, ge=0, le=23)
     quiet_end: int = Field(default=8, ge=0, le=23)
     quiet_critical: bool = False
@@ -56,7 +57,7 @@ class TargetBody(BaseModel):
     calendar_time: str = Field(default="20:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     daily_style: Literal["compact", "split"] = "compact"
     max_images: int = Field(default=1, ge=1, le=9)
-    tools: list[Literal["digest", "news", "products", "trending", "calendar", "codes"]] = Field(default_factory=lambda: list(bot.TOOLS))
+    tools: list[Literal["digest", "news", "products", "trending", "calendar", "codes", "revisions"]] = Field(default_factory=lambda: list(bot.TOOLS))
     delivery_mode: Literal["direct", "astrbot"] = "direct"
     chat_controls: bool = False
     reminders_enabled: bool = False
@@ -141,7 +142,7 @@ class BridgeBody(BaseModel):
 
 
 class QueryBody(BaseModel):
-    tool: Literal["digest", "news", "products", "trending", "calendar", "codes"] = "digest"
+    tool: Literal["digest", "news", "products", "trending", "calendar", "codes", "revisions"] = "digest"
     query: str = Field(default="", max_length=100)
 
 

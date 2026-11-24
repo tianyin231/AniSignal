@@ -69,13 +69,26 @@ const needsKeyword = computed(() => notificationReady.value && !loading.keywords
           @toggle="center.toggleInstant()"
         />
       </div>
+      <div class="flex items-center gap-3 py-3">
+        <div class="min-w-0 flex-1">
+          <dt class="font-semibold text-ink">官方公告修订提醒</dt>
+          <dd class="mt-0.5 text-xs leading-relaxed text-muted">监测到官方原文实质改字、改时间或换图时即时发信，按偏好分区与屏蔽词筛选，不补发历史。</dd>
+        </div>
+        <UiSwitch
+          :on="notifications?.revision_enabled ?? false"
+          :label="notifications?.revision_enabled ? '关闭官方公告修订提醒' : '开启官方公告修订提醒'"
+          :disabled="!notificationReady || (!!notifyBusy && notifyBusy !== 'revision')"
+          :busy="notifyBusy === 'revision'"
+          @toggle="center.toggleRevision()"
+        />
+      </div>
     </dl>
 
     <UiNotice v-if="notificationBlockReason" tone="info" class="mt-4">
       {{ notificationBlockReason }}
       <button v-if="needsKeyword" type="button" class="link mt-1 block font-semibold" @click="emit('addKeyword')">去添加关键词</button>
     </UiNotice>
-    <UiNotice v-if="notifications?.instant_enabled && !notifications.enabled" tone="info" class="mt-3">即时提醒的设置已保留，开启邮件通知后恢复。</UiNotice>
+    <UiNotice v-if="(notifications?.instant_enabled || notifications?.revision_enabled) && !notifications.enabled" tone="info" class="mt-3">即时提醒与官方修订的设置已保留，开启邮件通知后恢复。</UiNotice>
 
     <div class="mt-4 grid gap-2 sm:grid-cols-2">
       <button type="button" class="btn-primary inline-flex h-10 items-center justify-center gap-1.5 px-3" :disabled="!!notifyBusy || !notificationReady" @click="center.sendNotification('morning')">

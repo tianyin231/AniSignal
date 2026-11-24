@@ -68,6 +68,7 @@ test('config: toServerTarget, secret preservation, and applySubscription', () =>
 
   const serverRow = toServerTarget(target);
   assert.equal(serverRow.delivery_mode, 'astrbot');
+  assert.equal(serverRow.revisions_enabled, false);
   assert.ok(serverRow.communities.length > 0, 'empty communities falls back to default set for FastAPI validator');
   assert.deepEqual(serverRow.channels, []);
 
@@ -91,11 +92,14 @@ test('config: toServerTarget, secret preservation, and applySubscription', () =>
     communities: ['wuwa', 'hsr'],
     daily_time: '09:15',
     updates_enabled: false,
+    revisions_enabled: true,
   });
   assert.equal(ok, true);
   assert.deepEqual(saved1.targets[0].subscription.communities, ['wuwa', 'hsr']);
   assert.equal(saved1.targets[0].notifications.daily_time, '09:15');
   assert.equal(saved1.targets[0].notifications.updates_enabled, false);
+  assert.equal(saved1.targets[0].notifications.revisions_enabled, true);
+  assert.equal(toServerTarget(saved1.targets[0]).revisions_enabled, true);
 
   const restored = toPluginTarget({ name: '旧会话', umo: 'dsh_qqbot:FriendMessage:OPENID1', community: 'wuwa' });
   assert.deepEqual(restored.subscription.communities, ['wuwa']);

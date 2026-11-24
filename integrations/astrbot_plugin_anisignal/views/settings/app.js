@@ -918,6 +918,10 @@ function renderNotifications(t, index) {
         }), h("span", { class: "sep" }, "分钟"))),
       fieldRow(meta("notifications", "updates_sources"), narrowPicker(t, index, "updates_sources"))));
 
+  const revisions = h("div", { class: "section" },
+    sectionHead("官方公告修订", "revisions_enabled"),
+    h("p", { class: "lede" }, meta("notifications", "revisions_enabled").hint || ""));
+
   const calendarMeta = meta("notifications", "calendar_kinds");
   const calendar = h("div", { class: "section" },
     sectionHead("活动收尾提醒", "calendar_enabled"),
@@ -946,7 +950,7 @@ function renderNotifications(t, index) {
     h("h3", null, "图片"),
     fieldRow(imageMeta, rangeControl(imageMeta, n.max_images, (v) => set("max_images", v, false), "max_images", (v) => `${v} 张`), { inline: false }));
 
-  return [daily, updates, calendar, quiet, images];
+  return [daily, updates, revisions, calendar, quiet, images];
 }
 
 function rangeControl(m, value, onChange, key, format) {

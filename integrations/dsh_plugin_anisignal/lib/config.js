@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-export const VERSION = '1.14.10';
+export const VERSION = '1.15.0';
 export const UMO_PATTERN = /^[^:]+:(FriendMessage|GroupMessage):[^:]+$/;
 export const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -40,6 +40,7 @@ export const QUERY_TOOLS = [
   { id: 'trending', label: '热度飙升' },
   { id: 'calendar', label: '活动日历' },
   { id: 'codes', label: '兑换码' },
+  { id: 'revisions', label: '官方修订' },
 ];
 
 export const CALENDAR_KINDS = [
@@ -110,6 +111,7 @@ export function defaultTarget(overrides = {}) {
       daily_time: '08:30',
       updates_enabled: true,
       updates_sources: [],
+      revisions_enabled: false,
       calendar_enabled: true,
       calendar_kinds: ['activity', 'pool', 'maintenance', 'deadline'],
       calendar_time: '20:00',
@@ -261,6 +263,7 @@ export function normalizeStoredTarget(raw) {
         ? Boolean(notif.updates_enabled ?? r.updates_enabled)
         : true,
       updates_sources: uniqueStrings(notif.updates_sources ?? r.updates_sources ?? []),
+      revisions_enabled: Boolean(notif.revisions_enabled ?? r.revisions_enabled ?? false),
       calendar_enabled: typeof (notif.calendar_enabled ?? r.calendar_enabled) === 'boolean'
         ? Boolean(notif.calendar_enabled ?? r.calendar_enabled)
         : true,
@@ -336,6 +339,7 @@ export function toServerTarget(pluginTarget) {
     daily_time: t.notifications.daily_time,
     updates_enabled: t.notifications.updates_enabled,
     updates_sources: [...t.notifications.updates_sources],
+    revisions_enabled: t.notifications.revisions_enabled,
     calendar_enabled: t.notifications.calendar_enabled,
     calendar_kinds: [...t.notifications.calendar_kinds],
     calendar_time: t.notifications.calendar_time,
@@ -365,7 +369,7 @@ export function applySubscription(targets, umo, response) {
         target.subscription[field] = structuredClone(response[field]);
       }
     }
-    for (const field of ['daily_enabled', 'daily_time', 'updates_enabled']) {
+    for (const field of ['daily_enabled', 'daily_time', 'updates_enabled', 'revisions_enabled']) {
       if (field in response && response[field] !== undefined) {
         target.notifications[field] = response[field];
       }

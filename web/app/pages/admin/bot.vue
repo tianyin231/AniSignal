@@ -10,7 +10,7 @@ const toast = useAdminToast()
 interface Target {
   id: number; name: string; umo: string; enabled: boolean; communities: string[]; community: string; keywords: string[]; exclude_keywords: string[]; channels: string[]
   client_id: string; client_name: string; managed_by_plugin: boolean; plugin_configured: boolean; last_activity?: string
-  daily_enabled: boolean; daily_time: string; updates_enabled: boolean; min_push_interval_minutes: number
+  daily_enabled: boolean; daily_time: string; updates_enabled: boolean; revisions_enabled?: boolean; min_push_interval_minutes: number
   calendar_enabled: boolean; calendar_time: string; tools: string[]; delivery_mode: string
 }
 interface BotClient { id: string; name: string; enabled: boolean; online: boolean; version: string; last_seen?: string }
@@ -37,7 +37,7 @@ const availableTargets = computed(() => targets.value.filter(t => t.plugin_confi
 const activeCount = computed(() => targets.value.filter(t => t.enabled).length)
 const onlineCount = computed(() => clients.value.filter(c => c.online).length)
 const inputClass = 'mt-1 w-full rounded-lg border border-line bg-card px-3 py-2 text-sm'
-const toolNames: Record<string, string> = { digest: '今日速报', news: '资讯查询', products: '商品进展', trending: '热度飙升', calendar: '活动日历', codes: '兑换码' }
+const toolNames: Record<string, string> = { digest: '今日速报', news: '资讯查询', products: '商品进展', trending: '热度飙升', calendar: '活动日历', codes: '兑换码', revisions: '官方修订' }
 const statuses: Record<string, string> = { pending: '待发送', sending: '发送中', accepted: '已接收', failed: '发送失败', unknown: '结果待核对', cancelled: '已取消' }
 
 function subscriptionLabel(target: Target) {
@@ -187,7 +187,7 @@ function cancelReminder(row: Reminder) {
         <article v-for="target in targets" :key="target.id" class="panel min-w-0 p-5">
           <div class="flex items-start justify-between gap-3"><div class="min-w-0"><h3 class="font-semibold">{{ target.name }}</h3><p class="mt-1 text-sm text-muted">{{ target.client_name }} · {{ target.umo.includes(':GroupMessage:') ? '群聊' : '私聊' }} · {{ subscriptionLabel(target) }}</p></div><span class="shrink-0 rounded-full px-2 py-1 text-xs" :class="target.enabled ? 'bg-ok/10 text-ok' : 'bg-chip text-muted'">{{ !target.plugin_configured ? '已移除' : target.enabled ? '已启用' : '已暂停' }}</span></div>
           <p class="mono mt-2 truncate text-xs text-muted" :title="target.umo">{{ target.umo.split(':')[0] }} · 尾号 {{ (target.umo.split(':')[2] || '').slice(-8) }}</p>
-          <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? '动态推送开启' : '动态推送关闭' }}</p>
+          <p class="mt-3 text-sm">{{ target.daily_enabled ? `每日 ${target.daily_time} 早报` : '早报关闭' }} · {{ target.updates_enabled ? '动态推送开启' : '动态推送关闭' }}<template v-if="target.revisions_enabled"> · 官方修订开启</template></p>
           <p v-if="target.updates_enabled" class="mt-1 text-xs text-muted">{{ target.min_push_interval_minutes ? `推送间隔 ${target.min_push_interval_minutes} 分钟` : '即时推送' }} · {{ target.calendar_enabled ? `收尾提醒 ${target.calendar_time}` : '收尾提醒关闭' }}</p>
           <p class="mt-2 text-sm text-muted">{{ target.keywords.length ? target.keywords.join(' / ') : '不限关键词' }}</p>
           <p v-if="target.exclude_keywords?.length" class="mt-2 text-sm text-muted">排除：{{ target.exclude_keywords.join(' / ') }}</p>
@@ -214,7 +214,7 @@ function cancelReminder(row: Reminder) {
     <section class="panel p-5">
       <h2 class="font-semibold">最近投递</h2>
       <p v-if="!deliveries.length" class="py-5 text-sm text-muted">暂无投递记录</p>
-      <div class="mt-3 divide-y divide-line"><details v-for="row in deliveries" :key="row.id" class="py-3"><summary class="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-1 text-sm"><span class="font-medium">{{ row.name }}</span><span>{{ { daily: '每日早报', updates: '重要动态', critical: '关键动态', manual: '手动发送', reminder: '定时提醒', calendar: '日历提醒' }[row.kind] || row.kind }}</span><span :class="row.status === 'accepted' ? 'text-ok' : ['failed', 'unknown'].includes(row.status) ? 'text-warn' : 'text-muted'">{{ statuses[row.status] || row.status }}</span><span class="ml-auto text-xs text-muted">{{ fmtTime(row.created_at) }}</span></summary><p v-if="row.error" class="mt-2 text-sm text-warn">{{ row.error }}</p><pre class="mt-3 whitespace-pre-wrap break-words text-sm text-ink-2">{{ row.rendered_body || row.body }}</pre><details v-if="row.rendered_body && row.rendered_body !== row.body" class="mt-3 text-sm"><summary class="cursor-pointer text-muted">原始资料</summary><pre class="mt-2 whitespace-pre-wrap break-words">{{ row.body }}</pre></details><button v-if="['failed', 'unknown'].includes(row.status)" class="mt-3 min-h-11 text-sm text-brand-ink" :disabled="!!busy" @click="retry(row)">核对后重试</button></details></div>
+      <div class="mt-3 divide-y divide-line"><details v-for="row in deliveries" :key="row.id" class="py-3"><summary class="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-1 text-sm"><span class="font-medium">{{ row.name }}</span><span>{{ { daily: '每日早报', updates: '重要动态', critical: '关键动态', revisions: '官方修订', manual: '手动发送', reminder: '定时提醒', calendar: '日历提醒' }[row.kind] || row.kind }}</span><span :class="row.status === 'accepted' ? 'text-ok' : ['failed', 'unknown'].includes(row.status) ? 'text-warn' : 'text-muted'">{{ statuses[row.status] || row.status }}</span><span class="ml-auto text-xs text-muted">{{ fmtTime(row.created_at) }}</span></summary><p v-if="row.error" class="mt-2 text-sm text-warn">{{ row.error }}</p><pre class="mt-3 whitespace-pre-wrap break-words text-sm text-ink-2">{{ row.rendered_body || row.body }}</pre><details v-if="row.rendered_body && row.rendered_body !== row.body" class="mt-3 text-sm"><summary class="cursor-pointer text-muted">原始资料</summary><pre class="mt-2 whitespace-pre-wrap break-words">{{ row.body }}</pre></details><button v-if="['failed', 'unknown'].includes(row.status)" class="mt-3 min-h-11 text-sm text-brand-ink" :disabled="!!busy" @click="retry(row)">核对后重试</button></details></div>
     </section>
   </div>
 </template>

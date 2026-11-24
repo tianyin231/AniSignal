@@ -10,7 +10,7 @@ from app.clock import utcnow
 from app.models import BotClient, BotDelivery, BotTarget
 from app.services.account_limits import QUOTA_EXHAUSTED, claim_notification
 
-AUTOMATIC_KINDS = {"daily", "updates", "calendar", "critical"}
+AUTOMATIC_KINDS = {"daily", "updates", "calendar", "critical", "revisions"}
 _target_locks = defaultdict(asyncio.Lock)
 
 

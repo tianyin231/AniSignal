@@ -31,7 +31,13 @@ export interface NotificationRecord {
   created_at: string
   sent_at: string | null
 }
-export interface NotificationStatus { enabled: boolean, instant_enabled: boolean, schedule: string, records: NotificationRecord[] }
+export interface NotificationStatus {
+  enabled: boolean
+  instant_enabled: boolean
+  revision_enabled: boolean
+  schedule: string
+  records: NotificationRecord[]
+}
 export interface CustomFeedRow {
   id: number
   name: string
@@ -185,7 +191,7 @@ export function createAccountCenter() {
   })
 
   // ---------- 邮件通知 ----------
-  const notifyBusy = ref<'' | 'toggle' | 'instant' | 'morning' | 'ai'>('')
+  const notifyBusy = ref<'' | 'toggle' | 'instant' | 'revision' | 'morning' | 'ai'>('')
   const notifyMessage = ref('')
   const notifyError = ref('')
   let notificationPoll: ReturnType<typeof setTimeout> | undefined
@@ -210,7 +216,7 @@ export function createAccountCenter() {
     return ''
   })
 
-  async function updateNotifications(kind: 'toggle' | 'instant', body: Record<string, boolean>, okText: string) {
+  async function updateNotifications(kind: 'toggle' | 'instant' | 'revision', body: Record<string, boolean>, okText: string) {
     if (notifyBusy.value) return
     notifyBusy.value = kind
     notifyMessage.value = notifyError.value = ''
@@ -233,6 +239,10 @@ export function createAccountCenter() {
   function toggleInstant() {
     const instant_enabled = !notifications.value?.instant_enabled
     return updateNotifications('instant', { instant_enabled }, instant_enabled ? '重要变化提醒已开启，只提醒之后的新变化。' : '重要变化提醒已关闭。')
+  }
+  function toggleRevision() {
+    const revision_enabled = !notifications.value?.revision_enabled
+    return updateNotifications('revision', { revision_enabled }, revision_enabled ? '官方公告修订提醒已开启，只提醒之后的新修订。' : '官方公告修订提醒已关闭。')
   }
   async function sendNotification(kind: 'morning' | 'ai') {
     if (notifyBusy.value) return
@@ -307,7 +317,7 @@ export function createAccountCenter() {
     fetchOverview, fetchKeywords, keywordBusy, keywordError, addKeyword, toggleKeyword, removeKeyword,
     feed, feedPage, feedKeywordId, feedTotalPages, fetchFeed, filterFeed, feedGoPage,
     notifyBusy, notifyMessage, notifyError, fetchNotifications, notificationReady, aiReady, notificationBlockReason,
-    toggleEmail, toggleInstant, sendNotification,
+    toggleEmail, toggleInstant, toggleRevision, sendNotification,
     customBusy, customError, customMessage, fetchCustom, createCustom, patchCustom, triggerCustom, removeCustom,
     loadAll, dispose,
   }

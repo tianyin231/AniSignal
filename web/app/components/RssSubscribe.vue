@@ -9,9 +9,10 @@ const { communities } = useGameSection()
 const { user } = useAuth()
 const scope = ref<'personal' | 'public'>(props.personal ? 'personal' : 'public')
 const community = ref('all')
-const personalMode = ref<'all' | 'keywords'>('all')
+const revisedOnly = ref(false)
+const personalMode = ref<'all' | 'keywords' | 'revisions'>('all')
 const origin = ref('')
-const tokenData = ref<{ token: string, all_path: string, keywords_path: string } | null>(null)
+const tokenData = ref<{ token: string, all_path: string, keywords_path: string, revisions_path?: string } | null>(null)
 const tokenLoading = ref(false)
 const tokenBusy = ref(false)
 const tokenError = ref('')
@@ -21,7 +22,7 @@ async function loadToken() {
   tokenLoading.value = true
   tokenError.value = ''
   try {
-    tokenData.value = await $fetch<{ token: string, all_path: string, keywords_path: string }>('/api/account/feed-token')
+    tokenData.value = await $fetch<{ token: string, all_path: string, keywords_path: string, revisions_path?: string }>('/api/account/feed-token')
   } catch (exc) {
     if (apiErrorStatus(exc) === 401) user.value = null
     tokenError.value = apiErrorDetail(exc, '个人 RSS 令牌加载失败，请重试。')
@@ -36,7 +37,7 @@ async function rotateToken() {
   tokenBusy.value = true
   tokenError.value = ''
   try {
-    tokenData.value = await $fetch<{ token: string, all_path: string, keywords_path: string }>('/api/account/feed-token/rotate', { method: 'POST' })
+    tokenData.value = await $fetch<{ token: string, all_path: string, keywords_path: string, revisions_path?: string }>('/api/account/feed-token/rotate', { method: 'POST' })
   } catch (exc) {
     if (apiErrorStatus(exc) === 401) user.value = null
     tokenError.value = apiErrorDetail(exc, '重置失败，请稍后重试。')
@@ -53,9 +54,11 @@ onMounted(() => {
 const path = computed(() => {
   if (scope.value === 'personal' && props.personal) {
     if (!tokenData.value) return ''
-    return personalMode.value === 'keywords' ? tokenData.value.keywords_path : tokenData.value.all_path
+    if (personalMode.value === 'keywords') return tokenData.value.keywords_path
+    if (personalMode.value === 'revisions') return tokenData.value.revisions_path || `${tokenData.value.all_path.replace(/\?.*$/, '')}?mode=revisions`
+    return tokenData.value.all_path
   }
-  return `/rss.xml?community=${community.value}`
+  return `/rss.xml?community=${community.value}${revisedOnly.value ? '&revised_only=true' : ''}`
 })
 const url = computed(() => (path.value ? `${origin.value}${path.value}` : ''))
 const copied = ref(false)
@@ -111,6 +114,7 @@ onBeforeUnmount(() => clearTimeout(timer))
       <select v-if="scope === 'personal' && personal" v-model="personalMode" aria-label="个人 RSS 过滤模式" class="select h-10 shrink-0">
         <option value="all">个人偏好过滤</option>
         <option value="keywords">仅命中关键词</option>
+        <option value="revisions">仅官方修订</option>
       </select>
       <select v-else v-model="community" aria-label="RSS 范围" class="select h-10 shrink-0">
         <option value="all">全部分区</option>
@@ -130,6 +134,10 @@ onBeforeUnmount(() => clearTimeout(timer))
         <Check v-if="copied" :size="14" /><Copy v-else :size="14" />{{ copied ? '已复制' : '复制地址' }}
       </button>
       <a v-if="path" :href="path" target="_blank" rel="noopener" class="inline-flex h-8 items-center text-muted hover:text-ink">在新标签打开</a>
+      <label v-if="scope === 'public' || !personal" class="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted hover:text-ink">
+        <input v-model="revisedOnly" type="checkbox" class="accent-brand">
+        <span>仅看官方修订</span>
+      </label>
       <button
         v-if="scope === 'personal' && personal && tokenData"
         type="button"

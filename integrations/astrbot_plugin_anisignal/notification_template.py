@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 TOKEN = re.compile(r"\{([a-z_]+)\}")
 FIELDS = {"title", "summary", "content", "original", "time", "source", "url", "images", "image_urls", "items", "index", "schedule", "details_hint"}
 ITEM_TEMPLATE = "{index}. {title}\n{summary}\n发布时间：{time}\n来源：{source}\n{url}\n{images}"
-KINDS = {"daily": "每日早报", "updates": "重要动态", "critical": "关键动态", "calendar": "活动提醒", "reminder": "定时提醒", "manual": "情报通知"}
+KINDS = {"daily": "每日早报", "updates": "重要动态", "critical": "关键动态", "revisions": "官方修订", "calendar": "活动提醒", "reminder": "定时提醒", "manual": "情报通知"}
 
 
 @dataclass(frozen=True)

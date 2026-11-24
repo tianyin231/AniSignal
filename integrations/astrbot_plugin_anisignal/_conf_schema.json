@@ -1586,6 +1586,12 @@
                 ],
                 "hint": "留空沿用会话来源；勾选后仅接收这些来源与会话订阅的交集，不能扩大订阅。"
               },
+              "revisions_enabled": {
+                "description": "官方公告修订提醒（抓暗改）",
+                "type": "bool",
+                "default": false,
+                "hint": "监测到官方原文实质改字、改时间或换图时推送，自动跳过风控抓漏；遵守免打扰与推送间隔。"
+              },
               "calendar_enabled": {
                 "description": "活动收尾提醒",
                 "type": "bool",
@@ -1789,7 +1795,8 @@
                   "products",
                   "trending",
                   "calendar",
-                  "codes"
+                  "codes",
+                  "revisions"
                 ],
                 "labels": [
                   "今日速报",
@@ -1797,7 +1804,8 @@
                   "商品进展",
                   "热度飙升",
                   "活动日历",
-                  "兑换码"
+                  "兑换码",
+                  "官方修订"
                 ]
               },
               "chat_controls": {

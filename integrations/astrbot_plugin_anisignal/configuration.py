@@ -336,6 +336,7 @@ def apply_subscription(targets, umo, response):
             for field in target_schema()["subscription"]["items"]:
                 if field.startswith("channel_"):
                     target["subscription"][field] = [key for key in response["channels"] if key.startswith(field.removeprefix("channel_") + ":")]
-        for field in ("daily_enabled", "daily_time", "updates_enabled"):
-            target["notifications"][field] = response[field]
+        for field in ("daily_enabled", "daily_time", "updates_enabled", "revisions_enabled"):
+            if field in response:
+                target["notifications"][field] = response[field]
         break

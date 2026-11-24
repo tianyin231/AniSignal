@@ -13,6 +13,7 @@ const KINDS = {
   daily: '每日早报',
   updates: '重要动态',
   critical: '关键动态',
+  revisions: '官方修订',
   calendar: '活动提醒',
   reminder: '定时提醒',
   manual: '情报通知',

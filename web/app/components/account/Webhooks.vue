@@ -11,6 +11,7 @@ interface WebhookRow {
   has_secret: boolean
   enabled: boolean
   events_mode: string
+  include_revisions: boolean
   last_status: string | null
   last_error: string | null
   last_sent_at: string | null
@@ -28,7 +29,11 @@ const PROVIDERS = [
 ] as const
 
 const PROVIDER_LABELS: Record<string, string> = Object.fromEntries(PROVIDERS.map(p => [p.key, p.label]))
-const MODE_LABELS: Record<string, string> = { keywords: '命中关注词', all: '偏好分区重要事件' }
+const MODE_LABELS: Record<string, string> = {
+  keywords: '命中关注词',
+  all: '偏好分区重要事件',
+  revisions: '仅官方公告修订',
+}
 
 const { user } = useAuth()
 const items = ref<WebhookRow[]>([])
@@ -46,6 +51,7 @@ const form = reactive({
   url: '',
   secret: '',
   events_mode: 'keywords',
+  include_revisions: false,
 })
 
 const currentProviderMeta = computed(() => PROVIDERS.find(p => p.key === form.provider) ?? PROVIDERS[0])
@@ -84,11 +90,13 @@ async function create() {
         url: form.url.trim(),
         secret: form.secret.trim() || null,
         events_mode: form.events_mode,
+        include_revisions: form.events_mode === 'revisions' ? true : form.include_revisions,
       },
     })
     form.name = ''
     form.url = ''
     form.secret = ''
+    form.include_revisions = false
     formOpen.value = false
     message.value = 'Webhook 已添加，可点击「测试」验证连通性。'
     await refresh()
@@ -108,6 +116,21 @@ async function toggle(row: WebhookRow) {
     await refresh()
   } catch (exc) {
     error.value = failure(exc, '状态更新失败，请重试。')
+  } finally {
+    busy.value = ''
+  }
+}
+
+async function toggleRevisions(row: WebhookRow) {
+  if (busy.value) return
+  busy.value = `rev-${row.id}`
+  error.value = message.value = ''
+  try {
+    await $fetch(`/api/account/webhooks/${row.id}`, { method: 'PATCH', body: { include_revisions: !row.include_revisions } })
+    message.value = !row.include_revisions ? `「${row.name}」已开启官方公告修订推送。` : `「${row.name}」已关闭官方公告修订推送。`
+    await refresh()
+  } catch (exc) {
+    error.value = failure(exc, '修订推送开关更新失败，请重试。')
   } finally {
     busy.value = ''
   }
@@ -177,6 +200,7 @@ async function removeRow(row: WebhookRow) {
               <span class="truncate text-sm font-semibold text-ink">{{ row.name }}</span>
               <span class="rounded bg-chip px-1.5 py-0.5 text-[11px] text-ink-2">{{ PROVIDER_LABELS[row.provider] ?? row.provider }}</span>
               <span class="rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted">{{ MODE_LABELS[row.events_mode] ?? row.events_mode }}</span>
+              <span v-if="row.include_revisions && row.events_mode !== 'revisions'" class="rounded bg-warn/15 px-1.5 py-0.5 text-[11px] font-medium text-warn">含官方修订</span>
             </div>
             <p class="mono mt-0.5 truncate text-[11px] text-faint">{{ row.url }}</p>
             <p v-if="row.last_sent_at || row.last_error" class="mt-0.5 text-xs" :class="row.last_status === 'failed' ? 'text-hot' : 'text-muted'">
@@ -202,6 +226,16 @@ async function removeRow(row: WebhookRow) {
             <Send :size="12" aria-hidden="true" />{{ busy === `test-${row.id}` ? '发送中…' : '测试' }}
           </button>
           <button
+            v-if="row.events_mode !== 'revisions'"
+            type="button"
+            class="inline-flex h-7 items-center gap-1 rounded-lg border border-line px-2.5 font-medium transition-colors disabled:opacity-40"
+            :class="row.include_revisions ? 'border-warn/40 bg-warn/10 text-warn hover:bg-warn/15' : 'text-muted hover:bg-chip hover:text-ink'"
+            :disabled="!!busy"
+            @click="toggleRevisions(row)"
+          >
+            {{ busy === `rev-${row.id}` ? '更新中…' : row.include_revisions ? '已含官方修订' : '附加官方修订' }}
+          </button>
+          <button
             type="button"
             class="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-muted hover:bg-hot/10 hover:text-hot disabled:opacity-40"
             :disabled="!!busy"
@@ -225,6 +259,7 @@ async function removeRow(row: WebhookRow) {
         <select v-model="form.events_mode" aria-label="触发范围" class="select h-9 text-xs">
           <option value="keywords">命中关注词的重要事件</option>
           <option value="all">偏好分区全部重要事件</option>
+          <option value="revisions">仅官方公告修订（抓暗改）</option>
         </select>
         <input
           v-model="form.secret"
@@ -235,6 +270,10 @@ async function removeRow(row: WebhookRow) {
           class="input h-9 text-xs"
         >
       </div>
+      <label v-if="form.events_mode !== 'revisions'" class="flex items-center gap-2 text-xs text-ink-2">
+        <input v-model="form.include_revisions" type="checkbox" class="accent-brand">
+        <span>同时推送官方公告实质修订（抓暗改）</span>
+      </label>
       <div class="flex items-center gap-2 pt-1">
         <button type="submit" class="btn-primary inline-flex h-9 items-center gap-1.5 px-3.5 text-xs" :disabled="!!busy">
           {{ busy === 'create' ? '保存中…' : '保存通道' }}

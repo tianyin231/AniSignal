@@ -42,7 +42,7 @@ export const name = 'anisignal';
 
 const RECENT_INTROS = 5;
 const MAX_BODY_BYTES = 512 * 1024;
-const VALID_QUERY_TYPES = new Set(['digest', 'news', 'products', 'trending', 'calendar', 'codes']);
+const VALID_QUERY_TYPES = new Set(['digest', 'news', 'products', 'trending', 'calendar', 'codes', 'revisions']);
 
 function trustedOrigin(req) {
   const origin = req?.headers?.origin;
@@ -570,7 +570,7 @@ export class AniSignalService {
 
   async executeQueryTool(peer, queryType = 'digest', search = '') {
     if (!VALID_QUERY_TYPES.has(queryType)) {
-      return { error: '仅支持 digest、news、products、trending、calendar、codes。' };
+      return { error: '仅支持 digest、news、products、trending、calendar、codes、revisions。' };
     }
     if (!peer?.umo) {
       return { text: '当前不在已识别的 QQ 会话中；请在 QQ 群聊或私聊中使用。' };
@@ -621,7 +621,7 @@ export class AniSignalService {
     }
     const target = this.sessionTarget(peer.umo);
     const allowedTools = new Set(target?.tools || []);
-    if (!target || (!allowedTools.has('digest') && !allowedTools.has('news'))) {
+    if (!target || (!allowedTools.has('digest') && !allowedTools.has('news') && !allowedTools.has('revisions'))) {
       return { error: '此会话尚未开放资讯查询。' };
     }
     const num = Number(number);
@@ -719,14 +719,14 @@ export class AniSignalService {
     return [
       {
         name: 'anisignal_query',
-        description: '查询游戏与 AI 分区的最新速报(digest)、7日资讯(news)、热度飙升(trending)、活动日历(calendar)、兑换码(codes)或商品发货进展(products)。',
+        description: '查询游戏与 AI 分区的最新速报(digest)、7日资讯(news)、热度飙升(trending)、活动日历(calendar)、兑换码(codes)、商品发货进展(products)或官方公告修订(revisions)。',
         parameters: {
           type: 'object',
           properties: {
             query_type: {
               type: 'string',
-              enum: ['digest', 'news', 'products', 'trending', 'calendar', 'codes'],
-              description: '查询类型：digest(24h速报)、news(7日资讯)、trending(热度飙升)、calendar(活动维护日程)、codes(兑换码)、products(商品履约证据)',
+              enum: ['digest', 'news', 'products', 'trending', 'calendar', 'codes', 'revisions'],
+              description: '查询类型：digest(24h速报)、news(7日资讯)、trending(热度飙升)、calendar(活动维护日程)、codes(兑换码)、products(商品履约证据)、revisions(官方公告修订/抓暗改)',
             },
             search: {
               type: 'string',
@@ -774,8 +774,8 @@ export class AniSignalService {
           properties: {
             action: {
               type: 'string',
-              enum: ['view', 'keywords', 'exclude_keywords', 'community', 'channels', 'daily', 'updates'],
-              description: 'view查看；keywords替换关注词；exclude_keywords替换排除词；community修改分区；channels替换频道；daily早报时间(HH:mm或off)；updates即时推送(on/off)',
+              enum: ['view', 'keywords', 'exclude_keywords', 'community', 'channels', 'daily', 'updates', 'revisions'],
+              description: 'view查看；keywords替换关注词；exclude_keywords替换排除词；community修改分区；channels替换频道；daily早报时间(HH:mm或off)；updates即时推送(on/off)；revisions官方修订提醒(on/off)',
             },
             value: {
               type: 'string',

@@ -199,6 +199,7 @@ async def notification_status(
     return {
         "enabled": user.notification_enabled,
         "instant_enabled": user.instant_notification_enabled,
+        "revision_enabled": user.revision_notification_enabled,
         "schedule": "每天 08:00（北京时间）",
         "records": [
             {
@@ -228,7 +229,8 @@ async def update_notification_preference(
     # 与即时通知准备共用用户行锁，防止恢复时的新基线被旧批次覆盖。
     user = await session.get(User, user.id, populate_existing=True, with_for_update=True)
     was_active = user.notification_enabled and user.instant_notification_enabled
-    for field in ("enabled", "instant_enabled"):
+    was_rev_active = user.notification_enabled and user.revision_notification_enabled
+    for field in ("enabled", "instant_enabled", "revision_enabled"):
         if field in body and not isinstance(body[field], bool):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "通知开关必须是布尔值")
     if body.get("instant_enabled"):
@@ -236,10 +238,14 @@ async def update_notification_preference(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先验证邮箱")
         if not await enabled_keywords(session, user.id):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先启用至少一个关键词")
+    if body.get("revision_enabled") and not user.is_verified:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "请先验证邮箱")
     if "enabled" in body:
         user.notification_enabled = body["enabled"]
     if "instant_enabled" in body:
         user.instant_notification_enabled = body["instant_enabled"]
+    if "revision_enabled" in body:
+        user.revision_notification_enabled = body["revision_enabled"]
     if user.notification_enabled and user.instant_notification_enabled and not was_active:
         # MySQL 的普通查询可能沿用鉴权阶段的旧快照；锁定读取得真正的最新基线。
         user.instant_notification_cursor = await session.scalar(
@@ -248,13 +254,35 @@ async def update_notification_preference(
         user.instant_fulfillment_cursor = await session.scalar(
             select(ProductFulfillmentRevision.id).order_by(ProductFulfillmentRevision.id.desc()).limit(1).with_for_update()
         ) or 0
-    if not user.notification_enabled or not user.instant_notification_enabled:
+    if user.notification_enabled and user.revision_notification_enabled and not was_rev_active:
+        user.instant_revision_cursor = await session.scalar(
+            select(ContentVersion.id).order_by(ContentVersion.id.desc()).limit(1).with_for_update()
+        ) or 0
+    if not user.notification_enabled:
         await session.execute(update(NotificationDelivery).where(
             NotificationDelivery.user_id == user.id, NotificationDelivery.kind == "instant",
             NotificationDelivery.status == "pending",
-        ).values(status="skipped", error="用户已关闭即时邮件通知"))
+        ).values(status="skipped", error="用户已关闭邮件通知"))
+    else:
+        if not user.instant_notification_enabled:
+            await session.execute(update(NotificationDelivery).where(
+                NotificationDelivery.user_id == user.id, NotificationDelivery.kind == "instant",
+                NotificationDelivery.status == "pending",
+                ~NotificationDelivery.dedupe_key.startswith("instant-revision:"),
+            ).values(status="skipped", error="用户已关闭即时邮件通知"))
+        if not user.revision_notification_enabled:
+            await session.execute(update(NotificationDelivery).where(
+                NotificationDelivery.user_id == user.id, NotificationDelivery.kind == "instant",
+                NotificationDelivery.status == "pending",
+                NotificationDelivery.dedupe_key.startswith("instant-revision:"),
+            ).values(status="skipped", error="用户已关闭官方公告修订提醒"))
     await session.commit()
-    return {"enabled": user.notification_enabled, "instant_enabled": user.instant_notification_enabled, "schedule": "每天 08:00（北京时间）"}
+    return {
+        "enabled": user.notification_enabled,
+        "instant_enabled": user.instant_notification_enabled,
+        "revision_enabled": user.revision_notification_enabled,
+        "schedule": "每天 08:00（北京时间）",
+    }
 
 
 @router.post("/notifications/send", status_code=status.HTTP_202_ACCEPTED)
@@ -861,6 +889,7 @@ def _feed_token_view(token: str) -> dict:
         "token": token,
         "all_path": f"/api/rss/personal/{token}.xml",
         "keywords_path": f"/api/rss/personal/{token}.xml?mode=keywords",
+        "revisions_path": f"/api/rss/personal/{token}.xml?mode=revisions",
     }
 
 
@@ -896,6 +925,7 @@ class WebhookCreateIn(BaseModel):
     url: str = Field(min_length=8, max_length=512)
     secret: str | None = Field(default=None, max_length=256)
     events_mode: str = Field(default="keywords", max_length=16)
+    include_revisions: bool = False
     enabled: bool = True
 
 
@@ -906,6 +936,7 @@ class WebhookUpdateIn(BaseModel):
     secret: str | None = Field(default=None, max_length=256)
     clear_secret: bool = False
     events_mode: str | None = Field(default=None, max_length=16)
+    include_revisions: bool | None = None
     enabled: bool | None = None
 
 
@@ -918,6 +949,7 @@ def _webhook_view(wh: UserWebhook) -> dict:
         "has_secret": bool(wh.secret),
         "enabled": wh.enabled,
         "events_mode": wh.events_mode,
+        "include_revisions": bool(wh.include_revisions),
         "last_status": wh.last_status,
         "last_error": wh.last_error,
         "last_sent_at": wh.last_sent_at,
@@ -966,7 +998,7 @@ async def create_webhook(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "不支持的 Webhook 渠道类型")
     mode = body.events_mode.strip().lower()
     if mode not in WEBHOOK_MODES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "推送范围仅支持 keywords 或 all")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "推送范围仅支持 keywords、all 或 revisions")
     try:
         clean_url = validate_webhook_url_static(body.url)
     except WebhookError as exc:
@@ -983,6 +1015,7 @@ async def create_webhook(
             status.HTTP_409_CONFLICT, f"每个账号最多添加 {MAX_WEBHOOKS} 个 Webhook 通道"
         )
 
+    include_rev = True if mode == "revisions" else bool(body.include_revisions)
     wh = UserWebhook(
         user_id=user.id,
         name=body.name.strip()[:64] or "我的 Webhook",
@@ -991,13 +1024,21 @@ async def create_webhook(
         secret=(body.secret or "").strip() or None,
         enabled=bool(body.enabled),
         events_mode=mode,
+        include_revisions=include_rev,
     )
     session.add(wh)
     # 首次接入 Webhook 时把游标设到当前最新修订，不回放历史事件。
-    if user.webhook_notification_cursor is None:
+    if mode in {"keywords", "all"} and user.webhook_notification_cursor is None:
         user.webhook_notification_cursor = (
             await session.scalar(
                 select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1)
+            )
+            or 0
+        )
+    if (mode == "revisions" or include_rev) and user.webhook_revision_cursor is None:
+        user.webhook_revision_cursor = (
+            await session.scalar(
+                select(ContentVersion.id).order_by(ContentVersion.id.desc()).limit(1)
             )
             or 0
         )
@@ -1045,17 +1086,28 @@ async def update_webhook(
     if body.events_mode is not None:
         mode = body.events_mode.strip().lower()
         if mode not in WEBHOOK_MODES:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "推送范围仅支持 keywords 或 all")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "推送范围仅支持 keywords、all 或 revisions")
         wh.events_mode = mode
+        if mode == "revisions":
+            wh.include_revisions = True
+    if body.include_revisions is not None:
+        wh.include_revisions = True if wh.events_mode == "revisions" else bool(body.include_revisions)
     if body.enabled is not None:
         wh.enabled = bool(body.enabled)
-        if wh.enabled and user.webhook_notification_cursor is None:
-            user.webhook_notification_cursor = (
-                await session.scalar(
-                    select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1)
-                )
-                or 0
+    if wh.enabled and wh.events_mode in {"keywords", "all"} and user.webhook_notification_cursor is None:
+        user.webhook_notification_cursor = (
+            await session.scalar(
+                select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1)
             )
+            or 0
+        )
+    if wh.enabled and (wh.events_mode == "revisions" or wh.include_revisions) and user.webhook_revision_cursor is None:
+        user.webhook_revision_cursor = (
+            await session.scalar(
+                select(ContentVersion.id).order_by(ContentVersion.id.desc()).limit(1)
+            )
+            or 0
+        )
     await session.commit()
     await session.refresh(wh)
     return _webhook_view(wh)

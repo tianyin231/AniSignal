@@ -32,6 +32,7 @@ from app.services.account_limits import QUOTA_EXHAUSTED, claim_notification
 from app.services.hidden_communities import account_blocks
 from app.services.instant_notifications import _business_revision, _important, _matching_items
 from app.services.notifications import _plain, _safe_url, beijing_today
+from app.services.revision_notifications import load_official_revision_events, revision_webhook_payload
 from app.services.urls import is_public_http_url
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 MAX_WEBHOOKS = 3
 WEBHOOK_TIMEOUT_SECONDS = 10.0
 WEBHOOK_PROVIDERS = ("generic", "bark", "feishu", "dingtalk", "wecom", "discord", "ntfy")
-WEBHOOK_MODES = ("keywords", "all")
+WEBHOOK_MODES = ("keywords", "all", "revisions")
 _TEST_COOLDOWN_SECONDS = 10.0
 _TEST_LAST_AT: dict[int, float] = {}
 
@@ -153,7 +154,7 @@ def build_webhook_request(
             "card": {
                 "header": {
                     "title": {"tag": "plain_text", "content": title[:100]},
-                    "template": "blue",
+                    "template": "orange" if payload.get("type") == "content_revision" else "blue",
                 },
                 "elements": [{"tag": "markdown", "content": "\n".join(md_lines)[:3000]}],
             },
@@ -195,7 +196,7 @@ def build_webhook_request(
             "title": title[:256],
             "url": detail_url,
             "description": (summary or plain_body)[:2000],
-            "color": 3447003,
+            "color": 15105570 if payload.get("type") == "content_revision" else 3447003,
             "footer": {"text": "AniSignal"},
         }
         if fields:
@@ -231,6 +232,14 @@ def build_webhook_request(
             "sources": sources[:5],
         },
     }
+    if payload.get("type") == "content_revision":
+        body_obj["revision"] = {
+            "content_id": payload.get("content_id"),
+            "from_version": payload.get("from_version"),
+            "to_version": payload.get("to_version"),
+            "change_label": payload.get("change_label"),
+            "change_lines": payload.get("change_lines") or [],
+        }
     raw_bytes = json.dumps(body_obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     headers["Content-Type"] = "application/json; charset=utf-8"
     if secret:
@@ -414,97 +423,153 @@ async def run_webhook_notifications(session: AsyncSession) -> dict:
             await session.commit()
             continue
 
-        if user.webhook_notification_cursor is None:
-            user.webhook_notification_cursor = (
-                await session.scalar(
-                    select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1)
-                )
-                or 0
-            )
-            await session.commit()
-            continue
+        event_webhooks = [wh for wh in webhooks if wh.events_mode in {"keywords", "all"}]
+        revision_webhooks = [wh for wh in webhooks if wh.events_mode == "revisions" or wh.include_revisions]
 
-        revisions = list(
-            await session.scalars(
-                select(EventRevision)
-                .where(EventRevision.id > user.webhook_notification_cursor)
-                .order_by(EventRevision.id)
-                .limit(200)
-            )
-        )
-        if not revisions:
-            await session.commit()
-            continue
-
-        by_event = {row.event_id: row for row in revisions if _business_revision(row)}
         # 先准备要发送的批次并推进游标，避免外部 HTTP 超时拖住 User 行锁。
         pending_sends: list[tuple[int, int, str, str, str | None, dict]] = []
-        for event_id, revision in by_event.items():
-            event = await session.get(Event, event_id)
-            if not event or not _important(event):
-                continue
-            kw_items: list[dict] | None = None
-            all_sources: list[dict] | None = None
 
-            for wh in webhooks:
-                if wh.events_mode == "keywords":
-                    if kw_items is None:
-                        kw_items = await _matching_items(session, user, event)
-                    if not kw_items:
-                        continue
-                    matched_kws = sorted({k for item in kw_items for k in item["keywords"]})
-                    sources = [
-                        {
-                            "id": item["id"],
-                            "title": item["title"],
-                            "source": item.get("source") or item["platform"],
-                            "url": _safe_url(item.get("url")),
-                        }
-                        for item in kw_items[:3]
-                    ]
-                    content_ids = [item["id"] for item in kw_items]
-                else:
-                    if not _event_matches_preferences(user, event):
-                        continue
-                    if all_sources is None:
-                        all_sources = await _event_sources(session, event.id)
-                    matched_kws = []
-                    sources = all_sources
-                    content_ids = [s["id"] for s in sources]
-
-                dedupe_key = f"webhook:{wh.id}:{event.id}:{revision.id}"
-                if await session.scalar(
-                    select(NotificationDelivery.id).where(
-                        NotificationDelivery.dedupe_key == dedupe_key
+        if event_webhooks:
+            if user.webhook_notification_cursor is None:
+                user.webhook_notification_cursor = (
+                    await session.scalar(
+                        select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1)
                     )
-                ):
-                    continue
-
-                allowed = await claim_notification(session, user.id)
-                payload = _event_payload(event, revision, keywords=matched_kws, sources=sources)
-                delivery = NotificationDelivery(
-                    user_id=user.id,
-                    kind="webhook",
-                    source="schedule",
-                    period_date=beijing_today(),
-                    dedupe_key=dedupe_key,
-                    status="sending" if allowed else "skipped",
-                    subject=f"{wh.name} · {event.title}"[:255],
-                    body=payload["summary"][:2000],
-                    matched_keywords=matched_kws,
-                    content_ids=content_ids,
-                    error=None if allowed else QUOTA_EXHAUSTED,
+                    or 0
                 )
-                session.add(delivery)
-                await session.flush()
-                if allowed:
-                    pending_sends.append(
-                        (delivery.id, wh.id, wh.provider, wh.url, wh.secret, payload)
+            else:
+                revisions = list(
+                    await session.scalars(
+                        select(EventRevision)
+                        .where(EventRevision.id > user.webhook_notification_cursor)
+                        .order_by(EventRevision.id)
+                        .limit(200)
                     )
-                else:
-                    stats["skipped"] += 1
+                )
+                if revisions:
+                    by_event = {row.event_id: row for row in revisions if _business_revision(row)}
+                    for event_id, revision in by_event.items():
+                        event = await session.get(Event, event_id)
+                        if not event or not _important(event):
+                            continue
+                        kw_items: list[dict] | None = None
+                        all_sources: list[dict] | None = None
 
-        user.webhook_notification_cursor = revisions[-1].id
+                        for wh in event_webhooks:
+                            if wh.events_mode == "keywords":
+                                if kw_items is None:
+                                    kw_items = await _matching_items(session, user, event)
+                                if not kw_items:
+                                    continue
+                                matched_kws = sorted({k for item in kw_items for k in item["keywords"]})
+                                sources = [
+                                    {
+                                        "id": item["id"],
+                                        "title": item["title"],
+                                        "source": item.get("source") or item["platform"],
+                                        "url": _safe_url(item.get("url")),
+                                    }
+                                    for item in kw_items[:3]
+                                ]
+                                content_ids = [item["id"] for item in kw_items]
+                            else:
+                                if not _event_matches_preferences(user, event):
+                                    continue
+                                if all_sources is None:
+                                    all_sources = await _event_sources(session, event.id)
+                                matched_kws = []
+                                sources = all_sources
+                                content_ids = [s["id"] for s in sources]
+
+                            dedupe_key = f"webhook:{wh.id}:{event.id}:{revision.id}"
+                            if await session.scalar(
+                                select(NotificationDelivery.id).where(
+                                    NotificationDelivery.dedupe_key == dedupe_key
+                                )
+                            ):
+                                continue
+
+                            allowed = await claim_notification(session, user.id)
+                            payload = _event_payload(event, revision, keywords=matched_kws, sources=sources)
+                            delivery = NotificationDelivery(
+                                user_id=user.id,
+                                kind="webhook",
+                                source="schedule",
+                                period_date=beijing_today(),
+                                dedupe_key=dedupe_key,
+                                status="sending" if allowed else "skipped",
+                                subject=f"{wh.name} · {event.title}"[:255],
+                                body=payload["summary"][:2000],
+                                matched_keywords=matched_kws,
+                                content_ids=content_ids,
+                                error=None if allowed else QUOTA_EXHAUSTED,
+                            )
+                            session.add(delivery)
+                            await session.flush()
+                            if allowed:
+                                pending_sends.append(
+                                    (delivery.id, wh.id, wh.provider, wh.url, wh.secret, payload)
+                                )
+                            else:
+                                stats["skipped"] += 1
+
+                    user.webhook_notification_cursor = revisions[-1].id
+
+        if revision_webhooks:
+            if user.webhook_revision_cursor is None:
+                user.webhook_revision_cursor = (
+                    await session.scalar(
+                        select(ContentVersion.id).order_by(ContentVersion.id.desc()).limit(1)
+                    )
+                    or 0
+                )
+            else:
+                prefs = user.feed_preferences or {}
+                blocks = account_blocks(user)
+                rev_events, max_ver_id = await load_official_revision_events(
+                    session,
+                    after_version_id=user.webhook_revision_cursor,
+                    communities=prefs.get("communities") or None,
+                    exclude_keywords=prefs.get("exclude_keywords") or None,
+                    limit=100,
+                )
+                for item in rev_events:
+                    if not prefs.get("communities") and item["community"] in blocks.communities:
+                        continue
+                    payload = revision_webhook_payload(item)
+                    for wh in revision_webhooks:
+                        dedupe_key = f"webhook-rev:{wh.id}:{item['content_id']}:{item['version_id']}"
+                        if await session.scalar(
+                            select(NotificationDelivery.id).where(
+                                NotificationDelivery.dedupe_key == dedupe_key
+                            )
+                        ):
+                            continue
+                        allowed = await claim_notification(session, user.id)
+                        delivery = NotificationDelivery(
+                            user_id=user.id,
+                            kind="webhook",
+                            source="schedule",
+                            period_date=beijing_today(),
+                            dedupe_key=dedupe_key,
+                            status="sending" if allowed else "skipped",
+                            subject=f"{wh.name} · 官方修订 · {item['title']}"[:255],
+                            body=payload["summary"][:2000],
+                            matched_keywords=[],
+                            content_ids=[item["content_id"]],
+                            error=None if allowed else QUOTA_EXHAUSTED,
+                        )
+                        session.add(delivery)
+                        await session.flush()
+                        if allowed:
+                            pending_sends.append(
+                                (delivery.id, wh.id, wh.provider, wh.url, wh.secret, payload)
+                            )
+                        else:
+                            stats["skipped"] += 1
+                if max_ver_id > user.webhook_revision_cursor:
+                    user.webhook_revision_cursor = max_ver_id
+
         await session.commit()
 
         # 行锁释放后再发外部 HTTP 请求，逐条回写投递状态。

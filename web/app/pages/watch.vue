@@ -72,7 +72,8 @@ const channels: Channel[] = [
       const n = status.value?.notifications
       if (!n) return null
       if (!n.enabled) return { tone: 'off', text: '未开启' }
-      return { tone: 'on', text: `已开启 · ${n.instant_enabled ? '含重要变化提醒' : '仅每日早报'}` }
+      const extras = [n.instant_enabled ? '重要变化' : '', n.revision_enabled ? '官方修订' : ''].filter(Boolean)
+      return { tone: 'on', text: extras.length ? `已开启 · 含${extras.join(' / ')}` : '已开启 · 仅每日早报' }
     },
   },
   {

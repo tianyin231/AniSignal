@@ -40,6 +40,7 @@ TOOLS = {
     "trending": "热度飙升",
     "calendar": "活动日历",
     "codes": "兑换码",
+    "revisions": "官方修订",
 }
 
 # 合并缓冲存 site_settings，避免为一期加表迁移；key 按目标隔离。
@@ -306,6 +307,55 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
                     lines.append(evidence["url"])
         if not items:
             lines.append("没有找到匹配的商品档案，请使用商品名称或更短的关键词。")
+    elif tool == "revisions":
+        from app.services.revision_notifications import bot_revision_brief, load_official_revision_events
+
+        terms = search_terms(query) if query else []
+        text_terms, named = split_communities(terms)
+        days = SEARCH_DAYS if text_terms else 14
+        query_communities = [key for key in selected if key in named] if named else selected
+        events, _ = await load_official_revision_events(
+            session,
+            since_parsed_at=now - timedelta(days=days),
+            communities=query_communities,
+            exclude_keywords=config.get("exclude_keywords", []),
+            limit=120,
+        )
+        matched = []
+        for item in events:
+            brief_item = bot_revision_brief([item])["items"][0]
+            if not matches_target_scope(target, brief_item):
+                continue
+            if text_terms and not matches_terms({
+                "title": item["title"],
+                "text": " ".join([item.get("text") or "", " ".join(item.get("change_lines") or [])]),
+                "community": item["community"],
+            }, text_terms):
+                continue
+            matched.append(item)
+            if len(matched) >= 5:
+                break
+        items = matched
+        lines = [
+            f"{scope} · 官方公告修订（抓暗改）",
+            _fmt_bj(now, "更新于 %Y/%m/%d %H:%M（北京时间）"),
+        ]
+        for idx, it in enumerate(matched, 1):
+            parsed_bj = _fmt_bj(it["parsed_at"], "%m/%d %H:%M")
+            lines.extend([
+                f"\n{idx}. [{it['community_label']}] {it['title']}",
+                f"v{it['from_version']}→v{it['to_version']} · {it['change_label']} · 修订于 {parsed_bj}",
+            ])
+            for snippet in (it.get("change_lines") or [])[:2]:
+                lines.append(snippet)
+            lines.append(it["detail_url"])
+        if matched:
+            brief = bot_revision_brief(matched)
+        elif query:
+            lines.append(f"近 {days} 天订阅范围内没有找到与「{query}」相关的官方公告修订。")
+            grounding = SEARCH_MISS
+        else:
+            lines.append("近 14 天订阅范围内暂未检测到实质性的官方公告修订。")
     else:
         terms = search_terms(query) if query else []
         text_terms, named = split_communities(terms)
@@ -657,11 +707,13 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
         pass
     elif row.kind in {"updates", "critical", "calendar"} and notification != "daily" and not config.get("updates_enabled"):
         reason = "此会话已关闭自动动态，取消积压消息"
+    elif row.kind == "revisions" and not config.get("revisions_enabled"):
+        reason = "此会话已关闭官方公告修订提醒，取消积压消息"
     elif notification == "daily" and not config.get("daily_enabled", True):
         reason = "此会话已关闭早报"
     elif row.kind == "calendar" and not config.get("calendar_enabled", True):
         reason = "此会话已关闭日程提醒"
-    elif row.kind in {"updates", "critical"} and row.created_at <= now - timedelta(hours=12):
+    elif row.kind in {"updates", "critical", "revisions"} and row.created_at <= now - timedelta(hours=12):
         reason = "动态已超过 12 小时发送窗口"
     elif row.kind == "daily":
         due = datetime.fromisoformat(brief["scheduled_at"]) if brief.get("scheduled_at") else scheduled_at(row.created_at, config.get("daily_time", "08:00"))
@@ -698,6 +750,26 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
         if commit:
             await session.commit()
         return False
+    if row.kind == "revisions" and row.brief:
+        rev_items = row.brief.get("items") or []
+        rev_ids = {
+            cid
+            for item in rev_items
+            for source in (item.get("sources") or [item])
+            for cid in (source.get("content_ids") or [source.get("id")])
+            if isinstance(cid, int)
+        }
+        visible_ids = (
+            set(await session.scalars(select(RawContent.id).where(RawContent.id.in_(rev_ids), RawContent.hidden.is_(False))))
+            if rev_ids
+            else set()
+        )
+        if not rev_items or visible_ids != rev_ids or not all(matches_target_scope(target, item) for item in rev_items):
+            row.status, row.receipt, row.error, row.updated_at = "cancelled", None, "修订内容已隐藏或不再符合当前订阅范围", now
+            if commit:
+                await session.commit()
+            return False
+        return True
     if row.kind not in {"daily", "updates", "critical"} or not row.brief:
         return True
     items = row.brief.get("items") or []
@@ -947,6 +1019,7 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     text, brief = calendar_brief(entries, due)
                     await create_delivery(session, target, "calendar", text, key, brief=brief)
         buffer = await load_merge_buffer(session, target.id)
+        scan_since = target.last_scan_at
         if config.get("updates_enabled"):
             payload = await query_target(session, target, now=now, collected_after=target.last_scan_at, notification="updates")
             critical_items = []
@@ -1012,20 +1085,50 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
             )
         elif buffer.get("items"):
             await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
+        if config.get("revisions_enabled"):
+            from app.services.revision_notifications import (
+                bot_revision_brief,
+                format_bot_revision_message,
+                load_official_revision_events,
+            )
+
+            rev_since = max(scan_since, now - timedelta(hours=24)) if scan_since else now - timedelta(hours=24)
+            rev_target = await resolve_target(session, target, "updates")
+            rev_events, _ = await load_official_revision_events(
+                session,
+                since_parsed_at=rev_since,
+                communities=subscribed_communities(rev_target),
+                exclude_keywords=rev_target.config.get("exclude_keywords", []),
+                limit=50,
+            )
+            for item in rev_events:
+                brief = bot_revision_brief([item])
+                if not matches_target_scope(rev_target, brief["items"][0]):
+                    continue
+                await create_delivery(
+                    session,
+                    target,
+                    "revisions",
+                    format_bot_revision_message(item),
+                    f"revision:{target.id}:{item['content_id']}:{item['version_id']}",
+                    media=(item.get("media_added") or [])[:max_images] or None,
+                    brief=brief,
+                )
+            if not config.get("updates_enabled"):
+                target.last_scan_at = now
+                await session.commit()
         from app.services.bot_news import dedupe_pending_news
 
         await dedupe_pending_news(session, target.id, now)
         pending = list(await session.scalars(select(BotDelivery).where(
             BotDelivery.target_id == target.id,
-            BotDelivery.kind.in_(["daily", "updates", "critical", "reminder", "calendar"]),
+            BotDelivery.kind.in_(["daily", "updates", "critical", "reminder", "calendar", "revisions"]),
             BotDelivery.status.in_(["pending", "failed"]), BotDelivery.attempts < 3,
         ).order_by(BotDelivery.id).limit(10)))
         for row in pending:
             if row.kind == "reminder" and not config.get("reminders_enabled"):
                 continue
-            if row.kind == "updates" and quiet:
-                continue
-            if row.kind == "calendar" and quiet:
+            if row.kind in {"updates", "calendar", "revisions"} and quiet:
                 continue
             if row.kind == "critical" and quiet and not quiet_critical:
                 continue

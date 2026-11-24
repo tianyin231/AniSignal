@@ -25,10 +25,13 @@ class User(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     notification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     instant_notification_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    revision_notification_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # 开启时记录当前修订位置，只处理之后发生的变化。
     instant_notification_cursor: Mapped[int | None] = mapped_column(Integer)
     instant_fulfillment_cursor: Mapped[int | None] = mapped_column(Integer)
+    instant_revision_cursor: Mapped[int | None] = mapped_column(Integer)
     webhook_notification_cursor: Mapped[int | None] = mapped_column(Integer)
+    webhook_revision_cursor: Mapped[int | None] = mapped_column(Integer)
     # 个人过滤 RSS 令牌（可随时重置，不与登录会话耦合）
     feed_token: Mapped[str | None] = mapped_column(String(64))
     feed_preferences: Mapped[dict | None] = mapped_column(JSON)
@@ -150,8 +153,9 @@ class UserWebhook(Base):
     url: Mapped[str] = mapped_column(String(512))
     secret: Mapped[str | None] = mapped_column(String(256))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    # keywords: 命中个人关注词的重要事件；all: 个人偏好分区内的所有重要官方事件
+    # keywords: 命中个人关注词的重要事件；all: 个人偏好分区内的所有重要官方事件；revisions: 仅官方公告实质修订
     events_mode: Mapped[str] = mapped_column(String(16), default="keywords")
+    include_revisions: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     last_status: Mapped[str | None] = mapped_column(String(16))
     last_error: Mapped[str | None] = mapped_column(String(255))
     last_sent_at: Mapped[datetime | None] = mapped_column(DateTime)
