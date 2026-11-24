@@ -65,6 +65,10 @@ sudo apt-get install -y fonts-noto-cjk
 node --test test/*.test.mjs
 ```
 
+## 更新日志
+
+各版本变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
+
 ## 开源许可
 
 与 AniSignal 主仓库一致，采用 [AGPL-3.0-or-later](./LICENSE) 协议发布。
