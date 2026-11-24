@@ -12,6 +12,19 @@ config = context.config
 
 target_metadata = Base.metadata
 
+# MySQL 专属 ngram FULLTEXT 索引由迁移 0060 显式管理，不参与跨方言（SQLite/MySQL）autogenerate 差异比对。
+_MYSQL_FULLTEXT_INDEXES = frozenset({
+    "ft_content_versions_title_text",
+    "ft_content_translations_text",
+    "ft_events_title_summary",
+})
+
+
+def _include_object(_obj, name, type_, _reflected, _compare_to) -> bool:
+    if type_ == "index" and name in _MYSQL_FULLTEXT_INDEXES:
+        return False
+    return True
+
 
 def _sync_url() -> str:
     """ANISIGNAL_DATABASE_URL 是 async URL（mysql+asyncmy / sqlite+aiosqlite），迁移转同步驱动。"""
@@ -28,6 +41,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         compare_type=True,
+        include_object=_include_object,
         dialect_opts={"paramstyle": "named"},
     )
     with context.begin_transaction():
@@ -50,6 +64,7 @@ def run_migrations_online() -> None:
                 connection=connection,
                 target_metadata=target_metadata,
                 compare_type=True,
+                include_object=_include_object,
                 transaction_per_migration=True,
             )
             with context.begin_transaction():
