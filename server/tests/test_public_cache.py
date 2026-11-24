@@ -147,11 +147,49 @@ async def test_hot_public_endpoints_cache_default_views_and_skip_high_cardinalit
 
 async def test_oversized_payload_is_not_written_to_redis():
     redis = _FakeRedis()
-    big = {"blob": "x" * 2000}
+    # 使用不可压缩高熵载荷确保即使压缩后仍超过 max_bytes 上限
+    import os, base64
+
+    big = {"blob": base64.b64encode(os.urandom(1200)).decode("ascii")}
 
     result = await cached_dict(redis, "pubcache:v1:big", 60, lambda: asyncio.sleep(0, result=big), max_bytes=512)
     assert result == big
     assert "pubcache:v1:big" not in redis.store
+
+
+async def test_large_compressible_json_is_gzipped_and_roundtrips():
+    redis = _FakeRedis()
+    # 模拟 /api/products?community=all：原始 JSON 超过 120 KB，gzip 后远低于 96 KB 仍可安全缓存
+    payload = {
+        "items": [
+            {"id": i, "slug": f"merch-{i}", "name": f"鸣潮 联名周边手办 #{i}", "community": "wuwa",
+             "status": "active", "summary": "官方已公布预售安排，预计下季度陆续发货。"}
+            for i in range(600)
+        ]
+    }
+    calls = 0
+
+    async def loader():
+        nonlocal calls
+        calls += 1
+        return payload
+
+    r1 = await cached_dict(redis, "pubcache:v1:products:all", 60, loader)
+    r2 = await cached_dict(redis, "pubcache:v1:products:all", 60, loader)
+    assert r1 == payload and r2 == payload
+    assert calls == 1
+    stored, ttl = redis.store["pubcache:v1:products:all"]
+    assert ttl == 60
+    assert stored.startswith("gz:")
+    # 压缩 + base64 后远小于原始 ~110KB JSON
+    assert len(stored.encode("utf-8")) < 20_000
+
+
+async def test_legacy_uncompressed_cache_value_still_decodes():
+    redis = _FakeRedis()
+    redis.store["pubcache:v1:legacy"] = ('{"ok":true,"from":"legacy"}', 60)
+    res = await cached_dict(redis, "pubcache:v1:legacy", 60, lambda: asyncio.sleep(0, result={"ok": False}))
+    assert res == {"ok": True, "from": "legacy"}
 
 
 async def test_singleflight_coalesces_concurrent_cache_misses():
