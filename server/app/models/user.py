@@ -11,6 +11,9 @@ from app.models.base import Base
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index("ix_users_feed_token", "feed_token", unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True)
@@ -25,6 +28,9 @@ class User(Base):
     # 开启时记录当前修订位置，只处理之后发生的变化。
     instant_notification_cursor: Mapped[int | None] = mapped_column(Integer)
     instant_fulfillment_cursor: Mapped[int | None] = mapped_column(Integer)
+    webhook_notification_cursor: Mapped[int | None] = mapped_column(Integer)
+    # 个人过滤 RSS 令牌（可随时重置，不与登录会话耦合）
+    feed_token: Mapped[str | None] = mapped_column(String(64))
     feed_preferences: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active/banned
     banned_reason: Mapped[str | None] = mapped_column(Text)
@@ -33,6 +39,9 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     sessions: Mapped[list["UserSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    webhooks: Mapped[list["UserWebhook"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -121,3 +130,32 @@ class NotificationDelivery(Base):
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class UserWebhook(Base):
+    """用户自配 Webhook 推送通道（Bark / 飞书 / 钉钉 / 企业微信 / Discord / ntfy / 通用 JSON）。"""
+
+    __tablename__ = "user_webhooks"
+    __table_args__ = (
+        Index("ix_user_webhooks_user_enabled", "user_id", "enabled"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", name="fk_user_webhooks_user_id_users", ondelete="CASCADE"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(64))
+    provider: Mapped[str] = mapped_column(String(24), default="generic")
+    url: Mapped[str] = mapped_column(String(512))
+    secret: Mapped[str | None] = mapped_column(String(256))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # keywords: 命中个人关注词的重要事件；all: 个人偏好分区内的所有重要官方事件
+    events_mode: Mapped[str] = mapped_column(String(16), default="keywords")
+    last_status: Mapped[str | None] = mapped_column(String(16))
+    last_error: Mapped[str | None] = mapped_column(String(255))
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="webhooks")

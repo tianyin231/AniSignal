@@ -92,10 +92,13 @@ onBeforeUnmount(center.dispose)
       <AccountPreferences class="lg:col-start-2 lg:row-start-2" @saved="onPreferencesSaved" />
     </div>
     <div v-else-if="tab === 'notify'" class="grid items-start gap-5 lg:grid-cols-2">
-      <AccountEmail @add-keyword="focusKeywords" />
+      <div class="space-y-5">
+        <AccountEmail @add-keyword="focusKeywords" />
+        <AccountWebhooks />
+      </div>
       <div class="space-y-5">
         <AccountBotAccess />
-        <RssSubscribe compact />
+        <RssSubscribe compact personal />
       </div>
     </div>
     <AccountMonitors v-else-if="tab === 'custom'" />

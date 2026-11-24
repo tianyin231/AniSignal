@@ -171,6 +171,51 @@ async def monthly_calendar(
     return await calendar_month(session, community, month, exclude=request_hidden(request))
 
 
+@router.get("/calendar.ics")
+async def calendar_subscription_feed(
+    request: Request,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
+    session: AsyncSession = Depends(get_session),
+):
+    """整分区/全站活动日历订阅流（支持 webcal:// 与系统日历自动刷新）。"""
+    from app.services.calendar import calendar_entries, calendar_feed_ics
+
+    cache = getattr(request.app.state, "redis", None)
+    base = public_site_base(request)
+    cache_key = f"{CACHE_PREFIX}calendar_ics:{community}"
+
+    async def _load() -> dict:
+        now = utcnow()
+        entries = await calendar_entries(
+            session,
+            community,
+            now=now,
+            window_start=now - timedelta(days=14),
+            window_end=now + timedelta(days=120),
+        )
+        all_mode = is_all_community(community)
+        label = "全部分区" if all_mode else (COMMUNITIES.get(community).label if community in COMMUNITIES else community)
+        labels = {key: meta.label for key, meta in COMMUNITIES.items()}
+        ics = calendar_feed_ics(
+            entries,
+            cal_name=f"AniSignal 活动日历 · {label}",
+            community_labels=labels,
+            site_base=base,
+            include_community_prefix=all_mode,
+        )
+        return {"ics": ics}
+
+    payload = await cached_dict(cache, cache_key, PUBLIC_CACHE_SECONDS, _load)
+    return Response(
+        payload["ics"],
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": f'inline; filename="anisignal-{community}.ics"',
+            "Cache-Control": "public, max-age=300",
+        },
+    )
+
+
 @router.get("/calendar/{schedule_id}.ics")
 async def export_calendar(schedule_id: int, session: AsyncSession = Depends(get_session)):
     from app.models import ContentSchedule
@@ -512,6 +557,49 @@ async def sitemap(request: Request, session: AsyncSession = Depends(get_session)
     return Response(content=xml, media_type="application/xml; charset=utf-8")
 
 
+def _render_rss_xml(
+    items: list[PublicContentItem],
+    *,
+    title: str,
+    link: str,
+    description: str,
+    base: str,
+) -> str:
+    from email.utils import format_datetime
+    from xml.sax.saxutils import escape
+
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0">',
+        "<channel>",
+        f"<title>{escape(title)}</title>",
+        f"<link>{escape(link)}</link>",
+        f"<description>{escape(description)}</description>",
+        "<generator>AniSignal</generator>",
+    ]
+    for item in items:
+        published = item.published_at or item.collected_at
+        pub_date = format_datetime(published.replace(tzinfo=timezone.utc))
+        item_link = item.url or f"{base}/contents/{item.id}"
+        parts.extend(
+            [
+                "<item>",
+                f"<title>{escape(item.title or item.external_id)}</title>",
+                f"<link>{escape(item_link)}</link>",
+                f"<guid>{escape(f'anisignal-content-{item.id}')}</guid>",
+                f"<pubDate>{pub_date}</pubDate>",
+                f"<description>{escape(item.text_excerpt or item.title or '')}</description>",
+            ]
+        )
+        if item.cover:
+            parts.append(
+                f'<enclosure url="{escape(item.cover)}" type="image/jpeg" length="0"/>'
+            )
+        parts.append("</item>")
+    parts.extend(["</channel>", "</rss>"])
+    return "\n".join(parts)
+
+
 @router.get("/rss.xml", response_class=Response)
 async def rss_feed(
     request: Request,
@@ -521,9 +609,6 @@ async def rss_feed(
     session: AsyncSession = Depends(get_session),
 ):
     """RSS 2.0 订阅源：默认最新内容流，5 分钟进程内缓存。"""
-    from xml.sax.saxutils import escape
-    from email.utils import format_datetime
-
     cache_key = f"{community}|{q or ''}|{limit}"
     cached = _RSS_CACHE.get(cache_key)
     if cached and cached[0] > time.time():
@@ -548,41 +633,151 @@ async def rss_feed(
     )
     base = public_site_base(request)
     label = "跨分区聚合" if is_all_community(community) else community
-    parts = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<rss version="2.0">',
-        "<channel>",
-        f"<title>AniSignal 情报流 · {escape(label)}</title>",
-        f"<link>{escape(base)}</link>",
-        "<description>游戏动态与商品履约追踪</description>",
-        "<generator>AniSignal</generator>",
-    ]
-    for item in listing.items:
-        published = item.published_at or item.collected_at
-        pub_date = format_datetime(published.replace(tzinfo=timezone.utc))
-        link = item.url or f"{base}/contents/{item.id}"
-        parts.extend(
-            [
-                "<item>",
-                f"<title>{escape(item.title or item.external_id)}</title>",
-                f"<link>{escape(link)}</link>",
-                f"<guid>{escape(f'anisignal-content-{item.id}')}</guid>",
-                f"<pubDate>{pub_date}</pubDate>",
-                f"<description>{escape(item.text_excerpt or item.title or '')}</description>",
-            ]
-        )
-        if item.cover:
-            parts.append(
-                f'<enclosure url="{escape(item.cover)}" type="image/jpeg" length="0"/>'
-            )
-        parts.append("</item>")
-    parts.extend(["</channel>", "</rss>"])
-    xml = "\n".join(parts)
+    xml = _render_rss_xml(
+        listing.items,
+        title=f"AniSignal 情报流 · {label}",
+        link=base,
+        description="游戏动态与商品履约追踪",
+        base=base,
+    )
     _RSS_CACHE[cache_key] = (time.time() + _RSS_TTL_SECONDS, xml)
     if len(_RSS_CACHE) > 32:
         for stale_key in [k for k, v in _RSS_CACHE.items() if v[0] <= time.time()]:
             _RSS_CACHE.pop(stale_key, None)
     return Response(content=xml, media_type="application/rss+xml; charset=utf-8")
+
+
+@router.get("/rss/personal/{token}.xml", response_class=Response)
+async def personal_rss_feed(
+    token: str,
+    request: Request,
+    mode: str = Query(default="all", pattern="^(all|keywords)$"),
+    limit: int = Query(default=30, ge=1, le=50),
+    session: AsyncSession = Depends(get_session),
+):
+    """个人专属过滤 RSS：按账号的分区偏好、屏蔽词/屏蔽分区与可选关注词实时过滤。"""
+    from html import unescape
+    from sqlalchemy import or_
+
+    from app.models import User, UserKeyword
+    from app.services import settings as settings_service
+    from app.services.classify import HIDDEN_CATEGORIES
+    from app.services.feed_preferences import preference_conditions
+    from app.services.hidden_communities import account_blocks
+
+    cleaned_token = token.strip()
+    if not cleaned_token or len(cleaned_token) > 64:
+        raise HTTPException(status_code=404, detail="订阅源不存在")
+    user = await session.scalar(
+        select(User).where(User.feed_token == cleaned_token, User.status == "active")
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="订阅源不存在")
+
+    base = public_site_base(request)
+    prefs = user.feed_preferences or {}
+    conditions: list = [
+        RawContent.hidden.is_(False),
+        ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None),
+        *preference_conditions(prefs),
+    ]
+    blocks = account_blocks(user)
+    # 仅在用户未显式限定「只看这些分区」时应用网站屏蔽分区，防止矛盾过滤。
+    if not prefs.get("communities") and blocks.communities:
+        conditions.append(RawContent.community.notin_(blocks.communities))
+    conditions.extend(blocks.platform_conditions(RawContent.platform, RawContent.community))
+
+    hidden_platforms = settings_service.hidden_platforms(
+        await settings_service.get_media_visibility(session)
+    )
+    if hidden_platforms:
+        conditions.append(RawContent.platform.notin_(hidden_platforms))
+
+    if mode == "keywords":
+        keywords = list(
+            await session.scalars(
+                select(UserKeyword)
+                .where(UserKeyword.user_id == user.id, UserKeyword.enabled.is_(True))
+                .order_by(UserKeyword.id)
+            )
+        )
+        if not keywords:
+            xml = _render_rss_xml(
+                [],
+                title="AniSignal 个人关注流（关键词）",
+                link=f"{base}/account",
+                description="暂未启用关注关键词",
+                base=base,
+            )
+            return Response(
+                content=xml,
+                media_type="application/rss+xml; charset=utf-8",
+                headers={"Cache-Control": "private, max-age=120"},
+            )
+        conditions.append(
+            or_(
+                *[
+                    func.lower(func.coalesce(ContentVersion.title, "")).contains(
+                        k.keyword.lower(), autoescape=True
+                    )
+                    for k in keywords
+                ]
+            )
+        )
+
+    rows = await session.execute(
+        select(RawContent, Source, ContentVersion)
+        .options(defer(RawContent.raw_json))
+        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+        .outerjoin(Source, Source.id == RawContent.source_id)
+        .where(*conditions)
+        .order_by(func.coalesce(RawContent.published_at, RawContent.collected_at).desc(), RawContent.id.desc())
+        .limit(limit)
+    )
+    items: list[PublicContentItem] = []
+    for raw, source, version in rows:
+        normalized = (version.normalized_json if version else None) or {}
+        media = normalized.get("media") or []
+        text_body = (version.text if version else None) or str(normalized.get("text") or "")
+        excerpt = text_body.strip()
+        if "<" in excerpt and ">" in excerpt:
+            excerpt = re.sub(r"<[^>]+>", "", unescape(excerpt))
+        items.append(
+            PublicContentItem(
+                id=raw.id,
+                platform=raw.platform,
+                content_type=raw.content_type,
+                external_id=raw.external_id,
+                url=raw.url,
+                title=(version.title if version else None) or raw.external_id,
+                text_excerpt=excerpt[:220] if excerpt else None,
+                cover=media[0] if media and isinstance(media[0], str) else None,
+                source_name=source.name if source else None,
+                source_identity=source.identity if source else None,
+                identity=source.identity if source else "unknown",
+                published_at=raw.published_at,
+                collected_at=raw.collected_at,
+                metrics=None,
+                matched_keywords=raw.matched_keywords or [],
+                category=version.category if version else None,
+                community=getattr(raw, "community", None) or DEFAULT_COMMUNITY,
+                preview_mode=_preview_mode(text_body, media, raw.url),
+            )
+        )
+
+    mode_label = "关键词命中" if mode == "keywords" else "个人偏好过滤"
+    xml = _render_rss_xml(
+        items,
+        title=f"AniSignal 个人订阅 · {mode_label}",
+        link=f"{base}/account",
+        description=f"按个人偏好与降噪规则过滤的专属情报源（{mode_label}）",
+        base=base,
+    )
+    return Response(
+        content=xml,
+        media_type="application/rss+xml; charset=utf-8",
+        headers={"Cache-Control": "private, max-age=120"},
+    )
 
 
 @router.get("/sources", response_model=PublicSourceList)

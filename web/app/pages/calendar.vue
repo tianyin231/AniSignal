@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-vue-next'
+import { ArrowUpRight, CalendarPlus, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, RefreshCw } from 'lucide-vue-next'
 import { communityClasses, communityMeta, useHiddenCommunities } from '~/composables/useGameSection'
 import type { CalendarEntry } from '~/composables/usePublicApi'
 import { beijingDay, calendarDays, shiftCalendarMonth, type CalendarMilestone } from '~/utils/calendar'
 import { fmtTime } from '~/utils/admin-types'
+import { copyText } from '~/utils/clipboard'
 import { decodeEntities } from '~/utils/text'
 
 useSeoMeta({ title: '活动日历 · AniSignal', description: '游戏活动、版本更新、周边预售与抽奖截止的时间表。' })
@@ -100,6 +101,27 @@ function timeRange(item: CalendarEntry) {
   if (item.end_at) return `${format(item.start_at)} — ${format(item.end_at)}`
   return `${format(item.start_at)} 起`
 }
+
+const subscribeOpen = ref(false)
+const icsCopied = ref(false)
+const siteOrigin = ref('')
+let copyTimer: ReturnType<typeof setTimeout> | undefined
+onMounted(() => { siteOrigin.value = window.location.origin })
+onBeforeUnmount(() => clearTimeout(copyTimer))
+const icsPath = computed(() => `/calendar.ics?community=${community.value}`)
+const icsHttpUrl = computed(() => `${siteOrigin.value}${icsPath.value}`)
+const webcalUrl = computed(() => {
+  if (!siteOrigin.value) return icsPath.value
+  return `${siteOrigin.value.replace(/^https?:/, 'webcal:')}${icsPath.value}`
+})
+const activeFilterLabel = computed(() => filters.value.find(f => f.key === community.value)?.label ?? '全部分区')
+async function copyIcsUrl() {
+  if (await copyText(icsHttpUrl.value || icsPath.value)) {
+    icsCopied.value = true
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { icsCopied.value = false }, 2000)
+  }
+}
 </script>
 
 <template>
@@ -123,10 +145,41 @@ function timeRange(item: CalendarEntry) {
           {{ filter.label }}
         </button>
       </div>
-      <button type="button" class="grid size-11 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-chip hover:text-ink" aria-label="刷新日历" :disabled="status === 'pending'" @click="refresh()">
-        <RefreshCw :size="17" :class="{ 'animate-spin': status === 'pending' }" aria-hidden="true" />
-      </button>
+      <div class="flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          class="inline-flex h-10 items-center gap-1.5 rounded-full border border-line bg-card px-3.5 text-[13px] font-medium text-ink-2 transition-colors hover:bg-chip hover:text-ink"
+          :aria-expanded="subscribeOpen"
+          aria-controls="calendar-subscribe-bar"
+          @click="subscribeOpen = !subscribeOpen"
+        >
+          <CalendarPlus :size="15" aria-hidden="true" />
+          订阅日历
+        </button>
+        <button type="button" class="grid size-11 shrink-0 place-items-center rounded-full text-muted transition-colors hover:bg-chip hover:text-ink" aria-label="刷新日历" :disabled="status === 'pending'" @click="refresh()">
+          <RefreshCw :size="17" :class="{ 'animate-spin': status === 'pending' }" aria-hidden="true" />
+        </button>
+      </div>
     </header>
+
+    <section v-if="subscribeOpen" id="calendar-subscribe-bar" class="panel mb-5 flex flex-wrap items-center gap-2.5 px-4 py-3" aria-label="日历订阅地址">
+      <span class="shrink-0 text-xs font-semibold text-ink">{{ activeFilterLabel }} · .ics</span>
+      <input
+        :value="icsHttpUrl || icsPath"
+        readonly
+        aria-label="日历订阅地址"
+        class="input mono h-9 min-w-[200px] flex-1 text-xs"
+        @focus="($event.target as HTMLInputElement).select()"
+      >
+      <div class="flex shrink-0 items-center gap-2">
+        <button type="button" class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line px-3 text-xs font-semibold text-ink-2 transition-colors hover:bg-chip hover:text-ink" @click="copyIcsUrl">
+          <Check v-if="icsCopied" :size="14" /><Copy v-else :size="14" />{{ icsCopied ? '已复制' : '复制地址' }}
+        </button>
+        <a :href="webcalUrl" class="btn-primary inline-flex h-9 items-center gap-1.5 px-3 text-xs">
+          <CalendarPlus :size="14" aria-hidden="true" />系统日历打开
+        </a>
+      </div>
+    </section>
 
     <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
       <section class="panel min-w-0 overflow-hidden" :aria-label="`${monthLabel}月历`" :aria-busy="status === 'pending'">

@@ -1,6 +1,6 @@
 import { createError, defineEventHandler, getRequestHeader, getRequestIP, proxyRequest } from 'h3'
 
-const ROOT_API_PATHS = new Set(['/rss.xml', '/sitemap.xml', '/robots.txt'])
+const ROOT_API_PATHS = new Set(['/rss.xml', '/calendar.ics', '/sitemap.xml', '/robots.txt'])
 
 export default defineEventHandler((event) => {
   const rawPath = event.path || '/'

@@ -1,9 +1,11 @@
 """账号中心 API：关键词监控 CRUD、个性化关注流、账号概览。"""
 
 import logging
+import secrets
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy import literal, or_, select, func, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +24,7 @@ from app.models import (
     Source,
     User,
     UserKeyword,
+    UserWebhook,
 )
 from app.schemas.api import PublicContentItem, PublicContentList
 from app.services.notifications import beijing_today, create_delivery, enabled_keywords
@@ -848,3 +851,241 @@ async def delete_custom_feed(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
     await session.delete(feed)
     await session.commit()
+
+
+# ---------- 个人专属 RSS 令牌 ----------
+
+
+def _feed_token_view(token: str) -> dict:
+    return {
+        "token": token,
+        "all_path": f"/api/rss/personal/{token}.xml",
+        "keywords_path": f"/api/rss/personal/{token}.xml?mode=keywords",
+    }
+
+
+@router.get("/feed-token")
+async def get_feed_token(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """获取或首次签发个人专属 RSS 令牌。"""
+    if not user.feed_token:
+        user.feed_token = secrets.token_urlsafe(24)
+        await session.commit()
+    return _feed_token_view(user.feed_token)
+
+
+@router.post("/feed-token/rotate")
+async def rotate_feed_token(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """重置个人 RSS 令牌，旧订阅地址立即失效。"""
+    user.feed_token = secrets.token_urlsafe(24)
+    await session.commit()
+    return _feed_token_view(user.feed_token)
+
+
+# ---------- 通用用户 Webhook 推送 ----------
+
+
+class WebhookCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    provider: str = Field(default="generic", max_length=24)
+    url: str = Field(min_length=8, max_length=512)
+    secret: str | None = Field(default=None, max_length=256)
+    events_mode: str = Field(default="keywords", max_length=16)
+    enabled: bool = True
+
+
+class WebhookUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    provider: str | None = Field(default=None, max_length=24)
+    url: str | None = Field(default=None, min_length=8, max_length=512)
+    secret: str | None = Field(default=None, max_length=256)
+    clear_secret: bool = False
+    events_mode: str | None = Field(default=None, max_length=16)
+    enabled: bool | None = None
+
+
+def _webhook_view(wh: UserWebhook) -> dict:
+    return {
+        "id": wh.id,
+        "name": wh.name,
+        "provider": wh.provider,
+        "url": wh.url,
+        "has_secret": bool(wh.secret),
+        "enabled": wh.enabled,
+        "events_mode": wh.events_mode,
+        "last_status": wh.last_status,
+        "last_error": wh.last_error,
+        "last_sent_at": wh.last_sent_at,
+        "created_at": wh.created_at,
+    }
+
+
+@router.get("/webhooks")
+async def list_webhooks(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.webhooks import MAX_WEBHOOKS
+
+    rows = list(
+        await session.scalars(
+            select(UserWebhook)
+            .where(UserWebhook.user_id == user.id)
+            .order_by(UserWebhook.id.desc())
+        )
+    )
+    return {
+        "items": [_webhook_view(wh) for wh in rows],
+        "max_webhooks": MAX_WEBHOOKS,
+    }
+
+
+@router.post("/webhooks", status_code=status.HTTP_201_CREATED)
+async def create_webhook(
+    body: WebhookCreateIn,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.webhooks import (
+        MAX_WEBHOOKS,
+        WEBHOOK_MODES,
+        WEBHOOK_PROVIDERS,
+        WebhookError,
+        validate_webhook_url_static,
+    )
+
+    if not user.is_verified:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "请先完成邮箱验证后再添加 Webhook")
+    provider = body.provider.strip().lower()
+    if provider not in WEBHOOK_PROVIDERS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "不支持的 Webhook 渠道类型")
+    mode = body.events_mode.strip().lower()
+    if mode not in WEBHOOK_MODES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "推送范围仅支持 keywords 或 all")
+    try:
+        clean_url = validate_webhook_url_static(body.url)
+    except WebhookError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    existing_count = (
+        await session.scalar(
+            select(func.count(UserWebhook.id)).where(UserWebhook.user_id == user.id)
+        )
+        or 0
+    )
+    if existing_count >= MAX_WEBHOOKS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"每个账号最多添加 {MAX_WEBHOOKS} 个 Webhook 通道"
+        )
+
+    wh = UserWebhook(
+        user_id=user.id,
+        name=body.name.strip()[:64] or "我的 Webhook",
+        provider=provider,
+        url=clean_url,
+        secret=(body.secret or "").strip() or None,
+        enabled=bool(body.enabled),
+        events_mode=mode,
+    )
+    session.add(wh)
+    # 首次接入 Webhook 时把游标设到当前最新修订，不回放历史事件。
+    if user.webhook_notification_cursor is None:
+        user.webhook_notification_cursor = (
+            await session.scalar(
+                select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1)
+            )
+            or 0
+        )
+    await session.commit()
+    await session.refresh(wh)
+    return _webhook_view(wh)
+
+
+@router.patch("/webhooks/{webhook_id}")
+async def update_webhook(
+    webhook_id: int,
+    body: WebhookUpdateIn,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.webhooks import (
+        WEBHOOK_MODES,
+        WEBHOOK_PROVIDERS,
+        WebhookError,
+        validate_webhook_url_static,
+    )
+
+    wh = await session.get(UserWebhook, webhook_id)
+    if wh is None or wh.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Webhook 不存在")
+    if body.name is not None:
+        cleaned = body.name.strip()
+        if not cleaned:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "名称不能为空")
+        wh.name = cleaned[:64]
+    if body.provider is not None:
+        provider = body.provider.strip().lower()
+        if provider not in WEBHOOK_PROVIDERS:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "不支持的 Webhook 渠道类型")
+        wh.provider = provider
+    if body.url is not None:
+        try:
+            wh.url = validate_webhook_url_static(body.url)
+        except WebhookError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if body.clear_secret:
+        wh.secret = None
+    elif body.secret is not None and body.secret.strip():
+        wh.secret = body.secret.strip()
+    if body.events_mode is not None:
+        mode = body.events_mode.strip().lower()
+        if mode not in WEBHOOK_MODES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "推送范围仅支持 keywords 或 all")
+        wh.events_mode = mode
+    if body.enabled is not None:
+        wh.enabled = bool(body.enabled)
+        if wh.enabled and user.webhook_notification_cursor is None:
+            user.webhook_notification_cursor = (
+                await session.scalar(
+                    select(EventRevision.id).order_by(EventRevision.id.desc()).limit(1)
+                )
+                or 0
+            )
+    await session.commit()
+    await session.refresh(wh)
+    return _webhook_view(wh)
+
+
+@router.delete("/webhooks/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_webhook(
+    webhook_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    wh = await session.get(UserWebhook, webhook_id)
+    if wh is None or wh.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Webhook 不存在")
+    await session.delete(wh)
+    await session.commit()
+
+
+@router.post("/webhooks/{webhook_id}/test")
+async def test_my_webhook(
+    webhook_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.services.webhooks import WebhookError, test_webhook
+
+    wh = await session.get(UserWebhook, webhook_id)
+    if wh is None or wh.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Webhook 不存在")
+    try:
+        return await test_webhook(session, wh)
+    except WebhookError as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc

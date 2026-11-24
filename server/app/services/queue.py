@@ -233,8 +233,11 @@ class LocalQueue(BaseQueue):
             return None
 
         async def run() -> None:
+            from app.services.webhooks import run_webhook_notifications
+
             async with SessionLocal() as session:
                 await run_instant_notifications(session)
+                await run_webhook_notifications(session)
 
         self._instant_task = asyncio.create_task(run())
         self._tasks.add(self._instant_task)

@@ -106,37 +106,160 @@ async def calendar_groups(session: AsyncSession, community: str, *, exclude: tup
     return {key: values[:5 if key in {"recent", "ended"} else 10] for key, values in groups.items()}
 
 
-def calendar_ics(schedule: ContentSchedule, url: str | None) -> str:
-    """RFC 5545：UTC 时刻、全天日期、CRLF 和 UTF-8 按字节折行。"""
-    def text(value: str) -> str:
-        return value.replace("\\", "\\\\").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n").replace(";", "\\;").replace(",", "\\,")
+_ICS_KIND_LABELS = {
+    "activity": "活动",
+    "maintenance": "更新维护",
+    "pool": "卡池",
+    "broadcast": "直播",
+    "delay": "变更",
+    "deadline": "截止",
+}
 
-    def fold(line: str) -> str:
-        parts, current = [], ""
-        for char in line:
-            if len((current + char).encode("utf-8")) > 75:
-                parts.append(current)
-                current = " "
-            current += char
-        return "\r\n".join([*parts, current])
 
-    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//AniSignal//Game Calendar//ZH", "CALSCALE:GREGORIAN", "BEGIN:VEVENT",
-             f"UID:schedule-{schedule.id}@anisignal", f"DTSTAMP:{utcnow():%Y%m%dT%H%M%SZ}", f"SUMMARY:{text(schedule.title)}"]
-    start, end = schedule.start_at, schedule.end_at
-    if schedule.all_day:
-        start_day = (start + timedelta(hours=8)).date()
+def _ics_escape(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", "\\n")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+    )
+
+
+def _ics_fold(line: str) -> str:
+    parts, current = [], ""
+    for char in line:
+        if len((current + char).encode("utf-8")) > 75:
+            parts.append(current)
+            current = " "
+        current += char
+    return "\r\n".join([*parts, current])
+
+
+def _ics_vevent_lines(
+    *,
+    schedule_id: int,
+    title: str,
+    kind: str,
+    start_at: datetime,
+    end_at: datetime | None,
+    all_day: bool,
+    url: str | None,
+    stamp: str,
+    summary_prefix: str = "",
+    detail_url: str | None = None,
+) -> list[str]:
+    summary = f"{summary_prefix}{title}" if summary_prefix else title
+    lines = [
+        "BEGIN:VEVENT",
+        f"UID:schedule-{schedule_id}@anisignal",
+        f"DTSTAMP:{stamp}",
+        f"SUMMARY:{_ics_escape(summary)}",
+    ]
+    if all_day:
+        start_day = (start_at + timedelta(hours=8)).date()
         lines.append(f"DTSTART;VALUE=DATE:{start_day:%Y%m%d}")
-        if end:
+        if end_at:
             # 公告的结束日期包含当天，iCalendar 的 DTEND 不包含当天。
-            end_day = (end + timedelta(hours=8)).date() + timedelta(days=1)
+            end_day = (end_at + timedelta(hours=8)).date() + timedelta(days=1)
             lines.append(f"DTEND;VALUE=DATE:{end_day:%Y%m%d}")
     else:
-        lines.append(f"DTSTART:{start:%Y%m%dT%H%M%SZ}")
-        if end:
-            lines.append(f"DTEND:{end:%Y%m%dT%H%M%SZ}")
-    description = "公告中的截止时间。" if schedule.kind == "deadline" else "结束时间未公布。" if end is None else "以来源公告为准。"
-    if url:
-        description += f"\n来源：{url}"
-        lines.append(f"URL:{url.replace(chr(13), '').replace(chr(10), '')}")
-    lines.extend([f"DESCRIPTION:{text(description)}", "TRANSP:TRANSPARENT", "END:VEVENT", "END:VCALENDAR"])
-    return "\r\n".join(fold(line) for line in lines) + "\r\n"
+        lines.append(f"DTSTART:{start_at:%Y%m%dT%H%M%SZ}")
+        if end_at:
+            lines.append(f"DTEND:{end_at:%Y%m%dT%H%M%SZ}")
+    kind_label = _ICS_KIND_LABELS.get(kind)
+    if kind_label:
+        lines.append(f"CATEGORIES:{_ics_escape(kind_label)}")
+    description = (
+        "公告中的截止时间。"
+        if kind == "deadline"
+        else "结束时间未公布。"
+        if end_at is None
+        else "以来源公告为准。"
+    )
+    clean_url = url.replace("\r", "").replace("\n", "") if url else None
+    clean_detail = detail_url.replace("\r", "").replace("\n", "") if detail_url else None
+    if clean_url:
+        description += f"\n来源：{clean_url}"
+    if clean_detail and clean_detail != clean_url:
+        description += f"\n站内详情：{clean_detail}"
+    event_url = clean_url or clean_detail
+    if event_url:
+        lines.append(f"URL:{event_url}")
+    lines.extend([f"DESCRIPTION:{_ics_escape(description)}", "TRANSP:TRANSPARENT", "END:VEVENT"])
+    return lines
+
+
+def calendar_ics(schedule: ContentSchedule, url: str | None) -> str:
+    """RFC 5545：UTC 时刻、全天日期、CRLF 和 UTF-8 按字节折行。"""
+    stamp = f"{utcnow():%Y%m%dT%H%M%SZ}"
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//AniSignal//Game Calendar//ZH",
+        "CALSCALE:GREGORIAN",
+        *_ics_vevent_lines(
+            schedule_id=schedule.id,
+            title=schedule.title,
+            kind=schedule.kind,
+            start_at=schedule.start_at,
+            end_at=schedule.end_at,
+            all_day=schedule.all_day,
+            url=url,
+            stamp=stamp,
+        ),
+        "END:VCALENDAR",
+    ]
+    return "\r\n".join(_ics_fold(line) for line in lines) + "\r\n"
+
+
+def calendar_feed_ics(
+    entries: list[dict],
+    *,
+    cal_name: str,
+    community_labels: dict[str, str] | None = None,
+    site_base: str | None = None,
+    include_community_prefix: bool = False,
+    limit: int = 200,
+) -> str:
+    """整分区/全站 Webcal 订阅流（RFC 5545 + RFC 7986），支持 Apple/Google/Outlook 自动刷新。"""
+    stamp = f"{utcnow():%Y%m%dT%H%M%SZ}"
+    base = (site_base or "").rstrip("/")
+    labels = community_labels or {}
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//AniSignal//Game Calendar//ZH",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{_ics_escape(cal_name)}",
+        f"NAME:{_ics_escape(cal_name)}",
+        "X-WR-TIMEZONE:Asia/Shanghai",
+        "REFRESH-INTERVAL;VALUE=DURATION:PT6H",
+        "X-PUBLISHED-TTL:PT6H",
+    ]
+    ordered = sorted(entries, key=lambda e: (e["start_at"], e["id"]))[:limit]
+    for entry in ordered:
+        prefix = ""
+        if include_community_prefix:
+            label = labels.get(entry.get("community") or "")
+            if label:
+                prefix = f"[{label}] "
+        detail = f"{base}/contents/{entry['content_id']}" if base and entry.get("content_id") else None
+        lines.extend(
+            _ics_vevent_lines(
+                schedule_id=entry["id"],
+                title=entry["title"],
+                kind=entry["kind"],
+                start_at=entry["start_at"],
+                end_at=entry.get("end_at"),
+                all_day=bool(entry.get("all_day")),
+                url=entry.get("url"),
+                stamp=stamp,
+                summary_prefix=prefix,
+                detail_url=detail,
+            )
+        )
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(_ics_fold(line) for line in lines) + "\r\n"

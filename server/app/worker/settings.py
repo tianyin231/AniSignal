@@ -65,6 +65,7 @@ async def send_instant_notifications(ctx) -> dict:
     import secrets
     from app.db import SessionLocal
     from app.services.instant_notifications import run_instant_notifications
+    from app.services.webhooks import run_webhook_notifications
 
     token = secrets.token_hex(16)
     key = "anisignal:instant-notifications-lock"
@@ -72,7 +73,9 @@ async def send_instant_notifications(ctx) -> dict:
         return {"status": "busy"}
     try:
         async with SessionLocal() as session:
-            return await run_instant_notifications(session)
+            result = await run_instant_notifications(session)
+            result["webhooks"] = await run_webhook_notifications(session)
+            return result
     finally:
         await ctx["redis"].eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0", 1, key, token)
 
