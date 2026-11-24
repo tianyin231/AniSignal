@@ -338,20 +338,37 @@ async def acquire_aggregation_lock(session: AsyncSession) -> None:
     await session.execute(select(SiteSetting.key).where(SiteSetting.key == key).with_for_update())
 
 
-async def run_aggregation(session: AsyncSession, *, product_snapshots: dict | None = None) -> AggStats:
-    """全量扫描并维护事件（ensure 语义），调用方负责 commit。"""
+async def run_aggregation(
+    session: AsyncSession,
+    *,
+    product_snapshots: dict | None = None,
+    communities: set[str] | None = None,
+) -> AggStats:
+    """全量或按指定游戏分区扫描并维护事件（ensure 语义），调用方负责 commit。"""
     from app.services.classify import seed_defaults
+
+    game_communities = {key for key, meta in COMMUNITIES.items() if meta.domain == "game"}
+    target_communities = (
+        game_communities & set(communities) if communities is not None else game_communities
+    )
+    if not target_communities:
+        return AggStats()
 
     # 不串行网络采集或模型调用，只串行对账本身。
     await acquire_aggregation_lock(session)
     stats = AggStats()
     await seed_defaults(session, commit=False)
     # 资讯分区走独立编辑链路，不参与事件和商品归并。
-    contents = await load_classified_contents(session, communities={key for key, meta in COMMUNITIES.items() if meta.domain == "game"})
+    contents = await load_classified_contents(session, communities=target_communities)
 
-    await _aggregate_official(session, contents, stats)
+    await _aggregate_official(
+        session, contents, stats, communities=target_communities if communities is not None else None
+    )
 
-    products = list((await session.execute(select(Product).order_by(Product.id).with_for_update().execution_options(populate_existing=True))).scalars())
+    product_query = select(Product).order_by(Product.id).with_for_update().execution_options(populate_existing=True)
+    if communities is not None:
+        product_query = product_query.where(Product.community.in_(target_communities))
+    products = list((await session.execute(product_query)).scalars())
     by_community: dict[str, list[ContentRow]] = {}
     for row in contents:
         by_community.setdefault(row.community, []).append(row)
@@ -359,19 +376,18 @@ async def run_aggregation(session: AsyncSession, *, product_snapshots: dict | No
     for product in products:
         await _aggregate_product(session, product, by_community.get(product.community or DEFAULT_COMMUNITY, []), stats,
                                  before=(product_snapshots or {}).get(product.id), ai_links=links.get(product.id, {}))
-    await _backfill_facts(session, stats)
+    await _backfill_facts(session, stats, communities=target_communities if communities is not None else None)
     return stats
 
 
-async def _backfill_facts(session: AsyncSession, stats: AggStats) -> None:
+async def _backfill_facts(
+    session: AsyncSession, stats: AggStats, *, communities: set[str] | None = None
+) -> None:
     """为缺少 facts 的存量事件补模板关键事实（不覆盖已有的/AI 生成的）。"""
-    events = list(
-        (
-            await session.execute(
-                select(Event).where(Event.is_active.is_(True), Event.manual_locked.is_(False))
-            )
-        ).scalars()
-    )
+    query = select(Event).where(Event.is_active.is_(True), Event.manual_locked.is_(False))
+    if communities is not None:
+        query = query.where(Event.community.in_(communities))
+    events = list((await session.execute(query)).scalars())
     missing = [e for e in events if not e.facts]
     if not missing:
         return
@@ -407,7 +423,11 @@ async def _backfill_facts(session: AsyncSession, stats: AggStats) -> None:
 
 
 async def _aggregate_official(
-    session: AsyncSession, contents: list[ContentRow], stats: AggStats
+    session: AsyncSession,
+    contents: list[ContentRow],
+    stats: AggStats,
+    *,
+    communities: set[str] | None = None,
 ) -> None:
     """按当前聚类结果精确对账官方事件，允许移除历史误挂证据。
 
@@ -433,8 +453,12 @@ async def _aggregate_official(
             tuple(sorted((left_id, right_id))) for left_id, right_id in pair_rows
         }
 
-    communities = sorted({row.community for row in official_all} | {DEFAULT_COMMUNITY})
-    for community in communities:
+    target_communities = (
+        sorted(communities)
+        if communities is not None
+        else sorted({row.community for row in official_all} | {DEFAULT_COMMUNITY})
+    )
+    for community in target_communities:
         official = [row for row in official_all if row.community == community]
         await _aggregate_official_community(
             session, community, official, semantic_pairs, stats

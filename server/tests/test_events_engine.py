@@ -447,3 +447,34 @@ def test_missing_llm_match_result_can_be_completed_conservatively():
         "confidence": 0.0,
         "reason": "模型未返回该候选，按保守策略不合并",
     }
+
+
+async def test_scoped_aggregation_only_touches_requested_communities(session):
+    """按分区增量聚合只对目标分区对账，不加载也不停用其他分区的既有事件。"""
+    await _seed_rules(session)
+    await ingest_items(
+        session,
+        "kuro_notices",
+        [{"platform": "kuro_cn", "entry": {"id": "8101", "tabTitle": {"zh-Hans": "《鸣潮》2.5版本更新公告"}}, "detail": None}],
+        community="wuwa",
+    )
+    await run_aggregation(session, communities={"wuwa"})
+    await session.commit()
+
+    wuwa_events = list(await session.scalars(select(Event).where(Event.community == "wuwa", Event.is_active.is_(True))))
+    assert len(wuwa_events) == 1
+
+    # 对另一个游戏分区单独聚合，不得把 wuwa 的现存事件误判为空而停用
+    await ingest_items(
+        session,
+        "bilibili_search",
+        [{**VIDEO_RAW, "bvid": "BVark1", "title": "明日方舟版本更新维护公告", "owner_mid": 161775300, "owner_name": "明日方舟"}],
+        community="arknights",
+    )
+    await run_aggregation(session, communities={"arknights"})
+    await session.commit()
+
+    wuwa_after = list(await session.scalars(select(Event).where(Event.community == "wuwa", Event.is_active.is_(True))))
+    ark_after = list(await session.scalars(select(Event).where(Event.community == "arknights", Event.is_active.is_(True))))
+    assert len(wuwa_after) == 1
+    assert len(ark_after) == 1

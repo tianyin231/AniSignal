@@ -393,15 +393,15 @@ async def export_configuration(session: AsyncSession = Depends(get_session), cli
 async def sync_configuration(body: ConfigurationBody, session: AsyncSession = Depends(get_session), client_id: str = Depends(require_tools)):
     from app.services.account_limits import check_bot_targets
     await check_bot_targets(session, client_id, [target.umo for target in body.targets if target.enabled])
-    await bot_preferences.validate_sources(session, client_id, body.targets)
     rows = {row.umo: row for row in await session.scalars(select(BotTarget)
             .where(BotTarget.client_id == client_id).with_for_update())}
-    for target in body.targets:
+    targets = await bot_preferences.validate_sources(session, client_id, body.targets, existing_rows=rows)
+    for target in targets:
         existing = rows.get(target.umo)
         if existing and not existing.managed_by_plugin and existing.config.get("delivery_mode") != "astrbot":
             raise HTTPException(409, "该会话仍在旧直发通道中，请先停用旧通道")
     configured = []
-    for target in body.targets:
+    for target in targets:
         target = target.model_copy(update={"delivery_mode": "astrbot"})
         row = rows.get(target.umo)
         if row is None:
@@ -412,7 +412,7 @@ async def sync_configuration(body: ConfigurationBody, session: AsyncSession = De
             await apply_target(row, target, session, check_quota=False)
         row.managed_by_plugin = True
         configured.append(row)
-    selected = {target.umo for target in body.targets}
+    selected = {target.umo for target in targets}
     for umo, row in rows.items():
         if umo not in selected and (row.managed_by_plugin or row.config.get("delivery_mode") == "astrbot"):
             await apply_target(row, TargetBody(name=row.name, umo=row.umo, enabled=False, **row.config), session)

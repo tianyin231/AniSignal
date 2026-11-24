@@ -739,3 +739,38 @@ async def test_queued_repost_is_cancelled_before_sending_without_cancelling_orig
         assert await bot.prepare_delivery(session, original, target=row, now=now)
     assert not await bot.prepare_delivery(session, duplicate, target=row, now=now)
     assert duplicate.status == 'cancelled' and '同一原帖' in duplicate.error
+
+
+async def test_merge_buffer_skips_redundant_writes_when_empty_or_congested(session, monkeypatch):
+    """空缓冲或免打扰/积压稳态期间不反复回写 site_settings，避免每分钟写放大刷爆 binlog。"""
+    now = utcnow().replace(hour=4, minute=0, second=0, microsecond=0)
+    row = await target(session, now, merge_minutes=0)
+    writes = []
+    real_save = bot.save_merge_buffer
+
+    async def spy_save(sess, target_id, buf):
+        writes.append((target_id, len(buf.get('items', [])), buf.get('flush_at')))
+        return await real_save(sess, target_id, buf)
+
+    monkeypatch.setattr(bot, 'save_merge_buffer', spy_save)
+    monkeypatch.setattr(bot, 'query_target', AsyncMock(return_value={'items': []}))
+
+    # 1. 原本为空缓冲时，不应产生无意义的空写
+    await bot.run_bot_notifications(session, now)
+    assert writes == []
+
+    # 2. 积压状态下（merge_minutes=0），稳态轮询不应反复改写 flush_at 和重写整块 JSON
+    await bot.create_delivery(session, row, 'updates', '未领走', 'congested-pending')
+    item = await bot.identify_item(session, {
+        'id': 101, 'content_ids': [101], 'title': '新的官方活动公告',
+        'text': '活动明天开启，奖励丰厚。', 'identity': 'official',
+        'community': 'wuwa', 'published_at': now, 'url': 'https://example.com/101',
+    })
+    await real_save(session, row.id, {
+        'items': [{**bot._source(item), 'buffered_at': now.isoformat()}],
+        'flush_at': now.isoformat(),
+    })
+    writes.clear()
+    await bot.run_bot_notifications(session, now + timedelta(minutes=1))
+    await bot.run_bot_notifications(session, now + timedelta(minutes=2))
+    assert writes == []

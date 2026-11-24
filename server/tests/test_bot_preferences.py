@@ -156,3 +156,56 @@ async def test_calendar_kind_selection_applies_to_query_queue_and_send(client, s
     target.config = {**target.config, 'calendar_kinds': []}
     await session.commit()
     assert not await bot.prepare_delivery(session, row, now=now)
+
+
+async def test_disabled_or_removed_previous_custom_feed_is_pruned_instead_of_blocking_bot_sync(client, session):
+    """停用本人/公共监控或删除曾绑定的监控时，同步自动剥离失效源而不 403 卡死整台 Bot；越权新增他人私有源仍 403。"""
+    user, key, target = await connect(client, session)
+    other, _ = await account(session, 'other-prune@example.com')
+    mine = await feed(session, user.id, '将停用的自建源')
+    public = await feed(session, other.id, '将停用的公共源', public=True)
+    deleted = await feed(session, user.id, '将删除的历史源')
+    other_private = await feed(session, other.id, '他人私有源', public=False)
+
+    current = (await client.get('/api/bot/configuration', headers=key)).json()['targets'][0]
+    first = await client.post('/api/bot/configuration', headers=key, json={'targets': [{
+        **current,
+        'custom_feed_ids': [mine.id, public.id, deleted.id],
+        'daily_sources': [f'feed:{mine.id}', f'feed:{deleted.id}'],
+        'updates_sources': [f'feed:{public.id}'],
+    }]})
+    assert first.status_code == 200, first.text
+
+    # 模拟线上场景：本人监控停用、公共监控停用、曾绑定源被彻底删除
+    mine.enabled = False
+    public.enabled = False
+    await session.delete(deleted)
+    await session.commit()
+
+    # 插件仍按旧本地配置同步（含 3 个失效源），服务端应自动剥离并返回 200
+    resync = await client.post('/api/bot/configuration', headers=key, json={'targets': [{
+        **current,
+        'custom_feed_ids': [mine.id, public.id, deleted.id],
+        'daily_sources': [f'feed:{mine.id}', f'feed:{deleted.id}'],
+        'updates_sources': [f'feed:{public.id}'],
+    }]})
+    assert resync.status_code == 200, resync.text
+    synced = resync.json()['targets'][0]
+    assert synced['custom_feed_ids'] == []
+    assert synced['daily_sources'] == []
+    assert synced['updates_sources'] == []
+
+    # 插件若在下一轮继续提交已停用的本人/公共源 ID，依然安全剥离而不回退 403
+    again = await client.post('/api/bot/configuration', headers=key, json={'targets': [{
+        **current,
+        'custom_feed_ids': [mine.id, public.id],
+    }]})
+    assert again.status_code == 200
+    assert again.json()['targets'][0]['custom_feed_ids'] == []
+
+    # 但企图越权新增绑定他人私有源或从未绑定过的不存在源，仍严格 403
+    for bad in [other_private.id, 999999]:
+        denied = await client.post('/api/bot/configuration', headers=key, json={'targets': [{
+            **current, 'custom_feed_ids': [bad],
+        }]})
+        assert denied.status_code == 403

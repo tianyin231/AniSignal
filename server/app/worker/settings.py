@@ -35,7 +35,10 @@ async def summarize_event(ctx, event_id: int) -> dict:
     from app.services.ai import summarize_event as run
 
     async with SessionLocal() as session:
-        return await run(session, event_id)
+        result = await run(session, event_id)
+    if result.get("status") == "deferred":
+        raise Retry(defer=65)
+    return result
 
 
 async def translate_content(ctx, content_id: int) -> dict:
@@ -44,7 +47,10 @@ async def translate_content(ctx, content_id: int) -> dict:
     from app.services.ai import translate_content as run
 
     async with SessionLocal() as session:
-        return await run(session, content_id)
+        result = await run(session, content_id)
+    if result.get("status") == "deferred":
+        raise Retry(defer=65)
+    return result
 
 
 async def repair_ai_item(ctx, task: str, ref_id: int, only_missing: bool = True) -> dict:
@@ -258,6 +264,10 @@ async def on_startup(ctx) -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    arq_logger = logging.getLogger("arq")
+    if arq_logger.handlers:
+        # arq CLI 启动时已挂独立 StreamHandler，阻止向上传播避免每条任务日志重复输出两遍。
+        arq_logger.propagate = False
     logging.getLogger("httpx").setLevel(logging.WARNING)
     from app.communities import sync_communities
     from app.db import SessionLocal

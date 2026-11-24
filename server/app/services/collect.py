@@ -51,18 +51,29 @@ def _is_deadlock(exc: BaseException) -> bool:
     return bool(args) and args[0] == 1213
 
 
-async def _aggregate_with_retry(session: AsyncSession):
+async def _aggregate_with_retry(
+    session: AsyncSession, *, communities: set[str] | None = None
+):
     """InnoDB 选中聚合作为死锁牺牲方时已回滚整个事务；入库在聚合前已单独提交，重跑聚合即可。
 
     不重跑的话，这一轮新内容的事件摘要、翻译和审核任务都不会入队，后续轮次也不会补。
     """
+    import inspect
     from sqlalchemy.exc import OperationalError
 
     from app.services.events import run_aggregation
 
+    params = inspect.signature(run_aggregation).parameters
+    accepts_communities = "communities" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
     for attempt in range(1, AGGREGATION_ATTEMPTS + 1):
         try:
-            agg = await run_aggregation(session)
+            if communities is not None and accepts_communities:
+                agg = await run_aggregation(session, communities=communities)
+            else:
+                agg = await run_aggregation(session)
             await session.commit()
             return agg
         except OperationalError as exc:
@@ -242,7 +253,11 @@ def filter_relevant(
 
 
 async def _backfill_empty_draw_dynamics(
-    session: AsyncSession, collector, limit: int = 5
+    session: AsyncSession,
+    collector,
+    limit: int = 5,
+    *,
+    touched_communities: set[str] | None = None,
 ) -> int:
     """回填空图文、转发缺失的原图；保留原始作者和统计，以新版本补齐。
 
@@ -295,6 +310,8 @@ async def _backfill_empty_draw_dynamics(
     total = 0
     for community, items in enriched_by_community.items():
         await ingest_items(session, "bilibili_dynamics", items, community=community)
+        if touched_communities is not None:
+            touched_communities.add(community)
         total += len(items)
     if total:
         logger.info(
@@ -477,11 +494,14 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 pending_ids = await pending_news_ids(session, external_ids=external_ids)
                 if pending_ids:
                     await enqueue_review_jobs(redis, pending_ids)
+            backfilled_communities: set[str] = set()
             if fetch_result.fetch_kind == "bilibili_dynamics":
                 try:
                     repair_collector = collector_factory()
                     configure_collector(repair_collector, proxy_url)
-                    await _backfill_empty_draw_dynamics(session, repair_collector)
+                    await _backfill_empty_draw_dynamics(
+                        session, repair_collector, touched_communities=backfilled_communities
+                    )
                 except Exception as exc:  # noqa: BLE001 - 回填失败不影响本轮采集
                     postprocess_errors.append(f"dynamic backfill failed: {type(exc).__name__}: {exc}")
                     logger.warning("empty DRAW backfill failed", exc_info=True)
@@ -506,10 +526,11 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     postprocess_errors.append(f"official content matching failed: {type(exc).__name__}: {exc}")
                     logger.exception("official content matching failed")
             if domain == "game" and (stats.items_new or stats.items_updated or (match_stats and match_stats.decisions)):
-                # 分类 + 事件聚合跟随采集执行（全量 ensure，量级小）
+                # 按涉及分区聚合，避免单目标采集加载全库 14 个游戏分区内容并锁全表商品。
                 # 先结束旧事务：可重复读下，取到聚合锁后仍读旧快照，看不到上一轮刚写入的证据。
+                agg_communities = {target.community, *backfilled_communities}
                 await session.commit()
-                agg = await _aggregate_with_retry(session)
+                agg = await _aggregate_with_retry(session, communities=agg_communities)
                 # 重试前的回滚会让已加载的对象过期，异步会话里不能再懒加载。
                 target = await session.get(CollectTarget, target_id)
                 run = await session.get(CollectRun, run_id)

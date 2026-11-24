@@ -142,3 +142,32 @@ async def test_timeout_covers_entire_key_pool(monkeypatch):
 
 def test_api_key_pool_without_primary_is_available():
     assert ai_module.ai_available({**CONFIG, "api_key": ""})
+
+
+async def test_cooldown_marks_summarize_and_translate_as_deferred(session, monkeypatch):
+    from sqlalchemy import select
+    from app.models import AiUsage, ContentVersion, Event, Evidence, RawContent
+    from app.services.settings import set_setting
+
+    await set_setting(session, "ai", CONFIG)
+    raw = RawContent(platform="youtube", content_type="video", external_id="yt-cool-1", community="wuwa")
+    session.add(raw)
+    await session.flush()
+    session.add(ContentVersion(raw_content_id=raw.id, version=1, title="New Version Preview", text="Details here."))
+    event = Event(title="New Version Preview", category="official_announce", community="wuwa", identity="official")
+    session.add(event)
+    await session.flush()
+    session.add(Evidence(event_id=event.id, raw_content_id=raw.id))
+    await session.commit()
+
+    ai_module._KEY_COOLDOWN.update({key: time.monotonic() + 60 for key in CONFIG["api_keys"]})
+    sum_res = await ai_module.summarize_event(session, event.id)
+    tr_res = await ai_module.translate_content(session, raw.id)
+    assert sum_res["status"] == "deferred"
+    assert tr_res["status"] == "deferred"
+
+    usages = list(await session.scalars(select(AiUsage).order_by(AiUsage.id)))
+    assert [(u.task, u.status) for u in usages] == [
+        ("summarize_event", "deferred"),
+        ("translate_content", "deferred"),
+    ]

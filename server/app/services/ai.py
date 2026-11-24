@@ -314,6 +314,12 @@ async def summarize_event(
         try:
             raw_out, usage = await chat(config, system, user, json_mode=True)
             parsed = json.loads(raw_out)
+        except AiPoolCoolingDown as exc:
+            await record_usage(session, task="summarize_event", config=config, usage=None,
+                               duration_ms=int((time.monotonic() - started) * 1000),
+                               ref_id=event_id, status="deferred")
+            logger.info("summarize_event %s deferred: %s", event_id, exc)
+            return {"status": "deferred", "reason": str(exc)[:200]}
         except Exception as exc:  # noqa: BLE001
             await record_usage(session, task="summarize_event", config=config, usage=None,
                                duration_ms=int((time.monotonic() - started) * 1000),
@@ -395,6 +401,12 @@ async def translate_content(session: AsyncSession, content_id: int) -> dict:
     started = time.monotonic()
     try:
         translated, usage = await chat(config, system, user)
+    except AiPoolCoolingDown as exc:
+        await record_usage(session, task="translate_content", config=config, usage=None,
+                           duration_ms=int((time.monotonic() - started) * 1000),
+                           ref_id=content_id, status="deferred")
+        logger.info("translate_content %s deferred: %s", content_id, exc)
+        return {"status": "deferred", "reason": str(exc)[:200]}
     except Exception as exc:  # noqa: BLE001
         await record_usage(session, task="translate_content", config=config, usage=None,
                            duration_ms=int((time.monotonic() - started) * 1000),

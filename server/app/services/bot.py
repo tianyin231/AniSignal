@@ -44,6 +44,7 @@ TOOLS = {
 
 # 合并缓冲存 site_settings，避免为一期加表迁移；key 按目标隔离。
 _MERGE_KEY_PREFIX = "bot_merge_"
+_MAX_MERGE_BUFFER_ITEMS = 60
 
 
 def _community_label(community: str | None) -> str:
@@ -800,11 +801,13 @@ async def prepare_delivery(session: AsyncSession, row: BotDelivery, *, target=No
 
 async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, quiet: bool, quiet_critical: bool,
                               max_images: int, congested: bool = False) -> None:
+    original_items = list(buffer.get("items", []))
+    original_flush_at = buffer.get("flush_at")
     target = await resolve_target(session, target, "updates")
     known = await known_notification_keys(session, target.id, now)
     previously_known = set(known)
     usable = []
-    for item in buffer.get("items", []):
+    for item in original_items:
         if not matches_target_scope(target, item):
             continue
         buffered_at = datetime.fromisoformat(item.get("buffered_at") or item.get("published_at") or now.isoformat())
@@ -812,14 +815,24 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
             continue
         usable.append(item)
         known.update(key for key in (item.get("dedupe"),) if key)
-    buffer = {**buffer, "items": await prepare_update_items(session, target.id, usable, now, previously_known)}
+    prepared_items = await prepare_update_items(session, target.id, usable, now, previously_known)
+    if len(prepared_items) > _MAX_MERGE_BUFFER_ITEMS:
+        prepared_items = sorted(
+            prepared_items,
+            key=lambda item: _published(item.get("published_at")) or datetime.min,
+            reverse=True,
+        )[:_MAX_MERGE_BUFFER_ITEMS]
+    buffer = {**buffer, "items": prepared_items}
     if not buffer["items"]:
-        await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
+        if original_items or original_flush_at is not None:
+            await save_merge_buffer(session, target.id, {"items": [], "flush_at": None})
         return
     if not (buffer.get("items") and buffer.get("flush_at")):
         return
     flush_at = datetime.fromisoformat(buffer["flush_at"])
     if now < flush_at:
+        if len(prepared_items) != len(original_items):
+            await save_merge_buffer(session, target.id, buffer)
         return
     can_send = True
     if quiet or congested:
@@ -847,8 +860,9 @@ async def _flush_merge_buffer(session, target, buffer: dict, now: datetime, *, q
         await save_merge_buffer(session, target.id, {
             "items": remaining, "flush_at": (now + timedelta(minutes=5)).isoformat() if remaining else None,
         })
-    else:
-        buffer["flush_at"] = (now + timedelta(minutes=5)).isoformat()
+    elif len(prepared_items) != len(original_items) or buffer.get("flush_at") != original_flush_at:
+        # 免打扰或积压期间保持已到期 flush_at 不变，避免每分钟重复全量落盘写爆 binlog；
+        # 仅在过期清理缩减了条目或首次补全 flush_at 时写库，条件解除后立即可发。
         await save_merge_buffer(session, target.id, buffer)
 
 
@@ -977,13 +991,19 @@ async def run_bot_notifications(session: AsyncSession, now=None) -> dict:
                     known.update(key for key in (digest, item.get("topic_key")) if key)
                     buffer.setdefault("items", []).append({**_source(item), "topic_key": item.get("topic_key"),
                         "buffered_at": older["buffered_at"] if older else now.isoformat()})
+                if len(buffer.get("items", [])) > _MAX_MERGE_BUFFER_ITEMS:
+                    buffer["items"] = sorted(
+                        buffer["items"],
+                        key=lambda entry: _published(entry.get("published_at")) or datetime.min,
+                        reverse=True,
+                    )[:_MAX_MERGE_BUFFER_ITEMS]
                 if buffer["items"] and not buffer.get("flush_at"):
                     buffer["flush_at"] = (now + timedelta(minutes=merge_minutes)).isoformat()
                 # 新条目进缓冲后立刻落库，进程重启也不丢。
                 await save_merge_buffer(session, target.id, buffer)
             target.last_scan_at = now
             await session.commit()
-            if merge_minutes <= 0 and buffer.get("items"):
+            if merge_minutes <= 0 and buffer.get("items") and not buffer.get("flush_at"):
                 buffer["flush_at"] = now.isoformat()
             await _flush_merge_buffer(
                 session, target, buffer, now,

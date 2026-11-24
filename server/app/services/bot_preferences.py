@@ -1,5 +1,7 @@
 """Token 所属账号的可选来源，以及每种通知实际使用的订阅范围。"""
 
+import logging
+
 from fastapi import HTTPException
 from sqlalchemy import or_, select
 
@@ -7,6 +9,8 @@ from app.communities import COMMUNITIES
 from app.custom_presets import CUSTOM_PRESETS, promote_subscriptions
 from app.models import BotClient, CustomFeed, User, UserKeyword
 from app.services.bot_channels import channel_options, selected_communities
+
+logger = logging.getLogger(__name__)
 
 
 async def client_user(session, client_id):
@@ -42,15 +46,68 @@ async def catalog(session, client_id):
     }
 
 
-async def validate_sources(session, client_id, targets):
-    ids = {fid for target in targets for fid in target.custom_feed_ids}
-    ids.update(int(key[5:]) for target in targets for key in target.daily_sources + target.updates_sources if key.startswith("feed:"))
+def _target_feed_ids(config_or_target) -> set[int]:
+    if isinstance(config_or_target, dict):
+        feed_ids = config_or_target.get("custom_feed_ids") or []
+        daily_sources = config_or_target.get("daily_sources") or []
+        updates_sources = config_or_target.get("updates_sources") or []
+    else:
+        feed_ids = config_or_target.custom_feed_ids
+        daily_sources = config_or_target.daily_sources
+        updates_sources = config_or_target.updates_sources
+    ids = {int(fid) for fid in feed_ids if isinstance(fid, int) or str(fid).isdigit()}
+    for key in [*daily_sources, *updates_sources]:
+        if isinstance(key, str) and key.startswith("feed:") and key[5:].isdigit():
+            ids.add(int(key[5:]))
+    return ids
+
+
+async def validate_sources(session, client_id, targets, *, existing_rows: dict | None = None):
+    """校验订阅引用的定制监控；对已停用/已下线的历史或本人/公共源自动剥离，避免整节点 403 停摆。
+
+    越权新增绑定他人私有监控或从未绑定过的不存在监控仍严格返回 403。
+    """
+    ids = set().union(*(_target_feed_ids(target) for target in targets)) if targets else set()
     if not ids:
-        return
+        return list(targets)
     user = await client_user(session, client_id)
     allowed = set(await session.scalars(accessible_feeds(user.id if user else None).with_only_columns(CustomFeed.id).where(CustomFeed.id.in_(ids))))
-    if ids - allowed:
-        raise HTTPException(403, "定制监控不存在、已停用或不属于此账号的可访问范围")
+    missing = ids - allowed
+    if not missing:
+        return list(targets)
+
+    # 已停用/下线但原本归属本账号、公开或站点维护的监控属于历史配置漂移，而非越权访问。
+    owned_or_public = or_(
+        CustomFeed.user_id.is_(None),
+        CustomFeed.is_public.is_(True),
+        *([CustomFeed.user_id == user.id] if user is not None else []),
+    )
+    inactive_known = set(await session.scalars(
+        select(CustomFeed.id).where(CustomFeed.id.in_(missing), owned_or_public)
+    ))
+
+    cleaned = []
+    pruned_all: set[int] = set()
+    for target in targets:
+        target_missing = _target_feed_ids(target) - allowed
+        if not target_missing:
+            cleaned.append(target)
+            continue
+        existing = (existing_rows or {}).get(target.umo)
+        previous_ids = _target_feed_ids(existing.config or {}) if existing is not None else set()
+        prunable = inactive_known | previous_ids
+        if target_missing - prunable:
+            raise HTTPException(403, "定制监控不存在、已停用或不属于此账号的可访问范围")
+        pruned_all.update(target_missing)
+        stale_keys = {f"feed:{fid}" for fid in target_missing}
+        cleaned.append(target.model_copy(update={
+            "custom_feed_ids": [fid for fid in target.custom_feed_ids if fid not in target_missing],
+            "daily_sources": [key for key in target.daily_sources if key not in stale_keys],
+            "updates_sources": [key for key in target.updates_sources if key not in stale_keys],
+        }))
+    if pruned_all:
+        logger.warning("pruned inactive/removed custom feeds %s for bot client %s", sorted(pruned_all), client_id)
+    return cleaned
 
 
 class ScopedTarget:
