@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { GitCompareArrows } from 'lucide-vue-next'
 import { toRawItem } from '~/utils/public-utils'
 import { platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
 import type { PublicContentList } from '~/composables/usePublicApi'
@@ -23,18 +24,23 @@ const tab = computed({
   get: () => visibleTabs.value.some(item => item.key === route.query.tab) ? String(route.query.tab) : 'all',
   set: (v: string) => router.replace({ query: { ...route.query, tab: v === 'all' ? undefined : v, page: undefined } }),
 })
+const revisedOnly = computed({
+  get: () => route.query.revised === '1' || route.query.revised === 'true',
+  set: (v: boolean) => router.replace({ query: { ...route.query, revised: v ? '1' : undefined, page: undefined } }),
+})
 const page = computed(() => Math.max(1, Number(route.query.page) || 1))
 const pageSize = 30
 
 const { api } = usePublicApi()
 const { data, status, error, refresh } = await useLazyAsyncData(
-  () => `official-feed-${scope.value}-${tab.value}-${page.value}`,
+  () => `official-feed-${scope.value}-${tab.value}-${revisedOnly.value ? 'rev' : 'all'}-${page.value}`,
   (_app, { signal }) =>
     api<PublicContentList>('/api/contents', {
       signal,
       query: {
         community: scope.value, identity: 'official',
         ...(tab.value === 'all' ? {} : { platform: tab.value }),
+        ...(revisedOnly.value ? { revised_only: true } : {}),
         limit: pageSize, offset: (page.value - 1) * pageSize,
       },
     }),
@@ -50,7 +56,20 @@ useSeoMeta({ title: '官方动态', description: '各游戏官方账号与官网
   <div>
     <h1 class="sr-only">官方动态</h1>
     <SectionNav />
-    <TabNav v-model="tab" :tabs="visibleTabs" />
+    <TabNav v-model="tab" :tabs="visibleTabs">
+      <template #actions>
+        <button
+          type="button"
+          :aria-pressed="revisedOnly"
+          class="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 text-xs font-semibold transition-colors"
+          :class="revisedOnly ? 'bg-amber-500/15 text-amber-700 dark:bg-amber-400/20 dark:text-amber-300' : 'text-muted hover:bg-chip hover:text-ink'"
+          @click="revisedOnly = !revisedOnly"
+        >
+          <GitCompareArrows :size="13" aria-hidden="true" />
+          仅看有修订
+        </button>
+      </template>
+    </TabNav>
 
     <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">
       加载中…

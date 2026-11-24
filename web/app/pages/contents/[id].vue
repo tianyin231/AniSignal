@@ -1,10 +1,11 @@
 <script setup lang="ts">
 const lightbox = ref<string | null>(null)
 
-import { ArrowUpRight } from 'lucide-vue-next'
+import { ArrowUpRight, GitCompareArrows } from 'lucide-vue-next'
 import type { ContentDetail } from '~/composables/usePublicApi'
 import { contentTypeLabels } from '~/utils/admin-types'
 import { fmtTime } from '~/utils/admin-types'
+import { revisionBadgeLabel } from '~/utils/content-diff'
 import { categoryMeta } from '~/utils/public-utils'
 import { imageSrcset, imageUrl } from '~/utils/image'
 import { identityMeta, platformMeta, type Identity, type Platform } from '~/utils/data'
@@ -21,6 +22,15 @@ if (!detail.value)
 usePageCommunity(() => detail.value?.community)
 
 const d = computed(() => detail.value!)
+const diffRef = ref<{ expandAndLoad: () => void } | null>(null)
+const revisionLabel = computed(() => revisionBadgeLabel(d.value.revision_count, d.value.has_source_revision))
+const openRevisionsInitially = computed(() => Boolean(d.value.has_source_revision) || route.hash === '#revisions')
+function jumpToRevisions() {
+  diffRef.value?.expandAndLoad()
+  nextTick(() => {
+    document.getElementById('revisions')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+}
 const { mediaMode } = useSiteConfig()
 const videoMode = computed(() => mediaMode(d.value.platform, 'video'))
 const imageMode = computed(() => mediaMode(d.value.platform, 'image'))
@@ -83,7 +93,17 @@ useSeoMeta({
         <span :class="identityMeta[d.identity as Identity]?.text">{{ identityMeta[d.identity as Identity]?.label ?? d.identity }}</span>
         <span v-if="d.news" class="inline-flex h-5 items-center rounded-md px-1.5 font-semibold" :class="d.news.kind === 'rumor' ? 'bg-warn/10 text-warn' : 'bg-ai-soft text-ai-ink'">{{ d.news.kind === 'rumor' ? '传闻线索' : '报道' }}</span>
         <span class="chip" :class="d.preview_mode === 'external_only' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'">{{ previewLabel }}</span>
-        <span v-if="d.version" class="mono ml-auto text-slate-400">v{{ d.version }}</span>
+        <button
+          v-if="revisionLabel"
+          type="button"
+          class="mono ml-auto inline-flex h-6 items-center gap-1 rounded-md px-2 text-xs font-semibold transition-colors"
+          :class="d.has_source_revision ? 'bg-amber-500/12 text-amber-700 hover:bg-amber-500/20 dark:bg-amber-400/15 dark:text-amber-300' : 'bg-chip text-ink-2 hover:bg-line'"
+          @click="jumpToRevisions"
+        >
+          <GitCompareArrows :size="12" aria-hidden="true" />
+          {{ revisionLabel }}<template v-if="d.version"> · v{{ d.version }}</template>
+        </button>
+        <span v-else-if="d.version" class="mono ml-auto text-slate-400">v{{ d.version }}</span>
       </div>
       <h1 class="mt-3 text-2xl font-bold leading-snug text-ink">{{ d.news?.headline || d.title }}</h1>
       <p v-if="d.news" class="mt-2 text-sm leading-relaxed text-ink-2">{{ d.news.summary }}</p>
@@ -96,6 +116,17 @@ useSeoMeta({
         {{ d.source_name ?? '—' }} · {{ d.content_type === 'video' ? '视频发布' : '发布' }} {{ d.published_at ? fmtTime(d.published_at) : '时间未知' }}<template v-if="d.community !== 'ai'"> · 采集 {{ fmtTime(d.collected_at) }}</template>
       </p>
     </section>
+
+    <ContentVersionDiff
+      v-if="(d.revision_count ?? 0) > 0"
+      ref="diffRef"
+      :content-id="d.id"
+      :revision-count="d.revision_count ?? 0"
+      :has-source-revision="Boolean(d.has_source_revision)"
+      :image-mode="imageMode"
+      :initial-open="openRevisionsInitially"
+      @open-image="lightbox = $event"
+    />
 
     <div class="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <section v-if="player" class="panel overflow-hidden lg:col-span-2">

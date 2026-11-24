@@ -267,6 +267,8 @@ class PublicContentItem(BaseModel):
     matched_keywords: list[str] = []
     community: str = _DEFAULT_COMMUNITY
     delta_view: int | None = None
+    revision_count: int = 0
+    has_source_revision: bool = False
 
 
 class ContentFeedStatus(BaseModel):
@@ -313,7 +315,69 @@ class ContentDetailOut(BaseModel):
     translation: dict | None = None
     matched_keywords: list[str] = []
     version: int | None = None
+    revision_count: int = 0
+    has_source_revision: bool = False
     preview_mode: str
+
+
+class ContentDiffSegmentOut(BaseModel):
+    op: str  # equal / delete / insert
+    text: str
+
+
+class ContentDiffLineOut(BaseModel):
+    op: str  # equal / delete / insert
+    old_no: int | None = None
+    new_no: int | None = None
+    text: str
+    segments: list[ContentDiffSegmentOut] | None = None
+
+
+class ContentDiffHunkOut(BaseModel):
+    old_start: int
+    new_start: int
+    lines: list[ContentDiffLineOut]
+
+
+class ContentDiffStatsOut(BaseModel):
+    added_lines: int = 0
+    removed_lines: int = 0
+    title_changed: bool = False
+    media_added: int = 0
+    media_removed: int = 0
+
+
+class ContentVersionItemOut(BaseModel):
+    version: int
+    parsed_at: datetime
+    origin: str  # source / admin
+    title: str
+    text_length: int = 0
+    media_count: int = 0
+
+
+class ContentVersionDiffOut(BaseModel):
+    from_version: int
+    to_version: int
+    from_parsed_at: datetime
+    to_parsed_at: datetime
+    to_origin: str  # source / admin
+    title_changed: bool = False
+    title_segments: list[ContentDiffSegmentOut] = []
+    hunks: list[ContentDiffHunkOut] = []
+    media_added: SafeMediaList = []
+    media_removed: SafeMediaList = []
+    stats: ContentDiffStatsOut = Field(default_factory=ContentDiffStatsOut)
+    truncated: bool = False
+
+
+class ContentVersionHistoryOut(BaseModel):
+    content_id: int
+    latest_version: int
+    revision_count: int = 0
+    has_source_revision: bool = False
+    versions: list[ContentVersionItemOut] = []
+    diff: ContentVersionDiffOut | None = None
 
 
 class PublicSource(BaseModel):
@@ -438,6 +502,8 @@ class EventSourceOut(BaseModel):
     url: SafeLink
     content_id: int | None = None
     identity: str = "unknown"
+    revision_count: int = 0
+    has_source_revision: bool = False
 
 
 class EventCorrectionOut(BaseModel):

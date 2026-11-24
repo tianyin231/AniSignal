@@ -134,5 +134,7 @@ export interface RawItem {
   originalUrl?: string
   metrics?: Record<string, number>
   community?: string
+  revisionCount?: number
+  hasSourceRevision?: boolean
   previewMode: 'full' | 'partial' | 'external_only'
 }

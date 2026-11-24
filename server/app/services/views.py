@@ -38,15 +38,20 @@ _REGION_OF_PLATFORM = {
 }
 
 
-async def _latest_titles(session: AsyncSession, raw_ids: list[int]) -> dict[int, str | None]:
+async def _latest_meta(session: AsyncSession, raw_ids: list[int]) -> dict[int, tuple[str | None, int]]:
     if not raw_ids:
         return {}
     rows = await session.execute(
-        select(RawContent.id, ContentVersion.title)
+        select(RawContent.id, ContentVersion.title, ContentVersion.version)
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .where(RawContent.id.in_(raw_ids))
     )
-    return dict(rows.all())
+    return {raw_id: (title, int(version or 1)) for raw_id, title, version in rows.all()}
+
+
+async def _latest_titles(session: AsyncSession, raw_ids: list[int]) -> dict[int, str | None]:
+    meta = await _latest_meta(session, raw_ids)
+    return {raw_id: title for raw_id, (title, _ver) in meta.items()}
 
 
 async def events_to_out(
@@ -71,7 +76,21 @@ async def events_to_out(
     latest_evidence_by_event: dict[int, datetime] = {}
     evidence_data = list(evidence_rows)
     raw_ids = [raw.id for _, raw, _ in evidence_data]
-    titles = await _latest_titles(session, raw_ids)
+    latest_meta = await _latest_meta(session, raw_ids)
+    rev_summaries = {}
+    if include_detail:
+        platform_by_id = {raw.id: raw.platform for _, raw, _ in evidence_data}
+        multi_platforms = {
+            rid: platform_by_id[rid]
+            for rid, (_title, ver) in latest_meta.items()
+            if ver > 1 and rid in platform_by_id
+        }
+        if multi_platforms:
+            from app.services.content_diff import load_revision_summaries
+
+            rev_summaries = await load_revision_summaries(
+                session, list(multi_platforms), platforms=multi_platforms
+            )
 
     for evidence, raw, source in evidence_data:
         if evidence.role == "excluded":
@@ -82,16 +101,20 @@ async def events_to_out(
             latest_evidence_by_event[evidence.event_id] = published
         for kw in raw.matched_keywords or []:
             keywords_by_event.setdefault(evidence.event_id, set()).add(kw)
+        meta_entry = latest_meta.get(raw.id)
+        rev = rev_summaries.get(raw.id)
         item = EventSourceOut(
             platform=raw.platform,
             account=(source.name if source else None),
-            title=titles.get(raw.id),
+            title=(meta_entry[0] if meta_entry else None),
             region=(get_community(raw.community).official_notice_region if raw.platform == "game_official"
                     else _REGION_OF_PLATFORM.get(raw.platform, "cn")),
             published_at=raw.published_at,
             url=raw.url,
             content_id=raw.id,
             identity=(source.identity if source else "unknown"),
+            revision_count=rev.revision_count if rev else 0,
+            has_source_revision=rev.has_source_revision if rev else False,
         )
         bucket = (
             conflicts_by_event if evidence.role == "conflict" else evidences_by_event

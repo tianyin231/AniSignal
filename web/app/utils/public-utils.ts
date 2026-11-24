@@ -88,6 +88,8 @@ export function toRawItem(item: PublicContentItem): RawItem {
     originalUrl: item.url ?? undefined,
     metrics: item.metrics ?? undefined,
     community: item.community,
+    revisionCount: item.revision_count ?? 0,
+    hasSourceRevision: Boolean(item.has_source_revision),
     previewMode: item.preview_mode,
   }
 }

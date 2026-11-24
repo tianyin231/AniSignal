@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ArrowUpRight, BadgeCheck, ImageIcon } from 'lucide-vue-next'
+import { ArrowUpRight, BadgeCheck, GitCompareArrows, ImageIcon } from 'lucide-vue-next'
 import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
+import { revisionBadgeLabel } from '~/utils/content-diff'
 import { imageSrcset, imageUrl } from '~/utils/image'
 import { isRedundantExcerpt } from '~/utils/text'
 
@@ -44,6 +45,7 @@ const keywords = computed(() => {
   const skip = new Set([communityMeta(props.item.community)?.label, props.item.account])
   return (props.item.keywords ?? []).filter(k => !skip.has(k)).slice(0, 2)
 })
+const revisionLabel = computed(() => revisionBadgeLabel(props.item.revisionCount, props.item.hasSourceRevision))
 // 有封面时摘要让位给标题；纯文字内容（动态 / X / 公告）保留两行摘要，与标题重复时不再显示
 const excerpt = computed(() => {
   if (showCover.value) return ''
@@ -94,6 +96,13 @@ const excerpt = computed(() => {
           <span v-if="viewLabel" class="num font-semibold sm:hidden" :class="isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }} {{ viewUnit }}</span>
           <span v-if="deltaLabel" class="num rounded-full bg-hot/10 px-1.5 py-0.5 text-[11px] font-bold text-hot">{{ deltaLabel }} / 24h</span>
           <span v-if="item.translated" class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>
+          <span
+            v-if="revisionLabel"
+            class="inline-flex h-5 items-center gap-0.5 rounded-md px-1.5 text-[11px] font-semibold"
+            :class="item.hasSourceRevision ? 'bg-amber-500/12 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300' : 'bg-chip text-ink-2'"
+          >
+            <GitCompareArrows :size="11" aria-hidden="true" />{{ revisionLabel }}
+          </span>
           <span v-if="item.mergedInto" class="text-brand-ink">已并入事件</span>
           <span v-for="k in keywords" :key="k" class="rounded-md bg-chip px-1.5 py-0.5 text-[11px] text-ink-2 max-sm:hidden">{{ k }}</span>
         </div>

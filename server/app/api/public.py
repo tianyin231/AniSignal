@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import BigInteger, cast, exists, func, select
+from sqlalchemy import BigInteger, cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, defer
 
@@ -32,6 +32,7 @@ from app.clock import utcnow
 from app.models import CollectTarget, ContentReview, ContentVersion, Evidence, RawContent, Source
 from app.schemas.api import (
     ContentDetailOut,
+    ContentVersionHistoryOut,
     EventListOut,
     EventOut,
     ProductListOut,
@@ -293,6 +294,7 @@ async def list_contents(
         default=None, ge=1, le=8760, description="仅返回最近若干小时发布的内容"
     ),
     include_chat: bool = Query(default=False, description="包含闲聊/杂谈类（默认隐藏降噪）"),
+    revised_only: bool = Query(default=False, description="仅返回有实质修订记录的内容"),
     sort: str = Query(default="time", pattern="^(time|hot)$", description="hot=按最新播放量排序"),
     q: str | None = Query(default=None, max_length=100, description="标题关键词"),
     limit: int = Query(default=30, ge=1, le=100),
@@ -335,6 +337,24 @@ async def list_contents(
         conditions.append(RawContent.platform.notin_(hidden_platforms))
     if not include_chat:
         conditions.append(ContentVersion.category.notin_(HIDDEN_CATEGORIES) | ContentVersion.category.is_(None))
+    filter_revised = revised_only is True
+    if filter_revised:
+        prev_cv = aliased(ContentVersion, name="cv_prev")
+        conditions.append(ContentVersion.version > 1)
+        conditions.append(
+            exists(
+                select(1).where(
+                    prev_cv.raw_content_id == RawContent.id,
+                    prev_cv.version < ContentVersion.version,
+                    or_(
+                        func.coalesce(prev_cv.title, "") != func.coalesce(ContentVersion.title, ""),
+                        func.coalesce(prev_cv.text, "") != func.coalesce(ContentVersion.text, ""),
+                        func.coalesce(prev_cv.normalized_json["media"].as_string(), "")
+                        != func.coalesce(ContentVersion.normalized_json["media"].as_string(), ""),
+                    ),
+                )
+            )
+        )
     if q:
         from app.services.search import content_search_condition, supports_mysql_fts
 
@@ -377,53 +397,111 @@ async def list_contents(
             .scalar_subquery()
         )
         page_query = page_query.order_by(func.coalesce(latest_score, 0).desc())
-    page_ids = list(await session.scalars(page_query.order_by(
-        published.desc(), RawContent.id.desc(),
-    ).limit(limit).offset(offset)))
-    rows = await session.execute(
-        select(RawContent, Source.name, Source.identity, ContentVersion)
-        .options(defer(RawContent.raw_json))
-        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(RawContent.id.in_(page_ids))
-    ) if page_ids else []
-    page_rows = {row[0].id: row for row in rows}
-    candidates: list[PublicContentItem] = []
-    for raw, source_name, source_identity, version in (page_rows[raw_id] for raw_id in page_ids):
-        normalized = version.normalized_json if version else None
-        text = (version.text if version else None) or str((normalized or {}).get("text") or "")
-        media = (normalized or {}).get("media") or []
-        candidates.append(
-            PublicContentItem(
-                id=raw.id,
-                platform=raw.platform,
-                content_type=raw.content_type,
-                external_id=raw.external_id,
-                url=raw.url,
-                title=(version.title if version else None) or raw.external_id,
-                text_excerpt=_excerpt(text),
-                published_at=raw.published_at,
-                collected_at=raw.collected_at,
-                source_name=source_name,
-                identity=source_identity or "unknown",
-                category=version.category,
-                metrics=None,
-                cover=media[0] if isinstance(media, list) and media else None,
-                preview_mode="partial" if ((normalized or {}).get("extra") or {}).get("truncated") else _preview_mode(text, media if isinstance(media, list) else [], raw.url),
-                matched_keywords=(raw.matched_keywords or []),
-                community=(raw.community or DEFAULT_COMMUNITY),
+    from app.services.content_diff import RevisionSummary, load_revision_summaries
+
+    async def _build_list_response() -> PublicContentList:
+        ordered_query = page_query.order_by(published.desc(), RawContent.id.desc())
+        rev_summaries: dict[int, RevisionSummary] = {}
+        if filter_revised:
+            cand_query = matching(RawContent.id, RawContent.platform)
+            if sort == "hot":
+                cand_query = cand_query.order_by(func.coalesce(latest_score, 0).desc())
+            cand_rows = list(
+                (await session.execute(cand_query.order_by(published.desc(), RawContent.id.desc()).limit(250))).all()
             )
+            candidate_ids = [cid for cid, _plat in cand_rows]
+            candidate_platforms = {cid: plat for cid, plat in cand_rows}
+            rev_summaries = await load_revision_summaries(
+                session, candidate_ids, platforms=candidate_platforms
+            )
+            verified_ids = [
+                cid for cid in candidate_ids
+                if (summary := rev_summaries.get(cid)) is not None and summary.revision_count > 0
+            ]
+            total = len(verified_ids)
+            page_ids = verified_ids[offset : offset + limit]
+        else:
+            page_ids = list(await session.scalars(ordered_query.limit(limit).offset(offset)))
+            total = await session.scalar(matching(func.count())) or 0
+
+        rows = await session.execute(
+            select(RawContent, Source.name, Source.identity, ContentVersion)
+            .options(defer(RawContent.raw_json))
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .where(RawContent.id.in_(page_ids))
+        ) if page_ids else []
+        page_rows = {row[0].id: row for row in rows}
+        if not filter_revised:
+            multi_platforms = {
+                raw.id: raw.platform
+                for raw, _, _, ver in page_rows.values()
+                if ver is not None and ver.version > 1
+            }
+            if multi_platforms:
+                rev_summaries = await load_revision_summaries(
+                    session, list(multi_platforms), platforms=multi_platforms
+                )
+
+        candidates: list[PublicContentItem] = []
+        for raw, source_name, source_identity, version in (page_rows[raw_id] for raw_id in page_ids):
+            normalized = version.normalized_json if version else None
+            text = (version.text if version else None) or str((normalized or {}).get("text") or "")
+            media = (normalized or {}).get("media") or []
+            rev = rev_summaries.get(raw.id)
+            candidates.append(
+                PublicContentItem(
+                    id=raw.id,
+                    platform=raw.platform,
+                    content_type=raw.content_type,
+                    external_id=raw.external_id,
+                    url=raw.url,
+                    title=(version.title if version else None) or raw.external_id,
+                    text_excerpt=_excerpt(text),
+                    published_at=raw.published_at,
+                    collected_at=raw.collected_at,
+                    source_name=source_name,
+                    identity=source_identity or "unknown",
+                    category=version.category,
+                    metrics=None,
+                    cover=media[0] if isinstance(media, list) and media else None,
+                    preview_mode="partial" if ((normalized or {}).get("extra") or {}).get("truncated") else _preview_mode(text, media if isinstance(media, list) else [], raw.url),
+                    matched_keywords=(raw.matched_keywords or []),
+                    community=(raw.community or DEFAULT_COMMUNITY),
+                    revision_count=rev.revision_count if rev else 0,
+                    has_source_revision=rev.has_source_revision if rev else False,
+                )
+            )
+
+        metrics_map = await _latest_metrics(session, [i.id for i in candidates])
+        for item in candidates:
+            item.metrics = metrics_map.get(item.id)
+        items = candidates
+
+        if is_xiaoheihe:
+            return PublicContentList(items=items, total=total, feed_status=await xiaoheihe_feed_status(session))
+        return PublicContentList(items=items, total=total)
+
+    if (
+        filter_revised
+        and request is not None
+        and not blocks
+        and not q
+        and not hidden_platforms
+        and offset == 0
+        and published_within_hours is None
+        and not include_chat
+        and not exclude_identity
+        and not content_type
+        and limit in (20, 30)
+    ):
+        cache = getattr(request.app.state, "redis", None)
+        cache_key = (
+            f"{CACHE_PREFIX}contents-revised:{community}:{platform or 'all'}:"
+            f"{identity or 'all'}:{sort}:{limit}"
         )
-
-    metrics_map = await _latest_metrics(session, [i.id for i in candidates])
-    for item in candidates:
-        item.metrics = metrics_map.get(item.id)
-    items = candidates
-
-    total = await session.scalar(matching(func.count())) or 0
-    if is_xiaoheihe:
-        return PublicContentList(items=items, total=total, feed_status=await xiaoheihe_feed_status(session))
-    return PublicContentList(items=items, total=total)
+        return await cached_model(cache, cache_key, PUBLIC_CACHE_SECONDS, PublicContentList, _build_list_response)
+    return await _build_list_response()
 
 
 async def _latest_metrics(session: AsyncSession, content_ids: list[int]) -> dict[int, dict]:
@@ -625,6 +703,7 @@ async def rss_feed(
         exclude_identity=None,
         published_within_hours=None,
         include_chat=False,
+        revised_only=False,
         sort="time",
         q=q,
         limit=limit,
@@ -926,6 +1005,14 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
             "confidence": event_model.confidence,
         }
 
+    rev_summary = None
+    if version is not None and version.version > 1:
+        from app.services.content_diff import load_revision_summaries
+
+        rev_summary = (
+            await load_revision_summaries(session, [raw.id], platforms={raw.id: raw.platform})
+        ).get(raw.id)
+
     review = await session.get(ContentReview, raw.id) if raw.community == "ai" else None
     news = review.news if (
         review and review.news and version
@@ -957,8 +1044,54 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         translation=translation,
         matched_keywords=(raw.matched_keywords or []),
         version=version.version if version else None,
+        revision_count=rev_summary.revision_count if rev_summary else 0,
+        has_source_revision=rev_summary.has_source_revision if rev_summary else False,
         preview_mode="partial" if (normalized.get("extra") or {}).get("truncated") else _preview_mode(text, media, raw.url),
     )
+
+
+@router.get("/contents/{content_id}/versions", response_model=ContentVersionHistoryOut)
+async def get_content_versions(
+    request: Request,
+    content_id: int,
+    from_version: int | None = Query(default=None, ge=1, description="对比基准版本号"),
+    to_version: int | None = Query(default=None, ge=1, description="对比目标版本号"),
+    session: AsyncSession = Depends(get_session),
+):
+    """返回单条内容的实质版本列表与文本/标题/图片 Diff（自动折叠解析重算与非实质抖动）。"""
+    from app.services.content_diff import build_version_history, load_version_inputs
+
+    meta_row = (
+        await session.execute(
+            select(RawContent.platform, RawContent.latest_version_id)
+            .where(RawContent.id == content_id, RawContent.hidden.is_(False))
+        )
+    ).first()
+    if meta_row is None:
+        raise HTTPException(status_code=404, detail="content not found")
+    platform, latest_version_id = meta_row
+
+    async def _load() -> ContentVersionHistoryOut:
+        versions = (await load_version_inputs(session, [content_id])).get(content_id, [])
+        try:
+            payload = build_version_history(
+                content_id,
+                versions,
+                platform=platform,
+                from_version=from_version,
+                to_version=to_version,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return ContentVersionHistoryOut(**payload)
+
+    cache = getattr(request.app.state, "redis", None)
+    # 缓存键纳入 latest_version_id，内容新增版本或修订时自动换键，无陈旧缓存风险。
+    cache_key = (
+        f"{CACHE_PREFIX}content-versions:{content_id}:{latest_version_id or 0}:"
+        f"{from_version or 0}:{to_version or 0}"
+    )
+    return await cached_model(cache, cache_key, PUBLIC_CACHE_SECONDS, ContentVersionHistoryOut, _load)
 
 @router.get("/events", response_model=EventListOut)
 async def list_events(

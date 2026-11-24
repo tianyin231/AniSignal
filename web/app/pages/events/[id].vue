@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { GitCompareArrows } from 'lucide-vue-next'
 import type { ApiEvent } from '~/composables/usePublicApi'
 import { toAppEvent } from '~/utils/public-utils'
 import { fmtTime } from '~/utils/admin-types'
+import { revisionBadgeLabel } from '~/utils/content-diff'
 import { platformMeta, type Platform } from '~/utils/data'
 
 const route = useRoute()
@@ -121,8 +123,17 @@ useSeoMeta({
               <span v-if="s.account" class="text-xs text-slate-400 dark:text-zinc-500">{{ s.account }}</span>
             </div>
             <p v-if="s.title" class="mt-0.5 leading-relaxed text-slate-700 dark:text-zinc-200">{{ s.title }}</p>
-            <div class="mt-1 flex gap-3 text-xs">
+            <div class="mt-1 flex flex-wrap items-center gap-3 text-xs">
               <NuxtLink v-if="s.content_id" :to="`/contents/${s.content_id}`" class="link">站内详情</NuxtLink>
+              <NuxtLink
+                v-if="s.content_id && revisionBadgeLabel(s.revision_count, s.has_source_revision)"
+                :to="`/contents/${s.content_id}#revisions`"
+                class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold transition-colors"
+                :class="s.has_source_revision ? 'bg-amber-500/12 text-amber-700 hover:bg-amber-500/20 dark:bg-amber-400/15 dark:text-amber-300' : 'bg-chip text-ink-2 hover:bg-line'"
+              >
+                <GitCompareArrows :size="11" aria-hidden="true" />
+                {{ revisionBadgeLabel(s.revision_count, s.has_source_revision) }}
+              </NuxtLink>
               <a v-if="s.url" :href="s.url" target="_blank" rel="noopener" class="link">原文 ↗</a>
             </div>
           </li>

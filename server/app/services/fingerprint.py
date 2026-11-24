@@ -12,11 +12,16 @@ from app.schemas.content import NormalizedContent
 
 _URL_SCHEME = re.compile(r"^(?:https?:)?//")
 _BILIBILI_IMAGE_SHARD = re.compile(r"^i\d\.hdslb\.com/")
+_YT_IMAGE_SHARD = re.compile(r"^i\d\.ytimg\.com/")
+_YT_THUMB_QUERY = re.compile(r"^(i\.ytimg\.com/vi/[^?]+)\?.*$")
 
 
 def canonical_media(url: str) -> str:
-    """同一张图的不同写法归一：B 站会轮换 CDN 分片（i0/i1/i2）和 http/https。"""
-    return _BILIBILI_IMAGE_SHARD.sub("i0.hdslb.com/", _URL_SCHEME.sub("", url))
+    """同一张图的不同写法归一：B 站轮换 CDN 分片，YouTube 封面会附带/去掉 ?v= 缓存参数。"""
+    normalized = _URL_SCHEME.sub("", url)
+    normalized = _BILIBILI_IMAGE_SHARD.sub("i0.hdslb.com/", normalized)
+    normalized = _YT_IMAGE_SHARD.sub("i.ytimg.com/", normalized)
+    return _YT_THUMB_QUERY.sub(r"\1", normalized)
 
 
 def content_body(title: str | None, text: str | None, media: list | None, extra: dict | None = None) -> tuple:

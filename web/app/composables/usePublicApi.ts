@@ -21,6 +21,8 @@ export interface PublicContentItem {
   matched_keywords: string[]
   community?: string
   delta_view?: number | null
+  revision_count?: number
+  has_source_revision?: boolean
 }
 
 export interface PublicContentList {
@@ -148,6 +150,8 @@ export interface ApiEventSource {
   url: string | null
   content_id: number | null
   identity?: string
+  revision_count?: number
+  has_source_revision?: boolean
 }
 
 export interface ApiEventCorrection {
@@ -371,7 +375,69 @@ export interface ContentDetail {
   translation: { lang: string; text: string; model: string | null } | null
   matched_keywords: string[]
   version: number | null
+  revision_count?: number
+  has_source_revision?: boolean
   preview_mode: 'full' | 'partial' | 'external_only'
+}
+
+export interface ContentDiffSegment {
+  op: 'equal' | 'delete' | 'insert'
+  text: string
+}
+
+export interface ContentDiffLine {
+  op: 'equal' | 'delete' | 'insert'
+  old_no: number | null
+  new_no: number | null
+  text: string
+  segments: ContentDiffSegment[] | null
+}
+
+export interface ContentDiffHunk {
+  old_start: number
+  new_start: number
+  lines: ContentDiffLine[]
+}
+
+export interface ContentDiffStats {
+  added_lines: number
+  removed_lines: number
+  title_changed: boolean
+  media_added: number
+  media_removed: number
+}
+
+export interface ContentVersionItem {
+  version: number
+  parsed_at: string
+  origin: 'source' | 'admin'
+  title: string
+  text_length: number
+  media_count: number
+}
+
+export interface ContentVersionDiff {
+  from_version: number
+  to_version: number
+  from_parsed_at: string
+  to_parsed_at: string
+  to_origin: 'source' | 'admin'
+  title_changed: boolean
+  title_segments: ContentDiffSegment[]
+  hunks: ContentDiffHunk[]
+  media_added: string[]
+  media_removed: string[]
+  stats: ContentDiffStats
+  truncated: boolean
+}
+
+export interface ContentVersionHistory {
+  content_id: number
+  latest_version: number
+  revision_count: number
+  has_source_revision: boolean
+  versions: ContentVersionItem[]
+  diff: ContentVersionDiff | null
 }
 
 export interface SteamPulsePoint {
