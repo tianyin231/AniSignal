@@ -204,8 +204,14 @@ def _is_backfill_transition(
     """
     if prev.origin != "source" or curr.origin != "source":
         return False
-    if not prev.text and bool(curr.text):
-        return True
+    if not prev.text:
+        if curr.text:
+            return True
+        if set(prev.media_keys).issubset(curr.media_keys) and (
+            len(curr.media_keys) > len(prev.media_keys) or (not prev.title and bool(curr.title))
+        ):
+            return True
+        return False
     if prev.truncated and not curr.truncated and (not prev.text or _starts_with_prefix(curr.text, prev.text)):
         return True
     if not prev.text or len(curr.text) <= len(prev.text) + 30:
@@ -244,18 +250,74 @@ def _is_transient_drop(candidate: SubstantiveVersion, anchor: SubstantiveVersion
     return False
 
 
+def _is_x_thumb_media_flip(
+    prev: SubstantiveVersion, curr: SubstantiveVersion, *, platform: str | None
+) -> bool:
+    """X 视频帖在匿名采集间常在 amplify_video_thumb 与 media 预览图间切换，正文未变不算修订。"""
+    if platform != "x" or prev.title != curr.title or prev.text != curr.text:
+        return False
+    if len(prev.media_keys) != 1 or len(curr.media_keys) != 1:
+        return False
+    kinds = {
+        "thumb" if ("video_thumb/" in key) else "media"
+        for key in (prev.media_keys[0], curr.media_keys[0])
+    }
+    return kinds == {"thumb", "media"}
+
+
+def _is_degraded_capture(
+    curr: SubstantiveVersion,
+    prev: SubstantiveVersion,
+    degraded_signatures: set[tuple[str, str, tuple[str, ...]]],
+    *,
+    platform: str | None = None,
+) -> bool:
+    """识别因风控/反爬/重算导致的退化版本（丢全文、丢全部或部分图片、退回历史残缺快照）。
+
+    仅作用于源站采集版本（origin == 'source'），绝不屏蔽管理员手工修订。
+    """
+    if curr.origin != "source" or prev.origin != "source":
+        return False
+    # 1. 有正文退化成空正文（如 B 站图文/专栏动态风控、X 瞬时空帖）
+    if prev.text and not curr.text:
+        return True
+    # 2. 退回曾经出现过的残缺补全前快照（如 B 站转发动态补全原动态后，后续再次风控丢回仅转发语）
+    if curr.signature in degraded_signatures:
+        return True
+    # 3. 标题与正文均未变化，但图片减少/掉零（没有新图替换，只是本轮没采全图片）
+    if curr.title == prev.title and curr.text == prev.text:
+        if prev.media_keys and set(curr.media_keys).issubset(prev.media_keys):
+            return True
+        if _is_x_thumb_media_flip(prev, curr, platform=platform):
+            return True
+    return False
+
+
+def _is_media_only_backfill(prev: SubstantiveVersion, curr: SubstantiveVersion) -> bool:
+    """首抓因风控/解析未取到图片（0 图），后续正文与标题未变仅补回图片：视为补全而非修订。"""
+    return (
+        prev.origin == "source"
+        and curr.origin == "source"
+        and prev.title == curr.title
+        and prev.text == curr.text
+        and not prev.media_keys
+        and bool(curr.media_keys)
+    )
+
+
 def collapse_substantive_versions(
     rows: Sequence[ContentVersion | VersionInput],
     *,
     platform: str | None = None,
 ) -> list[SubstantiveVersion]:
-    """按版本号升序折叠非实质变更、采集抖动与初次补全，返回真实内容演进序列。"""
+    """按版本号升序折叠非实质变更、风控退化、采集抖动与初次补全，返回真实内容演进序列。"""
     inputs = [_coerce_input(row) for row in rows]
     ordered = sorted(inputs, key=lambda item: item.version)
     if len(ordered) > _MAX_VERSIONS_PER_CONTENT:
         ordered = [ordered[0], *ordered[-(_MAX_VERSIONS_PER_CONTENT - 1):]]
 
     kept: list[SubstantiveVersion] = []
+    degraded_signatures: set[tuple[str, str, tuple[str, ...]]] = set()
     last_raw_key: tuple[str, str, tuple[str, ...]] | None = None
 
     for item in ordered:
@@ -274,7 +336,15 @@ def collapse_substantive_versions(
         if curr.signature == prev.signature:
             continue
         if len(kept) == 1 and _is_backfill_transition(prev, curr, platform=platform):
+            degraded_signatures.add(prev.signature)
             kept[0] = curr
+            continue
+        if _is_media_only_backfill(prev, curr):
+            degraded_signatures.add(prev.signature)
+            kept[-1] = curr
+            continue
+        if _is_degraded_capture(curr, prev, degraded_signatures, platform=platform):
+            degraded_signatures.add(curr.signature)
             continue
 
         # 折叠 A → B(残缺抖动) → A 环路；若 B 引入了新内容（如 11:00→13:00→11:00）则完整保留。
@@ -283,6 +353,8 @@ def collapse_substantive_versions(
             if kept[idx].signature == curr.signature and all(
                 _is_transient_drop(mid, kept[idx]) for mid in kept[idx + 1 :]
             ):
+                for mid in kept[idx + 1 :]:
+                    degraded_signatures.add(mid.signature)
                 del kept[idx + 1 :]
                 folded_flap = True
                 break
@@ -481,8 +553,13 @@ def compute_version_diff(old: SubstantiveVersion, new: SubstantiveVersion) -> di
 
     old_media_map = dict(zip(old.media_keys, old.media))
     new_media_map = dict(zip(new.media_keys, new.media))
-    media_added = [new_media_map[k] for k in new.media_keys if k not in old_media_map]
-    media_removed = [old_media_map[k] for k in old.media_keys if k not in new_media_map]
+    # 源站某一版完全没采到图片（0 张）通常是风控或正文抽取丢图，不误标为“新增/移除全部图片”。
+    if old.origin == "source" and new.origin == "source" and (not old.media_keys or not new.media_keys):
+        media_added: list[str] = []
+        media_removed: list[str] = []
+    else:
+        media_added = [new_media_map[k] for k in new.media_keys if k not in old_media_map]
+        media_removed = [old_media_map[k] for k in old.media_keys if k not in new_media_map]
 
     return {
         "from_version": old.version,

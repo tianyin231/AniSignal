@@ -61,10 +61,89 @@ def test_collapse_skips_reparse_and_cdn_shard_noise():
     assert len(kept) == 1
     assert kept[0].version == 1
 
-    # YouTube 封面 ?v= 缓存参数轮换不记为修订
-    yt_v1 = _ver(1, title="PV", text="desc", media=["https://i.ytimg.com/vi/abc123/maxresdefault.jpg?v=6ae2ae7e"])
-    yt_v2 = _ver(2, title="PV", text="desc", media=["https://i.ytimg.com/vi/abc123/maxresdefault.jpg"], minutes_offset=15)
-    assert len(collapse_substantive_versions([yt_v1, yt_v2], platform="youtube")) == 1
+    # YouTube 封面分片、分辨率、直播态与 ?v= 缓存参数轮换不记为修订
+    yt_v1 = _ver(1, title="PV", text="desc", media=["https://i1.ytimg.com/vi/abc123/hqdefault.jpg"])
+    yt_v2 = _ver(2, title="PV", text="desc", media=["https://i.ytimg.com/vi/abc123/maxresdefault_live.jpg?v=6ae2ae7e"], minutes_offset=10)
+    yt_v3 = _ver(3, title="PV", text="desc", media=["https://i.ytimg.com/vi/abc123/maxresdefault.jpg"], minutes_offset=20)
+    assert len(collapse_substantive_versions([yt_v1, yt_v2, yt_v3], platform="youtube")) == 1
+
+    # X 图片格式参数变化与视频预览图 amplify_video_thumb <-> media 切换不记为修订
+    x_fmt_v1 = _ver(1, title="Post", text="Patch notes live.", media=["https://pbs.twimg.com/media/AbCdEf123.jpg"])
+    x_fmt_v2 = _ver(2, title="Post", text="Patch notes live.", media=["https://pbs.twimg.com/media/AbCdEf123?format=webp&name=medium"], minutes_offset=5)
+    assert len(collapse_substantive_versions([x_fmt_v1, x_fmt_v2], platform="x")) == 1
+
+    x_vid_v1 = _ver(1, title="PV", text="Watch the trailer", media=["https://pbs.twimg.com/amplify_video_thumb/999/img/aaa.jpg"])
+    x_vid_v2 = _ver(2, title="PV", text="Watch the trailer", media=["https://pbs.twimg.com/media/BBB123?format=jpg&name=large"], minutes_offset=5)
+    assert len(collapse_substantive_versions([x_vid_v1, x_vid_v2], platform="x")) == 1
+
+    # RSS/CDN 纯缓存时间戳参数（?t=）变化不记为修订
+    cdn_v1 = _ver(1, title="News", text="Body", media=["https://cdn.example.com/asset/hero.png?t=1793422837"])
+    cdn_v2 = _ver(2, title="News", text="Body", media=["https://cdn.example.com/asset/hero.png?t=1793423031"], minutes_offset=5)
+    assert len(collapse_substantive_versions([cdn_v1, cdn_v2], platform="rss")) == 1
+
+
+def test_collapse_filters_risk_control_image_drops_and_degraded_snapshots():
+    imgs = [
+        "https://i0.hdslb.com/bfs/new_dyn/aaa.jpg",
+        "https://i0.hdslb.com/bfs/new_dyn/bbb.jpg",
+        "https://i0.hdslb.com/bfs/new_dyn/ccc.jpg",
+    ]
+    # 1. 源站风控丢图（全丢 3->0 或部分丢 3->1，正文未变）：不误报为“删除图片”
+    drop_v1 = _ver(1, title="活动公告", text="活动现已开启，欢迎参与。", media=imgs)
+    drop_v2 = _ver(2, title="活动公告", text="活动现已开启，欢迎参与。", media=[], minutes_offset=10)
+    drop_v3 = _ver(3, title="活动公告", text="活动现已开启，欢迎参与。", media=[imgs[0]], minutes_offset=20)
+    kept_drop = collapse_substantive_versions([drop_v1, drop_v2, drop_v3], platform="bilibili")
+    assert [v.version for v in kept_drop] == [1]
+
+    # 2. 首抓风控 0 图，后续补回图片（0->3，正文未变）：视为补全而非修订
+    backfill_v1 = _ver(1, title="活动公告", text="活动现已开启，欢迎参与。", media=[])
+    backfill_v2 = _ver(2, title="活动公告", text="活动现已开启，欢迎参与。", media=imgs, minutes_offset=10)
+    kept_bf = collapse_substantive_versions([backfill_v1, backfill_v2], platform="rss")
+    assert [v.version for v in kept_bf] == [2]
+
+    # 3. 真实正文编辑时伴随风控丢图（v2 为 0 图），后续 v3 补回图片：合并为单一文本修订且不出现空 Diff/假删图
+    edit_v1 = _ver(1, title="公告", text="维护结束：11:00", media=imgs[:2])
+    edit_v2 = _ver(2, title="公告", text="维护结束：13:00", media=[], minutes_offset=10)
+    edit_v3 = _ver(3, title="公告", text="维护结束：13:00", media=imgs[:2], minutes_offset=20)
+    kept_edit = collapse_substantive_versions([edit_v1, edit_v2, edit_v3], platform="rss")
+    assert [v.version for v in kept_edit] == [1, 3]
+    diff_edit = compute_version_diff(kept_edit[0], kept_edit[1])
+    assert diff_edit["stats"]["added_lines"] == 1
+    assert diff_edit["media_added"] == []
+    assert diff_edit["media_removed"] == []
+
+    # 即使尚未抓回 v3，v1(有图) -> v2(0图+改文) 也只展示文本差异，不误报“移除全部图片”
+    diff_mid = compute_version_diff(collapse_substantive_versions([edit_v1, edit_v2], platform="rss")[0],
+                                    collapse_substantive_versions([edit_v1, edit_v2], platform="rss")[1])
+    assert diff_mid["stats"]["added_lines"] == 1
+    assert diff_mid["media_removed"] == []
+    assert diff_mid["media_added"] == []
+
+    # 4. B 站空动态多步占位回填后再次风控退回空正文（无后续恢复）：折叠为唯一完整版本
+    b_v1 = _ver(1, title="", text="", media=[])
+    b_v3 = _ver(3, title="图文动态", text="", media=[imgs[0]], minutes_offset=5)
+    b_v7 = _ver(7, title="图文动态", text="", media=[], minutes_offset=10)
+    b_v8 = _ver(8, title="OST上架公告", text="《鸣潮》OST现已正式上架各大音乐平台。", media=[imgs[0]], minutes_offset=15)
+    b_v9 = _ver(9, title="图文动态", text="", media=[], minutes_offset=20)
+    kept_b = collapse_substantive_versions([b_v1, b_v3, b_v7, b_v8, b_v9], platform="bilibili")
+    assert [v.version for v in kept_b] == [8]
+
+    # 5. B 站转发动态补全后再退回初始残缺态（v1短+0图 -> v2全+1图 -> v3短+0图）：忽略退化 v3
+    short_repost = "鸣潮丨「莫宁」1/6手办 预售即将开启，更多详细情报可关注官方店铺。"
+    full_repost = short_repost + "\n2026年9月25日18:00正式开启预售，全款 799 元。"
+    r_v1 = _ver(1, title=short_repost, text=short_repost, media=[])
+    r_v2 = _ver(2, title=short_repost, text=full_repost, media=[imgs[0]], minutes_offset=10)
+    r_v3 = _ver(3, title=short_repost, text=short_repost, media=[], minutes_offset=20)
+    kept_r = collapse_substantive_versions([r_v1, r_v2, r_v3], platform="bilibili")
+    assert [v.version for v in kept_r] == [2]
+
+    # 6. 管理员手工删图（origin=admin）仍必须完整保留，不被风控过滤误吞
+    adm_v1 = _ver(1, title="公告", text="正文一致", media=[imgs[0]], parser_version="2")
+    adm_v2 = _ver(2, title="公告", text="正文一致", media=[], parser_version="2+admin", minutes_offset=10)
+    kept_adm = collapse_substantive_versions([adm_v1, adm_v2], platform="bilibili")
+    assert [v.version for v in kept_adm] == [1, 2]
+    diff_adm = compute_version_diff(kept_adm[0], kept_adm[1])
+    assert diff_adm["media_removed"] == [imgs[0]]
 
 
 def test_collapse_folds_transient_flap_but_keeps_genuine_revert():

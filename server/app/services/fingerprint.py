@@ -13,15 +13,30 @@ from app.schemas.content import NormalizedContent
 _URL_SCHEME = re.compile(r"^(?:https?:)?//")
 _BILIBILI_IMAGE_SHARD = re.compile(r"^i\d\.hdslb\.com/")
 _YT_IMAGE_SHARD = re.compile(r"^i\d\.ytimg\.com/")
+_YT_THUMB_VARIANT = re.compile(
+    r"^(i\.ytimg\.com/vi/[^/?]+)/(?:default|mqdefault|hqdefault|sddefault|maxresdefault|hq720)(?:_live)?\.(?:jpg|webp)(?:\?.*)?$",
+    re.I,
+)
 _YT_THUMB_QUERY = re.compile(r"^(i\.ytimg\.com/vi/[^?]+)\?.*$")
+_TWIMG_VARIANT = re.compile(
+    r"^(pbs\.twimg\.com/(?:media|amplify_video_thumb|ext_tw_video_thumb)/[^?]+?)(?:\.(?:jpg|jpeg|png|webp))?(?:\?.*)?$",
+    re.I,
+)
+_IMAGE_CACHE_BUSTER = re.compile(
+    r"^([^?]+\.(?:jpg|jpeg|png|webp|gif))\?(?:t|v|_t|ts|cb)=[a-zA-Z0-9._-]+$",
+    re.I,
+)
 
 
 def canonical_media(url: str) -> str:
-    """同一张图的不同写法归一：B 站轮换 CDN 分片，YouTube 封面会附带/去掉 ?v= 缓存参数。"""
+    """同一张图的不同写法归一：B 站 CDN 分片、YouTube 封面分辨率/直播态/参数、X 图片格式与纯缓存时间戳参数。"""
     normalized = _URL_SCHEME.sub("", url)
     normalized = _BILIBILI_IMAGE_SHARD.sub("i0.hdslb.com/", normalized)
     normalized = _YT_IMAGE_SHARD.sub("i.ytimg.com/", normalized)
-    return _YT_THUMB_QUERY.sub(r"\1", normalized)
+    normalized = _YT_THUMB_VARIANT.sub(r"\1/thumb", normalized)
+    normalized = _YT_THUMB_QUERY.sub(r"\1", normalized)
+    normalized = _TWIMG_VARIANT.sub(r"\1", normalized)
+    return _IMAGE_CACHE_BUSTER.sub(r"\1", normalized)
 
 
 def content_body(title: str | None, text: str | None, media: list | None, extra: dict | None = None) -> tuple:
