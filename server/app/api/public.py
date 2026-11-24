@@ -45,6 +45,12 @@ from app.schemas.api import (
     StatisticsOverview,
 )
 from app.services.hidden_communities import request_blocks, request_hidden
+from app.services.public_cache import (
+    CACHE_PREFIX,
+    SITE_CONFIG_KEY,
+    cached_dict,
+    cached_model,
+)
 from app.services.urls import safe_link
 
 router = APIRouter(prefix="/api")
@@ -63,6 +69,12 @@ COMMUNITY_AGGREGATE_QUERY = COMMUNITY_AGGREGATE_QUERY_DEP
 
 
 HIGHLIGHTS_CACHE_SECONDS = 60
+PUBLIC_CACHE_SECONDS = 60
+EVENTS_CACHE_SECONDS = 45
+_TRENDING_CACHE_HOURS = frozenset({6, 12, 24, 48, 72, 168})
+_TRENDING_CACHE_LIMITS = frozenset({5, 10, 20})
+_EVENTS_CACHE_LIMITS = frozenset({6, 20, 30})
+_STEAM_CACHE_HOURS = frozenset({24, 72, 168, 720})
 
 
 @router.get("/highlights", response_model=PublicContentList)
@@ -75,35 +87,25 @@ async def list_highlights(
     """首页精选：官方实质动态与高热度社区内容混排。
 
     候选要扫描近 200 条内容并补指标与事件分组（实测 0.6–0.7s），是首页首屏最慢的一步；
-    结果按分区短期缓存，精选本身按小时级变化，60 秒延迟可以接受。
+    仅缓存默认公共视角，避免自定义屏蔽 cookie 组合产生高基数 Key 占用 Redis 内存。
     """
-    blocks = request_blocks(request).scoped(community)
-    cache = getattr(request.app.state, "redis", None)
-    cache_key = f"highlights:v1:{community}:{limit}" + (f":-{'.'.join(blocks.tokens())}" if blocks else "")
-    if cache is not None:
-        try:
-            cached = await cache.get(cache_key)
-            if cached:
-                return PublicContentList.model_validate_json(cached)
-        except Exception:  # noqa: BLE001 - Redis 不可用时直接现算
-            pass
-
     from app.services.curation import select_highlights
 
-    items = [
-        PublicContentItem(**item)
-        for item in await select_highlights(
-            session, limit, community=community, exclude=blocks.communities,
-            where=blocks.platform_conditions(RawContent.platform, RawContent.community),
-        )
-    ]
-    result = PublicContentList(items=items, total=len(items))
-    if cache is not None:
-        try:
-            await cache.set(cache_key, result.model_dump_json(), ex=HIGHLIGHTS_CACHE_SECONDS)
-        except Exception:  # noqa: BLE001
-            pass
-    return result
+    blocks = request_blocks(request).scoped(community)
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = f"{CACHE_PREFIX}highlights:{community}:{limit}" if not blocks else None
+
+    async def _load() -> PublicContentList:
+        items = [
+            PublicContentItem(**item)
+            for item in await select_highlights(
+                session, limit, community=community, exclude=blocks.communities,
+                where=blocks.platform_conditions(RawContent.platform, RawContent.community),
+            )
+        ]
+        return PublicContentList(items=items, total=len(items))
+
+    return await cached_model(cache, cache_key, HIGHLIGHTS_CACHE_SECONDS, PublicContentList, _load)
 
 
 @router.get("/trending", response_model=PublicContentList)
@@ -118,14 +120,24 @@ async def list_trending(
     from app.services.curation import select_trending
 
     blocks = request_blocks(request).scoped(community)
-    items = [
-        PublicContentItem(**item)
-        for item in await select_trending(
-            session, limit, community=community, hours=hours, exclude=blocks.communities,
-            where=blocks.platform_conditions(RawContent.platform, RawContent.community),
-        )
-    ]
-    return PublicContentList(items=items, total=len(items))
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = (
+        f"{CACHE_PREFIX}trending:{community}:{hours}:{limit}"
+        if (not blocks and hours in _TRENDING_CACHE_HOURS and limit in _TRENDING_CACHE_LIMITS)
+        else None
+    )
+
+    async def _load() -> PublicContentList:
+        items = [
+            PublicContentItem(**item)
+            for item in await select_trending(
+                session, limit, community=community, hours=hours, exclude=blocks.communities,
+                where=blocks.platform_conditions(RawContent.platform, RawContent.community),
+            )
+        ]
+        return PublicContentList(items=items, total=len(items))
+
+    return await cached_model(cache, cache_key, PUBLIC_CACHE_SECONDS, PublicContentList, _load)
 
 
 @router.get("/calendar")
@@ -136,7 +148,15 @@ async def content_calendar(
 ):
     from app.services.calendar import calendar_groups
 
-    return await calendar_groups(session, community, exclude=request_hidden(request))
+    hidden = request_hidden(request)
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = f"{CACHE_PREFIX}calendar:{community}" if not hidden else None
+    return await cached_dict(
+        cache,
+        cache_key,
+        PUBLIC_CACHE_SECONDS,
+        lambda: calendar_groups(session, community, exclude=hidden),
+    )
 
 
 @router.get("/calendar/month")
@@ -176,29 +196,36 @@ async def list_redeem_codes(
     """可用兑换码列表（官方内容 AI 抽取；过期自动隐藏）。"""
     from app.models import RedeemCode
 
-    now = utcnow()
-    conditions: list = [RedeemCode.status == "active", RawContent.hidden.is_(False),
-                        *community_conditions(RedeemCode.community, community, request_hidden(request))]
-    conditions.append(RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now))
-    rows = await session.execute(
-        select(RedeemCode, RawContent.url)
-        .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
-        .where(*conditions)
-        .order_by(RedeemCode.created_at.desc())
-        .limit(30)
-    )
-    items = [
-        {
-            "code": code.code,
-            "community": code.community,
-            "expires_at": code.expires_at,
-            "created_at": code.created_at,
-            # 兑换码页把 url 直接绑到 href，脏 scheme 不下发
-            "url": safe_link(url),
-        }
-        for code, url in rows
-    ]
-    return {"items": items, "total": len(items)}
+    hidden = request_hidden(request)
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = f"{CACHE_PREFIX}codes:{community}" if not hidden else None
+
+    async def _load() -> dict:
+        now = utcnow()
+        conditions: list = [RedeemCode.status == "active", RawContent.hidden.is_(False),
+                            *community_conditions(RedeemCode.community, community, hidden)]
+        conditions.append(RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now))
+        rows = await session.execute(
+            select(RedeemCode, RawContent.url)
+            .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
+            .where(*conditions)
+            .order_by(RedeemCode.created_at.desc())
+            .limit(30)
+        )
+        items = [
+            {
+                "code": code.code,
+                "community": code.community,
+                "expires_at": code.expires_at,
+                "created_at": code.created_at,
+                # 兑换码页把 url 直接绑到 href，脏 scheme 不下发
+                "url": safe_link(url),
+            }
+            for code, url in rows
+        ]
+        return {"items": items, "total": len(items)}
+
+    return await cached_dict(cache, cache_key, PUBLIC_CACHE_SECONDS, _load)
 
 
 def _preview_mode(text: str | None, media: list, url: str | None) -> str:
@@ -561,6 +588,7 @@ async def rss_feed(
 
 @router.get("/sources", response_model=PublicSourceList)
 async def list_sources(
+    request: Request,
     community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
@@ -568,24 +596,30 @@ async def list_sources(
 
     community=all 时返回全部分区的来源（系统级视角）；不暴露 last_error 等内部细节。
     """
-    rows = await session.execute(
-        select(CollectTarget)
-        .where(*([] if is_all_community(community) else [CollectTarget.community == community]))
-        .order_by(CollectTarget.community, CollectTarget.platform, CollectTarget.id)
-    )
-    items = [
-        PublicSource(
-            name=target.display_name or target.target_value,
-            platform=target.platform,
-            target_type=target.target_type,
-            enabled=target.enabled,
-            last_success_at=target.last_success_at,
-            consecutive_failures=target.consecutive_failures,
-            community=getattr(target, "community", None) or DEFAULT_COMMUNITY,
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = f"{CACHE_PREFIX}sources:{community}"
+
+    async def _load() -> PublicSourceList:
+        rows = await session.execute(
+            select(CollectTarget)
+            .where(*([] if is_all_community(community) else [CollectTarget.community == community]))
+            .order_by(CollectTarget.community, CollectTarget.platform, CollectTarget.id)
         )
-        for target in rows.scalars()
-    ]
-    return PublicSourceList(items=items)
+        items = [
+            PublicSource(
+                name=target.display_name or target.target_value,
+                platform=target.platform,
+                target_type=target.target_type,
+                enabled=target.enabled,
+                last_success_at=target.last_success_at,
+                consecutive_failures=target.consecutive_failures,
+                community=getattr(target, "community", None) or DEFAULT_COMMUNITY,
+            )
+            for target in rows.scalars()
+        ]
+        return PublicSourceList(items=items)
+
+    return await cached_model(cache, cache_key, PUBLIC_CACHE_SECONDS, PublicSourceList, _load)
 
 
 _ALLOWED_TAGS = [
@@ -751,68 +785,88 @@ async def list_events(
     from app.models import Product as ProductModel
     from app.services.views import events_to_out
 
-    # 资讯事件由专用发布层重新核对审核版本与引用，避免游戏出口暴露旧摘要。
-    conditions = [EventModel.is_active.is_(True), EventModel.category != "ai_news",
-                  *community_conditions(EventModel.community, community, request_hidden(request))]
-    latest_evidence_sq = (
-        select(
-            Evidence.event_id.label("event_id"),
-            func.max(
-                func.coalesce(RawContent.published_at, RawContent.collected_at)
-            ).label("latest_evidence_at"),
+    hidden = request_hidden(request)
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = (
+        f"{CACHE_PREFIX}events:{community}:{limit}"
+        if (
+            not hidden
+            and category is None
+            and product_slug is None
+            and importance is None
+            and published_within_hours is None
+            and q is None
+            and offset == 0
+            and limit in _EVENTS_CACHE_LIMITS
         )
-        .join(RawContent, RawContent.id == Evidence.raw_content_id)
-        .where(Evidence.role != "excluded", RawContent.hidden.is_(False))
-        .group_by(Evidence.event_id)
-        .subquery()
+        else None
     )
-    if category:
-        conditions.append(EventModel.category == category)
-    if product_slug:
-        product = await session.scalar(
-            select(ProductModel).where(ProductModel.slug == product_slug)
-        )
-        conditions.append(EventModel.product_id == (product.id if product else -1))
-    if importance is not None:
-        conditions.append(EventModel.importance.is_(importance))
-    if published_within_hours:
-        cutoff = utcnow() - timedelta(hours=published_within_hours)
-        recent_event_ids = (
-            select(Evidence.event_id)
-            .join(RawContent, RawContent.id == Evidence.raw_content_id)
-            .where(
-                RawContent.published_at >= cutoff,
-                Evidence.role != "excluded",
-                RawContent.hidden.is_(False),
-            )
-        )
-        conditions.append(EventModel.id.in_(recent_event_ids))
-    if q:
-        conditions.append(EventModel.title.like(f"%{q}%"))
 
-    total = await session.scalar(
-        select(func.count(EventModel.id))
-        .join(latest_evidence_sq, latest_evidence_sq.c.event_id == EventModel.id)
-        .where(*conditions)
-    ) or 0
-    events = list(
-        (
-            await session.execute(
-                select(EventModel)
-                .join(latest_evidence_sq, latest_evidence_sq.c.event_id == EventModel.id)
-                .where(*conditions)
-                .order_by(
-                    latest_evidence_sq.c.latest_evidence_at.desc(),
-                    EventModel.importance.desc(),
-                    EventModel.id.desc(),
-                )
-                .limit(limit)
-                .offset(offset)
+    async def _load() -> EventListOut:
+        # 资讯事件由专用发布层重新核对审核版本与引用，避免游戏出口暴露旧摘要。
+        conditions = [EventModel.is_active.is_(True), EventModel.category != "ai_news",
+                      *community_conditions(EventModel.community, community, hidden)]
+        latest_evidence_sq = (
+            select(
+                Evidence.event_id.label("event_id"),
+                func.max(
+                    func.coalesce(RawContent.published_at, RawContent.collected_at)
+                ).label("latest_evidence_at"),
             )
-        ).scalars()
-    )
-    items = await events_to_out(session, events)
-    return EventListOut(items=items, total=total)
+            .join(RawContent, RawContent.id == Evidence.raw_content_id)
+            .where(Evidence.role != "excluded", RawContent.hidden.is_(False))
+            .group_by(Evidence.event_id)
+            .subquery()
+        )
+        if category:
+            conditions.append(EventModel.category == category)
+        if product_slug:
+            product = await session.scalar(
+                select(ProductModel).where(ProductModel.slug == product_slug)
+            )
+            conditions.append(EventModel.product_id == (product.id if product else -1))
+        if importance is not None:
+            conditions.append(EventModel.importance.is_(importance))
+        if published_within_hours:
+            cutoff = utcnow() - timedelta(hours=published_within_hours)
+            recent_event_ids = (
+                select(Evidence.event_id)
+                .join(RawContent, RawContent.id == Evidence.raw_content_id)
+                .where(
+                    RawContent.published_at >= cutoff,
+                    Evidence.role != "excluded",
+                    RawContent.hidden.is_(False),
+                )
+            )
+            conditions.append(EventModel.id.in_(recent_event_ids))
+        if q:
+            conditions.append(EventModel.title.like(f"%{q}%"))
+
+        total = await session.scalar(
+            select(func.count(EventModel.id))
+            .join(latest_evidence_sq, latest_evidence_sq.c.event_id == EventModel.id)
+            .where(*conditions)
+        ) or 0
+        events = list(
+            (
+                await session.execute(
+                    select(EventModel)
+                    .join(latest_evidence_sq, latest_evidence_sq.c.event_id == EventModel.id)
+                    .where(*conditions)
+                    .order_by(
+                        latest_evidence_sq.c.latest_evidence_at.desc(),
+                        EventModel.importance.desc(),
+                        EventModel.id.desc(),
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                )
+            ).scalars()
+        )
+        items = await events_to_out(session, events)
+        return EventListOut(items=items, total=total)
+
+    return await cached_model(cache, cache_key, EVENTS_CACHE_SECONDS, EventListOut, _load)
 
 
 @router.get("/events/{event_id}", response_model=EventOut)
@@ -837,17 +891,25 @@ async def list_products(
     from app.models import Product as ProductModel
     from app.services.views import products_to_out
 
-    query = select(ProductModel).where(
-        *community_conditions(ProductModel.community, community, request_hidden(request)))
-    products = list(
-        (
-            await session.execute(
-                query.order_by(ProductModel.id)
-            )
-        ).scalars()
-    )
-    items = await products_to_out(session, products)
-    return ProductListOut(items=items)
+    hidden = request_hidden(request)
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = f"{CACHE_PREFIX}products:{community}" if not hidden else None
+
+    async def _load() -> ProductListOut:
+        query = select(ProductModel).where(
+            *community_conditions(ProductModel.community, community, hidden)
+        )
+        products = list(
+            (
+                await session.execute(
+                    query.order_by(ProductModel.id)
+                )
+            ).scalars()
+        )
+        items = await products_to_out(session, products)
+        return ProductListOut(items=items)
+
+    return await cached_model(cache, cache_key, PUBLIC_CACHE_SECONDS, ProductListOut, _load)
 
 
 @router.get("/products/{slug}", response_model=ProductOut)
@@ -1152,24 +1214,29 @@ async def official_links(
 
 
 @router.get("/site-config")
-async def site_config(session: AsyncSession = Depends(get_session)):
+async def site_config(request: Request, session: AsyncSession = Depends(get_session)):
     """公开站点配置：全服公告、文案区域、动态分区与服务就绪布尔状态（不含任何凭据或 SMTP 详情）。"""
     from app.services import settings as settings_service
     from app.services.ai import ai_available, get_ai_config
 
-    await sync_communities(session)
-    all_items = [community_to_public_dict(meta) for meta in COMMUNITIES.values()]
-    ai_cfg = await get_ai_config(session)
-    smtp_cfg = await settings_service.get_effective_smtp(session)
-    return {
-        "announcement": await settings_service.get_announcement(session),
-        "texts": await settings_service.get_texts(session),
-        "communities": [item for item in all_items if item["active"]],
-        "all_communities": all_items,
-        "media_visibility": await settings_service.get_media_visibility(session),
-        "ai_configured": bool(ai_available(ai_cfg)),
-        "smtp_configured": bool(smtp_cfg.get("host") and smtp_cfg.get("user") and smtp_cfg.get("password")),
-    }
+    cache = getattr(request.app.state, "redis", None)
+
+    async def _load() -> dict:
+        await sync_communities(session)
+        all_items = [community_to_public_dict(meta) for meta in COMMUNITIES.values()]
+        ai_cfg = await get_ai_config(session)
+        smtp_cfg = await settings_service.get_effective_smtp(session)
+        return {
+            "announcement": await settings_service.get_announcement(session),
+            "texts": await settings_service.get_texts(session),
+            "communities": [item for item in all_items if item["active"]],
+            "all_communities": all_items,
+            "media_visibility": await settings_service.get_media_visibility(session),
+            "ai_configured": bool(ai_available(ai_cfg)),
+            "smtp_configured": bool(smtp_cfg.get("host") and smtp_cfg.get("user") and smtp_cfg.get("password")),
+        }
+
+    return await cached_dict(cache, SITE_CONFIG_KEY, PUBLIC_CACHE_SECONDS, _load)
 
 
 @router.get("/stats", response_model=PublicStats)
@@ -1325,11 +1392,22 @@ async def steam_pulse(
     blocks = request_blocks(request).scoped(community)
     if "steam" in blocks.raw_platforms("game"):
         return {"community": community, "hours": hours, "apps": []}
-    return await get_steam_pulse(
-        session,
-        community,
-        hours=hours,
-        exclude_communities=blocks.communities,
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = (
+        f"{CACHE_PREFIX}steam-pulse:{community}:{hours}"
+        if (not blocks and hours in _STEAM_CACHE_HOURS)
+        else None
+    )
+    return await cached_dict(
+        cache,
+        cache_key,
+        PUBLIC_CACHE_SECONDS,
+        lambda: get_steam_pulse(
+            session,
+            community,
+            hours=hours,
+            exclude_communities=blocks.communities,
+        ),
     )
 
 

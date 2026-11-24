@@ -48,6 +48,9 @@ async def set_setting(session: AsyncSession, key: str, value: dict) -> None:
     else:
         row.value = value
     await session.commit()
+    from app.services.public_cache import invalidate_for_setting
+
+    await invalidate_for_setting(key)
 
 
 async def get_texts(session: AsyncSession) -> dict[str, str]:
