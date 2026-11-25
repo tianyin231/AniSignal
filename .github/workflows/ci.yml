@@ -66,6 +66,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       # 锁文件指向国内镜像，runner 上改走官方源；完整性哈希不变
       - run: npm ci --replace-registry-host=always
+      - run: npm audit --audit-level=critical --registry=https://registry.npmjs.org
       - run: npm test
       - run: npm ci --prefix ../integrations/dsh_plugin_anisignal --ignore-scripts --omit=optional --replace-registry-host=always
       - run: node --test ../integrations/dsh_plugin_anisignal/test/*.test.mjs
