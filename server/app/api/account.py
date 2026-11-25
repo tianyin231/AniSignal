@@ -181,6 +181,94 @@ async def update_hidden_communities(
     return _blocks_body(account_blocks(user))
 
 
+CALENDAR_TIMEZONES = frozenset({
+    "Asia/Shanghai",
+    "Asia/Tokyo",
+    "America/New_York",
+    "Europe/Berlin",
+    "UTC",
+    "local",
+})
+DEFAULT_CALENDAR_TIMEZONE = "Asia/Shanghai"
+MAX_CLAIMED_CODES = 200
+MAX_COMPLETED_SCHEDULES = 300
+
+
+def _read_calendar_state(user: User) -> dict:
+    raw = (user.feed_preferences or {}).get("calendar_state")
+    if not isinstance(raw, dict):
+        return {"claimed_codes": [], "completed_schedules": [], "timezone": DEFAULT_CALENDAR_TIMEZONE}
+    claimed = [c for c in raw.get("claimed_codes", []) if isinstance(c, str) and c]
+    completed = [i for i in raw.get("completed_schedules", []) if type(i) is int and i > 0]
+    tz = raw.get("timezone")
+    if not isinstance(tz, str) or tz not in CALENDAR_TIMEZONES:
+        tz = DEFAULT_CALENDAR_TIMEZONE
+    return {
+        "claimed_codes": claimed[-MAX_CLAIMED_CODES:],
+        "completed_schedules": completed[-MAX_COMPLETED_SCHEDULES:],
+        "timezone": tz,
+    }
+
+
+@router.get("/calendar-state")
+async def get_calendar_state(user: User = Depends(get_current_user)):
+    """个人日历打卡状态（已领兑换码、已完成日程、时区偏好）。"""
+    return _read_calendar_state(user)
+
+
+@router.put("/calendar-state")
+async def update_calendar_state(
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """更新个人日历打卡与时区偏好；缺少的字段保留原值，不影响关注流与屏蔽设置。"""
+    current = _read_calendar_state(user)
+    next_state = dict(current)
+
+    if "claimed_codes" in body:
+        raw_codes = body["claimed_codes"]
+        if not isinstance(raw_codes, list) or len(raw_codes) > 1000:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "已领兑换码格式无效")
+        cleaned_codes: list[str] = []
+        seen_codes: set[str] = set()
+        for item in raw_codes:
+            if not isinstance(item, str):
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "兑换码标识必须是字符串")
+            token = item.strip()
+            if not token or len(token) > 80:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "兑换码标识长度需在 1–80 字符之间")
+            if token not in seen_codes:
+                seen_codes.add(token)
+                cleaned_codes.append(token)
+        next_state["claimed_codes"] = cleaned_codes[-MAX_CLAIMED_CODES:]
+
+    if "completed_schedules" in body:
+        raw_ids = body["completed_schedules"]
+        if not isinstance(raw_ids, list) or len(raw_ids) > 1000:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "已完成日程格式无效")
+        cleaned_ids: list[int] = []
+        seen_ids: set[int] = set()
+        for item in raw_ids:
+            if type(item) is not int or item <= 0:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "日程 ID 必须是正整数")
+            if item not in seen_ids:
+                seen_ids.add(item)
+                cleaned_ids.append(item)
+        next_state["completed_schedules"] = cleaned_ids[-MAX_COMPLETED_SCHEDULES:]
+
+    if "timezone" in body:
+        tz = body["timezone"]
+        if not isinstance(tz, str) or tz not in CALENDAR_TIMEZONES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请选择支持的时区")
+        next_state["timezone"] = tz
+
+    # 不更新 updated_at：它只用于邮件早报快照，打卡不改变早报内容。
+    user.feed_preferences = {**(user.feed_preferences or {}), "calendar_state": next_state}
+    await session.commit()
+    return next_state
+
+
 @router.get("/notifications")
 async def notification_status(
     user: User = Depends(get_current_user),

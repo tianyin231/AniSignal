@@ -172,6 +172,46 @@ async def monthly_calendar(
     return await calendar_month(session, community, month, exclude=request_hidden(request))
 
 
+@router.get("/calendar/range")
+async def calendar_range_api(
+    request: Request,
+    community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
+    start: str | None = Query(default=None, pattern=r"^(?:19|20|21)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$"),
+    days: int = Query(default=30, ge=7, le=90),
+    days_back: int = Query(default=3, ge=0, le=30),
+    session: AsyncSession = Depends(get_session),
+):
+    """跨月时间轴窗口日程（供活动日历甘特时间轴视图使用）。"""
+    from app.services.calendar import calendar_range
+
+    if start is not None:
+        try:
+            datetime.strptime(start, "%Y-%m-%d")
+        except ValueError as exc:
+            raise HTTPException(400, "无效日期") from exc
+
+    hidden = request_hidden(request)
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = (
+        f"{CACHE_PREFIX}calendar_range:{community}:{days}:{days_back}"
+        if (not hidden and start is None and days in {14, 21, 30, 45} and days_back == 3)
+        else None
+    )
+    return await cached_dict(
+        cache,
+        cache_key,
+        PUBLIC_CACHE_SECONDS,
+        lambda: calendar_range(
+            session,
+            community,
+            start_date=start,
+            days=days,
+            days_back=days_back,
+            exclude=hidden,
+        ),
+    )
+
+
 @router.get("/calendar.ics")
 async def calendar_subscription_feed(
     request: Request,

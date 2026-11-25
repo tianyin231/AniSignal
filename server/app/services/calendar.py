@@ -86,6 +86,45 @@ async def calendar_month(session: AsyncSession, community: str, month: str, *, e
     return {"month": month, "items": items}
 
 
+async def calendar_range(
+    session: AsyncSession,
+    community: str,
+    *,
+    start_date: str | None = None,
+    days: int = 30,
+    days_back: int = 3,
+    exclude: tuple[str, ...] = (),
+) -> dict:
+    """按跨月滚动窗口返回日程，供横向甘特时间轴视图使用。
+
+    查询窗口向两侧各留 1 天缓冲，覆盖 UTC-12 ~ UTC+14 的任意客户端时区边界。
+    """
+    now = utcnow()
+    if start_date:
+        anchor = datetime.strptime(start_date, "%Y-%m-%d")
+    else:
+        beijing_today = (now + timedelta(hours=8)).replace(hour=0, minute=0, second=0, microsecond=0)
+        anchor = beijing_today - timedelta(days=days_back)
+    window_start = anchor - timedelta(days=1)
+    window_end = anchor + timedelta(days=days + 1)
+    items = await calendar_entries(
+        session,
+        community,
+        now=now,
+        window_start=window_start,
+        window_end=window_end,
+        exclude=exclude,
+    )
+    items.sort(key=lambda item: (item["start_at"], item["id"]))
+    end_anchor = anchor + timedelta(days=days - 1)
+    return {
+        "start": anchor.strftime("%Y-%m-%d"),
+        "end": end_anchor.strftime("%Y-%m-%d"),
+        "days": days,
+        "items": items,
+    }
+
+
 async def calendar_groups(session: AsyncSession, community: str, *, exclude: tuple[str, ...] = ()) -> dict:
     now = utcnow()
     groups: dict[str, list] = {"ongoing": [], "upcoming": [], "recent": [], "ended": []}
