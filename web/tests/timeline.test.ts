@@ -8,6 +8,9 @@ import {
 } from '../app/utils/calendar.ts'
 import { buildTimeline, effectiveScheduleBounds } from '../app/utils/timeline.ts'
 import {
+  codeServerLabel,
+  codeSourceBadge,
+  formatCodeExpiry,
   makeCodeKey,
   mergeCalendarStates,
   normalizeCalendarState,
@@ -143,4 +146,34 @@ test('全天日程的有效结束时刻包含结束日当天，时间轴与详�
   // 上海 2026-11-06 00:00 ~ 2026-12-07 00:00（包含 12-06 全天）
   assert.equal(new Date(shanghai.startMs).toISOString(), '2026-11-05T16:00:00.000Z')
   assert.equal(new Date(shanghai.endMs!).toISOString(), '2026-12-06T16:00:00.000Z')
+})
+
+test('兑换码来源徽章、区服与三层有效期展示逻辑', () => {
+  assert.deepEqual(codeSourceBadge({ source_kind: 'official', source_count: 1 }), { label: '官方', tone: 'official' })
+  assert.deepEqual(codeSourceBadge({ source_kind: 'community', source_count: 1 }), { label: '社区整理', tone: 'community' })
+  assert.deepEqual(codeSourceBadge({ source_kind: 'community', source_count: 3 }), { label: '×3 确认', tone: 'verified' })
+
+  assert.equal(codeServerLabel('cn'), '国服')
+  assert.equal(codeServerLabel('global'), '国际服')
+  assert.equal(codeServerLabel(null), null)
+
+  const now = Date.parse('2026-11-25T03:00:00Z')
+  // 预计过期且不足 24h -> urgent=true
+  const est = formatCodeExpiry(
+    { expires_at: '2026-11-25T15:59:00', expiry_estimated: true },
+    'Asia/Shanghai',
+    now,
+  )
+  assert.equal(est.urgent, true)
+  assert.equal(est.estimated, true)
+  assert.equal(est.text, '预计 11-25 23:59 过期（前瞻短效）')
+
+  // 无有效期 -> 诚实展示整理日期
+  const unknown = formatCodeExpiry(
+    { expires_at: null, published_at: '2026-11-24T06:35:00' },
+    'Asia/Shanghai',
+    now,
+  )
+  assert.equal(unknown.urgent, false)
+  assert.equal(unknown.text, '11-24 整理 · 未注明有效期')
 })

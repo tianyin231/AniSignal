@@ -205,6 +205,7 @@ async def extract_entities_sweep(ctx) -> dict:
     """官方内容实体抽取轮询：日程与兑换码（每轮限量）。"""
     from app.db import SessionLocal
     from app.services.extract import sweep_extractions
+    from app.services.redeem_codes import sweep_community_codes
     import secrets
 
     token = secrets.token_hex(16)
@@ -214,7 +215,9 @@ async def extract_entities_sweep(ctx) -> dict:
     try:
         async with SessionLocal() as session:
             result = await sweep_extractions(session)
-            if result["candidates"]:
+            community_codes = await sweep_community_codes(session)
+            result["community_codes"] = community_codes
+            if result["candidates"] or community_codes["candidates"]:
                 logger.info("extract_entities_sweep -> %s", result)
             return result
     finally:

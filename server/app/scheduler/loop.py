@@ -96,8 +96,10 @@ async def local_loop(queue) -> None:
                 global _local_extract_sweep_at
                 if _local_extract_sweep_at is None or now >= _local_extract_sweep_at:
                     from app.services.extract import sweep_extractions
+                    from app.services.redeem_codes import sweep_community_codes
 
                     await sweep_extractions(session)
+                    await sweep_community_codes(session)
                     _local_extract_sweep_at = now + _CUSTOM_SWEEP_INTERVAL
         except Exception:  # noqa: BLE001 - 调度循环不能因单轮失败退出
             logger.exception("local scheduler tick failed")

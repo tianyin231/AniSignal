@@ -754,17 +754,15 @@ async def _tool_get_calendar(session: AsyncSession, ctx: McpContext, args: dict)
 
 
 async def _tool_list_redeem_codes(session: AsyncSession, ctx: McpContext, args: dict) -> str:
+    from app.services.redeem_codes import active_redeem_code_conditions
+
     await ensure_communities_synced(session)
     raw_comm = _str_arg(args, "community", max_len=40)
     limit = _clamp_int(args.get("limit"), 20, 1, 30, "limit")
     _comm_slug, comm_list, exclude_comms = _resolve_community_scope(ctx, raw_comm)
 
     now = utcnow()
-    conditions: list[Any] = [
-        RedeemCode.status == "active",
-        RawContent.hidden.is_(False),
-        or_(RedeemCode.expires_at.is_(None), RedeemCode.expires_at > now),
-    ]
+    conditions: list[Any] = active_redeem_code_conditions(now)
     if comm_list is not None:
         conditions.append(RedeemCode.community.in_(comm_list))
     elif exclude_comms:
@@ -777,7 +775,12 @@ async def _tool_list_redeem_codes(session: AsyncSession, ctx: McpContext, args: 
                 .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
                 .outerjoin(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
                 .where(*conditions)
-                .order_by(RedeemCode.created_at.desc(), RedeemCode.id.desc())
+                .order_by(
+                    (RedeemCode.source_kind == "official").desc(),
+                    RedeemCode.source_count.desc(),
+                    RedeemCode.created_at.desc(),
+                    RedeemCode.id.desc(),
+                )
                 .limit(limit)
             )
         ).all()
@@ -788,10 +791,25 @@ async def _tool_list_redeem_codes(session: AsyncSession, ctx: McpContext, args: 
     lines = [f"### 当前可用兑换码（共 {len(rows)} 个 · 更新于 {_fmt_bj(now)}）"]
     for idx, (code, raw_id, url, title) in enumerate(rows, 1):
         meta = get_community(code.community)
-        expiry = f"截止：{_fmt_bj(code.expires_at)}" if code.expires_at else "未标注截止时间"
+        badges: list[str] = []
+        if code.server == "cn":
+            badges.append("国服")
+        elif code.server == "global":
+            badges.append("国际服")
+        if code.source_kind == "official":
+            badges.append("官方")
+        else:
+            badges.append(f"×{code.source_count} 确认" if (code.source_count or 1) >= 2 else "社区整理")
+        badge_str = f" [{' · '.join(badges)}]" if badges else ""
+        reward_str = f" · {code.reward}" if code.reward else ""
+        expiry = (
+            f"{'预计截止' if code.expiry_estimated else '截止'}：{_fmt_bj(code.expires_at)}"
+            if code.expires_at
+            else "未注明截止时间（14天保鲜期）"
+        )
         origin = safe_link(url) or _content_url(ctx.base_url, raw_id)
         note = f"（来源：{_clip(title, 40)}）" if title else ""
-        lines.append(f"{idx}. `[{meta.label}]` **`{code.code}`** — {expiry}{note} · {origin}")
+        lines.append(f"{idx}. `[{meta.label}]` **`{code.code}`**{badge_str}{reward_str} — {expiry}{note} · {origin}")
     return "\n".join(lines)
 
 
@@ -1288,13 +1306,11 @@ async def read_resource(session: AsyncSession, ctx: McpContext, uri: str) -> dic
             for group, rows in groups.items()
         }
     elif uri == "anisignal://codes":
+        from app.services.redeem_codes import active_redeem_code_conditions
+
         now = utcnow()
         _comm_slug, comm_list, exclude_comms = _resolve_community_scope(ctx, "")
-        conds = [
-            RedeemCode.status == "active",
-            RawContent.hidden.is_(False),
-            or_(RedeemCode.expires_at.is_(None), RedeemCode.expires_at > now),
-        ]
+        conds = active_redeem_code_conditions(now)
         if comm_list is not None:
             conds.append(RedeemCode.community.in_(comm_list))
         elif exclude_comms:
@@ -1304,7 +1320,11 @@ async def read_resource(session: AsyncSession, ctx: McpContext, uri: str) -> dic
                 select(RedeemCode, RawContent.url)
                 .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
                 .where(*conds)
-                .order_by(RedeemCode.created_at.desc())
+                .order_by(
+                    (RedeemCode.source_kind == "official").desc(),
+                    RedeemCode.source_count.desc(),
+                    RedeemCode.created_at.desc(),
+                )
                 .limit(30)
             )
         ).all()
@@ -1313,6 +1333,11 @@ async def read_resource(session: AsyncSession, ctx: McpContext, uri: str) -> dic
                 "code": code.code,
                 "community": code.community,
                 "expires_at": code.expires_at.isoformat() if code.expires_at else None,
+                "expiry_estimated": bool(code.expiry_estimated),
+                "source_kind": code.source_kind or "official",
+                "source_count": code.source_count or 1,
+                "server": code.server,
+                "reward": code.reward,
                 "url": safe_link(url),
             }
             for code, url in rows

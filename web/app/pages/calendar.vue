@@ -31,6 +31,7 @@ import {
   type CalendarTimezoneId,
 } from '~/utils/calendar'
 import { copyText } from '~/utils/clipboard'
+import { codeServerLabel, codeSourceBadge, formatCodeExpiry } from '~/utils/calendar-state'
 import { ENDING_SOON_MS, KIND_LABELS, fmtRemaining } from '~/utils/schedule'
 import { decodeEntities } from '~/utils/text'
 import { buildTimeline, effectiveScheduleBounds } from '~/utils/timeline'
@@ -298,15 +299,27 @@ const codeRows = computed(() => (codesData.value?.items ?? [])
   .map((item) => {
     const meta = communityMeta(item.community)
     const claimed = isCodeClaimed(item.code, item.community)
+    const source = codeSourceBadge(item)
+    const server = codeServerLabel(item.server)
+    const expiry = formatCodeExpiry(item, timezone.value, nowMs.value)
     return {
       ...item,
       game: meta?.label,
       dot: communityClasses(meta?.color ?? 'blue').dot,
       chip: communityClasses(meta?.color ?? 'blue').chip,
       claimed,
+      source,
+      server,
+      expiry,
     }
   })
   .sort((a, b) => Number(a.claimed) - Number(b.claimed)))
+
+function codeSourceClass(tone: 'official' | 'verified' | 'community') {
+  if (tone === 'official') return 'bg-brand-soft text-brand-ink'
+  if (tone === 'verified') return 'bg-ok/12 text-ok'
+  return 'bg-chip text-muted'
+}
 
 const claimedCodesCount = computed(() => codeRows.value.filter(c => c.claimed).length)
 const unclaimedCodesCount = computed(() => codeRows.value.length - claimedCodesCount.value)
@@ -656,8 +669,15 @@ async function copyIcsUrl() {
             <span v-if="community === 'all' && item.game" class="rounded px-1.5 py-0.5 text-[10px] font-semibold" :class="item.chip">
               {{ item.game }}
             </span>
-            <span class="tabular-nums">
-              {{ item.expires_at ? `${formatTimeInZone(item.expires_at, timezone)} 前有效` : '有效期待公布' }}
+            <span class="rounded px-1.5 py-0.5 text-[10px] font-semibold" :class="codeSourceClass(item.source.tone)">
+              {{ item.source.label }}
+            </span>
+            <span v-if="item.server" class="rounded border border-line px-1.5 py-0.5 text-[10px] font-medium text-ink-2">
+              {{ item.server }}
+            </span>
+            <span v-if="item.reward" class="truncate text-ink-2">{{ item.reward }}</span>
+            <span class="tabular-nums" :class="{ 'font-semibold text-hot': item.expiry.urgent && !item.claimed }">
+              {{ item.expiry.text }}
             </span>
           </div>
         </div>

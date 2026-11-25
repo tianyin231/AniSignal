@@ -58,6 +58,12 @@ export interface RedeemCodeDto {
   community?: string
   expires_at: string | null
   created_at: string
+  published_at?: string | null
+  source_kind?: 'official' | 'community' | string
+  source_count?: number
+  server?: 'cn' | 'global' | 'all' | string | null
+  reward?: string | null
+  expiry_estimated?: boolean
   url: string | null
 }
 

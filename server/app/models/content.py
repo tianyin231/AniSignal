@@ -147,7 +147,7 @@ class ContentSchedule(Base):
 
 
 class RedeemCode(Base):
-    """从官方内容抽取的兑换码（AI 层产物；community+code 唯一）。"""
+    """兑换码（AI 层双轨抽取：官方内容 + 社区 UP 主前瞻/攻略汇总；community+code 唯一）。"""
 
     __tablename__ = "redeem_codes"
     __table_args__ = (
@@ -163,6 +163,12 @@ class RedeemCode(Base):
     code: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), default="active")
     expires_at: Mapped[datetime | None] = mapped_column(DateTime)
+    source_kind: Mapped[str] = mapped_column(String(16), default="official", server_default="official")
+    source_count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    server: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    reward: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    expiry_estimated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    confirmed_sources: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

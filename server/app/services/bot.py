@@ -254,9 +254,10 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
         if not count:
             lines.append("暂无可展示的日程。")
     elif tool == "codes":
+        from app.services.redeem_codes import active_redeem_code_conditions
+
         items = []
-        conditions = [RawContent.hidden.is_(False), RedeemCode.status == "active", RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now)]
-        conditions.append(RedeemCode.community.in_(selected))
+        conditions = [*active_redeem_code_conditions(now), RedeemCode.community.in_(selected)]
         if config.get("channels"):
             conditions.append(bot_channels.channel_condition(config["channels"]))
         rows = await session.stream(
@@ -266,7 +267,7 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
                 select(func.max(ContentVersion.id)).where(ContentVersion.raw_content_id == RawContent.id).correlate(RawContent).scalar_subquery()))
             .outerjoin(Source, Source.id == RawContent.source_id)
             .where(*conditions)
-            .order_by(RedeemCode.created_at.desc(), RedeemCode.id.desc())
+            .order_by((RedeemCode.source_kind == "official").desc(), RedeemCode.source_count.desc(), RedeemCode.created_at.desc(), RedeemCode.id.desc())
             .execution_options(yield_per=100)
         )
         lines = [f"{scope} · 可用兑换码", (now + timedelta(hours=8)).strftime("更新于 %Y/%m/%d %H:%M（北京时间）")]
@@ -275,8 +276,21 @@ async def query_target(session: AsyncSession, target: BotTarget, tool: str = "di
             async for code, url, title, text in rows:
                 if not matches_keywords(config, {"title": title, "text": text}):
                     continue
-                expiry = f"（{_fmt_bj(code.expires_at)} 前）" if code.expires_at else ""
-                lines.append(f"\n{code.code}{expiry}")
+                tags: list[str] = []
+                if code.server == "cn":
+                    tags.append("国服")
+                elif code.server == "global":
+                    tags.append("国际服")
+                if code.source_kind == "community":
+                    tags.append(f"{code.source_count}位博主确认" if (code.source_count or 1) >= 2 else "社区整理")
+                tag_str = f" [{'·'.join(tags)}]" if tags else ""
+                reward_str = f" · {code.reward}" if code.reward else ""
+                expiry = (
+                    f"（{'预计 ' if code.expiry_estimated else ''}{_fmt_bj(code.expires_at)} 前）"
+                    if code.expires_at
+                    else ""
+                )
+                lines.append(f"\n{code.code}{tag_str}{reward_str}{expiry}")
                 if url:
                     lines.append(url)
                 found += 1

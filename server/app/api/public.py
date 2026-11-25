@@ -279,8 +279,9 @@ async def list_redeem_codes(
     community: CommunityOrAllSlug = COMMUNITY_AGGREGATE_QUERY,
     session: AsyncSession = Depends(get_session),
 ):
-    """可用兑换码列表（官方内容 AI 抽取；过期自动隐藏）。"""
+    """可用兑换码列表（官方 + 社区 UP 主双轨抽取；过期或超 14 天未知有效期自动隐藏）。"""
     from app.models import RedeemCode
+    from app.services.redeem_codes import active_redeem_code_conditions
 
     hidden = request_hidden(request)
     cache = getattr(request.app.state, "redis", None)
@@ -288,15 +289,20 @@ async def list_redeem_codes(
 
     async def _load() -> dict:
         now = utcnow()
-        conditions: list = [RedeemCode.status == "active", RawContent.hidden.is_(False),
-                            *community_conditions(RedeemCode.community, community, hidden)]
-        conditions.append(RedeemCode.expires_at.is_(None) | (RedeemCode.expires_at > now))
+        conditions: list = [
+            *active_redeem_code_conditions(now),
+            *community_conditions(RedeemCode.community, community, hidden),
+        ]
         rows = await session.execute(
-            select(RedeemCode, RawContent.url)
+            select(RedeemCode, RawContent.url, RawContent.published_at)
             .join(RawContent, RawContent.id == RedeemCode.raw_content_id)
             .where(*conditions)
-            .order_by(RedeemCode.created_at.desc())
-            .limit(30)
+            .order_by(
+                (RedeemCode.source_kind == "official").desc(),
+                RedeemCode.source_count.desc(),
+                RedeemCode.created_at.desc(),
+            )
+            .limit(40)
         )
         items = [
             {
@@ -304,10 +310,16 @@ async def list_redeem_codes(
                 "community": code.community,
                 "expires_at": code.expires_at,
                 "created_at": code.created_at,
+                "published_at": published_at,
+                "source_kind": code.source_kind or "official",
+                "source_count": code.source_count or 1,
+                "server": code.server,
+                "reward": code.reward,
+                "expiry_estimated": bool(code.expiry_estimated),
                 # 兑换码页把 url 直接绑到 href，脏 scheme 不下发
                 "url": safe_link(url),
             }
-            for code, url in rows
+            for code, url, published_at in rows
         ]
         return {"items": items, "total": len(items)}
 

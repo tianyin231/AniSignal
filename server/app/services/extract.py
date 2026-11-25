@@ -21,6 +21,16 @@ from app.clock import to_naive_utc, utcnow
 from app.communities import feed_community_keys, get_community
 from app.models import BotTarget, ContentSchedule, RawContent, RedeemCode, Source, ContentVersion
 from app.services.ai import ai_available, chat, get_ai_config, record_usage, retry_allowed
+from app.services.redeem_codes import (
+    backfill_expiry_from_official_deadline,
+    infer_livestream_expiry,
+    is_valid_redeem_code,
+    looks_like_livestream_context,
+    normalize_code,
+    normalize_reward,
+    normalize_server,
+    upsert_redeem_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +44,13 @@ _CODE_PATTERN_MAX = 20
 _SYSTEM = "你是游戏公告结构化助手。严格按用户要求的 JSON 格式输出，不编造任何不存在的信息。"
 
 _USER_TEMPLATE = """从以下官方内容中抽取「日程」与「兑换码」，输出 JSON：
-{{"schedules": [{{"title": "...", "start_at": "...", "end_at": "...", "kind": "...", "all_day": false, "date_evidence": "含日期的原文片段"}}], "codes": [{{"code": "...", "expires_at": "..."}}]}}
+{{"schedules": [{{"title": "...", "start_at": "...", "end_at": "...", "kind": "...", "all_day": false, "date_evidence": "含日期的原文片段"}}], "codes": [{{"code": "...", "expires_at": "...", "is_livestream": false, "server": null, "reward": null}}]}}
 
 规则：
-1. schedules 只收有明确日期/时间点的日程。kind 只能取：activity（游戏内活动/任务/商城）、maintenance（停机维护/版本更新）、pool（卡池/祈愿/建造）、broadcast（直播/前瞻节目）、delay（明确延期并给出新时间）、deadline（只公布报名、兑换、抽奖等截止时间，不能当作开始时间）。
+1. schedules 只收有明确日期/时间点的日程。kind 只能取：activity（游戏内活动/任务/商城）、maintenance（停机维护/版本更新）、pool（卡池/祈愿/建造）、broadcast（直播/前瞻节目）、delay（明确延期并给出新时间）、deadline（只公布报名、兑换、抽奖等截止时间，不能当作开始时间；如果公告只给出前瞻兑换码统一失效时间而正文没写码本身，也作为 deadline 抽取）。
 2. 时间输出带时区的 ISO 格式；原文有时区必须遵守，否则使用北京时间 +08:00。公告发布时间为 {published_at}；“今晚/明天”等相对时间必须基于公告发布时间，不能基于当前时间。未注明年份按公告的 {year} 年理解；未给结束时间填 null。
 3. delay 条目的 title 写「原活动名（延期）」，start_at 填新的时间。
-4. codes 只在正文出现"兑换码/礼包码"字样时抽取，码为 6-20 位字母数字组合；expires_at 无明确时间填 null。
+4. codes 只在正文出现"兑换码/礼包码/口令码/redemption code"字样时抽取；支持 6–32 位英数码（可含点号或连字符）与 4–24 字中文口令码，严禁抽取网址/BV号/纯数字；expires_at 无明确时间填 null；is_livestream 仅前瞻直播/特别节目短效码填 true；server 区分区服时填 cn/global/all，否则 null；reward 填简短奖励描述或 null。
 5. 没有可抽取的内容就输出空列表。绝不编造正文里不存在的码或时间。
 6. 只有日期没有具体时刻时，all_day=true，start_at 使用该日期的 00:00，不得编造维护开服时刻。只有“某版本期间”而没有日期的，不抽取。date_evidence 必须逐字摘录支持开始和结束日期的原文，不能改写。
 
@@ -144,12 +154,19 @@ def _parse_extraction(raw_out: str, *, source_text: str | None = None, published
     for entry in payload.get("codes") or []:
         if not isinstance(entry, dict):
             continue
-        code = str(entry.get("code") or "").strip()
-        if not (_CODE_PATTERN_MIN <= len(code) <= _CODE_PATTERN_MAX and re.fullmatch(r"[A-Za-z0-9]+", code)):
+        code = normalize_code(entry.get("code"))
+        if not is_valid_redeem_code(code, source_text=source_text):
             continue
-        if source_text is not None and code.lower() not in source_text.lower():
-            continue
-        codes.append({"code": code, "expires_at": _parse_dt(entry.get("expires_at"))})
+        item: dict = {"code": code, "expires_at": _parse_dt(entry.get("expires_at"))}
+        if entry.get("is_livestream") is True:
+            item["is_livestream"] = True
+        server = normalize_server(entry.get("server"))
+        if server:
+            item["server"] = server
+        reward = normalize_reward(entry.get("reward"))
+        if reward:
+            item["reward"] = reward
+        codes.append(item)
     return schedules, codes
 
 
@@ -281,40 +298,45 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
             )
         )
         new_schedules += 1
+        if entry["kind"] == "deadline" and re.search(r"兑换码|礼包码|口令码|redemption|redeem", entry["title"], re.IGNORECASE):
+            await backfill_expiry_from_official_deadline(session, community, entry["start_at"], published)
 
     new_codes = 0
+    post_is_livestream = looks_like_livestream_context(title, text)
     for entry in codes:
-        exists = await session.scalar(
-            select(RedeemCode.id).where(
-                RedeemCode.community == community, RedeemCode.code == entry["code"]
-            )
-        )
-        if exists:
-            continue
-        session.add(
-            RedeemCode(
-                raw_content_id=content_id,
-                community=community,
-                code=entry["code"],
-                status="active",
-                expires_at=entry["expires_at"],
-                created_at=now,
-            )
-        )
-        new_codes += 1
         expiry = entry["expires_at"]
-        source = {"id": content_id, "content_ids": [content_id], "title": title, "text": text,
-                  "url": raw.url, "community": community, "identity": "official", "published_at": source_published}
-        pushed = await _push_to_targets(
+        expiry_estimated = False
+        if expiry is None and (entry.get("is_livestream") or post_is_livestream):
+            expiry, expiry_estimated = await infer_livestream_expiry(session, community, published)
+
+        row, created, should_notify = await upsert_redeem_code(
             session,
-            community,
-            "critical",
-            f"🎫 新兑换码：{entry['code']}\n来自：{title}\n记得尽快兑换，过期作废。",
-            f"code:{community}:{entry['code']}",
-            brief={"mode": "notice", "code": entry["code"], "expires_at": min(expiry or now + timedelta(hours=12), now + timedelta(hours=12)).isoformat(),
-                   "items": [{**source, "sources": [source]}]},
-        ) if notify and (not expiry or expiry > now) else 0
-        logger.info("new redeem code %s pushed to %s targets", entry["code"], pushed)
+            content_id=content_id,
+            source_id=raw.source_id,
+            community=community,
+            code=entry["code"],
+            expires_at=expiry,
+            expiry_estimated=expiry_estimated,
+            source_kind="official",
+            server=entry.get("server"),
+            reward=entry.get("reward"),
+            now=now,
+        )
+        if created:
+            new_codes += 1
+        if notify and should_notify and (not row.expires_at or row.expires_at > now):
+            source = {"id": content_id, "content_ids": [content_id], "title": title, "text": text,
+                      "url": raw.url, "community": community, "identity": "official", "published_at": source_published}
+            pushed = await _push_to_targets(
+                session,
+                community,
+                "critical",
+                f"🎫 新兑换码：{row.code}\n来自：{title}\n记得尽快兑换，过期作废。",
+                f"code:{community}:{row.code}",
+                brief={"mode": "notice", "code": row.code, "expires_at": min(row.expires_at or now + timedelta(hours=12), now + timedelta(hours=12)).isoformat(),
+                       "items": [{**source, "sources": [source]}]},
+            )
+            logger.info("new redeem code %s pushed to %s targets", row.code, pushed)
 
     # 仅修改明确同主题的日程，不能把同游戏的所有活动一起标成延期。
     from app.services.calendar import schedule_topic
