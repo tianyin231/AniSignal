@@ -10,14 +10,30 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.models import ContentVersion, MerchScan, MetricSnapshot, NewsGrouping
+from app.models import (
+    AiUsage,
+    BotDelivery,
+    CollectRun,
+    ContentVersion,
+    CustomCollectRun,
+    MerchScan,
+    MetricSnapshot,
+    NewsGrouping,
+    NotificationDelivery,
+    RunStatus,
+)
 from app.services.fingerprint import content_body
 
 # 少于这个版本数的内容不可能有可折叠的版本：首版、最新版和最新正文的上一次出现都要留。
 MIN_VERSIONS_TO_COMPACT = 4
 # 热度窗口最长 7 天，详情页只展示最近 10 个点。30 天内保留全部快照，更早的每天留一条。
 METRIC_FULL_DAYS = 30
+# 运维流水表保留期：采集流水 30 天（日统计表长期保留），AI 用量与投递流水 90 天（覆盖最大 90 天统计窗）。
+COLLECT_RUN_RETENTION_DAYS = 30
+AI_USAGE_RETENTION_DAYS = 90
+DELIVERY_RETENTION_DAYS = 90
 BATCH_SIZE = 1000
+MAX_PRUNE_BATCHES = 50
 _ITEMS_PER_TRANSACTION = 50
 
 
@@ -121,11 +137,91 @@ async def thin_metric_snapshots(session: AsyncSession, *, now: datetime | None =
         removed += len(stale)
 
 
+async def _prune_by_cutoff(
+    session: AsyncSession,
+    model,
+    time_column,
+    cutoff: datetime,
+    *,
+    extra_conditions: tuple = (),
+    max_batches: int = MAX_PRUNE_BATCHES,
+) -> int:
+    """按主键分批小事务删除超期流水行，不长持表锁。"""
+    removed = 0
+    for _ in range(max_batches):
+        ids = list(
+            await session.scalars(
+                select(model.id)
+                .where(time_column < cutoff, *extra_conditions)
+                .order_by(model.id)
+                .limit(BATCH_SIZE)
+            )
+        )
+        if not ids:
+            break
+        await session.execute(delete(model).where(model.id.in_(ids)))
+        await session.commit()
+        removed += len(ids)
+    return removed
+
+
+async def prune_operational_logs(
+    session: AsyncSession, *, now: datetime | None = None
+) -> dict[str, int]:
+    """清理超期的采集运行记录、AI 用量明细与历史投递流水。"""
+    now = now or utcnow()
+    run_cutoff = now - timedelta(days=COLLECT_RUN_RETENTION_DAYS)
+    ai_cutoff = now - timedelta(days=AI_USAGE_RETENTION_DAYS)
+    delivery_cutoff = now - timedelta(days=DELIVERY_RETENTION_DAYS)
+
+    collect_runs_removed = await _prune_by_cutoff(
+        session,
+        CollectRun,
+        CollectRun.started_at,
+        run_cutoff,
+        extra_conditions=(CollectRun.status != RunStatus.RUNNING,),
+    )
+    custom_runs_removed = await _prune_by_cutoff(
+        session,
+        CustomCollectRun,
+        CustomCollectRun.started_at,
+        run_cutoff,
+    )
+    ai_usage_removed = await _prune_by_cutoff(
+        session,
+        AiUsage,
+        AiUsage.created_at,
+        ai_cutoff,
+    )
+    bot_deliveries_removed = await _prune_by_cutoff(
+        session,
+        BotDelivery,
+        BotDelivery.created_at,
+        delivery_cutoff,
+        extra_conditions=(BotDelivery.status.notin_(("pending", "sending")),),
+    )
+    notification_deliveries_removed = await _prune_by_cutoff(
+        session,
+        NotificationDelivery,
+        NotificationDelivery.created_at,
+        delivery_cutoff,
+        extra_conditions=(NotificationDelivery.status.notin_(("pending", "sending")),),
+    )
+    return {
+        "collect_runs_removed": collect_runs_removed,
+        "custom_runs_removed": custom_runs_removed,
+        "ai_usage_removed": ai_usage_removed,
+        "deliveries_removed": bot_deliveries_removed + notification_deliveries_removed,
+    }
+
+
 async def run_retention(session: AsyncSession, *, now: datetime | None = None) -> dict:
     from app.services.steam import thin_steam_snapshots
 
+    log_stats = await prune_operational_logs(session, now=now)
     return {
         "versions_removed": await compact_versions(session),
         "snapshots_removed": await thin_metric_snapshots(session, now=now),
         "steam_snapshots_removed": await thin_steam_snapshots(session, now=now),
+        **log_stats,
     }

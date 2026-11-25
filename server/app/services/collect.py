@@ -37,7 +37,7 @@ from app.db import SessionLocal
 from app.models import CollectRun, CollectTarget, Platform, Product, RawContent, RunStatus, Source
 from app.services.ingest import IngestStats, ingest_items
 from app.services.collector_proxy import fetch_with_fallback, configure_collector, redact_proxy
-from app.services.queue import enqueue_review_jobs
+from app.services.queue import AI_QUEUE_NAME, enqueue_review_jobs
 from app.services.product_matching import matches_product_text
 
 logger = logging.getLogger(__name__)
@@ -67,13 +67,18 @@ async def _aggregate_with_retry(
     accepts_communities = "communities" in params or any(
         p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
     )
+    accepts_incremental = "incremental" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
 
     for attempt in range(1, AGGREGATION_ATTEMPTS + 1):
         try:
+            kwargs: dict = {}
             if communities is not None and accepts_communities:
-                agg = await run_aggregation(session, communities=communities)
-            else:
-                agg = await run_aggregation(session)
+                kwargs["communities"] = communities
+            if accepts_incremental:
+                kwargs["incremental"] = True
+            agg = await run_aggregation(session, **kwargs)
             await session.commit()
             return agg
         except OperationalError as exc:
@@ -540,12 +545,12 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 )
                 if agg.touched_event_ids and hasattr(redis, "enqueue_job"):
                     for event_id in agg.touched_event_ids:
-                        await redis.enqueue_job("summarize_event", event_id)
+                        await redis.enqueue_job("summarize_event", event_id, _queue_name=AI_QUEUE_NAME)
                 foreign = target.platform in ("youtube", "kuro_global", "x", "steam") or (
                     target.platform == "game_official" and get_community(target.community).official_notice_region == "global")
                 if foreign and hasattr(redis, "enqueue_job"):
                     for content_id in stats.touched_content_ids:
-                        await redis.enqueue_job("translate_content", content_id)
+                        await redis.enqueue_job("translate_content", content_id, _queue_name=AI_QUEUE_NAME)
                 if stats.touched_content_ids and hasattr(redis, "enqueue_job"):
                     await enqueue_review_jobs(redis, stats.touched_content_ids)
         except CollectorDeferred as exc:

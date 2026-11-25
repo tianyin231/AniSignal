@@ -246,9 +246,13 @@ async def extract_entities(session: AsyncSession, content_id: int, *, notify: bo
         await session.commit()
         return {"status": "skipped", "reason": "nothing_to_extract"}
 
-    config = await get_ai_config(session)
+    from app.services.ai import check_ai_budget, config_for_task
+
+    config = config_for_task(await get_ai_config(session), "extract_entities")
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
+    if not await check_ai_budget(session, config):
+        return {"status": "skipped", "reason": "daily_budget_exceeded"}
 
     published = raw.published_at or raw.collected_at
     # 日期解析的内部锚点不能当作消息对外展示的发布时间。

@@ -114,6 +114,8 @@ async def get_config(session: AsyncSession = Depends(get_session)):
 
 @router.put("/config")
 async def put_config(body: dict, session: AsyncSession = Depends(get_session)):
+    from app.services.ai import _normalize_task_models
+
     stored = (await settings_service.get_setting(session, "ai")) or {}
     api_key = body.get("api_key")
     if api_key is None or api_key == "":
@@ -134,6 +136,53 @@ async def put_config(body: dict, session: AsyncSession = Depends(get_session)):
             status.HTTP_400_BAD_REQUEST,
             "base_url 必须是 http(s) 地址（自托管内网地址允许）",
         )
+
+    raw_fb_base = (
+        str(body.get("fallback_base_url")).strip().rstrip("/")
+        if "fallback_base_url" in body and body.get("fallback_base_url") is not None
+        else str(stored.get("fallback_base_url") or "").strip().rstrip("/")
+    )
+    fallback_base_url = safe_endpoint(raw_fb_base) or ""
+    if raw_fb_base and not fallback_base_url:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "fallback_base_url 必须是 http(s) 地址",
+        )
+    fb_key = body.get("fallback_api_key")
+    if fb_key is None or fb_key == "":
+        fallback_api_key = "" if body.get("clear_fallback_api_key") is True else (stored.get("fallback_api_key") or "")
+    else:
+        fallback_api_key = str(fb_key).strip()
+    fallback_model = (
+        str(body.get("fallback_model") or "").strip()
+        if "fallback_model" in body
+        else str(stored.get("fallback_model") or "").strip()
+    )
+    task_models = (
+        _normalize_task_models(body.get("task_models"))
+        if "task_models" in body
+        else _normalize_task_models(stored.get("task_models"))
+    )
+    try:
+        daily_token_limit = max(
+            0,
+            int(
+                body["daily_token_limit"]
+                if body.get("daily_token_limit") not in (None, "")
+                else (stored.get("daily_token_limit") or 0)
+            ),
+        )
+        daily_cost_limit = max(
+            0.0,
+            float(
+                body["daily_cost_limit"]
+                if body.get("daily_cost_limit") not in (None, "")
+                else (stored.get("daily_cost_limit") or 0)
+            ),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "日预算上限必须是有效非负数字") from exc
+
     value = {
         "base_url": base_url,
         "api_key": api_key,
@@ -141,6 +190,12 @@ async def put_config(body: dict, session: AsyncSession = Depends(get_session)):
         "model": str(body.get("model") or "").strip(),
         "price_in": float(body.get("price_in") if body.get("price_in") is not None else stored.get("price_in") or 0),
         "price_out": float(body.get("price_out") if body.get("price_out") is not None else stored.get("price_out") or 0),
+        "fallback_base_url": fallback_base_url,
+        "fallback_api_key": fallback_api_key,
+        "fallback_model": fallback_model,
+        "task_models": task_models,
+        "daily_token_limit": daily_token_limit,
+        "daily_cost_limit": daily_cost_limit,
     }
     await settings_service.set_setting(session, "ai", value)
     return _public_view(await get_ai_config(session))
@@ -171,11 +226,15 @@ async def usage_stats(
     days: int = Query(default=7, ge=1, le=90),
     session: AsyncSession = Depends(get_session),
 ):
+    from sqlalchemy import case
+    from app.services.ai import get_ai_budget_status
+
     since = utcnow() - timedelta(days=days)
     rows = await session.execute(
         select(
             AiUsage.task,
             func.count(AiUsage.id),
+            func.sum(case((AiUsage.status.in_(("failed", "error")), 1), else_=0)),
             func.sum(AiUsage.prompt_tokens),
             func.sum(AiUsage.completion_tokens),
             func.sum(AiUsage.total_tokens),
@@ -189,13 +248,14 @@ async def usage_stats(
         {
             "task": task,
             "calls": calls,
+            "failed": int(failed or 0),
             "prompt_tokens": int(prompt or 0),
             "completion_tokens": int(completion or 0),
             "total_tokens": int(total or 0),
             "cost": round(float(cost or 0), 4),
             "avg_ms": int(avg or 0),
         }
-        for task, calls, prompt, completion, total, cost, avg in rows
+        for task, calls, failed, prompt, completion, total, cost, avg in rows
     ]
     total_row = await session.execute(
         select(
@@ -210,6 +270,8 @@ async def usage_stats(
         select(func.count(AiUsage.id), func.sum(AiUsage.total_tokens), func.sum(AiUsage.cost))
     )
     a_calls, a_tokens, a_cost = all_row.first()
+    config = await get_ai_config(session)
+    budget = await get_ai_budget_status(session, config, bypass_cache=True)
     return {
         "window_days": days,
         "window": {
@@ -222,6 +284,7 @@ async def usage_stats(
             "total_tokens": int(a_tokens or 0),
             "cost": round(float(a_cost or 0), 4),
         },
+        "budget": budget,
         "by_task": by_task,
     }
 

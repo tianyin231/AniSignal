@@ -47,9 +47,11 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001 - 空库或测试未建表时静默回退内置分区
         logger.debug("initial community sync skipped", exc_info=True)
     app.state.redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    from app.services.ai import close_ai_http_client, register_ai_redis
     from app.services.public_cache import register_cache_redis
 
     register_cache_redis(app.state.redis)
+    register_ai_redis(app.state.redis)
     scheduler_task: asyncio.Task | None = None
     if settings.local_mode:
         # 本地测试模式：进程内队列 + 进程内调度循环（见 app/local.py 入口）
@@ -63,6 +65,8 @@ async def lifespan(app: FastAPI):
     yield
     if scheduler_task is not None:
         scheduler_task.cancel()
+    register_ai_redis(None)
+    await close_ai_http_client()
     register_cache_redis(None)
     await app.state.redis.aclose()
     queue = getattr(app.state, "queue", None)

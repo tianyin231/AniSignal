@@ -206,16 +206,20 @@ async def main() -> None:
                     await redis.enqueue_job("check_bilibili_session", _job_id=f"bili-session:{int(now.timestamp() // 1800)}")
                     await redis.enqueue_job("send_bot_notifications", _job_id=f"bot-sweep:{int(now.timestamp() // 60)}")
                     await redis.enqueue_job("send_instant_notifications", _job_id="instant-notifications")
-                    # 定制监控轮询：5 分钟桶去重，worker 内部再按 next_run_at 限速
+                    # 定制监控与慢 AI 轮询：5 分钟桶去重，AI 任务全部走慢队列避免堵死采集与实时推送
+                    from app.services.queue import AI_QUEUE_NAME
+
                     bucket = int(now.timestamp() // 300)
                     if not await redis.get(f"anisignal:news-editorial-enqueued:{bucket}"):
-                        job = await redis.enqueue_job("news_editorial_sweep", _job_id="news-editorial")
+                        job = await redis.enqueue_job(
+                            "news_editorial_sweep", _job_id="news-editorial", _queue_name=AI_QUEUE_NAME
+                        )
                         if job is not None:
                             await redis.set(f"anisignal:news-editorial-enqueued:{bucket}", "1", nx=True, px=6 * 60 * 60 * 1000)
                     await redis.enqueue_job(
-                        "review_pending_news", _job_id=f"review-pending-news:{bucket}")
+                        "review_pending_news", _job_id=f"review-pending-news:{bucket}", _queue_name=AI_QUEUE_NAME)
                     await redis.enqueue_job(
-                        "review_pending_fulfillment", _job_id=f"review-pending-fulfillment:{bucket}")
+                        "review_pending_fulfillment", _job_id=f"review-pending-fulfillment:{bucket}", _queue_name=AI_QUEUE_NAME)
                     if not await redis.get(f"anisignal:custom-sweep-enqueued:{bucket}"):
                         job = await redis.enqueue_job(
                             "collect_custom_feeds", _job_id=f"custom-sweep:{bucket}")
@@ -223,17 +227,17 @@ async def main() -> None:
                             f"anisignal:custom-sweep-enqueued:{bucket}", "1",
                             nx=True, px=6 * 60 * 60 * 1000)
                         logger.info("enqueued custom sweep job=%s", getattr(job, "job_id", None))
-                    # 官方内容实体抽取：同 5 分钟桶去重（日程/兑换码）
+                    # 内容实体抽取：同 5 分钟桶去重（日程/兑换码，走慢 AI 队列）
                     if not await redis.get(f"anisignal:extract-sweep-enqueued:{bucket}"):
                         job = await redis.enqueue_job(
-                            "extract_entities_sweep", _job_id=f"extract-sweep:{bucket}")
+                            "extract_entities_sweep", _job_id=f"extract-sweep:{bucket}", _queue_name=AI_QUEUE_NAME)
                         await redis.set(
                             f"anisignal:extract-sweep-enqueued:{bucket}", "1",
                             nx=True, px=6 * 60 * 60 * 1000)
                         logger.info("enqueued extract sweep job=%s", getattr(job, "job_id", None))
                     if not await redis.get(f"anisignal:product-monitor-enqueued:{bucket}"):
                         job = await redis.enqueue_job(
-                            "product_monitor_sweep", _job_id=f"product-monitor:{bucket}")
+                            "product_monitor_sweep", _job_id=f"product-monitor:{bucket}", _queue_name=AI_QUEUE_NAME)
                         await redis.set(
                             f"anisignal:product-monitor-enqueued:{bucket}", "1",
                             nx=True, px=6 * 60 * 60 * 1000)

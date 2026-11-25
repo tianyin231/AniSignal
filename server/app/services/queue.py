@@ -10,12 +10,31 @@ import time
 
 logger = logging.getLogger(__name__)
 
+FAST_QUEUE_NAME = "arq:queue"
+AI_QUEUE_NAME = "arq:queue:ai"
+AI_JOB_NAMES = frozenset({
+    "summarize_event",
+    "translate_content",
+    "repair_ai_item",
+    "review_contents",
+    "review_pending_news",
+    "news_editorial_sweep",
+    "review_pending_fulfillment",
+    "extract_entities_sweep",
+    "product_monitor_sweep",
+})
+
 
 async def enqueue_review_jobs(redis, content_ids: list[int]) -> str | None:
-    """同一内容排队/执行期间只保留一份审核，完成后允许新版本入队。"""
+    """同一内容排队/执行期间只保留一份审核，完成后允许新版本入队（入慢 AI 队列）。"""
     first_job_id = None
     for content_id in dict.fromkeys(content_ids):
-        job = await redis.enqueue_job("review_contents", [content_id], _job_id=f"review-content:{content_id}")
+        job = await redis.enqueue_job(
+            "review_contents",
+            [content_id],
+            _job_id=f"review-content:{content_id}",
+            _queue_name=AI_QUEUE_NAME,
+        )
         if job is not None and first_job_id is None:
             first_job_id = getattr(job, "job_id", None)
     return first_job_id
@@ -294,6 +313,7 @@ class ArqQueue(BaseQueue):
             job = await self._pool.enqueue_job(
                 "repair_ai_item", task, ref_id, only_missing,
                 _job_id=f"ai-repair:{task}:{ref_id}",
+                _queue_name=AI_QUEUE_NAME,
             )
             queued += job is not None
         return queued
@@ -303,12 +323,18 @@ class ArqQueue(BaseQueue):
         return getattr(job, "job_id", None) if job is not None else None
 
     async def enqueue_editorial(self) -> str | None:
-        job = await self._pool.enqueue_job("news_editorial_sweep", _job_id="news-editorial")
+        job = await self._pool.enqueue_job(
+            "news_editorial_sweep",
+            _job_id="news-editorial",
+            _queue_name=AI_QUEUE_NAME,
+        )
         return getattr(job, "job_id", None) if job is not None else None
 
     async def pending_count(self) -> int | None:
         try:
-            return await self._pool.zcard("arq:queue")
+            fast = await self._pool.zcard(FAST_QUEUE_NAME)
+            slow = await self._pool.zcard(AI_QUEUE_NAME)
+            return int(fast or 0) + int(slow or 0)
         except Exception as exc:  # noqa: BLE001 - 队列深度是尽力而为的观测值
             logger.warning("queue depth unavailable: %r", exc)
             return None

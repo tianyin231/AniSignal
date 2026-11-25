@@ -221,9 +221,13 @@ async def discover_merch_candidates(
 ) -> dict:
     """逐版本 AI 识别并直接启动追踪。模型/协议失败十分钟后自动重试。"""
     now = now or utcnow()
-    config = await get_ai_config(session)
+    from app.services.ai import check_ai_budget, config_for_task
+
+    config = config_for_task(await get_ai_config(session), "discover_products")
     if not ai_available(config):
         return {"scanned": 0, "created": 0, "skipped_reason": "ai_not_configured"}
+    if not await check_ai_budget(session, config):
+        return {"scanned": 0, "created": 0, "skipped_reason": "daily_budget_exceeded"}
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
     rows = list(await session.execute(
         select(RawContent, ContentVersion, Source)
@@ -286,10 +290,10 @@ async def discover_merch_candidates(
             from app.services.product_matching import matches_product_text
             matched_ids = {p.id for p in catalog if matches_product_text(title, text, p.watch_terms or [])}
             if confirmed or matched_ids:
-                # 下面会锁商品行并聚合。先取聚合锁且放在本事务第一次读库之前：
+                # 下面会锁本分区商品行并聚合。先取本分区聚合锁且放在本事务第一次读库之前：
                 # 加锁顺序与采集后的聚合一致才不会死锁，快照晚于锁才看得到别的聚合刚写的证据。
                 from app.services.events import acquire_aggregation_lock
-                await acquire_aggregation_lock(session)
+                await acquire_aggregation_lock(session, communities={community})
             # 模型运行期间可能有内容修订/下架，旧版本不能落地建档。
             current = await session.scalar(select(ContentVersion.version).where(
                 ContentVersion.raw_content_id == raw_id).order_by(ContentVersion.version.desc()).limit(1))
@@ -330,7 +334,7 @@ async def discover_merch_candidates(
                 await session.flush()
                 if matched_ids:
                     from app.services.events import run_aggregation
-                    await run_aggregation(session)
+                    await run_aggregation(session, communities={community})
             await record_usage(session, task="discover_products", config=config, usage=usage,
                                duration_ms=int((time.monotonic() - started) * 1000), ref_id=raw_id)
             created += new_count

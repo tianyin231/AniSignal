@@ -126,19 +126,43 @@ def _build_facts(category: str, cluster: list, product=None) -> list:
     return facts
 
 
-async def load_classified_contents(session: AsyncSession, *, communities: set[str] | None = None) -> list[ContentRow]:
-    """全部内容或指定分区 + 最新版本（含分类）+ 来源身份。"""
+# 常规采集触发增量聚合时的官方事件对账窗口（天）：远大于 72h 规则聚类窗与 45d 语义匹配窗
+INCREMENTAL_OFFICIAL_WINDOW_DAYS = 60
+INCREMENTAL_CONTENT_BUFFER_DAYS = 10
+
+
+async def load_classified_contents(
+    session: AsyncSession,
+    *,
+    communities: set[str] | None = None,
+    since: datetime | None = None,
+    include_raw_ids: set[int] | None = None,
+) -> list[ContentRow]:
+    """全部内容或指定分区 + 最新版本（含分类）+ 来源身份。
+
+    增量模式传入 `since` 时仅加载时间窗内内容及 `include_raw_ids`（在监商品已有历史证据），
+    避免随历史数据增长每次采集都全表扫库。
+    """
     excluded_ids = set(
         await session.scalars(
             select(Evidence.raw_content_id).where(Evidence.role == "excluded")
         )
     )
+    where_clauses: list = [RawContent.hidden.is_(False)]
+    if communities is not None:
+        where_clauses.append(RawContent.community.in_(communities))
+    if since is not None:
+        time_cond = func.coalesce(RawContent.published_at, RawContent.collected_at) >= since
+        if include_raw_ids:
+            where_clauses.append(or_(time_cond, RawContent.id.in_(include_raw_ids)))
+        else:
+            where_clauses.append(time_cond)
     rows = await session.execute(
         select(RawContent, ContentVersion, Source)
         .options(defer(RawContent.raw_json))
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(RawContent.hidden.is_(False), *([RawContent.community.in_(communities)] if communities is not None else []))
+        .where(*where_clauses)
         .execution_options(populate_existing=True)
         .order_by(RawContent.id)
     )
@@ -314,23 +338,43 @@ _CATEGORY_CONCLUSION = {
 AGGREGATION_LOCK_KEY = "event_aggregation_lock"
 
 
-async def acquire_aggregation_lock(session: AsyncSession) -> None:
-    """取得事件聚合的事务行锁，随调用方 commit/rollback 释放；同一事务内重复取得无副作用。
+async def acquire_aggregation_lock(
+    session: AsyncSession,
+    *,
+    communities: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> None:
+    """取得按游戏分区拆分的事务行锁，随调用方 commit/rollback 释放；同一事务内重复取得无副作用。
 
-    多个采集任务会同时扫描全库，用这把锁串行对账，防止两轮都读到“证据不存在”再重复插入。
-    既要锁商品行又要聚合的事务，必须在锁商品之前先取这把锁：聚合固定按“聚合锁 → 全部商品行”加锁，
-    顺序反过来就会互相等待成死锁。可重复读的快照建立在事务里第一次普通读，
-    所以也要在普通读之前取锁，才能看到别的聚合刚提交的证据。
+    不同游戏分区（如 wuwa / hsr / genshin）持不同锁键可彻底并行；
+    传入 None 或多分区时严格按字典序依次加锁，保证与单分区事务及商品行锁顺序一致，杜绝死锁。
     """
-    key = AGGREGATION_LOCK_KEY
-    if session.get_bind().dialect.name == "mysql":
-        from sqlalchemy.dialects.mysql import insert
-        statement = insert(SiteSetting).values(key=key, value={})
-        await session.execute(statement.on_duplicate_key_update(key=key))
+    if communities is None:
+        keys = [
+            f"{AGGREGATION_LOCK_KEY}:{comm}"
+            for comm in sorted(key for key, meta in COMMUNITIES.items() if meta.domain == "game")
+        ]
+        if not keys:
+            keys = [AGGREGATION_LOCK_KEY]
     else:
-        from sqlalchemy.dialects.sqlite import insert
-        await session.execute(insert(SiteSetting).values(key=key, value={}).on_conflict_do_nothing())
-    await session.execute(select(SiteSetting.key).where(SiteSetting.key == key).with_for_update())
+        keys = [f"{AGGREGATION_LOCK_KEY}:{comm}" for comm in sorted({str(c) for c in communities if c})]
+        if not keys:
+            return
+
+    dialect = session.get_bind().dialect.name
+    for key in keys:
+        if dialect == "mysql":
+            from sqlalchemy.dialects.mysql import insert
+            statement = insert(SiteSetting).values(key=key, value={})
+            await session.execute(statement.on_duplicate_key_update(key=key))
+        else:
+            from sqlalchemy.dialects.sqlite import insert
+            await session.execute(insert(SiteSetting).values(key=key, value={}).on_conflict_do_nothing())
+    await session.execute(
+        select(SiteSetting.key)
+        .where(SiteSetting.key.in_(keys))
+        .order_by(SiteSetting.key)
+        .with_for_update()
+    )
 
 
 async def run_aggregation(
@@ -338,8 +382,16 @@ async def run_aggregation(
     *,
     product_snapshots: dict | None = None,
     communities: set[str] | None = None,
+    incremental: bool = False,
 ) -> AggStats:
-    """全量或按指定游戏分区扫描并维护事件（ensure 语义），调用方负责 commit。"""
+    """全量或按指定游戏分区扫描并维护事件（ensure 语义），调用方负责 commit。
+
+    incremental=True（常规采集后）：
+    - 仅锁该分区的活跃在监商品（watching），跳过已归档商品；
+    - 仅加载近 60 天（含 10 天缓冲）内容 + 在监商品已绑定的历史证据，避免每次采集全库扫描；
+    - 60 天之前的官方老事件冻结保留，不被误停用。
+    incremental=False（默认，管理员重算/改规则/单商品重算）：执行全量历史对账。
+    """
     from app.services.classify import seed_defaults
 
     game_communities = {key for key, meta in COMMUNITIES.items() if meta.domain == "game"}
@@ -349,21 +401,53 @@ async def run_aggregation(
     if not target_communities:
         return AggStats()
 
-    # 不串行网络采集或模型调用，只串行对账本身。
-    await acquire_aggregation_lock(session)
+    # 按分区加锁（固定字典序），不同游戏分区采集聚合彻底并行。
+    await acquire_aggregation_lock(session, communities=target_communities)
     stats = AggStats()
     await seed_defaults(session, commit=False)
-    # 资讯分区走独立编辑链路，不参与事件和商品归并。
-    contents = await load_classified_contents(session, communities=target_communities)
-
-    await _aggregate_official(
-        session, contents, stats, communities=target_communities if communities is not None else None
-    )
 
     product_query = select(Product).order_by(Product.id).with_for_update().execution_options(populate_existing=True)
     if communities is not None:
         product_query = product_query.where(Product.community.in_(target_communities))
+    if incremental:
+        product_query = product_query.where(Product.monitor_status == "watching")
     products = list((await session.execute(product_query)).scalars())
+
+    window_since: datetime | None = None
+    content_since: datetime | None = None
+    pinned_raw_ids: set[int] = set()
+    if incremental:
+        window_since = utcnow() - timedelta(days=INCREMENTAL_OFFICIAL_WINDOW_DAYS)
+        content_since = window_since - timedelta(days=INCREMENTAL_CONTENT_BUFFER_DAYS)
+        if products:
+            pinned_raw_ids = set(
+                await session.scalars(
+                    select(Evidence.raw_content_id)
+                    .join(Event, Event.id == Evidence.event_id)
+                    .where(
+                        Event.product_id.in_([p.id for p in products]),
+                        or_(Event.is_active.is_(True), Event.manual_locked.is_(True)),
+                        Evidence.role != "excluded",
+                    )
+                )
+            )
+
+    # 资讯分区走独立编辑链路，不参与事件和商品归并。
+    contents = await load_classified_contents(
+        session,
+        communities=target_communities,
+        since=content_since,
+        include_raw_ids=pinned_raw_ids or None,
+    )
+
+    await _aggregate_official(
+        session,
+        contents,
+        stats,
+        communities=target_communities if communities is not None else None,
+        window_since=window_since,
+    )
+
     by_community: dict[str, list[ContentRow]] = {}
     for row in contents:
         by_community.setdefault(row.community, []).append(row)
@@ -371,17 +455,28 @@ async def run_aggregation(
     for product in products:
         await _aggregate_product(session, product, by_community.get(product.community or DEFAULT_COMMUNITY, []), stats,
                                  before=(product_snapshots or {}).get(product.id), ai_links=links.get(product.id, {}))
-    await _backfill_facts(session, stats, communities=target_communities if communities is not None else None)
+    await _backfill_facts(
+        session,
+        stats,
+        communities=target_communities if communities is not None else None,
+        since=window_since,
+    )
     return stats
 
 
 async def _backfill_facts(
-    session: AsyncSession, stats: AggStats, *, communities: set[str] | None = None
+    session: AsyncSession,
+    stats: AggStats,
+    *,
+    communities: set[str] | None = None,
+    since: datetime | None = None,
 ) -> None:
     """为缺少 facts 的存量事件补模板关键事实（不覆盖已有的/AI 生成的）。"""
     query = select(Event).where(Event.is_active.is_(True), Event.manual_locked.is_(False))
     if communities is not None:
         query = query.where(Event.community.in_(communities))
+    if since is not None:
+        query = query.where(Event.first_seen_at >= since)
     events = list((await session.execute(query)).scalars())
     missing = [e for e in events if not e.facts]
     if not missing:
@@ -423,6 +518,7 @@ async def _aggregate_official(
     stats: AggStats,
     *,
     communities: set[str] | None = None,
+    window_since: datetime | None = None,
 ) -> None:
     """按当前聚类结果精确对账官方事件，允许移除历史误挂证据。
 
@@ -456,7 +552,7 @@ async def _aggregate_official(
     for community in target_communities:
         official = [row for row in official_all if row.community == community]
         await _aggregate_official_community(
-            session, community, official, semantic_pairs, stats
+            session, community, official, semantic_pairs, stats, window_since=window_since
         )
 
 
@@ -466,6 +562,8 @@ async def _aggregate_official_community(
     official: list[ContentRow],
     semantic_pairs: set[tuple[int, int]],
     stats: AggStats,
+    *,
+    window_since: datetime | None = None,
 ) -> None:
     """单个分区内的官方公告聚类与事件对账（证据可跨平台、不跨分区）。"""
     official_ids = {row.raw_id for row in official}
@@ -476,16 +574,26 @@ async def _aggregate_official_community(
         if row.category in ANNOUNCE_CATEGORIES or row.raw_id in semantically_linked_ids
     ]
 
-    existing = list(
-        await session.scalars(
-            select(Event).where(
-                Event.is_active.is_(True),
-                Event.product_id.is_(None),
-                Event.category.in_(ANNOUNCE_CATEGORIES),
-                Event.community == community,
-            )
-        )
+    existing_query = select(Event).where(
+        Event.is_active.is_(True),
+        Event.product_id.is_(None),
+        Event.category.in_(ANNOUNCE_CATEGORIES),
+        Event.community == community,
     )
+    if window_since is not None:
+        loaded_ids = {row.raw_id for row in rows}
+        if loaded_ids:
+            touched_event_subq = (
+                select(Evidence.event_id)
+                .where(Evidence.raw_content_id.in_(loaded_ids))
+                .scalar_subquery()
+            )
+            existing_query = existing_query.where(
+                or_(Event.first_seen_at >= window_since, Event.id.in_(touched_event_subq))
+            )
+        else:
+            existing_query = existing_query.where(Event.first_seen_at >= window_since)
+    existing = list(await session.scalars(existing_query))
     evidence_by_event: dict[int, set[int]] = {event.id: set() for event in existing}
     if existing:
         evidence_rows = await session.execute(
@@ -495,6 +603,13 @@ async def _aggregate_official_community(
         )
         for event_id, raw_id in evidence_rows:
             evidence_by_event[event_id].add(raw_id)
+
+    # 增量模式下，首见时间早于窗口边界的历史事件保持只增不减、不误停用。
+    protected_old_ids = (
+        {event.id for event in existing if event.first_seen_at and event.first_seen_at < window_since}
+        if window_since is not None
+        else set()
+    )
 
     locked_raw_ids = set().union(
         *(evidence_by_event[event.id] for event in existing if event.manual_locked)
@@ -563,10 +678,11 @@ async def _aggregate_official_community(
             evidence_by_event[event.id],
             stats,
             confidence_reason,
+            preserve_unloaded=event.id in protected_old_ids,
         )
 
     for event in unlocked:
-        if event.id in used_event_ids:
+        if event.id in used_event_ids or event.id in protected_old_ids:
             continue
         event.is_active = False
         event.last_updated_at = utcnow()
@@ -581,10 +697,23 @@ async def _reconcile_official_event(
     existing_ids: set[int],
     stats: AggStats,
     confidence_reason: str,
+    *,
+    preserve_unloaded: bool = False,
 ) -> None:
     expected_ids = {row.raw_id for row in cluster}
-    removed_ids = existing_ids - expected_ids
+    removed_ids = set() if preserve_unloaded else (existing_ids - expected_ids)
     added_rows = [row for row in cluster if row.raw_id not in existing_ids]
+    if preserve_unloaded:
+        if not added_rows:
+            return
+        for row in added_rows:
+            session.add(Evidence(event_id=event.id, raw_content_id=row.raw_id))
+        stats.evidences_added += len(added_rows)
+        event.regions = sorted(set(event.regions or []) | _regions_of(cluster))
+        event.last_updated_at = utcnow()
+        stats.touched_event_ids.append(event.id)
+        _add_revision(session, event, stats, f"增量补充 {len(added_rows)} 条关联证据")
+        return
     first = sorted(cluster, key=_sort_key)[0]
     expected_title = _canonical_row(cluster).title[:255]
     expected_facts = _build_facts(event.category, cluster)

@@ -572,21 +572,30 @@ async def run_webhook_notifications(session: AsyncSession) -> dict:
 
         await session.commit()
 
-        # 行锁释放后再发外部 HTTP 请求，逐条回写投递状态。
-        for delivery_id, wh_id, provider, url, secret, payload in pending_sends:
-            ok, _status_code, error = await send_webhook_http(provider, url, secret, payload)
-            delivery = await session.get(NotificationDelivery, delivery_id, populate_existing=True)
-            wh = await session.get(UserWebhook, wh_id, populate_existing=True)
-            now_dt = utcnow()
-            if delivery is not None:
-                delivery.status = "sent" if ok else "failed"
-                delivery.error = error
-                delivery.sent_at = now_dt if ok else None
-            if wh is not None:
-                wh.last_status = "ok" if ok else "failed"
-                wh.last_error = error
-                wh.last_sent_at = now_dt
+        # 行锁释放后受控并发外发 HTTP 请求（最多 5 并发），单条超时不再拖死整批；最后统一顺序回写库状态。
+        if pending_sends:
+            sem = asyncio.Semaphore(5)
+
+            async def _dispatch(item):
+                delivery_id, wh_id, provider, url, secret, payload = item
+                async with sem:
+                    ok, _status_code, error = await send_webhook_http(provider, url, secret, payload)
+                return delivery_id, wh_id, ok, error
+
+            outcomes = await asyncio.gather(*(_dispatch(item) for item in pending_sends))
+            for delivery_id, wh_id, ok, error in outcomes:
+                delivery = await session.get(NotificationDelivery, delivery_id, populate_existing=True)
+                wh = await session.get(UserWebhook, wh_id, populate_existing=True)
+                now_dt = utcnow()
+                if delivery is not None:
+                    delivery.status = "sent" if ok else "failed"
+                    delivery.error = error
+                    delivery.sent_at = now_dt if ok else None
+                if wh is not None:
+                    wh.last_status = "ok" if ok else "failed"
+                    wh.last_error = error
+                    wh.last_sent_at = now_dt
+                stats["sent" if ok else "failed"] += 1
             await session.commit()
-            stats["sent" if ok else "failed"] += 1
 
     return stats

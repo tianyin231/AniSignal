@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from app.services.queue import enqueue_review_jobs
-from app.worker.settings import WorkerSettings
+from app.services.queue import AI_QUEUE_NAME, enqueue_review_jobs
+from app.worker.settings import AiWorkerSettings, WorkerSettings
 
 
 async def test_review_jobs_deduplicate_content_ids_and_use_stable_keys():
@@ -12,11 +12,13 @@ async def test_review_jobs_deduplicate_content_ids_and_use_stable_keys():
         ("review_contents", [1]), ("review_contents", [2]),
     ]
     assert [call.kwargs for call in redis.enqueue_job.await_args_list] == [
-        {"_job_id": "review-content:1"}, {"_job_id": "review-content:2"},
+        {"_job_id": "review-content:1", "_queue_name": AI_QUEUE_NAME},
+        {"_job_id": "review-content:2", "_queue_name": AI_QUEUE_NAME},
     ]
-    review = next(item for item in WorkerSettings.functions if getattr(item, "name", None) == "review_contents")
+    review = next(item for item in AiWorkerSettings.functions if getattr(item, "name", None) == "review_contents")
     assert review.keep_result_s == 0
     assert review.max_tries == 3
+    assert any(getattr(item, "name", None) == "review_contents" for item in WorkerSettings.functions)
 
 
 async def test_failed_review_returns_worker_slot_and_defers_retry(session_factory, monkeypatch):

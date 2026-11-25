@@ -138,9 +138,14 @@ async def review_contents(
     ids = list(dict.fromkeys(int(item) for item in content_ids if item))
     if not ids:
         return stats
-    config = await get_ai_config(session)
+    from app.services.ai import check_ai_budget, config_for_task
+
+    config = config_for_task(await get_ai_config(session), "review_content")
     if not ai_available(config):
         stats.skipped_reason = "ai_not_configured"
+        return stats
+    if not await check_ai_budget(session, config):
+        stats.skipped_reason = "daily_budget_exceeded"
         return stats
 
     await ensure_communities_synced(session)

@@ -121,6 +121,10 @@ async def test_thinning_keeps_the_only_snapshot_of_a_stale_item(session):
         "versions_removed": 0,
         "snapshots_removed": 0,
         "steam_snapshots_removed": 0,
+        "collect_runs_removed": 0,
+        "custom_runs_removed": 0,
+        "ai_usage_removed": 0,
+        "deliveries_removed": 0,
     }
 
 

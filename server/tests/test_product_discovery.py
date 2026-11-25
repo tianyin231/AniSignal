@@ -122,9 +122,9 @@ async def test_discovery_takes_the_aggregation_lock_before_locking_products(sess
     order = []
     real_lock, real_store = events.acquire_aggregation_lock, product_discovery._store_discovered_product
 
-    async def lock(lock_session):
-        order.append(("lock", lock_session.in_transaction()))
-        await real_lock(lock_session)
+    async def lock(lock_session, *, communities=None):
+        order.append(("lock", lock_session.in_transaction(), communities))
+        await real_lock(lock_session, communities=communities)
 
     async def store(*args, **kwargs):
         order.append(("store", None))
@@ -136,8 +136,8 @@ async def test_discovery_takes_the_aggregation_lock_before_locking_products(sess
     # 没有周边、也没命中已有商品的内容不需要排队等聚合锁。
     await _official(session, title="爱弥斯新衣装展示", external="n2")
     assert await discover_merch_candidates(session) == {"scanned": 2, "created": 1}
-    assert order[:2] == [("lock", False), ("store", None)]
-    assert ("lock", False) not in order[2:]
+    assert order[:2] == [("lock", False, {"wuwa"}), ("store", None)]
+    assert not any(item[0] == "lock" and item[1] is False for item in order[2:])
 
 
 async def test_ignore_and_archive_leave_the_page_but_stop_the_search(session, client, admin_headers):

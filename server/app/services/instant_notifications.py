@@ -181,10 +181,11 @@ async def prepare_instant_notifications(session: AsyncSession) -> int:
     return created
 
 
-async def send_instant_notification(session: AsyncSession, delivery_id: int) -> dict:
+async def _prepare_delivery_for_send(session: AsyncSession, delivery_id: int) -> tuple[str, dict | None]:
+    """在单事务内核验并锁定配额/状态为 sending；返回 (status, send_task | None)。"""
     delivery = await session.get(NotificationDelivery, delivery_id, populate_existing=True)
     if not delivery or delivery.kind != "instant" or delivery.status != "pending":
-        return {"status": "skipped"}
+        return "skipped", None
     user = await session.get(User, delivery.user_id, populate_existing=True, with_for_update=True)
     base_eligible = bool(user and user.status == "active" and user.is_verified and user.notification_enabled)
     eligible = base_eligible and bool(user.instant_notification_enabled)
@@ -226,31 +227,56 @@ async def send_instant_notification(session: AsyncSession, delivery_id: int) -> 
         delivery.status = "skipped"
         delivery.error = "通知已关闭、状态已更新或已不符合当前关注条件"
         await session.commit()
-        return {"status": "skipped"}
-    subject, body, html = payload["subject"], payload["body"], payload["html"]
+        return "skipped", None
     # SMTP 结果不明时不自动重发，避免 worker 重启后重复投递。
     from app.services.account_limits import reserve_email
     if not await reserve_email(session, delivery):
-        return {"status": "skipped"}
+        return "skipped", None
+    smtp = await get_effective_smtp(session)
+    return "ready", {
+        "delivery_id": delivery_id,
+        "email": user.email,
+        "payload": payload,
+        "smtp": smtp,
+    }
+
+
+async def _dispatch_email_task(task: dict) -> tuple[dict, bool, str | None]:
+    payload = task["payload"]
     try:
         sent = await asyncio.wait_for(send_email(
-            user.email, subject, body, smtp=await get_effective_smtp(session), html_body=html,
+            task["email"], payload["subject"], payload["body"], smtp=task["smtp"], html_body=payload["html"],
         ), timeout=60)
         error = None if sent else "SMTP 发送失败，请查看服务端日志"
     except TimeoutError:
         sent, error = False, "SMTP 超时，发送结果未确认；未自动重发"
-    except SQLAlchemyError:
-        raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         sent, error = False, f"邮件发送异常（{type(exc).__name__}），未自动重发"
-    delivery.subject, delivery.body, delivery.html_body = subject, body, html
+    return task, sent, error
+
+
+async def _finalize_delivery(session: AsyncSession, task: dict, sent: bool, error: str | None) -> str:
+    delivery = await session.get(NotificationDelivery, task["delivery_id"], populate_existing=True)
+    if delivery is None:
+        return "skipped"
+    payload = task["payload"]
+    delivery.subject, delivery.body, delivery.html_body = payload["subject"], payload["body"], payload["html"]
     delivery.matched_keywords = payload["keywords"]
     delivery.content_ids = payload["content_ids"]
     delivery.status = "sent" if sent else "failed"
     delivery.error = error
     delivery.sent_at = utcnow() if sent else None
     await session.commit()
-    return {"status": delivery.status}
+    return delivery.status
+
+
+async def send_instant_notification(session: AsyncSession, delivery_id: int) -> dict:
+    prep_status, task = await _prepare_delivery_for_send(session, delivery_id)
+    if prep_status != "ready" or task is None:
+        return {"status": prep_status}
+    _, sent, error = await _dispatch_email_task(task)
+    final_status = await _finalize_delivery(session, task, sent, error)
+    return {"status": final_status}
 
 
 async def run_instant_notifications(session: AsyncSession) -> dict:
@@ -265,7 +291,22 @@ async def run_instant_notifications(session: AsyncSession) -> dict:
         NotificationDelivery.kind == "instant", NotificationDelivery.status == "pending",
     ).order_by(NotificationDelivery.id).limit(20)))
     stats = {"created": created, "sent": 0, "failed": 0, "skipped": 0}
+    ready_tasks: list[dict] = []
     for delivery_id in ids:
-        result = await send_instant_notification(session, delivery_id)
-        stats[result["status"]] += 1
+        prep_status, task = await _prepare_delivery_for_send(session, delivery_id)
+        if prep_status == "ready" and task is not None:
+            ready_tasks.append(task)
+        else:
+            stats[prep_status] += 1
+    if ready_tasks:
+        sem = asyncio.Semaphore(5)
+
+        async def _run_smtp(task: dict):
+            async with sem:
+                return await _dispatch_email_task(task)
+
+        outcomes = await asyncio.gather(*(_run_smtp(task) for task in ready_tasks))
+        for task, sent, error in outcomes:
+            final_status = await _finalize_delivery(session, task, sent, error)
+            stats[final_status] += 1
     return stats

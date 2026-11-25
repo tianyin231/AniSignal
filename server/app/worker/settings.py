@@ -277,13 +277,22 @@ async def on_startup(ctx) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     from app.communities import sync_communities
     from app.db import SessionLocal
+    from app.services.ai import register_ai_redis
     from app.services.collect import recover_stale_runs
 
+    register_ai_redis(ctx.get("redis") if isinstance(ctx, dict) else None)
     async with SessionLocal() as session:
         await sync_communities(session)
         recovered = await recover_stale_runs(session)
     if recovered:
         logger.warning("recovered %s interrupted collection runs", recovered)
+
+
+async def on_shutdown(ctx) -> None:
+    from app.services.ai import close_ai_http_client, register_ai_redis
+
+    register_ai_redis(None)
+    await close_ai_http_client()
 
 
 async def send_bot_notifications(ctx):
@@ -302,27 +311,68 @@ async def send_bot_notifications(ctx):
         await ctx["redis"].eval("if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0", 1, "anisignal:bot-sweep-lock", token)
 
 
+from app.services.queue import AI_QUEUE_NAME, FAST_QUEUE_NAME
+
+_FAST_FUNCTIONS = [
+    send_bot_notifications,
+    collect_target,
+    check_bilibili_session,
+    func(send_instant_notifications, keep_result=0),
+    send_user_notification,
+    send_morning_notifications,
+    send_admin_emails,
+    collect_custom_feeds,
+    func(retention_sweep, keep_result=0),
+]
+
+_AI_FUNCTIONS = [
+    summarize_event,
+    translate_content,
+    func(repair_ai_item, keep_result=0),
+    func(review_contents, keep_result=0, max_tries=3),
+    review_pending_news,
+    func(news_editorial_sweep, keep_result=0),
+    review_pending_fulfillment,
+    extract_entities_sweep,
+    product_monitor_sweep,
+]
+
+
+class FastWorkerSettings:
+    """快 IO 队列 Worker：采集、Bot/邮件/Webhook 即时送达与例行清理，永不被慢 LLM 堵死。"""
+
+    functions = _FAST_FUNCTIONS
+    queue_name = FAST_QUEUE_NAME
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    max_jobs = 6
+    job_timeout = 1800
+    keep_result = 3600
+    health_check_interval = 60
+    health_check_key = f"anisignal:worker-health:{__import__('socket').gethostname()}"
+    on_startup = on_startup
+    on_shutdown = on_shutdown
+
+
+class AiWorkerSettings:
+    """慢 AI 队列 Worker：多模态审核、摘要、翻译、编辑流、日程/兑换码抽取与周边发现。"""
+
+    functions = _AI_FUNCTIONS
+    queue_name = AI_QUEUE_NAME
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    max_jobs = 3
+    job_timeout = 1800
+    keep_result = 3600
+    health_check_interval = 60
+    health_check_key = f"anisignal:worker-health-ai:{__import__('socket').gethostname()}"
+    on_startup = on_startup
+    on_shutdown = on_shutdown
+
+
 class WorkerSettings:
-    functions = [
-        send_bot_notifications,
-        collect_target,
-        check_bilibili_session,
-        summarize_event,
-        translate_content,
-        func(repair_ai_item, keep_result=0),
-        func(send_instant_notifications, keep_result=0),
-        func(review_contents, keep_result=0, max_tries=3),
-        review_pending_news,
-        func(news_editorial_sweep, keep_result=0),
-        review_pending_fulfillment,
-        send_user_notification,
-        send_morning_notifications,
-        send_admin_emails,
-        collect_custom_feeds,
-        extract_entities_sweep,
-        product_monitor_sweep,
-        func(retention_sweep, keep_result=0),
-    ]
+    """单进程全功能兼容配置（保留兼容旧命令/单测）。"""
+
+    functions = [*_FAST_FUNCTIONS, *_AI_FUNCTIONS]
+    queue_name = FAST_QUEUE_NAME
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4
     job_timeout = 1800
@@ -330,3 +380,4 @@ class WorkerSettings:
     health_check_interval = 60
     health_check_key = f"anisignal:worker-health:{__import__('socket').gethostname()}"
     on_startup = on_startup
+    on_shutdown = on_shutdown

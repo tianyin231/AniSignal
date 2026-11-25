@@ -6,12 +6,13 @@
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
 import time
 from html import unescape
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from sqlalchemy import func, select
@@ -35,25 +36,77 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
+# 可按任务覆盖模型的合法任务键
+TASK_MODEL_KEYS = (
+    "review_content",
+    "translate_content",
+    "summarize_event",
+    "extract_entities",
+    "extract_community_codes",
+    "discover_products",
+    "assess_product",
+    "match_official_content",
+    "news_group",
+    "news_score",
+    "bot_brief",
+    "bot_news_dedupe",
+)
 
-async def get_ai_config(session: AsyncSession) -> dict:
+
+def _normalize_task_models(raw: object) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, val in raw.items():
+        if isinstance(key, str) and key in TASK_MODEL_KEYS and isinstance(val, str) and val.strip():
+            out[key] = val.strip()[:120]
+    return out
+
+
+async def get_ai_config(session: AsyncSession, *, task: str | None = None) -> dict:
     from app.services.settings import get_setting
 
     env = get_settings()
     stored = (await get_setting(session, "ai")) or {}
     env_keys = [k.strip() for k in (env.ai_api_keys or "").split(",") if k.strip()]
-    return {
+    task_models = _normalize_task_models(stored.get("task_models"))
+    config = {
         "base_url": (stored.get("base_url") or env.ai_base_url or "").rstrip("/"),
         "api_key": stored.get("api_key") or env.ai_api_key or "",
         "api_keys": [k.strip() for k in (stored.get("api_keys") or []) if k.strip()] or env_keys,
         "model": stored.get("model") or env.ai_model or "",
         "price_in": float(stored.get("price_in") or 0),  # 每百万输入 token 单价（元/美元由你定）
         "price_out": float(stored.get("price_out") or 0),
+        "fallback_base_url": str(stored.get("fallback_base_url") or "").strip().rstrip("/"),
+        "fallback_api_key": str(stored.get("fallback_api_key") or "").strip(),
+        "fallback_model": str(stored.get("fallback_model") or "").strip(),
+        "task_models": task_models,
+        "daily_token_limit": max(0, int(stored.get("daily_token_limit") or 0)),
+        "daily_cost_limit": max(0.0, float(stored.get("daily_cost_limit") or 0)),
     }
+    return config_for_task(config, task) if task else config
+
+
+def config_for_task(config: dict, task: str | None) -> dict:
+    """若该任务配置了分层覆盖模型，返回浅拷贝并替换 model（不影响原 config）。"""
+    if not task:
+        return config
+    override = (config.get("task_models") or {}).get(task)
+    if not override or override == config.get("model"):
+        return config
+    return {**config, "model": override}
 
 
 def ai_available(config: dict) -> bool:
     return bool(config.get("base_url") and any(_pool_keys(config)) and config.get("model"))
+
+
+def fallback_available(config: dict) -> bool:
+    return bool(
+        config.get("fallback_base_url")
+        and config.get("fallback_api_key")
+        and config.get("fallback_model")
+    )
 
 
 async def record_usage(
@@ -69,11 +122,12 @@ async def record_usage(
     prompt_tokens = int((usage or {}).get("prompt_tokens") or 0)
     completion_tokens = int((usage or {}).get("completion_tokens") or 0)
     cost = (prompt_tokens * config.get("price_in", 0) + completion_tokens * config.get("price_out", 0)) / 1e6
+    model_used = config.get("_last_model") or config.get("model") or ""
     session.add(
         AiUsage(
             task=task,
             ref_id=ref_id,
-            model=config.get("model") or "",
+            model=model_used,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
@@ -83,19 +137,166 @@ async def record_usage(
         )
     )
     await session.commit()
+    _invalidate_budget_cache()
 
 
-# ---------- 账号池：多密钥轮询分摊 + 限流冷却（sub2api 思路的零依赖实现） ----------
+# ---------- 账号池 + 长连接池 + Redis 共享冷却 + 备用 Provider 故障转移 + 日预算熔断 ----------
 
 _POOL_INDEX = 0
 _KEY_COOLDOWN: dict[str, float] = {}
 _KEY_COOLDOWN_SECONDS = 60.0
 _CHAT_TIMEOUT_SECONDS = 120.0
 _POOL_ROTATE_STATUSES = {401, 402, 403, 429}  # 密钥级失败：换下一把并冷却
+_COOLDOWN_REDIS_PREFIX = "anisignal:ai-key-cool:"
+_AI_REDIS = None
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+_HTTP_CLIENT_LOOP: asyncio.AbstractEventLoop | None = None
+_BUDGET_CACHE: tuple[float, str, int, float] | None = None  # (expires_mono, bj_date, tokens, cost)
+_BUDGET_CACHE_TTL = 20.0
 
 
 class AiPoolCoolingDown(RuntimeError):
     """所有密钥都在冷却，本轮不再向上游发送请求。"""
+
+
+class AiBudgetExceeded(AiPoolCoolingDown):
+    """当日 AI 用量达到管理员配置的日预算熔断阈值，暂停非关键后台任务。"""
+
+
+def register_ai_redis(redis) -> None:
+    """绑定进程级共享 Redis（供 API / Worker 跨进程同步密钥限流冷却）。"""
+    global _AI_REDIS
+    _AI_REDIS = redis
+
+
+def _invalidate_budget_cache() -> None:
+    global _BUDGET_CACHE
+    _BUDGET_CACHE = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """按事件循环复用的 httpx 连接池（保持 TCP/TLS 长连接；测试切 loop 时自动重建）。"""
+    global _HTTP_CLIENT, _HTTP_CLIENT_LOOP
+    loop = asyncio.get_running_loop()
+    if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed or _HTTP_CLIENT_LOOP is not loop:
+        _HTTP_CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(_CHAT_TIMEOUT_SECONDS, connect=15.0),
+            limits=httpx.Limits(max_connections=32, max_keepalive_connections=16, keepalive_expiry=60.0),
+        )
+        _HTTP_CLIENT_LOOP = loop
+    return _HTTP_CLIENT
+
+
+async def close_ai_http_client() -> None:
+    global _HTTP_CLIENT, _HTTP_CLIENT_LOOP
+    client = _HTTP_CLIENT
+    _HTTP_CLIENT = None
+    _HTTP_CLIENT_LOOP = None
+    if client is not None and not client.is_closed:
+        try:
+            await client.aclose()
+        except Exception:  # noqa: BLE001
+            logger.debug("ai http client close ignored", exc_info=True)
+
+
+def _cooldown_redis_key(api_key: str) -> str:
+    digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+    return f"{_COOLDOWN_REDIS_PREFIX}{digest}"
+
+
+async def _is_key_cooling(api_key: str) -> bool:
+    if _KEY_COOLDOWN.get(api_key, 0.0) > time.monotonic():
+        return True
+    redis = _AI_REDIS
+    if redis is not None and hasattr(redis, "exists"):
+        try:
+            if await redis.exists(_cooldown_redis_key(api_key)):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+    return False
+
+
+async def _mark_key_cooling(api_key: str, seconds: float = _KEY_COOLDOWN_SECONDS) -> None:
+    _KEY_COOLDOWN[api_key] = time.monotonic() + seconds
+    redis = _AI_REDIS
+    if redis is not None and hasattr(redis, "set"):
+        try:
+            await redis.set(_cooldown_redis_key(api_key), "1", ex=max(1, int(seconds)))
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _clear_key_cooling(api_key: str) -> None:
+    _KEY_COOLDOWN.pop(api_key, None)
+    redis = _AI_REDIS
+    if redis is not None and hasattr(redis, "delete"):
+        try:
+            await redis.delete(_cooldown_redis_key(api_key))
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _beijing_day_start_utc(now: datetime | None = None) -> tuple[str, datetime]:
+    now = now or utcnow()
+    bj = now + timedelta(hours=8)
+    day_start_bj = bj.replace(hour=0, minute=0, second=0, microsecond=0)
+    return bj.strftime("%Y-%m-%d"), day_start_bj - timedelta(hours=8)
+
+
+async def get_ai_budget_status(
+    session: AsyncSession,
+    config: dict,
+    *,
+    bypass_cache: bool = False,
+) -> dict:
+    """统计今日（北京时间）AI 用量并判断是否触发每日熔断阈值。"""
+    global _BUDGET_CACHE
+    token_limit = max(0, int(config.get("daily_token_limit") or 0))
+    cost_limit = max(0.0, float(config.get("daily_cost_limit") or 0))
+    bj_day, day_start_utc = _beijing_day_start_utc()
+
+    cached = _BUDGET_CACHE
+    if (
+        not bypass_cache
+        and cached is not None
+        and cached[0] > time.monotonic()
+        and cached[1] == bj_day
+    ):
+        today_tokens, today_cost = cached[2], cached[3]
+    else:
+        row = (
+            await session.execute(
+                select(
+                    func.coalesce(func.sum(AiUsage.total_tokens), 0),
+                    func.coalesce(func.sum(AiUsage.cost), 0.0),
+                ).where(AiUsage.created_at >= day_start_utc)
+            )
+        ).one()
+        today_tokens = int(row[0] or 0)
+        today_cost = round(float(row[1] or 0.0), 6)
+        _BUDGET_CACHE = (time.monotonic() + _BUDGET_CACHE_TTL, bj_day, today_tokens, today_cost)
+
+    token_tripped = token_limit > 0 and today_tokens >= token_limit
+    cost_tripped = cost_limit > 0 and today_cost >= cost_limit
+    return {
+        "date": bj_day,
+        "today_tokens": today_tokens,
+        "today_cost": today_cost,
+        "daily_token_limit": token_limit,
+        "daily_cost_limit": cost_limit,
+        "tripped": token_tripped or cost_tripped,
+    }
+
+
+async def check_ai_budget(session: AsyncSession, config: dict) -> bool:
+    """当日未达预算熔断上限返回 True（上限全为 0 时直接放行不查库）。"""
+    token_limit = max(0, int(config.get("daily_token_limit") or 0))
+    cost_limit = max(0.0, float(config.get("daily_cost_limit") or 0))
+    if token_limit <= 0 and cost_limit <= 0:
+        return True
+    status = await get_ai_budget_status(session, config)
+    return not status["tripped"]
 
 
 def retry_allowed(task: str, since):
@@ -134,30 +335,35 @@ async def _chat_once(
     }
     if json_mode:
         body["response_format"] = {"type": "json_object"}
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{config['base_url']}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json=body,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    client = _get_http_client()
+    resp = await client.post(
+        f"{config['base_url']}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json=body,
+    )
+    resp.raise_for_status()
+    data = resp.json()
     return data["choices"][0]["message"]["content"], data.get("usage")
 
 
 async def chat(
-    config: dict, system: str, user: "str | list", *, json_mode: bool = False
+    config: dict,
+    system: str,
+    user: "str | list",
+    *,
+    json_mode: bool = False,
+    task: str | None = None,
 ) -> tuple[str, dict | None]:
-    """OpenAI 兼容 chat/completions（多密钥池化）；返回 (回复文本, usage)。
+    """OpenAI 兼容 chat/completions（长连接池 + Redis 共享冷却 + 备用 Provider 故障转移）。
 
-    user 为 str 时是纯文本；为 list 时是 OpenAI 多模态 content 分片
-    （如 [{"type": "text", ...}, {"type": "image_url", ...}]），原样透传。
+    user 为 str 时是纯文本；为 list 时是 OpenAI 多模态 content 分片，原样透传。
     密钥池轮询：请求发出前推进起点，把并发调用摊到各密钥上；密钥级失败
-    （429/401/402/403）立即换下一把并给该密钥 60 秒冷却；全部密钥失败时
-    抛出最后一个异常，由上层任务按既有退避逻辑处理。
+    （429/401/402/403）立即换下一把并给该密钥 60 秒冷却；主池全部失败或冷却时，
+    若配置了 fallback 备用通道则自动无缝降级调用一次。
     """
     global _POOL_INDEX
-    keys = _pool_keys(config)
+    effective_cfg = config_for_task(config, task) if task else config
+    keys = _pool_keys(effective_cfg)
     start = _POOL_INDEX
     _POOL_INDEX = (start + 1) % len(keys)
     last_error: Exception | None = None
@@ -165,20 +371,50 @@ async def chat(
     async with asyncio.timeout(_CHAT_TIMEOUT_SECONDS):
         for offset in range(len(keys)):
             api_key = keys[(start + offset) % len(keys)]
-            if _KEY_COOLDOWN.get(api_key, 0) > time.monotonic():
+            if await _is_key_cooling(api_key):
                 continue
             try:
-                result = await _chat_once(config, api_key, system, user, json_mode=json_mode)
+                result = await _chat_once(effective_cfg, api_key, system, user, json_mode=json_mode)
             except httpx.HTTPStatusError as exc:
                 last_error = exc
                 if exc.response.status_code in _POOL_ROTATE_STATUSES:
-                    _KEY_COOLDOWN[api_key] = time.monotonic() + _KEY_COOLDOWN_SECONDS
+                    await _mark_key_cooling(api_key)
                 continue
             except (httpx.TransportError, ValueError, KeyError, IndexError) as exc:
                 last_error = exc
                 continue
-            _KEY_COOLDOWN.pop(api_key, None)
+            await _clear_key_cooling(api_key)
+            config["_last_model"] = effective_cfg.get("model") or ""
             return result
+
+        # 主通道全部失败或冷却时，尝试备用 Provider 故障转移
+        if fallback_available(effective_cfg):
+            fb_key = effective_cfg["fallback_api_key"]
+            if not await _is_key_cooling(fb_key):
+                fb_cfg = {
+                    **effective_cfg,
+                    "base_url": effective_cfg["fallback_base_url"],
+                    "model": effective_cfg["fallback_model"],
+                }
+                logger.warning(
+                    "primary AI pool unavailable (%s), falling back to %s @ %s",
+                    type(last_error).__name__ if last_error else "cooling",
+                    fb_cfg["model"],
+                    fb_cfg["base_url"],
+                )
+                try:
+                    result = await _chat_once(fb_cfg, fb_key, system, user, json_mode=json_mode)
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    if exc.response.status_code in _POOL_ROTATE_STATUSES:
+                        await _mark_key_cooling(fb_key)
+                except (httpx.TransportError, ValueError, KeyError, IndexError) as exc:
+                    last_error = exc
+                else:
+                    await _clear_key_cooling(fb_key)
+                    config["_last_model"] = fb_cfg["model"]
+                    return result
+
     if last_error is not None:
         raise last_error
     raise AiPoolCoolingDown("AI 密钥池正在冷却，稍后重试")
@@ -190,10 +426,16 @@ def _public_view(config: dict) -> dict:
         "base_url": config["base_url"],
         "model": config["model"],
         "api_key_set": bool(config["api_key"]),
-        "api_keys_count": len(keys),
-        "api_keys_tail": [k[-6:] for k in keys],
+        "api_keys_count": len(keys) if any(keys) else 0,
+        "api_keys_tail": [k[-6:] for k in keys if k],
         "price_in": config.get("price_in", 0),
         "price_out": config.get("price_out", 0),
+        "fallback_base_url": config.get("fallback_base_url") or "",
+        "fallback_model": config.get("fallback_model") or "",
+        "fallback_api_key_set": bool(config.get("fallback_api_key")),
+        "task_models": config.get("task_models") or {},
+        "daily_token_limit": int(config.get("daily_token_limit") or 0),
+        "daily_cost_limit": float(config.get("daily_cost_limit") or 0),
     }
 
 
@@ -246,7 +488,7 @@ async def summarize_event(
     if (event.manual_locked or event.summary_status == "manual") and not force:
         return {"status": "skipped", "reason": "manual_locked"}
 
-    config = await get_ai_config(session)
+    config = config_for_task(await get_ai_config(session), "summarize_event")
 
     rows = await session.execute(
         select(RawContent, ContentVersion, Evidence, Source)
@@ -275,7 +517,7 @@ async def summarize_event(
         return {"status": "skipped", "reason": "no_evidences"}
     evidence_context.append(str(len(evidences)))
 
-    used_fallback = not ai_available(config)
+    used_fallback = (not ai_available(config)) or (not await check_ai_budget(session, config))
     if used_fallback:
         summary = _fallback_summary(event, len(evidences))
     else:
@@ -358,9 +600,11 @@ async def summarize_event(
 
 async def translate_content(session: AsyncSession, content_id: int) -> dict:
     """外语内容机翻 → zh-CN（存 content_translations，可重算），并记录用量。"""
-    config = await get_ai_config(session)
+    config = config_for_task(await get_ai_config(session), "translate_content")
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
+    if not await check_ai_budget(session, config):
+        return {"status": "deferred", "reason": "daily_budget_exceeded"}
 
     row = await session.execute(
         select(RawContent, ContentVersion)
@@ -417,9 +661,11 @@ async def assess_product_stage(session: AsyncSession, product_id: int) -> dict:
     if product is None:
         return {"status": "skipped", "reason": "product_not_found"}
 
-    config = await get_ai_config(session)
+    config = config_for_task(await get_ai_config(session), "assess_product")
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
+    if not await check_ai_budget(session, config):
+        return {"status": "deferred", "reason": "daily_budget_exceeded"}
 
     rows = list(
         await session.execute(

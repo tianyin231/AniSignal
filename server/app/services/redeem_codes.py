@@ -515,9 +515,13 @@ async def extract_community_codes(
         await session.commit()
         return {"status": "skipped", "reason": "no_code_signal"}
 
-    config = await get_ai_config(session)
+    from app.services.ai import check_ai_budget, config_for_task
+
+    config = config_for_task(await get_ai_config(session), "extract_community_codes")
     if not ai_available(config):
         return {"status": "skipped", "reason": "ai_not_configured"}
+    if not await check_ai_budget(session, config):
+        return {"status": "skipped", "reason": "daily_budget_exceeded"}
 
     published = raw.published_at or raw.collected_at
     source_published = raw.published_at.isoformat() if raw.published_at else None

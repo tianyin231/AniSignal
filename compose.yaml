@@ -114,7 +114,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import os, socket, sys, redis; r = redis.Redis.from_url(os.environ.get('ANISIGNAL_REDIS_URL', 'redis://redis:6379/0'), socket_connect_timeout=3, socket_timeout=3); sys.exit(0 if r.exists(f'anisignal:worker-health:{socket.gethostname()}') else 1)"]
+      test: ["CMD", "python", "-c", "import os, socket, sys, redis; r = redis.Redis.from_url(os.environ.get('ANISIGNAL_REDIS_URL', 'redis://redis:6379/0'), socket_connect_timeout=3, socket_timeout=3); h = socket.gethostname(); sys.exit(0 if (r.exists(f'anisignal:worker-health:{h}') and r.exists(f'anisignal:worker-health-ai:{h}')) else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3

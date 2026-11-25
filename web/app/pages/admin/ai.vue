@@ -19,8 +19,36 @@ interface AiConfig {
   api_keys_tail?: string[]
   price_in: number
   price_out: number
+  fallback_base_url?: string
+  fallback_model?: string
+  fallback_api_key_set?: boolean
+  task_models?: Record<string, string>
+  daily_token_limit?: number
+  daily_cost_limit?: number
 }
-const config = reactive({ base_url: '', model: '', api_key: '', api_keys: '', price_in: 0, price_out: 0 })
+const TASK_MODEL_FIELDS: Array<{ key: string; label: string; hint: string }> = [
+  { key: 'review_content', label: '内容初审', hint: '调用量最高，可指派轻量便宜模型' },
+  { key: 'translate_content', label: '内容翻译', hint: '外语公告/YouTube 机翻' },
+  { key: 'summarize_event', label: '事件摘要', hint: '官方事件核心摘要' },
+  { key: 'extract_entities', label: '日程/官方码抽取', hint: '结构化日期与兑换码提取' },
+  { key: 'discover_products', label: '周边自动发现', hint: '官方公告周边建档与核验' },
+  { key: 'match_official_content', label: '跨平台语义匹配', hint: '多平台官方公告同事件核对' },
+]
+const config = reactive({
+  base_url: '',
+  model: '',
+  api_key: '',
+  api_keys: '',
+  price_in: 0,
+  price_out: 0,
+  fallback_base_url: '',
+  fallback_model: '',
+  fallback_api_key: '',
+  daily_token_limit: 0,
+  daily_cost_limit: 0,
+  task_models: {} as Record<string, string>,
+})
+const advancedOpen = ref(false)
 const configView = ref<AiConfig | null>(null)
 const testResult = ref('')
 
@@ -30,13 +58,20 @@ async function loadConfig() {
   config.model = configView.value.model
   config.price_in = configView.value.price_in
   config.price_out = configView.value.price_out
+  config.fallback_base_url = configView.value.fallback_base_url || ''
+  config.fallback_model = configView.value.fallback_model || ''
+  config.fallback_api_key = ''
+  config.daily_token_limit = configView.value.daily_token_limit || 0
+  config.daily_cost_limit = configView.value.daily_cost_limit || 0
+  config.task_models = { ...(configView.value.task_models || {}) }
   config.api_key = ''
 }
 
 // ---------- 用量 ----------
 interface UsageWindow { calls: number; total_tokens: number; cost: number }
-interface TaskUsage { task: string; calls: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; cost: number; avg_ms: number }
-interface UsageSummary { window_days: number; window: UsageWindow; all_time: UsageWindow; by_task: TaskUsage[] }
+interface BudgetStatus { date: string; today_tokens: number; today_cost: number; daily_token_limit: number; daily_cost_limit: number; tripped: boolean }
+interface TaskUsage { task: string; calls: number; failed?: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; cost: number; avg_ms: number }
+interface UsageSummary { window_days: number; window: UsageWindow; all_time: UsageWindow; budget?: BudgetStatus; by_task: TaskUsage[] }
 interface CallRow { id: number; task: string; ref_id: number | null; model: string; prompt_tokens: number; completion_tokens: number; total_tokens: number; cost: number; duration_ms: number; status: string; created_at: string }
 const usage = ref<UsageSummary | null>(null)
 const calls = ref<CallRow[]>([])
@@ -57,9 +92,17 @@ async function refresh() {
 onMounted(() => refresh())
 
 const TASK_LABELS: Record<string, string> = {
+  review_content: '内容初审',
   summarize_event: '事件摘要',
   translate_content: '内容翻译',
   assess_product: '商品履约判断',
+  discover_products: '周边自动发现',
+  product_images: '周边图片匹配',
+  extract_entities: '日程 / 官方码抽取',
+  extract_community_codes: '社区前瞻码抽取',
+  match_official_content: '跨平台语义匹配',
+  bot_brief: 'Bot 简报整理',
+  bot_news_dedupe: 'Bot 资讯去重',
   test: '连通测试',
   news_group: '资讯事件归组',
   news_score: '资讯价值评分',
@@ -70,10 +113,14 @@ async function saveConfig() {
   try {
     await api('/api/admin/ai/config', {
       method: 'PUT',
-      body: { ...config, api_keys: config.api_keys.trim() ? config.api_keys : null },
+      body: {
+        ...config,
+        api_keys: config.api_keys.trim() ? config.api_keys : null,
+      },
     })
     config.api_key = ''
     config.api_keys = ''
+    config.fallback_api_key = ''
     toast.ok('LLM 配置已保存')
     await Promise.all([loadConfig(), refreshSiteConfig()])
   } catch (exc: any) {
@@ -205,6 +252,67 @@ async function translateMissing() {
           <input v-model.number="config.price_out" type="number" step="0.1" min="0" class="input mono mt-1 w-full px-3 py-2 text-sm">
         </div>
       </div>
+
+      <!-- 高可用与成本控制折叠面板 -->
+      <div class="mt-4 rounded-xl border border-line bg-chip/30 p-3.5">
+        <button
+          type="button"
+          class="flex w-full items-center justify-between text-left text-xs font-semibold text-ink"
+          :aria-expanded="advancedOpen"
+          @click="advancedOpen = !advancedOpen"
+        >
+          <span>
+            高可用与成本控制（备用 Provider 降级 · 按任务分层模型 · 每日预算熔断）
+            <span v-if="configView?.fallback_model || configView?.daily_token_limit || configView?.daily_cost_limit" class="ml-1.5 rounded bg-brand-soft px-1.5 py-0.5 text-[10px] text-brand-ink">已启用</span>
+          </span>
+          <span class="text-muted">{{ advancedOpen ? '收起' : '展开配置' }}</span>
+        </button>
+
+        <div v-if="advancedOpen" class="mt-3 space-y-4 border-t border-line-soft pt-3">
+          <div>
+            <p class="text-xs font-semibold text-ink-2">备用 Provider（主力密钥池全部 429 / 故障时自动降级）</p>
+            <div class="mt-2 grid gap-3 sm:grid-cols-3">
+              <div>
+                <label class="block text-[11px] text-muted">备用 Base URL</label>
+                <input v-model="config.fallback_base_url" placeholder="https://api.openai.com/v1" class="input mt-1 w-full px-3 py-1.5 text-xs">
+              </div>
+              <div>
+                <label class="block text-[11px] text-muted">备用模型名</label>
+                <input v-model="config.fallback_model" placeholder="qwen-turbo / deepseek-chat" class="input mt-1 w-full px-3 py-1.5 text-xs">
+              </div>
+              <div>
+                <label class="block text-[11px] text-muted">备用 API Key（{{ configView?.fallback_api_key_set ? '已设置，留空保留' : '可选' }}）</label>
+                <input v-model="config.fallback_api_key" type="password" placeholder="sk-…" class="input mt-1 w-full px-3 py-1.5 text-xs">
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs font-semibold text-ink-2">每日预算熔断（北京时间 0 点重置；填 0 = 不限制）</p>
+            <div class="mt-2 grid gap-3 sm:grid-cols-2">
+              <div>
+                <label class="block text-[11px] text-muted">每日 Token 上限</label>
+                <input v-model.number="config.daily_token_limit" type="number" step="100000" min="0" class="input mono mt-1 w-full px-3 py-1.5 text-xs">
+              </div>
+              <div>
+                <label class="block text-[11px] text-muted">每日费用上限</label>
+                <input v-model.number="config.daily_cost_limit" type="number" step="1" min="0" class="input mono mt-1 w-full px-3 py-1.5 text-xs">
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p class="text-xs font-semibold text-ink-2">按任务覆盖模型（留空使用主模型；高吞吐任务可切轻量模型省流）</p>
+            <div class="mt-2 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              <div v-for="field in TASK_MODEL_FIELDS" :key="field.key">
+                <label class="block text-[11px] text-muted">{{ field.label }} <span class="text-faint">· {{ field.hint }}</span></label>
+                <input v-model="config.task_models[field.key]" :placeholder="config.model || '沿用主模型'" class="input mt-1 w-full px-2.5 py-1.5 text-xs">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <button class="btn-primary px-4 py-2" :disabled="busy" @click="saveConfig">{{ busyWhat === 'save' ? '保存中…' : '保存配置' }}</button>
         <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy" @click="runTest">{{ busyWhat === 'test' ? '测试中…' : '连通测试' }}</button>
@@ -238,6 +346,13 @@ async function translateMissing() {
           <option :value="90">近 90 天</option>
         </select>
       </div>
+      <div v-if="usage?.budget" class="mt-3 rounded-xl border px-4 py-3 text-xs" :class="usage.budget.tripped ? 'border-hot/50 bg-hot/10 text-hot' : 'border-line-soft bg-chip/40 text-muted'">
+        今日（{{ usage.budget.date }}）已消耗 <span class="mono font-semibold text-ink">{{ usage.budget.today_tokens.toLocaleString() }}</span> tokens
+        <template v-if="usage.budget.daily_token_limit"> / 上限 <span class="mono font-semibold">{{ usage.budget.daily_token_limit.toLocaleString() }}</span></template>
+        · 费用 <span class="mono font-semibold text-ink">{{ usage.budget.today_cost.toFixed(4) }}</span>
+        <template v-if="usage.budget.daily_cost_limit"> / 上限 <span class="mono font-semibold">{{ usage.budget.daily_cost_limit }}</span></template>
+        <span v-if="usage.budget.tripped" class="ml-2 font-bold">已触发日预算熔断，非关键后台 AI 任务已暂停至明日 00:00</span>
+      </div>
       <div class="mt-3 grid grid-cols-2 gap-3">
         <div class="rounded-xl bg-chip/60 px-4 py-3">
           <p class="text-xs text-muted">累计 tokens</p>
@@ -253,6 +368,7 @@ async function translateMissing() {
           <tr class="border-b border-line text-left text-xs text-faint">
             <th class="py-2 pr-3 font-medium">任务</th>
             <th class="py-2 pr-3 font-medium">调用</th>
+            <th class="py-2 pr-3 font-medium">失败</th>
             <th class="py-2 pr-3 font-medium">输入</th>
             <th class="py-2 pr-3 font-medium">输出</th>
             <th class="py-2 pr-3 font-medium">tokens</th>
@@ -264,6 +380,7 @@ async function translateMissing() {
           <tr v-for="t in usage.by_task" :key="t.task" class="border-b border-line-soft last:border-0">
             <td class="py-2 pr-3">{{ TASK_LABELS[t.task] ?? t.task }}</td>
             <td class="mono py-2 pr-3">{{ t.calls }}</td>
+            <td class="mono py-2 pr-3" :class="(t.failed ?? 0) > 0 ? 'text-hot font-semibold' : 'text-faint'">{{ t.failed ?? 0 }}</td>
             <td class="mono py-2 pr-3">{{ t.prompt_tokens.toLocaleString() }}</td>
             <td class="mono py-2 pr-3">{{ t.completion_tokens.toLocaleString() }}</td>
             <td class="mono py-2 pr-3">{{ t.total_tokens.toLocaleString() }}</td>
