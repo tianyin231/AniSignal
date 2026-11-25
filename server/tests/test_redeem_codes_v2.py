@@ -11,6 +11,7 @@ from app.services import extract as extract_module
 from app.services import redeem_codes as rc_module
 from app.services.extract import extract_entities
 from app.services.redeem_codes import (
+    active_livestream_communities,
     backfill_expiry_from_official_deadline,
     extract_community_codes,
     infer_livestream_expiry,
@@ -343,7 +344,7 @@ async def test_sweep_community_codes_skips_ai_and_empty_bodies(session, monkeypa
     monkeypatch.setattr(rc_module, "record_usage", AsyncMock(return_value=None))
     monkeypatch.setattr(rc_module, "get_ai_config", AsyncMock(return_value=_fake_config()))
 
-    stats = await sweep_community_codes(session, notify=False)
+    stats = await sweep_community_codes(session, notify=False, require_livestream_window=False)
     assert stats["codes"] == 1
     assert stats["skipped"] == 1  # empty_id 被前置过滤跳过，ai_id 被 domain != game 排除
     assert fake_chat.await_count == 1  # 只对真有码的 good_id 调了一次 LLM
@@ -356,3 +357,111 @@ async def test_sweep_community_codes_skips_ai_and_empty_bodies(session, monkeypa
     assert (await session.get(RawContent, empty_id)).extracted_at is not None
     assert (await session.get(RawContent, ai_id)).extracted_at is None
     assert (await session.get(RawContent, good_id)).extracted_at is not None
+
+
+async def test_sweep_community_codes_only_runs_inside_official_livestream_window(session, monkeypatch):
+    now = utcnow()
+    official_src = Source(platform="bilibili", external_id="off-live", name="官方", identity="official")
+    up_src = Source(platform="bilibili", external_id="up-live", name="UP主", identity="unknown")
+    session.add_all([official_src, up_src])
+    await session.flush()
+
+    async def _seed_up(ext_id: str, comm: str, code: str) -> int:
+        raw = RawContent(
+            platform="bilibili",
+            external_id=ext_id,
+            content_type="video",
+            community=comm,
+            source_id=up_src.id,
+            published_at=now - timedelta(hours=1),
+            collected_at=now,
+        )
+        session.add(raw)
+        await session.flush()
+        ver = ContentVersion(
+            raw_content_id=raw.id,
+            version=1,
+            title=f"{comm}前瞻兑换码",
+            text=f"前瞻兑换码：{code} 速领！",
+            parsed_at=now,
+        )
+        session.add(ver)
+        await session.flush()
+        raw.latest_version_id = ver.id
+        return raw.id
+
+    wuwa_post = await _seed_up("BV1wuwa00001", "wuwa", "WUWALIVE99")
+    hsr_post = await _seed_up("BV1hsr000002", "hsr", "HSRLIVE888")
+
+    # 1. 没有任何官方前瞻/直播窗口（只有 5 天后的远期直播）-> 社区扫库直接休眠，零 LLM 调用
+    off_raw = RawContent(
+        platform="bilibili",
+        external_id="off-notice-1",
+        content_type="dynamic",
+        community="hsr",
+        source_id=official_src.id,
+        published_at=now - timedelta(hours=2),
+        collected_at=now,
+    )
+    session.add(off_raw)
+    await session.flush()
+    session.add(
+        ContentSchedule(
+            raw_content_id=off_raw.id,
+            community="hsr",
+            title="崩铁远期前瞻特别节目",
+            kind="broadcast",
+            start_at=now + timedelta(days=5),
+        )
+    )
+    await session.commit()
+
+    fake_chat = AsyncMock(
+        return_value=(
+            '{"codes":[{"code":"WUWALIVE99","expires_at":null,"is_livestream":true,"evidence":"前瞻兑换码：WUWALIVE99"}]}',
+            None,
+        )
+    )
+    monkeypatch.setattr(rc_module, "chat", fake_chat)
+    monkeypatch.setattr(rc_module, "record_usage", AsyncMock(return_value=None))
+    monkeypatch.setattr(rc_module, "get_ai_config", AsyncMock(return_value=_fake_config()))
+
+    assert await active_livestream_communities(session, now) == set()
+    idle = await sweep_community_codes(session, notify=False)
+    assert idle["candidates"] == 0
+    assert idle["active_communities"] == []
+    assert fake_chat.await_count == 0
+    assert (await session.get(RawContent, wuwa_post)).extracted_at is None
+    assert (await session.get(RawContent, hsr_post)).extracted_at is None
+
+    # 2. 鸣潮进入官方前瞻直播窗口（2 小时前开播）-> 仅唤醒 wuwa 社区抓取，hsr 依然保持休眠
+    off_wuwa = RawContent(
+        platform="bilibili",
+        external_id="off-notice-wuwa",
+        content_type="dynamic",
+        community="wuwa",
+        source_id=official_src.id,
+        published_at=now - timedelta(days=1),
+        collected_at=now - timedelta(days=1),
+    )
+    session.add(off_wuwa)
+    await session.flush()
+    session.add(
+        ContentSchedule(
+            raw_content_id=off_wuwa.id,
+            community="wuwa",
+            title="鸣潮前瞻特别节目",
+            kind="broadcast",
+            start_at=now - timedelta(hours=2),
+        )
+    )
+    await session.commit()
+
+    assert await active_livestream_communities(session, now) == {"wuwa"}
+    active = await sweep_community_codes(session, notify=False)
+    assert active["active_communities"] == ["wuwa"]
+    assert active["codes"] == 1
+    assert fake_chat.await_count == 1
+    assert (await session.get(RawContent, wuwa_post)).extracted_at is not None
+    assert (await session.get(RawContent, hsr_post)).extracted_at is None
+

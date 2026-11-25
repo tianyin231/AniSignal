@@ -35,8 +35,10 @@ logger = logging.getLogger(__name__)
 
 # 无明确有效期普通兑换码的展示保鲜期上限（天）
 UNKNOWN_EXPIRY_TTL_DAYS = 14
-# 社区 UP 主兑换码扫库窗口（天）与单轮上限
-COMMUNITY_CODE_WINDOW_DAYS = 7
+# 社区 UP 主兑换码仅在官方前瞻/直播事件驱动窗口内激活（开播前 1h ~ 开播后 48h）
+LIVESTREAM_WINDOW_BEFORE = timedelta(hours=1)
+LIVESTREAM_WINDOW_AFTER = timedelta(hours=48)
+COMMUNITY_CODE_WINDOW_DAYS = 3
 COMMUNITY_CODE_BATCH_LIMIT = 8
 # 社区码触发 Bot 推送所需的最少独立来源数
 COMMUNITY_BOT_PUSH_MIN_SOURCES = 2
@@ -618,15 +620,88 @@ async def extract_community_codes(
     return {"status": "ok", "codes": new_codes, "confirmed": updated_codes}
 
 
+async def active_livestream_communities(
+    session: AsyncSession,
+    now: datetime | None = None,
+) -> set[str]:
+    """返回当前正处于「官方前瞻/直播兑换码抓取窗口」内的游戏分区集合。
+
+    触发条件（满足任一即可，均为轻量查询 content_schedules）：
+    1. 官方已登记的前瞻/直播日程（kind='broadcast'）在 [now - 48h, now + 1h] 内（临开播、直播中、播后 48h）；
+    2. 官方已登记的「兑换码截止」日程（kind='deadline'，标题含兑换码/礼包码）仍未截止且在未来 7 天内，或 48h 内刚发布。
+    """
+    now = now or utcnow()
+    active: set[str] = set()
+
+    broadcast_comms = (
+        await session.execute(
+            select(ContentSchedule.community)
+            .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
+            .join(Source, Source.id == RawContent.source_id)
+            .where(
+                ContentSchedule.kind == "broadcast",
+                Source.identity == "official",
+                RawContent.hidden.is_(False),
+                ContentSchedule.start_at >= now - LIVESTREAM_WINDOW_AFTER,
+                ContentSchedule.start_at <= now + LIVESTREAM_WINDOW_BEFORE,
+            )
+            .distinct()
+        )
+    ).scalars().all()
+    for comm in broadcast_comms:
+        if get_community(comm).domain == "game":
+            active.add(comm)
+
+    deadline_rows = (
+        await session.execute(
+            select(ContentSchedule.community, ContentSchedule.title)
+            .join(RawContent, RawContent.id == ContentSchedule.raw_content_id)
+            .join(Source, Source.id == RawContent.source_id)
+            .where(
+                ContentSchedule.kind == "deadline",
+                Source.identity == "official",
+                RawContent.hidden.is_(False),
+                or_(
+                    and_(
+                        ContentSchedule.start_at > now,
+                        ContentSchedule.start_at <= now + timedelta(days=7),
+                    ),
+                    func.coalesce(RawContent.published_at, ContentSchedule.created_at) >= now - LIVESTREAM_WINDOW_AFTER,
+                ),
+            )
+        )
+    ).all()
+    for comm, title in deadline_rows:
+        if _CODE_DEADLINE_TITLE_RE.search(title or "") and get_community(comm).domain == "game":
+            active.add(comm)
+
+    return active
+
+
 async def sweep_community_codes(
     session: AsyncSession,
     *,
     limit: int = COMMUNITY_CODE_BATCH_LIMIT,
     window_days: int = COMMUNITY_CODE_WINDOW_DAYS,
     notify: bool = True,
+    require_livestream_window: bool = True,
 ) -> dict:
-    """扫一批近 7 天内提及兑换码的游戏分区非官方帖（前置过滤后才消耗 LLM）。"""
-    cutoff = utcnow() - timedelta(days=window_days)
+    """扫一批游戏分区非官方兑换码帖（默认仅在官方前瞻/直播窗口内激活，平时零开销直接返回）。"""
+    now = utcnow()
+    active_comms: set[str] | None = None
+    if require_livestream_window:
+        active_comms = await active_livestream_communities(session, now)
+        if not active_comms:
+            return {
+                "candidates": 0,
+                "active_communities": [],
+                "codes": 0,
+                "confirmed": 0,
+                "failed": 0,
+                "skipped": 0,
+            }
+
+    cutoff = now - timedelta(days=window_days)
     feed_partitions = set(feed_community_keys())
     latest_parsed = select(func.max(ContentVersion.parsed_at)).where(
         ContentVersion.raw_content_id == RawContent.id,
@@ -643,20 +718,25 @@ async def sweep_community_codes(
         func.lower(ContentVersion.text).contains("redeem code"),
     )
 
+    conditions = [
+        or_(Source.identity.is_(None), Source.identity != "official"),
+        RawContent.hidden.is_(False),
+        RawContent.extracted_at.is_(None),
+        RawContent.collected_at >= cutoff,
+        keyword_cond,
+        retry_allowed("extract_community_codes", latest_parsed),
+    ]
+    if active_comms is not None:
+        conditions.append(RawContent.community.in_(active_comms))
+    elif feed_partitions:
+        conditions.append(RawContent.community.notin_(feed_partitions))
+
     rows = (
         await session.execute(
             select(RawContent.id, RawContent.community)
             .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
             .join(Source, RawContent.source_id == Source.id, isouter=True)
-            .where(
-                or_(Source.identity.is_(None), Source.identity != "official"),
-                RawContent.hidden.is_(False),
-                RawContent.extracted_at.is_(None),
-                RawContent.collected_at >= cutoff,
-                *([RawContent.community.notin_(feed_partitions)] if feed_partitions else []),
-                keyword_cond,
-                retry_allowed("extract_community_codes", latest_parsed),
-            )
+            .where(*conditions)
             .order_by(RawContent.id.desc())
             .limit(limit * 4)
         )
@@ -666,7 +746,14 @@ async def sweep_community_codes(
         cid for cid, comm in rows if get_community(comm).domain == "game"
     ][: limit * 3]
 
-    stats = {"candidates": 0, "codes": 0, "confirmed": 0, "failed": 0, "skipped": 0}
+    stats: dict = {
+        "candidates": 0,
+        "active_communities": sorted(active_comms) if active_comms is not None else [],
+        "codes": 0,
+        "confirmed": 0,
+        "failed": 0,
+        "skipped": 0,
+    }
     llm_calls = 0
     for cid in candidate_ids:
         if llm_calls >= limit:
