@@ -70,6 +70,37 @@ export interface BuildTimelineOptions {
   communityOrder?: string[]
 }
 
+export interface EffectiveScheduleBounds {
+  startMs: number
+  endMs: number | null
+  isPoint: boolean
+}
+
+/** 计算日程在目标时区下的有效起止毫秒（全天日程的结束日按该时区当天 24:00 计，保证时间轴与详情倒计时完全一致）。 */
+export function effectiveScheduleBounds(
+  entry: CalendarEntry,
+  timeZone: CalendarTimezoneId | string = DEFAULT_CALENDAR_TIMEZONE,
+): EffectiveScheduleBounds | null {
+  if (!entry.start_at) return null
+  const rawStart = timestamp(entry.start_at)
+  if (!Number.isFinite(rawStart)) return null
+
+  const hasEnd = Boolean(entry.end_at) && entry.kind !== 'deadline'
+  const rawEnd = hasEnd ? timestamp(entry.end_at!) : Number.NaN
+  if (hasEnd && (!Number.isFinite(rawEnd) || rawEnd < rawStart)) return null
+
+  const isPoint = !hasEnd || rawEnd === rawStart
+  if (isPoint) {
+    return { startMs: rawStart, endMs: null, isPoint: true }
+  }
+  if (entry.all_day) {
+    const startMs = zoneStartOfDayMs(dayInZone(rawStart, timeZone), timeZone)
+    const endMs = zoneStartOfDayMs(shiftIsoDay(dayInZone(rawEnd, timeZone), 1), timeZone)
+    return { startMs, endMs, isPoint: false }
+  }
+  return { startMs: rawStart, endMs: rawEnd, isPoint: false }
+}
+
 export function buildTimeline(options: BuildTimelineOptions): TimelineModel {
   const {
     startDay,
@@ -115,22 +146,10 @@ export function buildTimeline(options: BuildTimelineOptions): TimelineModel {
   const grouped = new Map<string, Omit<TimelineBar, 'track'>[]>()
 
   for (const entry of entries) {
-    if (!entry.start_at) continue
-    const rawStart = timestamp(entry.start_at)
-    if (!Number.isFinite(rawStart)) continue
-
-    const hasEnd = Boolean(entry.end_at) && entry.kind !== 'deadline'
-    const rawEnd = hasEnd ? timestamp(entry.end_at!) : Number.NaN
-    if (hasEnd && (!Number.isFinite(rawEnd) || rawEnd < rawStart)) continue
-
-    const isPoint = !hasEnd || rawEnd === rawStart
-
-    let startMs = rawStart
-    let endMs = rawEnd
-    if (!isPoint && entry.all_day) {
-      startMs = zoneStartOfDayMs(dayInZone(rawStart, timeZone), timeZone)
-      endMs = zoneStartOfDayMs(shiftIsoDay(dayInZone(rawEnd, timeZone), 1), timeZone)
-    }
+    const bounds = effectiveScheduleBounds(entry, timeZone)
+    if (!bounds) continue
+    const { startMs, isPoint } = bounds
+    const endMs = bounds.endMs ?? startMs
 
     if (isPoint) {
       if (startMs < windowStartMs || startMs > windowEndMs) continue
@@ -219,9 +238,16 @@ export function buildTimeline(options: BuildTimelineOptions): TimelineModel {
 
   for (const community of sortedCommunities) {
     const rawBars = grouped.get(community)!
-    // 同泳道内：先排起点早的，同起点先排区间更长的（视觉上类似甘特阶梯，整洁紧凑）
+    // 同泳道内优先把临期与进行中日程排在顶部轨道，多游戏折叠预览时第一时间呈现核心安排。
+    const priorityRank = (bar: Omit<TimelineBar, 'track'>) => {
+      if (bar.endingSoon) return 0
+      if (bar.status === 'ongoing') return 1
+      if (bar.status === 'upcoming') return 2
+      return 3
+    }
     rawBars.sort((a, b) =>
-      a.leftPct - b.leftPct
+      priorityRank(a) - priorityRank(b)
+      || a.leftPct - b.leftPct
       || Number(a.isPoint) - Number(b.isPoint)
       || b.widthPct - a.widthPct
       || a.entry.id - b.entry.id,

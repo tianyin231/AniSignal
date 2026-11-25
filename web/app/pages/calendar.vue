@@ -31,9 +31,9 @@ import {
   type CalendarTimezoneId,
 } from '~/utils/calendar'
 import { copyText } from '~/utils/clipboard'
-import { ENDING_SOON_MS, KIND_LABELS, fmtRemaining, toTimestamp } from '~/utils/schedule'
+import { ENDING_SOON_MS, KIND_LABELS, fmtRemaining } from '~/utils/schedule'
 import { decodeEntities } from '~/utils/text'
-import { buildTimeline } from '~/utils/timeline'
+import { buildTimeline, effectiveScheduleBounds } from '~/utils/timeline'
 
 useSeoMeta({
   title: '活动日历 · AniSignal',
@@ -216,18 +216,17 @@ const timelineHighlights = computed(() => {
   const now = nowMs.value
   return filteredItems.value
     .map((entry) => {
-      const start = toTimestamp(entry.start_at)
-      const end = entry.end_at && entry.kind !== 'deadline' ? toTimestamp(entry.end_at) : Number.NaN
-      if (!Number.isFinite(start)) return null
+      const bounds = effectiveScheduleBounds(entry, timezone.value)
+      if (!bounds) return null
+      const { startMs: start, endMs: end, isPoint } = bounds
       const completed = completedIdSet.value.has(entry.id)
-      const hasEnd = Number.isFinite(end) && end > start
-      const isOngoing = hasEnd && now >= start && now < end
+      const isOngoing = !isPoint && end !== null && now >= start && now < end
       const isUpcoming = now < start
       if (!isOngoing && !isUpcoming) return null
-      const urgentMs = isOngoing ? end - now : start - now
+      const urgentMs = isOngoing && end !== null ? end - now : start - now
       const endingSoon = (isOngoing || entry.kind === 'deadline') && urgentMs < ENDING_SOON_MS
       const rank = (completed ? 10 : 0) + (endingSoon ? 0 : isOngoing ? 1 : 2)
-      const badge = isOngoing
+      const badge = isOngoing && end !== null
         ? `剩 ${fmtRemaining(end - now)}`
         : entry.kind === 'deadline'
           ? `${fmtRemaining(start - now)}后截止`
@@ -241,11 +240,11 @@ const timelineHighlights = computed(() => {
 
 const selectedEntryStatus = computed(() => {
   const entry = selectedTimelineEntry.value
-  if (!entry || !entry.start_at) return null
+  if (!entry) return null
+  const bounds = effectiveScheduleBounds(entry, timezone.value)
+  if (!bounds) return null
   const now = nowMs.value
-  const start = toTimestamp(entry.start_at)
-  const end = entry.end_at && entry.kind !== 'deadline' ? toTimestamp(entry.end_at) : Number.NaN
-  if (!Number.isFinite(start)) return null
+  const { startMs: start, endMs: end, isPoint } = bounds
   if (now < start) {
     const rem = start - now
     return {
@@ -254,7 +253,7 @@ const selectedEntryStatus = computed(() => {
       progress: null as number | null,
     }
   }
-  if (Number.isFinite(end) && end > start) {
+  if (!isPoint && end !== null && end > start) {
     if (now >= end) return { label: '已结束', urgent: false, progress: 100 }
     const rem = end - now
     return {
@@ -423,9 +422,9 @@ async function copyIcsUrl() {
   <div>
     <SectionNav />
 
-    <!-- 顶栏：标题 + 视图切换 + 分区过滤 + 时区/订阅/刷新 -->
-    <header class="mb-4 flex flex-wrap items-center gap-3">
-      <div class="flex items-center gap-3 mr-auto">
+    <!-- 顶栏：标题 + 视图切换 + 时区/订阅/刷新；游戏分区独立整行展示不截断 -->
+    <header class="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-3">
         <div class="wall-heading">
           <h1 class="text-2xl font-bold text-ink">活动日历</h1>
         </div>
@@ -453,31 +452,15 @@ async function copyIcsUrl() {
         </div>
       </div>
 
-      <!-- 游戏分区筛选 -->
-      <div class="order-last flex w-full min-w-0 items-center gap-1 overflow-x-auto rounded-full bg-chip/65 p-1 [scrollbar-width:none] xl:order-none xl:w-auto" role="group" aria-label="游戏范围">
-        <button
-          v-for="filter in filters"
-          :key="filter.key"
-          type="button"
-          class="inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-3 text-[13px] transition-colors"
-          :class="community === filter.key ? 'bg-ink font-semibold text-card' : 'text-ink-2 hover:bg-card/60 hover:text-ink'"
-          :aria-pressed="community === filter.key"
-          @click="community = filter.key"
-        >
-          <span v-if="filter.key !== 'all'" class="size-1.5 rounded-full" :class="communityClasses(filter.color).dot" aria-hidden="true" />
-          {{ filter.label }}
-        </button>
-      </div>
-
       <!-- 右侧操作组：时区切换 + 订阅 + 刷新 -->
       <div class="flex shrink-0 flex-wrap items-center gap-1.5">
-        <label class="relative inline-flex h-10 items-center rounded-full border border-line bg-card pl-3 pr-2 text-xs text-ink-2 transition-colors hover:bg-chip">
+        <label class="relative inline-flex h-10 shrink-0 items-center whitespace-nowrap rounded-full border border-line bg-card pl-3 pr-2.5 text-xs text-ink-2 transition-colors hover:bg-chip">
           <Globe :size="14" class="mr-1.5 shrink-0 text-muted" aria-hidden="true" />
           <span class="sr-only">选择显示时区</span>
           <select
             :value="timezone"
             aria-label="显示时区"
-            class="h-full cursor-pointer bg-transparent pr-1 text-xs font-medium text-ink focus:outline-none"
+            class="h-full cursor-pointer whitespace-nowrap bg-transparent pr-1 text-xs font-medium text-ink focus:outline-none"
             @change="onTimezoneChange"
           >
             <option v-for="opt in CALENDAR_TIMEZONES" :key="opt.id" :value="opt.id" class="bg-card text-ink">
@@ -487,7 +470,7 @@ async function copyIcsUrl() {
         </label>
         <button
           type="button"
-          class="inline-flex h-10 items-center gap-1.5 rounded-full border border-line bg-card px-3 text-[13px] font-medium text-ink-2 transition-colors hover:bg-chip hover:text-ink"
+          class="inline-flex h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-card px-3 text-[13px] font-medium text-ink-2 transition-colors hover:bg-chip hover:text-ink"
           :aria-expanded="subscribeOpen"
           aria-controls="calendar-subscribe-bar"
           @click="subscribeOpen = !subscribeOpen"
@@ -506,6 +489,22 @@ async function copyIcsUrl() {
         </button>
       </div>
     </header>
+
+    <!-- 游戏分区筛选：桌面端自然换行展示全部分区，移动端单行横滑 -->
+    <div class="mb-3 flex min-w-0 items-center gap-1 overflow-x-auto rounded-2xl bg-chip/65 p-1 [scrollbar-width:none] sm:flex-wrap sm:overflow-visible" role="group" aria-label="游戏范围">
+      <button
+        v-for="filter in filters"
+        :key="filter.key"
+        type="button"
+        class="inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] transition-colors"
+        :class="community === filter.key ? 'bg-ink font-semibold text-card' : 'text-ink-2 hover:bg-card/60 hover:text-ink'"
+        :aria-pressed="community === filter.key"
+        @click="community = filter.key"
+      >
+        <span v-if="filter.key !== 'all'" class="size-1.5 rounded-full" :class="communityClasses(filter.color).dot" aria-hidden="true" />
+        {{ filter.label }}
+      </button>
+    </div>
 
     <!-- 分类筛选与个人打卡状态栏 -->
     <div class="mb-4 flex flex-wrap items-center justify-between gap-2.5">
@@ -606,61 +605,61 @@ async function copyIcsUrl() {
         <div
           v-for="item in displayedCodeRows"
           :key="`${item.community}-${item.code}`"
-          class="flex items-center gap-2 rounded-xl border px-2.5 py-2 transition-all"
+          class="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 transition-all"
           :class="item.claimed
             ? 'border-line-soft bg-chip/35 opacity-60'
             : 'border-line bg-card'"
         >
-          <button
-            type="button"
-            class="mono inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold transition-colors"
-            :class="item.claimed
-              ? 'bg-chip text-muted line-through'
-              : 'bg-brand-soft text-brand-ink hover:bg-brand/20'"
-            :aria-label="copiedCode === item.code ? '已复制' : `复制兑换码 ${item.code}`"
-            @click="copyRedeemCode(item.code)"
-          >
-            {{ item.code }}
-            <Check v-if="copiedCode === item.code" :size="13" aria-hidden="true" />
-            <Copy v-else :size="12" class="opacity-65" aria-hidden="true" />
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="mono inline-flex h-8 min-w-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold transition-colors"
+              :class="item.claimed
+                ? 'bg-chip text-muted line-through'
+                : 'bg-brand-soft text-brand-ink hover:bg-brand/20'"
+              :aria-label="copiedCode === item.code ? '已复制' : `复制兑换码 ${item.code}`"
+              @click="copyRedeemCode(item.code)"
+            >
+              <span class="truncate">{{ item.code }}</span>
+              <Check v-if="copiedCode === item.code" :size="13" class="shrink-0" aria-hidden="true" />
+              <Copy v-else :size="12" class="shrink-0 opacity-65" aria-hidden="true" />
+            </button>
 
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1.5">
-              <span v-if="community === 'all' && item.game" class="truncate rounded px-1 py-0.5 text-[10px] font-semibold" :class="item.chip">
-                {{ item.game }}
-              </span>
-              <span class="truncate text-[11px] tabular-nums text-muted">
-                {{ item.expires_at ? `${formatTimeInZone(item.expires_at, timezone)} 止` : '有效期待公布' }}
-              </span>
-            </div>
+            <button
+              type="button"
+              class="ml-auto inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors"
+              :class="item.claimed
+                ? 'border-ok/40 bg-ok/10 text-ok'
+                : 'border-line text-muted hover:border-brand/40 hover:bg-chip hover:text-ink'"
+              :aria-pressed="item.claimed"
+              :aria-label="item.claimed ? `取消 ${item.code} 已领标记` : `标记 ${item.code} 为已领`"
+              @click="toggleCodeClaimed(item.code, item.community)"
+            >
+              <CheckCircle2 v-if="item.claimed" :size="13" aria-hidden="true" />
+              <Circle v-else :size="13" aria-hidden="true" />
+              <span>{{ item.claimed ? '已领' : '标记已领' }}</span>
+            </button>
+
+            <a
+              v-if="item.url"
+              :href="item.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="grid size-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-chip hover:text-ink"
+              :aria-label="`查看兑换码 ${item.code} 原文`"
+            >
+              <ArrowUpRight :size="13" aria-hidden="true" />
+            </a>
           </div>
 
-          <button
-            type="button"
-            class="inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition-colors"
-            :class="item.claimed
-              ? 'border-ok/40 bg-ok/10 text-ok'
-              : 'border-line text-muted hover:border-brand/40 hover:bg-chip hover:text-ink'"
-            :aria-pressed="item.claimed"
-            :aria-label="item.claimed ? `取消 ${item.code} 已领标记` : `标记 ${item.code} 为已领`"
-            @click="toggleCodeClaimed(item.code, item.community)"
-          >
-            <CheckCircle2 v-if="item.claimed" :size="13" aria-hidden="true" />
-            <Circle v-else :size="13" aria-hidden="true" />
-            <span>{{ item.claimed ? '已领' : '已领?' }}</span>
-          </button>
-
-          <a
-            v-if="item.url"
-            :href="item.url"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="grid size-7 shrink-0 place-items-center rounded-md text-muted transition-colors hover:bg-chip hover:text-ink"
-            :aria-label="`查看兑换码 ${item.code} 原文`"
-          >
-            <ArrowUpRight :size="13" aria-hidden="true" />
-          </a>
+          <div class="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
+            <span v-if="community === 'all' && item.game" class="rounded px-1.5 py-0.5 text-[10px] font-semibold" :class="item.chip">
+              {{ item.game }}
+            </span>
+            <span class="tabular-nums">
+              {{ item.expires_at ? `${formatTimeInZone(item.expires_at, timezone)} 前有效` : '有效期待公布' }}
+            </span>
+          </div>
         </div>
       </div>
     </section>

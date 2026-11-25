@@ -21,12 +21,12 @@ export interface CalendarTimezoneOption {
 export const DEFAULT_CALENDAR_TIMEZONE: CalendarTimezoneId = 'Asia/Shanghai'
 
 export const CALENDAR_TIMEZONES: CalendarTimezoneOption[] = [
-  { id: 'Asia/Shanghai', label: '北京时间 · 国服 / 亚服', shortLabel: '北京 UTC+8', hint: 'UTC+8' },
-  { id: 'Asia/Tokyo', label: '东京时间 · 日服', shortLabel: '东京 UTC+9', hint: 'UTC+9' },
-  { id: 'America/New_York', label: '美东时间 · 美服', shortLabel: '美东', hint: 'UTC-5/-4' },
-  { id: 'Europe/Berlin', label: '中欧时间 · 欧服', shortLabel: '中欧', hint: 'UTC+1/+2' },
+  { id: 'Asia/Shanghai', label: '北京 UTC+8 · 国/亚服', shortLabel: '北京 UTC+8', hint: 'UTC+8' },
+  { id: 'Asia/Tokyo', label: '东京 UTC+9 · 日服', shortLabel: '东京 UTC+9', hint: 'UTC+9' },
+  { id: 'America/New_York', label: '美东 · 美服', shortLabel: '美东', hint: 'UTC-5/-4' },
+  { id: 'Europe/Berlin', label: '中欧 · 欧服', shortLabel: '中欧', hint: 'UTC+1/+2' },
   { id: 'UTC', label: 'UTC 标准时间', shortLabel: 'UTC', hint: 'UTC+0' },
-  { id: 'local', label: '浏览器本地时区', shortLabel: '本地时区', hint: '自动' },
+  { id: 'local', label: '本地时区', shortLabel: '本地时区', hint: '自动' },
 ]
 
 const VALID_TIMEZONE_IDS = new Set<string>(CALENDAR_TIMEZONES.map(item => item.id))

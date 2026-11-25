@@ -6,7 +6,7 @@ import {
   formatTimeInZone,
   zoneStartOfDayMs,
 } from '../app/utils/calendar.ts'
-import { buildTimeline } from '../app/utils/timeline.ts'
+import { buildTimeline, effectiveScheduleBounds } from '../app/utils/timeline.ts'
 import {
   makeCodeKey,
   mergeCalendarStates,
@@ -134,4 +134,13 @@ test('个人打卡状态规范化与登录合并保留本地数据', () => {
     completed_schedules: [20, 10],
     timezone: 'Asia/Tokyo',
   })
+})
+
+test('全天日程的有效结束时刻包含结束日当天，时间轴与详情倒计时口径一致', () => {
+  const allDay = entry(9, '2026-11-05T16:00:00', '2026-12-05T16:00:00', { all_day: true })
+  const shanghai = effectiveScheduleBounds(allDay, 'Asia/Shanghai')!
+  assert.equal(shanghai.isPoint, false)
+  // 上海 2026-11-06 00:00 ~ 2026-12-07 00:00（包含 12-06 全天）
+  assert.equal(new Date(shanghai.startMs).toISOString(), '2026-11-05T16:00:00.000Z')
+  assert.equal(new Date(shanghai.endMs!).toISOString(), '2026-12-06T16:00:00.000Z')
 })
