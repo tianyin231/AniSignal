@@ -11,18 +11,22 @@ const { rememberRouteCommunity, communities } = useGameSection()
 // 顶栏只有一层：品牌旁的"频道"组（首页/鸣潮/自定义分区…）+ 右侧工具；
 // 栏目导航（官方动态/活动日历/商品/事件/内容库）由 SectionNav 放在内容区首行。
 const brand = communityClasses('blue')
-const allChannels = computed(() => [
-  { key: 'home', label: '首页', nav: brand.nav, dot: brand.dot, to: '/' as RouteLocationRaw },
-  // 定制监控紧邻首页，避免被大量分区挤进「更多」折叠菜单
-  { key: 'custom', label: '定制监控', nav: brand.nav, dot: brand.dot, to: '/custom' as RouteLocationRaw },
-  ...communities.value.map(c => ({
-    key: c.key,
-    label: c.key === 'ai' ? 'AI 快讯' : c.label,
-    nav: communityClasses(c.color).nav,
-    dot: communityClasses(c.color).dot,
-    to: communityHomeTo(c.key),
-  })),
-])
+const allChannels = computed(() => {
+  const featured = communities.value.filter(c => c.domain === 'news' || c.domain === 'feed')
+  const games = communities.value.filter(c => c.domain !== 'news' && c.domain !== 'feed')
+  return [
+    { key: 'home', label: '首页', nav: brand.nav, dot: brand.dot, to: '/' as RouteLocationRaw },
+    // 定制监控与非游戏独立频道（AI 快讯、小黑盒等）紧邻首页，避免被大量游戏分区挤进「更多」折叠菜单
+    { key: 'custom', label: '定制监控', nav: brand.nav, dot: brand.dot, to: '/custom' as RouteLocationRaw },
+    ...[...featured, ...games].map(c => ({
+      key: c.key,
+      label: c.key === 'ai' ? 'AI 快讯' : c.label,
+      nav: communityClasses(c.color).nav,
+      dot: communityClasses(c.color).dot,
+      to: communityHomeTo(c.key),
+    })),
+  ]
+})
 
 onMounted(rememberRouteCommunity)
 watch(() => [route.path, route.query.community], rememberRouteCommunity)

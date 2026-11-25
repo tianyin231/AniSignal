@@ -109,6 +109,8 @@ async def fetch_with_fallback(collector, session, platform: str, fetch):
             last_error = last_error or exc
         except (CollectorError, httpx.HTTPError, TimeoutError) as exc:
             exc.args = (redact_proxy(str(exc), url),)
+            if getattr(exc, "stop_fallback", False):
+                raise
             last_error = exc
             logger.warning("%s collection exit %d/%d failed: %s", platform, index + 1, len(routes), type(exc).__name__)
     raise last_error

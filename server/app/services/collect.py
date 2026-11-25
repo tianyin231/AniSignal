@@ -29,7 +29,7 @@ from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
 from app.collectors.rss import RssCollector
 from app.collectors.x import XCollector
-from app.collectors.xiaoheihe import XiaoheiheCollector
+from app.collectors.xiaoheihe import XIAOHEIHE_MIN_INTERVAL_SECONDS, XiaoheiheCollector
 from app.collectors.steam import SteamCollector
 from app.collectors.game_official import GameOfficialCollector
 from app.config import get_settings
@@ -424,11 +424,19 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
             if isinstance(collector, XiaoheiheCollector):
                 from app.services.settings import get_effective_xiaoheihe
 
+                collector.redis = redis
                 collector.configure(await get_effective_xiaoheihe(session))
             async def fetch():
                 if isinstance(collector, XCollector):
                     return await collector.fetch(target.target_type, target.target_value, settings.collect_limit)
-                async with platform_slot(redis, target.platform, settings.platform_min_interval_seconds):
+                if isinstance(collector, XiaoheiheCollector) and target.target_type in {"account_dynamics", "xhh_account"}:
+                    await collector.check_account_cooldown()
+                min_interval = (
+                    XIAOHEIHE_MIN_INTERVAL_SECONDS
+                    if target.platform == "xiaoheihe"
+                    else settings.platform_min_interval_seconds
+                )
+                async with platform_slot(redis, target.platform, min_interval):
                     return await collector.fetch(target.target_type, target.target_value, settings.collect_limit)
             fetch_result = await fetch_with_fallback(collector, session, target.platform, fetch)
             proxy_url = collector.proxy_url

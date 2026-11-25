@@ -375,10 +375,14 @@ async def list_contents(
         conditions.append(Source.identity == identity)
     if exclude_identity:
         conditions.append((Source.identity != exclude_identity) | Source.identity.is_(None))
-    if sort == "hot" and published_within_hours is None and not is_xiaoheihe:
+    published = func.coalesce(RawContent.published_at, RawContent.collected_at) if is_xiaoheihe else RawContent.published_at
+    xiaoheihe_hot_fallback = is_xiaoheihe and sort == "hot" and published_within_hours is None
+    if sort == "hot" and published_within_hours is None:
         published_within_hours = HOT_DEFAULT_WINDOW_HOURS
+    window_condition = None
     if published_within_hours:
-        conditions.append(RawContent.published_at >= utcnow() - timedelta(hours=published_within_hours))
+        window_condition = published >= utcnow() - timedelta(hours=published_within_hours)
+        conditions.append(window_condition)
     conditions.append(RawContent.hidden.is_(False))
     from app.services import settings as settings_service
 
@@ -416,18 +420,17 @@ async def list_contents(
 
     # 直接通过 raw_contents.latest_version_id 主键关联最新版本，避免每页执行关联 NOT EXISTS 或 GROUP BY 衍生表；
     # 仍分两步取：先按覆盖索引定位本页 id，再回表读正文和 JSON，防止宽行排序退化。
-    def matching(*columns):
+    def matching(*columns, active_conditions=None):
         query = (
             select(*columns)
             .select_from(RawContent)
             .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-            .where(*conditions)
+            .where(*(conditions if active_conditions is None else active_conditions))
         )
         # 只有身份筛选要用来源表
         return query.join(Source, RawContent.source_id == Source.id, isouter=True) if identity or exclude_identity else query
 
-    page_query = matching(RawContent.id)
-    published = func.coalesce(RawContent.published_at, RawContent.collected_at) if is_xiaoheihe else RawContent.published_at
+    latest_score = None
     if sort == "hot":
         from app.models import MetricSnapshot
 
@@ -448,15 +451,22 @@ async def list_contents(
             .correlate(RawContent)
             .scalar_subquery()
         )
-        page_query = page_query.order_by(func.coalesce(latest_score, 0).desc())
     from app.services.content_diff import RevisionSummary, load_revision_summaries
 
     async def _build_list_response() -> PublicContentList:
+        active_conditions = list(conditions)
+        if xiaoheihe_hot_fallback and window_condition is not None:
+            recent_total = await session.scalar(matching(func.count(), active_conditions=active_conditions)) or 0
+            if recent_total == 0:
+                active_conditions = [cond for cond in active_conditions if cond is not window_condition]
+        page_query = matching(RawContent.id, active_conditions=active_conditions)
+        if latest_score is not None:
+            page_query = page_query.order_by(func.coalesce(latest_score, 0).desc())
         ordered_query = page_query.order_by(published.desc(), RawContent.id.desc())
         rev_summaries: dict[int, RevisionSummary] = {}
         if filter_revised:
-            cand_query = matching(RawContent.id, RawContent.platform)
-            if sort == "hot":
+            cand_query = matching(RawContent.id, RawContent.platform, active_conditions=active_conditions)
+            if latest_score is not None:
                 cand_query = cand_query.order_by(func.coalesce(latest_score, 0).desc())
             cand_rows = list(
                 (await session.execute(cand_query.order_by(published.desc(), RawContent.id.desc()).limit(250))).all()
@@ -474,7 +484,7 @@ async def list_contents(
             page_ids = verified_ids[offset : offset + limit]
         else:
             page_ids = list(await session.scalars(ordered_query.limit(limit).offset(offset)))
-            total = await session.scalar(matching(func.count())) or 0
+            total = await session.scalar(matching(func.count(), active_conditions=active_conditions)) or 0
 
         rows = await session.execute(
             select(RawContent, Source.name, Source.identity, ContentVersion)

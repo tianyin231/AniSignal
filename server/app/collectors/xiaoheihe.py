@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
+from datetime import datetime, timedelta
+
 import httpx
 
-from app.collectors.base import USER_AGENT, CollectorError, FetchResult, get_json
+from app.clock import utcnow
+from app.collectors.base import USER_AGENT, CollectorDeferred, CollectorError, FetchResult, get_json
 from app.collectors.rss import RssCollector
 from app.config import get_settings
 from app.models.enums import Identity, Platform
@@ -13,8 +18,29 @@ from app.schemas.content import NormalizedAuthor, NormalizedContent
 from app.services.collector_proxy import fetch_with_fallback, http_proxy_kwargs
 from app.services.urls import safe_endpoint
 
+logger = logging.getLogger(__name__)
+
 _ACCOUNT_POSTS_URL = "https://api.xiaoheihe.cn/bbs/app/profile/user/link/list_v2"
 _ACCOUNT_POSTS_LIMIT = 20
+XIAOHEIHE_MIN_INTERVAL_SECONDS = 20.0
+_RATE_LIMIT_COOLDOWN = timedelta(minutes=15)
+_COOLDOWN_KEY_PREFIX = "anisignal:xiaoheihe:cooldown"
+_EXIT_COOLDOWN_UNTIL: dict[str, datetime] = {}
+
+
+class XiaoheiheRateLimitError(CollectorError):
+    """小黑盒触发临时访问频控（show_captcha），已冷却当前出口。"""
+
+
+class XiaoheiheAccountNotFoundError(CollectorError):
+    """小黑盒账号不存在或未开放公开动态，换出口重试无意义。"""
+
+    stop_fallback = True
+
+
+def reset_cooldowns() -> None:
+    """清空进程内出口冷却记录（仅用于测试或手动复位）。"""
+    _EXIT_COOLDOWN_UNTIL.clear()
 
 
 class XiaoheiheCollector:
@@ -24,10 +50,52 @@ class XiaoheiheCollector:
 
     def __init__(self) -> None:
         self.proxy_url: str | None = None
+        self.redis = None
         self.request_count: int = 0
         self.bridge_url: str = ""
         self.bridge_token: str = ""
         self.feed_url: str = ""
+
+    def _exit_key(self) -> str:
+        url = getattr(self, "proxy_url", None)
+        return hashlib.sha256(url.encode()).hexdigest()[:12] if url else "direct"
+
+    def _cooldown_redis_key(self) -> str:
+        return f"{_COOLDOWN_KEY_PREFIX}:{self._exit_key()}"
+
+    async def check_account_cooldown(self) -> None:
+        exit_key = self._exit_key()
+        now = utcnow()
+        until = _EXIT_COOLDOWN_UNTIL.get(exit_key)
+        if until and until > now:
+            raise CollectorDeferred("小黑盒当前出口处于频控冷却期", retry_at=until)
+        if until is not None:
+            _EXIT_COOLDOWN_UNTIL.pop(exit_key, None)
+        if self.redis is not None:
+            ttl = await self.redis.pttl(self._cooldown_redis_key())
+            if ttl and ttl > 0:
+                retry_at = now + timedelta(milliseconds=ttl)
+                _EXIT_COOLDOWN_UNTIL[exit_key] = retry_at
+                raise CollectorDeferred("小黑盒当前出口处于频控冷却期", retry_at=retry_at)
+
+    async def _record_rate_limit(self) -> None:
+        exit_key = self._exit_key()
+        until = utcnow() + _RATE_LIMIT_COOLDOWN
+        _EXIT_COOLDOWN_UNTIL[exit_key] = until
+        if self.redis is not None:
+            await self.redis.set(
+                self._cooldown_redis_key(),
+                "1",
+                px=int(_RATE_LIMIT_COOLDOWN.total_seconds() * 1000),
+            )
+        logger.warning(
+            "xiaoheihe exit=%s hit show_captcha; cooling down for %s",
+            exit_key,
+            _RATE_LIMIT_COOLDOWN,
+        )
+
+    async def _clear_rate_limit(self) -> None:
+        _EXIT_COOLDOWN_UNTIL.pop(self._exit_key(), None)
 
     def configure(self, cfg: dict | None) -> None:
         data = cfg or {}
@@ -40,6 +108,7 @@ class XiaoheiheCollector:
         return httpx.AsyncClient(headers=merged, **http_proxy_kwargs(self))
 
     async def _public_posts(self, uid: str, limit: int, *, retries: int = 1) -> tuple[NormalizedAuthor, list[dict]]:
+        await self.check_account_cooldown()
         async with self._client() as client:
             self.request_count += 1
             payload = await get_json(
@@ -49,12 +118,19 @@ class XiaoheiheCollector:
                 retries=retries,
                 timeout=get_settings().http_timeout_seconds,
             )
-        result = payload.get("result") if isinstance(payload, dict) and payload.get("status") == "ok" else None
+        status = payload.get("status") if isinstance(payload, dict) else None
+        if status == "show_captcha":
+            await self._record_rate_limit()
+            raise XiaoheiheRateLimitError("小黑盒触发临时访问频控（show_captcha），已冷却当前出口")
+        if status != "ok":
+            raise CollectorError("小黑盒账号暂时无法读取，请稍后重试")
+        result = payload.get("result")
         user = result.get("user") if isinstance(result, dict) else None
         author_id = str(user.get("userid") or "") if isinstance(user, dict) else ""
         posts = result.get("post_links") if isinstance(result, dict) else None
         if not (author_id.isascii() and author_id.isdecimal()) or not isinstance(posts, list):
-            raise CollectorError("小黑盒账号暂时无法读取，请检查 UID 或稍后重试")
+            raise XiaoheiheAccountNotFoundError("小黑盒账号不存在或未开放公开动态，请检查 UID")
+        await self._clear_rate_limit()
         author = NormalizedAuthor(
             external_id=author_id,
             name=str(user.get("username") or "")[:64] or None,
@@ -70,7 +146,7 @@ class XiaoheiheCollector:
         cap = max(1, min(int(limit or _ACCOUNT_POSTS_LIMIT), _ACCOUNT_POSTS_LIMIT))
         author, posts = await self._public_posts(uid, cap, retries=1)
         if uid.isdecimal() and author.external_id != uid:
-            raise CollectorError("小黑盒返回的作者与监控 UID 不符")
+            raise XiaoheiheAccountNotFoundError("小黑盒返回的作者与监控 UID 不符")
         items: list[dict] = []
         seen: set[str] = set()
         author_payload = author.model_dump(mode="json")

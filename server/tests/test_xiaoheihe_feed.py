@@ -363,3 +363,153 @@ async def test_xiaoheihe_standard_targets_and_bridge_keyword_pipeline(
     assert [item["title"] for item in detail["items"]] == ["兑换码汇总帖"]
     assert detail["items"][0]["view"] == 5000
     assert detail["items"][0]["cover"] == "https://imgheybox.max-c.com/kw/2.jpg"
+
+
+async def test_xiaoheihe_show_captcha_cools_down_exit_and_falls_back_to_proxy(session, monkeypatch):
+    from app.services.collect_errors import user_facing_error
+    from app.services.collector_proxy import fetch_with_fallback
+
+    account_collector.reset_cooldowns()
+    calls: list[str] = []
+    now_ts = str(int(utcnow().replace(tzinfo=timezone.utc).timestamp()))
+
+    await set_setting(
+        session,
+        "collector_proxies",
+        {
+            "enabled": True,
+            "order": ["direct", "p1"],
+            "platforms": {"xiaoheihe": True},
+            "entries": [
+                {"id": "p1", "label": "proxy-1", "scheme": "http", "host": "proxy.example.com", "port": 8080, "enabled": True}
+            ],
+        },
+    )
+
+    async def fake_get_json(http, url, *, params, retries, timeout):
+        # 通过当前 collector.proxy_url 判断是否走了代理出口
+        via = "proxy" if getattr(http, "_mounts", None) else "direct"
+        calls.append(via)
+        if via == "direct":
+            return {"status": "show_captcha", "msg": ""}
+        return {
+            "status": "ok",
+            "result": {
+                "user": {"userid": 52101806, "username": "紫雨烟潇"},
+                "post_links": [
+                    {
+                        "userid": 52101806,
+                        "title": "测试帖子",
+                        "description": "正文内容",
+                        "click": 321,
+                        "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=captest1",
+                        "create_at": now_ts,
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr(account_collector, "get_json", fake_get_json)
+    try:
+        c1 = account_collector.XiaoheiheCollector()
+        res1 = await fetch_with_fallback(c1, session, "xiaoheihe", lambda: c1.fetch("account_dynamics", "52101806", 3))
+        assert len(res1.items) == 1
+        assert calls == ["direct", "proxy"]
+
+        # 第二次请求时直连出口仍在冷却，直接跳过不发请求，只走代理出口
+        c2 = account_collector.XiaoheiheCollector()
+        res2 = await fetch_with_fallback(c2, session, "xiaoheihe", lambda: c2.fetch("account_dynamics", "52101806", 3))
+        assert len(res2.items) == 1
+        assert calls == ["direct", "proxy", "proxy"]
+
+        assert (
+            user_facing_error("xiaoheihe", "XiaoheiheRateLimitError: 小黑盒触发临时访问频控（show_captcha）")
+            == "小黑盒触发临时频控，系统会自动重试"
+        )
+    finally:
+        account_collector.reset_cooldowns()
+
+
+async def test_xiaoheihe_missing_account_stops_proxy_fallback(session, monkeypatch):
+    import pytest
+    from app.services.collector_proxy import fetch_with_fallback
+
+    account_collector.reset_cooldowns()
+    calls = 0
+
+    await set_setting(
+        session,
+        "collector_proxies",
+        {
+            "enabled": True,
+            "order": ["direct", "p1"],
+            "platforms": {"xiaoheihe": True},
+            "entries": [
+                {"id": "p1", "label": "proxy-1", "scheme": "http", "host": "proxy.example.com", "port": 8080, "enabled": True}
+            ],
+        },
+    )
+
+    async def fake_get_json(http, url, *, params, retries, timeout):
+        nonlocal calls
+        calls += 1
+        # 账号不存在：status=ok 但无 post_links
+        return {"status": "ok", "result": {"user": {"userid": "10000", "username": "玩家10000"}}}
+
+    monkeypatch.setattr(account_collector, "get_json", fake_get_json)
+    try:
+        c = account_collector.XiaoheiheCollector()
+        with pytest.raises(account_collector.XiaoheiheAccountNotFoundError):
+            await fetch_with_fallback(c, session, "xiaoheihe", lambda: c.fetch("account_dynamics", "10000", 3))
+        # 遇到账号不存在立即终止，不再白白请求代理出口
+        assert calls == 1
+    finally:
+        account_collector.reset_cooldowns()
+
+
+async def test_xiaoheihe_hot_prefers_7d_window_with_all_time_fallback(client, session):
+    now = utcnow()
+    old_ts = str(int((now - timedelta(days=20)).replace(tzinfo=timezone.utc).timestamp()))
+    fresh_ts = str(int((now - timedelta(days=1)).replace(tzinfo=timezone.utc).timestamp()))
+
+    await ingest_items(
+        session,
+        "xiaoheihe_posts",
+        [
+            {
+                "userid": 52101806,
+                "title": "二十天前的爆款旧帖",
+                "description": "旧帖正文",
+                "click": 99999,
+                "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=oldhot1",
+                "create_at": old_ts,
+                "_author": {"external_id": "52101806", "name": "紫雨烟潇", "identity": "user"},
+            }
+        ],
+        "xiaoheihe",
+    )
+
+    # 近 7 天无帖时自动回退到全量热门，不显示空白页
+    fallback = (await client.get("/api/contents", params={"community": "xiaoheihe", "sort": "hot"})).json()
+    assert [item["title"] for item in fallback["items"]] == ["二十天前的爆款旧帖"]
+
+    await ingest_items(
+        session,
+        "xiaoheihe_posts",
+        [
+            {
+                "userid": 52101806,
+                "title": "昨天的新帖",
+                "description": "新帖正文",
+                "click": 500,
+                "share_url": "https://api.xiaoheihe.cn/v3/bbs/app/api/web/share?link_id=freshhot1",
+                "create_at": fresh_ts,
+                "_author": {"external_id": "52101806", "name": "紫雨烟潇", "identity": "user"},
+            }
+        ],
+        "xiaoheihe",
+    )
+
+    # 有近期帖子后，热门默认只展示近 7 天，避免远古旧帖永久霸榜
+    recent = (await client.get("/api/contents", params={"community": "xiaoheihe", "sort": "hot"})).json()
+    assert [item["title"] for item in recent["items"]] == ["昨天的新帖"]

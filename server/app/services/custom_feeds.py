@@ -17,7 +17,7 @@ from app.collectors.nikke import NikkeCollector, parse_notice
 from app.collectors.rss import RssCollector
 from app.collectors.steam import SteamCollector
 from app.collectors.x import XCollector
-from app.collectors.xiaoheihe import XiaoheiheCollector
+from app.collectors.xiaoheihe import XIAOHEIHE_MIN_INTERVAL_SECONDS, XiaoheiheCollector
 from app.collectors.youtube_api import YoutubeApiCollector
 from app.communities import ensure_communities_synced
 from app.custom_presets import CUSTOM_PRESETS, custom_preset
@@ -93,6 +93,7 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
 
         collector.set_cookies(await get_db_cookies(session))
     if isinstance(collector, XiaoheiheCollector):
+        collector.redis = redis
         collector.configure(await get_effective_xiaoheihe(session))
     preset = custom_preset(source.platform, source.kind, source.target_value)
     if not preset and (source.platform, source.kind) not in CUSTOM_SPECS:
@@ -104,7 +105,10 @@ async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> l
         if source.platform == "x":
             # X 自己按全局 30–90 秒间隔读取，主页/全文共用冷却；不叠加一个宽松槽位。
             return await collector.fetch(source.kind, source.target_value, 10)
-        async with platform_slot(redis, source.platform, 5.0):
+        if isinstance(collector, XiaoheiheCollector) and source.kind in {"account_dynamics", XIAOHEIHE_ACCOUNT_KIND}:
+            await collector.check_account_cooldown()
+        min_interval = XIAOHEIHE_MIN_INTERVAL_SECONDS if source.platform == XIAOHEIHE_KEY else 5.0
+        async with platform_slot(redis, source.platform, min_interval):
             if use_fetch_result:
                 fetch_kind = "notices" if source.platform == "steam" else source.kind
                 return await collector.fetch(fetch_kind, source.target_value, 30 if preset else 20)

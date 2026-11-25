@@ -25,6 +25,8 @@ def user_facing_error(platform: str | None, error: str | None) -> str | None:
         return PRIVATE_EGRESS_USER_HINT
     if "BiliRiskControlError" in error or "-352" in error:
         return "B 站接口暂时限制了访问，系统会自动重试"
+    if "XiaoheiheRateLimitError" in error or "show_captcha" in error:
+        return "小黑盒触发临时频控，系统会自动重试"
     if "CollectorDeferred" in error or "限流" in error or "冷却" in error:
         return "采集暂缓，稍后会自动重试"
     if re.search(r"\b404\b", error):
