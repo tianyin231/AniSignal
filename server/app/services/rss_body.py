@@ -37,8 +37,17 @@ async def fetch_body(client, url):
                 body.extend(chunk)
                 if len(body) > MAX_FEED_BYTES:
                     raise CollectorError("资讯正文超过 5 MB")
-        return await asyncio.to_thread(extract, bytes(body), url=url, include_comments=False,
+        raw_bytes = bytes(body)
+        ct = response.headers.get("content-type", "")
+        text = await asyncio.to_thread(extract, raw_bytes, url=url, include_comments=False,
             include_tables=False, fast=True, favor_precision=True)
+        if not text or len(text.strip()) < 120:
+            from app.services.web_parser import extract_page
+
+            fallback = await asyncio.to_thread(extract_page, raw_bytes, url, content_type=ct)
+            if fallback.text and len(fallback.text) > len(text or ""):
+                return fallback.text
+        return text
     return None
 
 

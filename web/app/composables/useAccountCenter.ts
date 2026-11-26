@@ -54,7 +54,14 @@ export interface CustomFeedRow {
   /** 上次采集失败的友好原因；成功后为 null */
   last_error?: string | null
   interval_minutes: number
-  filters: { include?: string[], exclude?: string[] }
+  filters: {
+    include?: string[]
+    exclude?: string[]
+    selector?: string
+    exclude_selector?: string
+    link_pattern?: string
+    ignore_patterns?: string[]
+  }
 }
 export interface CustomQuota {
   admitted: boolean

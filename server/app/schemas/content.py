@@ -16,6 +16,7 @@ class ContentType(StrEnum):
     POST = "post"
     NOTICE = "notice"
     RSS_ITEM = "rss_item"
+    WEB_PAGE = "web_page"
 
 
 class NormalizedAuthor(BaseModel):

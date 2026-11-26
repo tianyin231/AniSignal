@@ -4,8 +4,10 @@
 新消息推送直接复用投递行 SMTP（send_admin_email），每个监控每天至多推送一次。
 """
 
+import asyncio
+import json
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from sqlalchemy import delete, func, or_, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +18,14 @@ from app.collectors.bilibili import BilibiliCollector
 from app.collectors.nikke import NikkeCollector, parse_notice
 from app.collectors.rss import RssCollector
 from app.collectors.steam import SteamCollector
+from app.collectors.web_page import (
+    WebPageCollector,
+    build_list_watch_items,
+    build_page_watch_item,
+    enrich_list_items,
+    fetch_webpage_bytes,
+    web_rule_signature,
+)
 from app.collectors.x import XCollector
 from app.collectors.xiaoheihe import XIAOHEIHE_MIN_INTERVAL_SECONDS, XiaoheiheCollector
 from app.collectors.youtube_api import YoutubeApiCollector
@@ -23,16 +33,20 @@ from app.communities import ensure_communities_synced
 from app.custom_presets import CUSTOM_PRESETS, custom_preset
 from app.parsers.rss import parse_item as parse_rss_feed_item
 from app.parsers.steam import parse_notice as parse_steam_notice
+from app.parsers.web_page import parse_page as parse_web_page
 from app.parsers.x import parse_post
 from app.parsers.xiaoheihe import parse_post as parse_xiaoheihe_post
 from app.parsers.youtube import parse_rss_item
 from app.models import CustomFeed, CustomFeedItem, CustomFeedSource, CustomSourceItem, CustomCollectRun, NotificationDelivery, User
 from app.parsers.bilibili import parse_dynamic, parse_video
+from app.services.content_diff import SubstantiveVersion, compute_version_diff, extract_media_urls, readable_text, readable_title
 from app.services.notifications import beijing_today
 from app.services.collect_errors import YOUTUBE_RSS_RETRY_MAX_MINUTES, is_youtube_rss_transient
 from app.services.collector_proxy import fetch_with_fallback
 from app.services.custom_policy import claim_collection_budget, shared_source
+from app.services.revision_notifications import diff_change_summary
 from app.services.settings import get_effective_xiaoheihe
+from app.services.web_parser import WebParseError, normalize_web_config
 from app.services.xiaoheihe import (
     XIAOHEIHE_ACCOUNT_KIND,
     XIAOHEIHE_INTERVAL_MINUTES,
@@ -51,18 +65,32 @@ logger = logging.getLogger(__name__)
 SWEEP_BATCH = 20
 PUSH_MAX_ITEMS = 5
 STEAM_APP_KIND = "steam_app"
+WEB_PAGE_KEY = "web_page"
+PAGE_WATCH_KIND = "page_watch"
+LIST_WATCH_KIND = "list_watch"
 CUSTOM_SPECS = {
     ("bilibili", "uid"),
     ("bilibili", "keyword"),
     ("rss", "feed"),
     ("youtube", "channel_rss"),
     ("steam", STEAM_APP_KIND),
+    (WEB_PAGE_KEY, PAGE_WATCH_KIND),
+    (WEB_PAGE_KEY, LIST_WATCH_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_ACCOUNT_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_KEYWORD_KIND),
 }
 CUSTOM_KINDS = {k for _, k in CUSTOM_SPECS}
 CUSTOM_PLATFORMS = {p for p, _ in CUSTOM_SPECS}
+_WEB_FILTER_KEYS = ("selector", "exclude_selector", "link_pattern", "ignore_patterns")
+_CUSTOM_WEB_CACHE_TTL = 7 * 24 * 3600
+
+
+def extract_web_filter_config(filters: dict | None) -> dict:
+    if not isinstance(filters, dict):
+        return {}
+    raw = {k: filters[k] for k in _WEB_FILTER_KEYS if filters.get(k)}
+    return normalize_web_config(raw) if raw else {}
 
 
 def _collector(platform: str):
@@ -70,6 +98,8 @@ def _collector(platform: str):
         return BilibiliCollector()
     if platform == "rss":
         return RssCollector()
+    if platform == WEB_PAGE_KEY:
+        return WebPageCollector()
     if platform == "game_official":
         return NikkeCollector()
     if platform == "youtube":
@@ -83,10 +113,226 @@ def _collector(platform: str):
     raise ValueError(f"unsupported custom platform: {platform}")
 
 
-async def fetch_custom_items(source: CustomFeedSource, redis, session=None) -> list:
+def _as_substantive(title: str, text: str, media: list, parsed_at, version: int) -> SubstantiveVersion:
+    urls, keys = extract_media_urls(media)
+    return SubstantiveVersion(
+        version=version,
+        parsed_at=parsed_at,
+        origin="source",
+        title=readable_title(title),
+        text=readable_text(text),
+        media=urls,
+        media_keys=keys,
+        truncated=False,
+    )
+
+
+async def _load_custom_web_cache(redis, source_id: int) -> dict:
+    if redis is None or not hasattr(redis, "get"):
+        return {}
+    try:
+        raw = await redis.get(f"anisignal:custom-web-cache:{source_id}")
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode("utf-8", errors="ignore")
+        return json.loads(raw) if isinstance(raw, str) and raw else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+async def _save_custom_web_cache(redis, source_id: int, payload: dict) -> None:
+    if redis is None or not hasattr(redis, "set"):
+        return
+    try:
+        await redis.set(
+            f"anisignal:custom-web-cache:{source_id}",
+            json.dumps(payload, ensure_ascii=False),
+            ex=_CUSTOM_WEB_CACHE_TTL,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _fetch_web_page_custom_items(
+    source: CustomFeedSource, feeds: list[CustomFeed], redis, session: AsyncSession | None
+) -> list[NormalizedContent]:
+    """共享单次抓取网页 HTML，再按各订阅者不同的选择器/规则在内存分别解析与比对 Diff。"""
+    from app.collectors.base import CollectorError
+
+    rule_map: dict[str, dict] = {}
+    for feed in feeds:
+        try:
+            cfg = extract_web_filter_config(feed.filters)
+        except WebParseError:
+            cfg = {}
+        rule_map.setdefault(web_rule_signature(cfg), cfg)
+    if not rule_map:
+        rule_map["default"] = {}
+
+    single_sig = next(iter(rule_map)) if len(rule_map) == 1 else None
+    cached_http = await _load_custom_web_cache(redis, source.id) if single_sig else {}
+    use_cache = bool(
+        single_sig
+        and cached_http.get("url") == source.target_value
+        and cached_http.get("sig") == single_sig
+    )
+    etag = cached_http.get("etag") if use_cache else None
+    last_modified = cached_http.get("last_modified") if use_cache else None
+
+    collector = WebPageCollector()
+
+    async def fetch():
+        async with platform_slot(redis, WEB_PAGE_KEY, 5.0):
+            return await fetch_webpage_bytes(
+                source.target_value,
+                proxy_url=collector.proxy_url,
+                etag=etag,
+                last_modified=last_modified,
+            )
+
+    fetched = await fetch_with_fallback(collector, session, WEB_PAGE_KEY, fetch)
+    existing_rows = list(
+        await session.scalars(
+            select(CustomSourceItem)
+            .where(CustomSourceItem.source_id == source.id)
+            .order_by(CustomSourceItem.id.asc())
+        )
+    ) if session is not None else []
+    existing_by_ext = {row.external_id: row for row in existing_rows}
+
+    if fetched.not_modified:
+        now = utcnow()
+        for row in existing_rows:
+            row.collected_at = now
+        return []
+
+    if single_sig and (fetched.etag or fetched.last_modified):
+        await _save_custom_web_cache(
+            redis,
+            source.id,
+            {
+                "url": source.target_value,
+                "sig": single_sig,
+                "etag": fetched.etag,
+                "last_modified": fetched.last_modified,
+            },
+        )
+
+    now = utcnow()
+    now_iso = now.replace(tzinfo=timezone.utc).isoformat()
+    results: list[NormalizedContent] = []
+    errors: list[str] = []
+
+    if source.kind == PAGE_WATCH_KIND:
+        latest_by_sig: dict[str, CustomSourceItem] = {}
+        for row in existing_rows:
+            row_sig = ((row.normalized or {}).get("extra") or {}).get("rule_sig") or "default"
+            latest_by_sig[row_sig] = row
+
+        for sig, web_cfg in rule_map.items():
+            try:
+                raw = await asyncio.to_thread(
+                    build_page_watch_item,
+                    fetched,
+                    source_url=source.target_value,
+                    web_cfg=web_cfg,
+                )
+            except WebParseError as exc:
+                errors.append(str(exc))
+                continue
+
+            prev_row = latest_by_sig.get(sig)
+            raw_title = raw.get("title") or source.target_value
+            raw["page_title"] = raw_title
+            if prev_row is None:
+                raw["id"] = f"pw:{sig}:init:{raw['text_hash'][:16]}"[:64]
+                raw["title"] = f"[初始快照] {raw_title}"[:240]
+                raw["published"] = now_iso
+                raw["change_label"] = "初始快照"
+                raw["change_lines"] = []
+                results.append(parse_web_page(raw))
+                continue
+
+            prev_norm = NormalizedContent.model_validate(prev_row.normalized)
+            prev_extra = prev_norm.extra or {}
+            prev_ver = _as_substantive(
+                prev_extra.get("page_title") or prev_norm.title or "",
+                prev_norm.text or "",
+                prev_norm.media or [],
+                prev_row.collected_at,
+                1,
+            )
+            curr_ver = _as_substantive(
+                raw_title,
+                raw.get("text") or "",
+                raw.get("media") or [],
+                now,
+                2,
+            )
+            diff = compute_version_diff(prev_ver, curr_ver)
+            stats = diff.get("stats") or {}
+            has_change = bool(
+                stats.get("title_changed")
+                or stats.get("added_lines")
+                or stats.get("removed_lines")
+                or stats.get("media_added")
+                or stats.get("media_removed")
+            )
+            if not has_change:
+                prev_row.collected_at = now
+                continue
+
+            change_label, change_lines = diff_change_summary(diff, max_lines=4)
+            ext_id = f"pw:{sig}:{raw['text_hash'][:16]}"[:64]
+            if ext_id in existing_by_ext:
+                ext_id = f"pw:{sig}:{raw['text_hash'][:10]}:{int(now.timestamp())}"[:64]
+            raw["id"] = ext_id
+            raw["title"] = f"[页面变更 · {change_label}] {raw_title}"[:240]
+            raw["published"] = now_iso
+            raw["change_label"] = change_label
+            raw["change_lines"] = change_lines
+            results.append(parse_web_page(raw))
+    else:
+        for sig, web_cfg in rule_map.items():
+            try:
+                raw_items, _meta = await asyncio.to_thread(
+                    build_list_watch_items,
+                    fetched,
+                    source_url=source.target_value,
+                    web_cfg=web_cfg,
+                    limit=20,
+                )
+            except WebParseError as exc:
+                errors.append(str(exc))
+                continue
+            for item in raw_items:
+                if sig != "default":
+                    item["id"] = f"{sig[:8]}:{item['id'][:52]}"
+            await enrich_list_items(
+                raw_items,
+                existing_ids=set(existing_by_ext),
+                proxy_url=collector.proxy_url,
+                max_fetch=5,
+            )
+            for item in raw_items:
+                prior = existing_by_ext.get(item["id"])
+                if not item.get("published"):
+                    if prior and (prior.normalized or {}).get("published_at"):
+                        item["published"] = prior.normalized["published_at"]
+                    else:
+                        item["published"] = now_iso
+                results.append(parse_web_page(item))
+
+    if errors and not results and len(errors) == len(rule_map):
+        raise CollectorError(errors[0])
+    return results
+
+
+async def fetch_custom_items(source: CustomFeedSource, redis, session=None, *, feeds: list[CustomFeed] | None = None) -> list:
     """抓取并解析定制源；平台礼貌间隔与代理池回退与主采集完全一致。"""
     if source.platform == XIAOHEIHE_KEY and source.kind == XIAOHEIHE_KIND:
         return await refresh_xiaoheihe_items(session)
+    if source.platform == WEB_PAGE_KEY:
+        return await _fetch_web_page_custom_items(source, feeds or [], redis, session)
     collector = _collector(source.platform)
     if hasattr(collector, "set_cookies") and session is not None:
         from app.services.bilibili_session import get_db_cookies
@@ -147,6 +393,14 @@ async def distribute_custom_feed(session: AsyncSession, feed: CustomFeed) -> int
     """从共享公开缓存按个人条件分发；不再次访问平台，不进入主公共内容库。"""
     rows = await session.scalars(select(CustomSourceItem).where(CustomSourceItem.source_id == feed.source_id))
     normalized_list = [NormalizedContent.model_validate(row.normalized) for row in rows]
+    if feed.platform == WEB_PAGE_KEY:
+        try:
+            wanted_sig = web_rule_signature(extract_web_filter_config(feed.filters))
+        except WebParseError:
+            wanted_sig = "default"
+        normalized_list = [
+            n for n in normalized_list if ((n.extra or {}).get("rule_sig") or "default") == wanted_sig
+        ]
     existing = {item.external_id: item for item in await session.scalars(
         select(CustomFeedItem).where(CustomFeedItem.feed_id == feed.id))}
     if feed.kind == XIAOHEIHE_KIND:
@@ -270,9 +524,13 @@ async def _run_shared_source(session, redis, source_id, stats):
             run = CustomCollectRun(source_id=source_id)
             session.add(run); await session.commit(); run_id = run.id
             stats["sources"] += 1
-            items = await fetch_custom_items(source, redis, session)
+            items = (
+                await fetch_custom_items(source, redis, session, feeds=feeds)
+                if source.platform == WEB_PAGE_KEY
+                else await fetch_custom_items(source, redis, session)
+            )
             old = {row.external_id: row for row in await session.scalars(select(CustomSourceItem).where(
-                CustomSourceItem.source_id == source_id, CustomSourceItem.external_id.in_([n.external_id for n in items])))}
+                CustomSourceItem.source_id == source_id, CustomSourceItem.external_id.in_([n.external_id for n in items])))} if items else {}
             for n in items:
                 if n.external_id in old:
                     old[n.external_id].normalized = n.model_dump(mode="json")
@@ -298,9 +556,14 @@ async def _run_shared_source(session, redis, source_id, stats):
             .execution_options(populate_existing=True)))
         delivered = 0
         for feed in feeds:
+            had_items = bool(
+                await session.scalar(select(CustomFeedItem.id).where(CustomFeedItem.feed_id == feed.id).limit(1))
+            ) if feed.kind == PAGE_WATCH_KIND else True
             new_count = await distribute_custom_feed(session, feed)
             delivered += new_count; stats["feeds"] += 1; stats["new_items"] += new_count
-            if new_count and feed.push_enabled:
+            # 单页变更监控首次录入基线快照时不发送变更提醒邮件，后续真实变更才推送。
+            should_push = bool(new_count and feed.push_enabled and (feed.kind != PAGE_WATCH_KIND or had_items))
+            if should_push:
                 try:
                     stats["pushed"] += int(await push_custom_feed_digest(session, feed, new_count))
                 except Exception:

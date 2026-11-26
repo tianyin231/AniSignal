@@ -12,6 +12,12 @@ export const XIAOHEIHE_KEYWORD_MONITOR = {
 export const STEAM_MONITOR = {
   kind: 'steam_app', platform: 'steam', name: 'Steam 游戏',
 } as const
+export const WEB_PAGE_MONITOR = {
+  kind: 'page_watch', platform: 'web_page', name: '网页变更',
+} as const
+export const WEB_LIST_MONITOR = {
+  kind: 'list_watch', platform: 'web_page', name: '网页列表',
+} as const
 
 export function customKindLabel(kind: string) {
   return ({
@@ -22,6 +28,8 @@ export function customKindLabel(kind: string) {
     notices: '官方公告',
     account_dynamics: '官方动态',
     [STEAM_MONITOR.kind]: STEAM_MONITOR.name,
+    [WEB_PAGE_MONITOR.kind]: WEB_PAGE_MONITOR.name,
+    [WEB_LIST_MONITOR.kind]: WEB_LIST_MONITOR.name,
     [XIAOHEIHE_MONITOR.kind]: XIAOHEIHE_MONITOR.name,
     [XIAOHEIHE_ACCOUNT_MONITOR.kind]: XIAOHEIHE_ACCOUNT_MONITOR.name,
     [XIAOHEIHE_KEYWORD_MONITOR.kind]: XIAOHEIHE_KEYWORD_MONITOR.name,
@@ -29,7 +37,7 @@ export function customKindLabel(kind: string) {
 }
 
 export function customPlatformBadge(platform: string, contentType: string) {
-  return ({ youtube: 'YT', rss: 'RSS', x: 'X', game_official: '官', xiaoheihe: '盒', steam: 'S' } as Record<string, string>)[platform]
+  return ({ youtube: 'YT', rss: 'RSS', web_page: '页', x: 'X', game_official: '官', xiaoheihe: '盒', steam: 'S' } as Record<string, string>)[platform]
     || (contentType === 'dynamic' ? '动' : 'B')
 }
 

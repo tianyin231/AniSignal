@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.custom_presets import custom_preset
-from app.models import CustomFeed, CustomFeedItem, User
+from app.models import CustomFeed, CustomFeedItem, CustomSourceItem, User
 from app.parsers.steam import store_url as steam_store_url
 from app.parsers.xiaoheihe import account_url
 from app.services.auth import get_user_by_token
@@ -47,6 +47,8 @@ def _default_source_url(feed: CustomFeed) -> str | None:
     if feed.platform == "youtube" and feed.kind == "channel_rss":
         return safe_link(f"https://www.youtube.com/channel/{feed.target_value}")
     if feed.platform == "rss" and feed.kind == "feed":
+        return safe_link(feed.target_value)
+    if feed.platform == "web_page":
         return safe_link(feed.target_value)
     if feed.platform == "steam" and feed.target_value.isdigit():
         return steam_store_url(feed.target_value)
@@ -197,6 +199,19 @@ async def feed_detail(
         from app.services.steam import get_steam_app_pulse
 
         steam_pulse = await get_steam_app_pulse(session, int(feed.target_value), hours=168)
+    web_extras: dict[str, dict] = {}
+    if feed.platform == "web_page" and feed.source_id and items:
+        ext_ids = [item.external_id for item in items]
+        src_rows = await session.execute(
+            select(CustomSourceItem.external_id, CustomSourceItem.normalized).where(
+                CustomSourceItem.source_id == feed.source_id,
+                CustomSourceItem.external_id.in_(ext_ids),
+            )
+        )
+        for ext_id, norm in src_rows.all():
+            extra = (norm or {}).get("extra") if isinstance(norm, dict) else None
+            if isinstance(extra, dict):
+                web_extras[ext_id] = extra
     return {
         **_feed_out(feed, owner_name, total),
         "total": total,
@@ -216,6 +231,8 @@ async def feed_detail(
                 "content_type": item.content_type,
                 "platform": item.platform,
                 "published_at": item.published_at,
+                "change_label": web_extras.get(item.external_id, {}).get("change_label"),
+                "change_lines": web_extras.get(item.external_id, {}).get("change_lines") or [],
             }
             for item in items
         ],

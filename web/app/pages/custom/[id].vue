@@ -16,6 +16,8 @@ interface CustomItem {
   content_type: string
   platform: string
   published_at: string | null
+  change_label?: string | null
+  change_lines?: string[]
 }
 interface CustomFeedDetail {
   id: number
@@ -75,7 +77,7 @@ useSeoMeta({ title: () => `${data.value?.name ?? '定制监控'} · 定制化 ·
 const badge = computed(() => customFeedBadge(data.value?.platform ?? ''))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 const goPage = (value: number) => router.replace({ query: { ...route.query, page: value > 1 ? value : undefined } })
-const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', rss: 'RSS', x: 'X', game_official: '官网', xiaoheihe: '小黑盒', steam: 'Steam' }
+const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', rss: 'RSS', web_page: '网页', x: 'X', game_official: '官网', xiaoheihe: '小黑盒', steam: 'Steam' }
 const triggering = ref(false)
 const triggerMsg = ref('')
 async function triggerCollect() {
@@ -154,7 +156,7 @@ const emptyText = computed(() => {
         </div>
         <div class="flex flex-wrap gap-2">
           <a v-if="data.source_url" :href="data.source_url" target="_blank" rel="noopener" class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 transition-colors hover:text-ink">
-            <ExternalLink :size="14" /> {{ data.kind === XIAOHEIHE_ACCOUNT_MONITOR.kind ? '打开小黑盒主页' : data.kind === STEAM_MONITOR.kind ? '打开 Steam 商店' : '源地址' }}
+            <ExternalLink :size="14" /> {{ data.kind === XIAOHEIHE_ACCOUNT_MONITOR.kind ? '打开小黑盒主页' : data.kind === STEAM_MONITOR.kind ? '打开 Steam 商店' : data.platform === 'web_page' ? '打开目标网页' : '源地址' }}
           </a>
           <NuxtLink v-if="data.kind === XIAOHEIHE_MONITOR.kind" to="/contents?community=xiaoheihe" class="inline-flex h-9 items-center rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 hover:text-ink">
             小黑盒分区
@@ -209,6 +211,9 @@ const emptyText = computed(() => {
                 <span v-if="item.views">· {{ item.views }}</span>
                 <span v-if="item.time" class="mono text-faint" :title="item.exactTime">· {{ item.time }}</span>
               </p>
+              <ul v-if="item.change_lines?.length" class="mt-2 space-y-1 rounded-lg bg-chip/70 px-3 py-2 text-xs leading-relaxed text-ink-2">
+                <li v-for="(line, idx) in item.change_lines" :key="idx" class="break-words">{{ line }}</li>
+              </ul>
             </div>
           </article>
           <p v-if="!rows.length" class="px-5 py-14 text-center text-sm text-muted">{{ emptyText }}</p>

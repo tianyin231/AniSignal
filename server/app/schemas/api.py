@@ -48,6 +48,8 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     # UC 频道 ID，或待创建时解析的 @handle
     ("youtube", "channel_rss"): re.compile(r"^(?:[A-Za-z0-9_-]{2,64}|@[A-Za-z0-9._-]{3,30})$"),
     ("rss", "feed"): re.compile(r"^https?://[^\s]{1,247}$"),
+    ("web_page", "page_watch"): re.compile(r"^https?://[^\s]{1,247}$"),
+    ("web_page", "list_watch"): re.compile(r"^https?://[^\s]{1,247}$"),
 }
 
 
@@ -96,6 +98,40 @@ def validate_target_value(platform: object, target_type: object, value: object) 
     return text
 
 
+class WebPageConfigIn(BaseModel):
+    selector: str = Field(default="", max_length=200)
+    exclude_selector: str = Field(default="", max_length=200)
+    link_pattern: str = Field(default="", max_length=200)
+    ignore_patterns: list[str] = Field(default_factory=list, max_length=10)
+    fetch_body: bool | None = None
+
+    @model_validator(mode="after")
+    def _validate_web_cfg(self):
+        from app.services.web_parser import WebParseError, normalize_web_config
+
+        try:
+            cleaned = normalize_web_config(self.model_dump(exclude_none=True))
+        except WebParseError as exc:
+            raise ValueError(str(exc)) from None
+        self.selector = cleaned.get("selector", "")
+        self.exclude_selector = cleaned.get("exclude_selector", "")
+        self.link_pattern = cleaned.get("link_pattern", "")
+        self.ignore_patterns = cleaned.get("ignore_patterns", [])
+        self.fetch_body = cleaned.get("fetch_body")
+        return self
+
+    def to_storage_dict(self) -> dict:
+        from app.services.web_parser import normalize_web_config
+
+        return normalize_web_config(self.model_dump(exclude_none=True))
+
+
+class WebPagePreviewRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=255)
+    mode: str = Field(default="page_watch", pattern="^(page_watch|list_watch)$")
+    web_config: WebPageConfigIn | None = None
+
+
 class CollectTargetCreate(BaseModel):
     platform: Platform
     target_type: TargetType
@@ -108,6 +144,7 @@ class CollectTargetCreate(BaseModel):
     min_views: int = Field(default=0, ge=0, le=10_000_000)
     tier: str = Field(default="general", pattern="^(core|general)$")
     community: CommunitySlug = Field(default=_DEFAULT_COMMUNITY)
+    web_config: WebPageConfigIn | None = None
 
     @model_validator(mode="after")
     def _check_target_value(self):
@@ -133,6 +170,7 @@ class CollectTargetUpdate(BaseModel):
     min_views: int | None = Field(default=None, ge=0, le=10_000_000)
     tier: str | None = Field(default=None, pattern="^(core|general)$")
     community: OptionalCommunitySlug = Field(default=None)
+    web_config: WebPageConfigIn | None = None
 
 
 class CommunityCreate(BaseModel):
@@ -181,6 +219,7 @@ class CollectTargetOut(BaseModel):
     interval_minutes: int
     enabled: bool
     is_official: bool = False
+    web_config: dict = Field(default_factory=dict)
     co_terms: list[str] = []
     min_views: int = 0
     tier: str = "general"

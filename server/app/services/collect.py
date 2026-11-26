@@ -28,6 +28,7 @@ from app.collectors.miyoushe import MiyousheCollector
 from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
 from app.collectors.rss import RssCollector
+from app.collectors.web_page import WebPageCollector, enrich_list_items
 from app.collectors.x import XCollector
 from app.collectors.xiaoheihe import XIAOHEIHE_MIN_INTERVAL_SECONDS, XiaoheiheCollector
 from app.collectors.steam import SteamCollector
@@ -96,6 +97,7 @@ _MERCH_UPDATE = re.compile(
 # platform → 零参工厂；kuro 两个区域共享类但实例需指定 region
 _COLLECTORS = {
     "rss": lambda: RssCollector(),
+    "web_page": lambda: WebPageCollector(),
     "bilibili": lambda: BilibiliCollector(),
     "miyoushe": lambda: MiyousheCollector(),
     "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
@@ -181,7 +183,7 @@ def filter_relevant(
                 and not any(_source_alias_hit(str(item.get("title") or ""), term) for term in meta.source_exclusions)
             ]
             co_terms = list(dict.fromkeys([*co_terms, *aliases]))
-    if target.target_type == "notices":
+    if target.target_type in ("notices", "page_watch"):
         return items, original_count - len(items)
     is_news = get_community(target.community).domain == "news"
     if is_news:
@@ -194,7 +196,7 @@ def filter_relevant(
                 body = str(item.get("text") or "").casefold()
                 if co_terms and not any(term.casefold() in body for term in co_terms):
                     continue
-            elif target.platform != "rss" and not is_news_candidate(str(item.get("title") or "")):
+            elif target.platform not in ("rss", "web_page") and not is_news_candidate(str(item.get("title") or "")):
                 continue
             item["_matched_keywords"] = [target.target_value]
             kept.append(item)
@@ -400,6 +402,12 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
             await claim_collection_budget(session, target.platform, low_priority=product is not None)
             if isinstance(collector, RssCollector):
                 collector.source_config = {**(target.config or {}), "name": target.display_name, "feed_url": target.target_value}
+            if isinstance(collector, WebPageCollector):
+                collector.source_config = {
+                    **(target.config or {}),
+                    "name": target.display_name,
+                    "is_official": target.is_official,
+                }
             if isinstance(collector, MiyousheCollector):
                 collector.set_community(target.community)
             from app.communities import sync_communities
@@ -443,6 +451,33 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
             if isinstance(collector, RssCollector):
                 from app.services.rss_body import enrich_items
                 await enrich_items(session, collector, fetch_result.items)
+            if isinstance(collector, WebPageCollector):
+                if collector.last_http_cache:
+                    next_cfg = dict(target.config or {})
+                    if next_cfg.get("_http_cache") != collector.last_http_cache:
+                        next_cfg["_http_cache"] = collector.last_http_cache
+                        target.config = next_cfg
+                if (
+                    target.target_type == "list_watch"
+                    and fetch_result.items
+                    and target.web_config.get("fetch_body", True)
+                ):
+                    item_ids = [str(item.get("id") or "") for item in fetch_result.items if item.get("id")]
+                    existing_ids = set(
+                        (
+                            await session.scalars(
+                                select(RawContent.external_id).where(
+                                    RawContent.platform == "web_page",
+                                    RawContent.external_id.in_(item_ids),
+                                )
+                            )
+                        ).all()
+                    ) if item_ids else set()
+                    await enrich_list_items(
+                        fetch_result.items,
+                        existing_ids=existing_ids,
+                        proxy_url=proxy_url,
+                    )
             items_fetched = len(fetch_result.items)
             fetch_result.items, filtered_out = filter_relevant(
                 fetch_result.items, target,

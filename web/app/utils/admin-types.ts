@@ -1,5 +1,13 @@
 /** Admin 看板与后端 DTO 对应的类型与展示工具 */
 
+export interface WebPageConfig {
+  selector?: string
+  exclude_selector?: string
+  link_pattern?: string
+  ignore_patterns?: string[]
+  fetch_body?: boolean
+}
+
 export interface CollectTarget {
   id: number
   platform: string
@@ -9,6 +17,7 @@ export interface CollectTarget {
   interval_minutes: number
   enabled: boolean
   is_official: boolean
+  web_config?: WebPageConfig
   tier: 'core' | 'general'
   /** 游戏分区 key（合法值集合随分区注册表扩展，见 utils/admin-communities.ts） */
   community: string
@@ -119,6 +128,7 @@ export interface ContentList {
 export const platformLabels: Record<string, string> = {
   game_official: '游戏官网公告',
   rss: 'RSS 新闻源',
+  web_page: '网页监控',
   bilibili: 'B站',
   miyoushe: '米游社',
   xiaoheihe: '小黑盒',
@@ -131,6 +141,8 @@ export const platformLabels: Record<string, string> = {
 
 export const targetTypeLabels: Record<string, string> = {
   feed: 'RSS / Atom',
+  page_watch: '单页变更',
+  list_watch: '列表新增',
   keyword_search: '关键词搜索',
   account_videos: '账号视频',
   account_dynamics: '账号动态',
@@ -144,6 +156,7 @@ export const contentTypeLabels: Record<string, string> = {
   post: '帖子',
   notice: '公告',
   rss_item: 'RSS',
+  web_page: '网页',
 }
 
 /** 后端时间为 naive UTC（无 Z 后缀），按北京时间展示 */

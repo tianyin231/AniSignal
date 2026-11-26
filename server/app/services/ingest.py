@@ -34,6 +34,7 @@ from app.parsers.xiaoheihe import parse_share as parse_xiaoheihe_share
 from app.parsers.steam import PARSER_VERSION as STEAM_PARSER_VERSION
 from app.parsers.steam import parse_notice as parse_steam_notice
 from app.parsers.rss import PARSER_VERSION as RSS_PARSER_VERSION, parse_item as parse_feed_item
+from app.parsers.web_page import PARSER_VERSION as WEB_PAGE_PARSER_VERSION, parse_page as parse_web_page
 from app.parsers.game_official import PARSER_VERSION as GAME_OFFICIAL_PARSER_VERSION, parse_notice as parse_game_notice
 from app.collectors.nikke import parse_notice as parse_nikke_notice
 from app.schemas.content import NormalizedContent
@@ -74,6 +75,8 @@ PARSERS: dict[str, tuple] = {
     "xiaoheihe_posts": (parse_xiaoheihe_post, XIAOHEIHE_PARSER_VERSION),
     "steam_notices": (parse_steam_notice, STEAM_PARSER_VERSION),
     "rss_feed": (parse_feed_item, RSS_PARSER_VERSION),
+    "web_page_watch": (parse_web_page, WEB_PAGE_PARSER_VERSION),
+    "web_page_list": (parse_web_page, WEB_PAGE_PARSER_VERSION),
     "game_official_notices": (parse_game_notice, GAME_OFFICIAL_PARSER_VERSION),
     "nikke_notices": (parse_nikke_notice, "1"),
     "custom_source_archive": (parse_custom_archive, "1"),
@@ -97,6 +100,10 @@ def target_source_external_id(platform: str, target_value: str) -> str:
         from app.collectors.rss import rss_id
 
         return rss_id(target_value)
+    if platform == "web_page":
+        from app.collectors.web_page import web_id
+
+        return web_id(f"site:{target_value}")
     if platform == "x":
         return target_value.strip().removeprefix("@").lower()
     return target_value
@@ -491,6 +498,7 @@ _REPARSE_KIND = {
     "notice": "kuro_notices",
     "post": "miyoushe_posts",
     "rss_item": "youtube_rss",
+    "web_page": "web_page_watch",
 }
 
 
@@ -512,7 +520,13 @@ async def reparse_contents(
     rules = await load_rules(session)
     checked = updated = failed = 0
     for content in rows:
-        kind = {"x": "x_posts", "rss": "rss_feed", "xiaoheihe": "xiaoheihe_posts", "steam": "steam_notices"}.get(
+        kind = {
+            "x": "x_posts",
+            "rss": "rss_feed",
+            "web_page": "web_page_watch",
+            "xiaoheihe": "xiaoheihe_posts",
+            "steam": "steam_notices",
+        }.get(
             content.platform
         ) or _REPARSE_KIND.get(content.content_type)
         if (content.raw_json or {}).get("archive_source") == "custom_source_items":

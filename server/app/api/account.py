@@ -599,6 +599,8 @@ def _excerpt(text: str) -> str | None:
 # ---------- 定制监控（用户自建 B站关键词/UP主、RSS/Atom、YouTube 频道抓取源） ----------
 
 import re as _re
+import time as _time
+from collections import deque as _deque
 
 _KIND_DEFAULT_PLATFORM = {
     "uid": "bilibili",
@@ -606,11 +608,17 @@ _KIND_DEFAULT_PLATFORM = {
     "feed": "rss",
     "channel_rss": "youtube",
     "steam_app": "steam",
+    "page_watch": "web_page",
+    "list_watch": "web_page",
     "hot_posts": "xiaoheihe",
     XIAOHEIHE_ACCOUNT_KIND: XIAOHEIHE_KEY,
     XIAOHEIHE_KEYWORD_KIND: XIAOHEIHE_KEY,
 }
 _YT_CHANNEL_RE = _re.compile(r"^(?:UC[A-Za-z0-9_-]{20,30}|@[A-Za-z0-9._-]{3,30})$")
+_HTTP_URL_RE = _re.compile(r"^https?://[^\s]{1,247}$")
+_WEB_PREVIEW_BUCKETS: dict[int, _deque[float]] = {}
+_WEB_PREVIEW_WINDOW_SECONDS = 60.0
+_WEB_PREVIEW_MAX_PER_WINDOW = 10
 
 
 def _normalize_youtube_channel(raw: str) -> str:
@@ -649,6 +657,10 @@ def _validate_custom_target(kind: str, target: str) -> str:
             return extract_app_id(target)
         except ValueError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+    if kind in {"page_watch", "list_watch"}:
+        if not _HTTP_URL_RE.fullmatch(target) or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in target):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "请填写公开的 http(s) 网页地址")
+        return target
     return target
 
 
@@ -685,6 +697,16 @@ async def _ensure_safe_custom_target(kind: str, target: str) -> None:
 
             # 普通用户看不到也改不了服务端配置，提示里不带解析地址和环境变量名。
             raise HTTPException(status.HTTP_400_BAD_REQUEST, user_facing_error("rss", str(exc))) from exc
+    elif kind in {"page_watch", "list_watch"}:
+        from app.collectors.base import CollectorError
+        from app.collectors.web_page import public_web_url
+
+        try:
+            await public_web_url(target)
+        except CollectorError as exc:
+            from app.services.collect_errors import user_facing_error
+
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, user_facing_error("web_page", str(exc))) from exc
 
 
 def _validate_custom_payload(body: dict, *, partial: bool = False, default_kind: str = "") -> dict:
@@ -706,8 +728,9 @@ def _validate_custom_payload(body: dict, *, partial: bool = False, default_kind:
     target = str(body.get("target_value") or "").strip()
     if effective_kind and target:
         target = _validate_custom_target(effective_kind, target)
-    if ("target_value" in body or not partial) and not 1 <= len(target) <= 128:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "监控目标需为 1 至 128 字")
+    max_target_len = 255 if effective_kind in {"feed", "page_watch", "list_watch"} else 128
+    if ("target_value" in body or not partial) and not 1 <= len(target) <= max_target_len:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"监控目标需为 1 至 {max_target_len} 字")
     min_views = body.get("min_views")
     if min_views is not None:
         try:
@@ -724,12 +747,31 @@ def _validate_custom_payload(body: dict, *, partial: bool = False, default_kind:
         raise HTTPException(400, "采集周期需为 1 至 1440 分钟的整数")
     filters = body.get("filters")
     if filters is not None:
-        if (not isinstance(filters, dict) or set(filters) - {"include", "exclude"}
-            or any(not isinstance(values, list) or len(values) > 10
-                   or any(not isinstance(term, str) or not 1 <= len(term.strip()) <= 64 for term in values)
-                   for values in filters.values())):
-            raise HTTPException(400, "包含词、排除词各最多 10 个，每个 1 至 64 字")
-        filters = {key: list(dict.fromkeys(term.strip() for term in values)) for key, values in filters.items()}
+        is_web = effective_kind in {"page_watch", "list_watch"}
+        allowed_keys = {"include", "exclude", "selector", "exclude_selector", "link_pattern", "ignore_patterns"} if is_web else {"include", "exclude"}
+        if not isinstance(filters, dict) or (set(filters) - allowed_keys):
+            raise HTTPException(400, "筛选规则包含不支持的配置项")
+        cleaned_filters: dict = {}
+        for kw_key in ("include", "exclude"):
+            if kw_key in filters:
+                values = filters[kw_key]
+                if (
+                    not isinstance(values, list)
+                    or len(values) > 10
+                    or any(not isinstance(term, str) or not 1 <= len(term.strip()) <= 64 for term in values)
+                ):
+                    raise HTTPException(400, "包含词、排除词各最多 10 个，每个 1 至 64 字")
+                cleaned_filters[kw_key] = list(dict.fromkeys(term.strip() for term in values))
+        if is_web:
+            from app.services.web_parser import WebParseError, normalize_web_config
+
+            web_raw = {k: filters[k] for k in ("selector", "exclude_selector", "link_pattern", "ignore_patterns") if k in filters and filters[k]}
+            if web_raw:
+                try:
+                    cleaned_filters.update(normalize_web_config(web_raw))
+                except WebParseError as exc:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+        filters = cleaned_filters
     return {
         "name": name,
         "kind": kind,
@@ -845,6 +887,8 @@ async def create_custom_feed(
         raise HTTPException(status.HTTP_409_CONFLICT, messages.get(payload["kind"], "已创建相同的小黑盒监控"))
     source = await shared_source(session, payload["platform"], payload["kind"], payload["target_value"])
     request_interval(source, interval)
+    if payload["platform"] == "web_page" and not source.last_error:
+        source.next_run_at = None
     feed = CustomFeed(
         user_id=user.id,
         name=payload["name"],
@@ -911,6 +955,12 @@ async def update_custom_feed(
     if payload["filters"] is not None:
         feed.filters = payload["filters"]
         feed.next_run_at = None
+        if feed.platform == "web_page" and feed.source_id:
+            from app.models import CustomFeedSource
+
+            source = await session.get(CustomFeedSource, feed.source_id)
+            if source and not source.last_error:
+                source.next_run_at = None
     if payload["interval_minutes"] is not None:
         feed.interval_minutes = payload["interval_minutes"]
         feed.next_run_at = None
@@ -967,6 +1017,51 @@ async def delete_custom_feed(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "监控不存在")
     await session.delete(feed)
     await session.commit()
+
+
+@router.post("/web-page/preview")
+async def preview_web_page_account(
+    body: dict,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """账号中心测试网页监控解析效果（每分钟限 10 次，强制 SSRF 校验）。"""
+    import httpx
+    from app.collectors.base import CollectorError
+    from app.collectors.web_page import WebPageCollector, preview_webpage
+    from app.services.collect_errors import user_facing_error
+    from app.services.collector_proxy import fetch_with_fallback
+    from app.services.web_parser import WebParseError, normalize_web_config
+
+    now = _time.monotonic()
+    bucket = _WEB_PREVIEW_BUCKETS.setdefault(user.id, _deque())
+    while bucket and now - bucket[0] > _WEB_PREVIEW_WINDOW_SECONDS:
+        bucket.popleft()
+    if len(bucket) >= _WEB_PREVIEW_MAX_PER_WINDOW:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "测试解析过于频繁，请稍后再试")
+    bucket.append(now)
+
+    url = str(body.get("url") or "").strip()
+    mode = str(body.get("mode") or "page_watch").strip()
+    if mode not in {"page_watch", "list_watch"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "仅支持单页变更或列表新增模式")
+    url = _validate_custom_target(mode, url)
+    try:
+        web_cfg = normalize_web_config(body.get("web_config") if isinstance(body.get("web_config"), dict) else {})
+    except WebParseError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+
+    collector = WebPageCollector()
+
+    async def run():
+        return await preview_webpage(url, mode=mode, web_config=web_cfg, proxy_url=collector.proxy_url)
+
+    try:
+        return await fetch_with_fallback(collector, session, "web_page", run)
+    except (CollectorError, WebParseError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, user_facing_error("web_page", str(exc))) from None
+    except httpx.HTTPError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, user_facing_error("web_page", str(exc))) from None
 
 
 # ---------- 个人专属 RSS 令牌 ----------

@@ -72,6 +72,7 @@ from app.schemas.api import (
     RunTriggerOut,
     TargetBatchRequest,
     TargetImportPresetsRequest,
+    WebPagePreviewRequest,
     XiaoheiheShareCreate,
 )
 from app.services.queue import BaseQueue
@@ -482,6 +483,14 @@ async def create_target(
             body.target_value = await resolve_account_uid(body.target_value, session=session)
         except CollectorError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+    if body.platform == "web_page":
+        from app.collectors.base import CollectorError
+        from app.collectors.web_page import public_web_url
+
+        try:
+            await public_web_url(body.target_value)
+        except CollectorError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     await _ensure_no_target_conflict(
         session,
         platform=body.platform,
@@ -499,12 +508,19 @@ async def create_target(
     if get_community(body.community).domain == "news" or not supports_view_threshold(body.platform, body.target_type):
         min_views = 0
     is_official = bool(body.is_official and body.target_type not in ("keyword_search", "topic_search"))
+    target_config: dict = {}
+    if is_official:
+        target_config["is_official"] = True
+    if body.platform == "web_page" and body.web_config is not None:
+        web_dict = body.web_config.to_storage_dict()
+        if web_dict:
+            target_config["web"] = web_dict
     target = CollectTarget(
         platform=body.platform,
         target_type=body.target_type,
         target_value=body.target_value,
         display_name=body.display_name,
-        config={"is_official": True} if is_official else {},
+        config=target_config,
         interval_minutes=body.interval_minutes,
         enabled=body.enabled,
         co_terms=body.co_terms,
@@ -575,6 +591,14 @@ async def update_target(
                 next_value = await resolve_account_uid(next_value, session=session)
             except CollectorError as exc:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+        if target.platform == "web_page":
+            from app.collectors.base import CollectorError
+            from app.collectors.web_page import public_web_url
+
+            try:
+                await public_web_url(next_value)
+            except CollectorError as exc:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
         value_changed = next_value != target.target_value
     if value_changed or next_community != target.community or body.tier is not None or body.co_terms is not None:
         await _ensure_no_target_conflict(
@@ -590,18 +614,30 @@ async def update_target(
     if value_changed:
         target.target_value = next_value
         target.last_success_at, target.last_error, target.consecutive_failures = None, None, 0
+        if target.platform == "web_page":
+            next_cfg = dict(target.config or {})
+            next_cfg.pop("_http_cache", None)
+            target.config = next_cfg
         if target.enabled:
             target.next_run_at = utcnow()
     if body.tier is not None:
         target.tier = body.tier
     if body.community is not None:
         target.community = body.community
-    if body.is_official is not None:
+    if body.is_official is not None or (body.web_config is not None and target.platform == "web_page"):
         next_cfg = dict(target.config or {})
-        if body.is_official and target.target_type not in ("keyword_search", "topic_search"):
-            next_cfg["is_official"] = True
-        else:
-            next_cfg.pop("is_official", None)
+        if body.is_official is not None:
+            if body.is_official and target.target_type not in ("keyword_search", "topic_search"):
+                next_cfg["is_official"] = True
+            else:
+                next_cfg.pop("is_official", None)
+        if body.web_config is not None and target.platform == "web_page":
+            web_dict = body.web_config.to_storage_dict()
+            if web_dict:
+                next_cfg["web"] = web_dict
+            else:
+                next_cfg.pop("web", None)
+            next_cfg.pop("_http_cache", None)
         target.config = next_cfg
     if body.min_views is not None:
         target.min_views = body.min_views
@@ -645,6 +681,37 @@ async def delete_target(target_id: int, session: AsyncSession = Depends(get_sess
             session, platform, target_source_external_id(platform, old_value)
         )
     await session.commit()
+
+
+@router.post("/web-page/preview")
+async def preview_web_page_admin(
+    body: WebPagePreviewRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """管理员测试自定义网页解析规则：校验 SSRF、返回正文/列表预览、RSS 探测与 SPA 提示。"""
+    import httpx
+    from app.collectors.base import CollectorError
+    from app.collectors.web_page import WebPageCollector, preview_webpage
+    from app.services.collector_proxy import fetch_with_fallback
+    from app.services.web_parser import WebParseError
+
+    collector = WebPageCollector()
+    web_cfg = body.web_config.to_storage_dict() if body.web_config is not None else {}
+
+    async def run():
+        return await preview_webpage(
+            body.url.strip(),
+            mode=body.mode,
+            web_config=web_cfg,
+            proxy_url=collector.proxy_url,
+        )
+
+    try:
+        return await fetch_with_fallback(collector, session, "web_page", run)
+    except (CollectorError, WebParseError) as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+    except httpx.HTTPError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"网页请求失败：{exc}") from None
 
 
 async def _resolve_youtube_value(session: AsyncSession, value: str) -> str:

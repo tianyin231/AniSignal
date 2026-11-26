@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { Eye, EyeOff, Mail, MailX, Pause, Pencil, Play, Plus, RefreshCw, Trash2 } from 'lucide-vue-next'
 import type { CustomFeedRow } from '~/composables/useAccountCenter'
-import { customKindLabel, STEAM_MONITOR, XIAOHEIHE_ACCOUNT_MONITOR, XIAOHEIHE_KEYWORD_MONITOR, XIAOHEIHE_MONITOR } from '~/utils/custom-feeds'
+import { apiErrorDetail } from '~/utils/api-errors'
+import {
+  customKindLabel,
+  STEAM_MONITOR,
+  WEB_LIST_MONITOR,
+  WEB_PAGE_MONITOR,
+  XIAOHEIHE_ACCOUNT_MONITOR,
+  XIAOHEIHE_KEYWORD_MONITOR,
+  XIAOHEIHE_MONITOR,
+} from '~/utils/custom-feeds'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
-// 定制监控：自建 B 站关键词 / UP 主、RSS/Atom 订阅、YouTube 频道、Steam 游戏、小黑盒账号 / 关键词抓取源。公开的会出现在"定制监控"频道，私有的仅自己可见。
+// 定制监控：自建 B 站关键词 / UP 主、RSS/Atom 订阅、自定义网页变更/列表、YouTube 频道、Steam 游戏、小黑盒账号 / 关键词抓取源。公开的会出现在"定制监控"频道，私有的仅自己可见。
 const route = useRoute()
 const center = useAccountCenter()
 const { customFeeds, customQuota, customBusy, customError, customMessage, loading, errors } = center
@@ -15,6 +24,8 @@ const ALL_KINDS = [
   { key: 'keyword', platform: 'bilibili', label: 'B 站关键词', fieldLabel: '搜索关键词', placeholder: '例如：独立游戏 发售、机械键盘 评测' },
   { key: 'uid', platform: 'bilibili', label: 'B 站 UP 主', fieldLabel: 'UP 主 UID', placeholder: '纯数字，空间主页地址里的那串数字' },
   { key: 'feed', platform: 'rss', label: 'RSS / Atom', fieldLabel: 'RSS / Atom 地址', placeholder: 'https://example.com/feed.xml' },
+  { key: WEB_PAGE_MONITOR.kind, platform: WEB_PAGE_MONITOR.platform, label: WEB_PAGE_MONITOR.name, fieldLabel: '目标网页地址', placeholder: 'https://example.com/changelog（跟踪页面正文变更）' },
+  { key: WEB_LIST_MONITOR.kind, platform: WEB_LIST_MONITOR.platform, label: WEB_LIST_MONITOR.name, fieldLabel: '列表页地址', placeholder: 'https://example.com/news（自动发现新增文章）' },
   { key: 'channel_rss', platform: 'youtube', label: 'YouTube 频道', fieldLabel: '频道链接、@handle 或频道 ID', placeholder: 'https://www.youtube.com/@xxx、@xxx 或 UC...' },
   { key: STEAM_MONITOR.kind, platform: STEAM_MONITOR.platform, label: STEAM_MONITOR.name, fieldLabel: 'Steam AppID 或商店链接', placeholder: '例如 3513350 或 https://store.steampowered.com/app/3513350/' },
   { key: XIAOHEIHE_ACCOUNT_MONITOR.kind, platform: XIAOHEIHE_ACCOUNT_MONITOR.platform, label: XIAOHEIHE_ACCOUNT_MONITOR.name, fieldLabel: '小黑盒 UID 或个人主页链接', placeholder: '例如 12345678 或 https://xiaoheihe.cn/app/user/profile/12345678' },
@@ -23,20 +34,45 @@ const ALL_KINDS = [
 ] as const
 type MonitorKind = typeof ALL_KINDS[number]['key']
 
+interface WebPreviewResult {
+  mode: string
+  url: string
+  title: string
+  extractor: string
+  text_length: number
+  text_preview: string
+  media_count: number
+  detected_feeds: { url: string; title: string; type: string }[]
+  spa_warning: boolean
+  items: { title: string; url: string; published_at: string | null }[]
+}
+
 const KINDS = computed(() => ALL_KINDS.filter((k) => {
   if (k.key === XIAOHEIHE_KEYWORD_MONITOR.kind) return Boolean(customQuota.value.xiaoheihe_keyword_enabled)
   if (k.key === XIAOHEIHE_MONITOR.kind) return Boolean(customQuota.value.xiaoheihe_hot_enabled)
   return true
 }))
 
-const blank = () => ({ name: '', kind: 'keyword' as MonitorKind, target_value: '', min_views: 0, interval_minutes: 60, includeText: '', excludeText: '', push_enabled: false, is_public: false })
+const blank = () => ({
+  name: '', kind: 'keyword' as MonitorKind, target_value: '', min_views: 0, interval_minutes: 60,
+  includeText: '', excludeText: '', selector: '', excludeSelector: '', linkPattern: '', ignoreText: '',
+  push_enabled: false, is_public: false,
+})
 const form = reactive(blank())
 const editing = ref<number | null>(null)
-const draft = reactive({ name: '', target_value: '', min_views: 0, interval_minutes: 30, includeText: '', excludeText: '' })
+const draft = reactive({
+  name: '', target_value: '', min_views: 0, interval_minutes: 30,
+  includeText: '', excludeText: '', selector: '', excludeSelector: '', linkPattern: '', ignoreText: '',
+})
+const webPreview = ref<WebPreviewResult | null>(null)
+const webPreviewing = ref(false)
+const webPreviewError = ref('')
 
 const activeKindMeta = computed(() => ALL_KINDS.find(k => k.key === form.kind) ?? ALL_KINDS[0])
 const isHotPosts = computed(() => form.kind === XIAOHEIHE_MONITOR.kind)
 const isKeywordKind = (kind: string) => kind === 'keyword' || kind === XIAOHEIHE_KEYWORD_MONITOR.kind
+const isWebKind = (kind: string) => kind === WEB_PAGE_MONITOR.kind || kind === WEB_LIST_MONITOR.kind
+const isUrlKind = (kind: string) => kind === 'feed' || isWebKind(kind)
 const existingXiaoheihe = computed(() => customFeeds.value.find(row => row.kind === XIAOHEIHE_MONITOR.kind))
 const kindFieldLabel = (kind: string) => ALL_KINDS.find(k => k.key === kind)?.fieldLabel ?? '监控目标'
 
@@ -50,10 +86,57 @@ watch(() => customQuota.value.min_interval_minutes, (min) => { form.interval_min
 function openCreate() {
   creating.value = true
   customError.value = customMessage.value = ''
+  webPreview.value = null
+  webPreviewError.value = ''
 }
 function selectKind(kind: MonitorKind) {
   form.kind = kind
+  webPreview.value = null
+  webPreviewError.value = ''
   if (kind === XIAOHEIHE_MONITOR.kind && !form.name.trim()) form.name = XIAOHEIHE_MONITOR.name
+}
+function buildFilters(kind: string, src: { includeText: string, excludeText: string, selector: string, excludeSelector: string, linkPattern: string, ignoreText: string }) {
+  const filters: Record<string, unknown> = { include: words(src.includeText), exclude: words(src.excludeText) }
+  if (isWebKind(kind)) {
+    if (src.selector.trim()) filters.selector = src.selector.trim()
+    if (src.excludeSelector.trim()) filters.exclude_selector = src.excludeSelector.trim()
+    if (kind === WEB_LIST_MONITOR.kind && src.linkPattern.trim()) filters.link_pattern = src.linkPattern.trim()
+    if (kind === WEB_PAGE_MONITOR.kind && words(src.ignoreText).length) filters.ignore_patterns = words(src.ignoreText)
+  }
+  return filters
+}
+async function previewWeb() {
+  if (!isWebKind(form.kind) || !form.target_value.trim() || webPreviewing.value) return
+  webPreviewing.value = true
+  webPreviewError.value = ''
+  try {
+    webPreview.value = await $fetch<WebPreviewResult>('/api/account/web-page/preview', {
+      method: 'POST',
+      body: {
+        url: form.target_value.trim(),
+        mode: form.kind,
+        web_config: {
+          selector: form.selector.trim(),
+          exclude_selector: form.excludeSelector.trim(),
+          link_pattern: form.kind === WEB_LIST_MONITOR.kind ? form.linkPattern.trim() : '',
+          ignore_patterns: form.kind === WEB_PAGE_MONITOR.kind ? words(form.ignoreText) : [],
+        },
+      },
+    })
+    if (!form.name.trim() && webPreview.value?.title) form.name = webPreview.value.title.slice(0, 64)
+  } catch (exc) {
+    webPreview.value = null
+    webPreviewError.value = apiErrorDetail(exc, '网页解析测试失败')
+  } finally {
+    webPreviewing.value = false
+  }
+}
+function switchToDetectedFeed(feedUrl: string, feedTitle: string) {
+  form.kind = 'feed'
+  form.target_value = feedUrl
+  if (!form.name.trim() && feedTitle) form.name = feedTitle.slice(0, 64)
+  webPreview.value = null
+  webPreviewError.value = ''
 }
 watch(() => [customQuota.value.xiaoheihe_hot_enabled, customQuota.value.xiaoheihe_keyword_enabled] as const, ([hotOk, kwOk]) => {
   if (route.query.source === STEAM_MONITOR.platform && form.kind === 'keyword') {
@@ -64,7 +147,7 @@ watch(() => [customQuota.value.xiaoheihe_hot_enabled, customQuota.value.xiaoheih
 }, { immediate: true })
 
 async function create() {
-  const { includeText, excludeText, ...rest } = form
+  const { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText, ...rest } = form
   const ok = await center.createCustom({
     ...rest,
     platform: activeKindMeta.value.platform,
@@ -72,10 +155,12 @@ async function create() {
     target_value: isHotPosts.value ? XIAOHEIHE_MONITOR.target : rest.target_value.trim(),
     interval_minutes: isHotPosts.value ? undefined : rest.interval_minutes,
     min_views: isKeywordKind(rest.kind) ? Number(rest.min_views) || 0 : 0,
-    filters: isHotPosts.value ? {} : { include: words(includeText), exclude: words(excludeText) },
+    filters: isHotPosts.value ? {} : buildFilters(rest.kind, { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText }),
   })
   if (ok) {
     Object.assign(form, blank(), { interval_minutes: customQuota.value.min_interval_minutes })
+    webPreview.value = null
+    webPreviewError.value = ''
     creating.value = false
   }
 }
@@ -84,17 +169,21 @@ function startEdit(row: CustomFeedRow) {
   Object.assign(draft, {
     name: row.name, target_value: row.target_value, min_views: row.min_views, interval_minutes: row.interval_minutes,
     includeText: (row.filters?.include ?? []).join('，'), excludeText: (row.filters?.exclude ?? []).join('，'),
+    selector: row.filters?.selector ?? '',
+    excludeSelector: row.filters?.exclude_selector ?? '',
+    linkPattern: row.filters?.link_pattern ?? '',
+    ignoreText: (row.filters?.ignore_patterns ?? []).join('，'),
   })
   customError.value = customMessage.value = ''
 }
 async function saveEdit(row: CustomFeedRow) {
-  const { includeText, excludeText, ...rest } = draft
+  const { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText, ...rest } = draft
   const changes: Record<string, unknown> = { name: rest.name.trim() }
   if (row.kind !== XIAOHEIHE_MONITOR.kind) {
     changes.target_value = rest.target_value.trim()
     changes.interval_minutes = rest.interval_minutes
     changes.min_views = isKeywordKind(row.kind) ? rest.min_views : 0
-    changes.filters = { include: words(includeText), exclude: words(excludeText) }
+    changes.filters = buildFilters(row.kind, { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText })
   }
   const ok = await center.patchCustom(row, changes, '监控已更新。')
   if (ok) editing.value = null
@@ -124,7 +213,7 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
             定制监控 <span class="rounded bg-brand-soft px-1.5 py-0.5 text-[11px] font-semibold text-brand-ink">公测</span>
           </h2>
           <p class="mt-1 text-xs leading-relaxed text-muted">
-            选择 B 站、RSS / Atom、YouTube、Steam 游戏或小黑盒。公开的监控会展示在<NuxtLink to="/custom" class="link">定制监控频道</NuxtLink>，私有的仅自己可见。
+            选择 B 站、RSS / Atom、自定义网页、YouTube、Steam 游戏或小黑盒。公开的监控会展示在<NuxtLink to="/custom" class="link">定制监控频道</NuxtLink>，私有的仅自己可见。
           </p>
         </div>
         <button v-if="!creating" type="button" class="btn-primary inline-flex h-9 items-center gap-1 px-3.5" :disabled="!canCreate || loading.custom" @click="openCreate">
@@ -163,8 +252,8 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
             <input
               v-model="form.target_value"
               required
-              maxlength="128"
-              :type="form.kind === 'feed' ? 'url' : 'text'"
+              :maxlength="isUrlKind(form.kind) ? 255 : 128"
+              :type="isUrlKind(form.kind) ? 'url' : 'text'"
               :inputmode="form.kind === 'uid' ? 'numeric' : undefined"
               :pattern="form.kind === 'uid' ? '[0-9]+' : undefined"
               :placeholder="activeKindMeta.placeholder"
@@ -172,8 +261,61 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
             >
           </label>
           <label class="text-xs font-medium text-ink-2">监控名称
-            <input v-model="form.name" required maxlength="64" placeholder="例如：独立游戏资讯 / 某博客订阅" class="input mt-1.5 h-10 w-full font-normal">
+            <input v-model="form.name" required maxlength="64" placeholder="例如：独立游戏资讯 / 官网更新日志" class="input mt-1.5 h-10 w-full font-normal">
           </label>
+          <template v-if="isWebKind(form.kind)">
+            <label class="text-xs font-medium text-ink-2">内容区域选择器 <span class="font-normal text-faint">（CSS/XPath，留空自动提取）</span>
+              <input v-model="form.selector" maxlength="200" placeholder="例如：main、#changelog、article" class="input mono mt-1.5 h-10 w-full text-xs font-normal">
+            </label>
+            <label class="text-xs font-medium text-ink-2">排除噪音区域 <span class="font-normal text-faint">（可选）</span>
+              <input v-model="form.excludeSelector" maxlength="200" placeholder="例如：.ads, footer, .timestamp" class="input mono mt-1.5 h-10 w-full text-xs font-normal">
+            </label>
+            <label v-if="form.kind === WEB_LIST_MONITOR.kind" class="text-xs font-medium text-ink-2 sm:col-span-2">文章链接匹配规则 <span class="font-normal text-faint">（可选，路径前缀或 regex:）</span>
+              <input v-model="form.linkPattern" maxlength="200" placeholder="例如：/blog/ 或 regex:/news/2026" class="input mono mt-1.5 h-10 w-full text-xs font-normal">
+            </label>
+            <label v-if="form.kind === WEB_PAGE_MONITOR.kind" class="text-xs font-medium text-ink-2 sm:col-span-2">忽略动态行 <span class="font-normal text-faint">（逗号分隔，防浏览量等噪音误报，可选）</span>
+              <input v-model="form.ignoreText" placeholder="例如：在线人数, regex:更新于\\s+\\d+分钟前" class="input mono mt-1.5 h-10 w-full text-xs font-normal">
+            </label>
+            <div class="sm:col-span-2 space-y-2">
+              <button
+                type="button"
+                class="inline-flex h-8 items-center rounded-lg border border-line bg-card px-3 text-xs font-medium text-brand-ink hover:bg-chip disabled:opacity-50"
+                :disabled="webPreviewing || !form.target_value.trim()"
+                @click="previewWeb"
+              >
+                {{ webPreviewing ? '正在解析…' : '测试解析效果' }}
+              </button>
+              <p v-if="webPreviewError" class="text-xs text-hot">{{ webPreviewError }}</p>
+              <div v-if="webPreview" class="space-y-2 rounded-xl border border-line bg-card p-3 text-xs">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold text-ink">{{ webPreview.title }}</span>
+                  <span class="rounded bg-chip px-1.5 py-0.5 mono text-[11px] text-muted">{{ webPreview.extractor }}</span>
+                  <span v-if="webPreview.mode === 'page_watch'" class="text-muted">提取 {{ webPreview.text_length }} 字</span>
+                  <span v-else class="text-muted">发现 {{ webPreview.items.length }} 条链接</span>
+                </div>
+                <p v-if="webPreview.spa_warning" class="rounded bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-300">
+                  该网页可能是前端 JS 渲染页，静态抓取内容较少，建议优先改用 RSS 订阅。
+                </p>
+                <div v-if="webPreview.detected_feeds.length" class="flex flex-wrap items-center gap-1.5 rounded bg-emerald-500/10 px-2.5 py-1.5 text-emerald-700 dark:text-emerald-300">
+                  <span>检测到官方 RSS：</span>
+                  <button
+                    v-for="f in webPreview.detected_feeds"
+                    :key="f.url"
+                    type="button"
+                    class="rounded border border-emerald-500/40 bg-card px-2 py-0.5 font-medium hover:bg-emerald-500/10"
+                    @click="switchToDetectedFeed(f.url, f.title)"
+                  >
+                    改用 {{ f.title || 'RSS' }}
+                  </button>
+                </div>
+                <pre v-if="webPreview.mode === 'page_watch'" class="max-h-36 overflow-auto whitespace-pre-wrap rounded bg-chip/60 p-2 font-sans leading-relaxed text-ink-2">{{ webPreview.text_preview || '（未提取到正文）' }}</pre>
+                <ul v-else-if="webPreview.items.length" class="max-h-36 space-y-1 overflow-auto">
+                  <li v-for="(item, idx) in webPreview.items" :key="idx" class="truncate text-ink-2">· {{ item.title }}</li>
+                </ul>
+                <p v-else class="text-muted">未识别到文章链接，可填写选择器或链接前缀后重试。</p>
+              </div>
+            </div>
+          </template>
           <label v-if="isKeywordKind(form.kind)" class="text-xs font-medium text-ink-2">{{ form.kind === XIAOHEIHE_KEYWORD_MONITOR.kind ? '最低阅读量' : '最低播放量' }} <span class="font-normal text-faint">（可选）</span>
             <input v-model.number="form.min_views" type="number" min="0" max="10000000" step="1" class="input mt-1.5 h-10 w-full font-normal">
           </label>
@@ -229,8 +371,10 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
             <span>· {{ lastCollected(row) }}</span>
           </p>
           <p v-if="row.enabled && row.last_error" class="mt-1 text-xs text-hot">上次采集失败：{{ row.last_error }}</p>
-          <p v-if="row.min_views || row.filters?.include?.length || row.filters?.exclude?.length" class="mt-1 text-xs text-faint">
+          <p v-if="row.min_views || row.filters?.include?.length || row.filters?.exclude?.length || row.filters?.selector || row.filters?.link_pattern" class="mt-1 text-xs text-faint">
             <template v-if="row.min_views">{{ row.kind === XIAOHEIHE_KEYWORD_MONITOR.kind ? '阅读' : '播放' }} ≥ {{ row.min_views.toLocaleString('zh-CN') }}　</template>
+            <template v-if="row.filters?.selector">区域：{{ row.filters.selector }}　</template>
+            <template v-if="row.filters?.link_pattern">链接：{{ row.filters.link_pattern }}　</template>
             <template v-if="row.filters?.include?.length">包含：{{ row.filters.include.join('、') }}　</template>
             <template v-if="row.filters?.exclude?.length">排除：{{ row.filters.exclude.join('、') }}</template>
           </p>
@@ -255,7 +399,13 @@ const action = 'inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[13px] t
           <p class="text-sm font-bold text-ink">编辑监控</p>
           <label class="text-xs font-medium text-ink-2">监控名称<input v-model="draft.name" required maxlength="64" class="input mt-1.5 h-9 w-full font-normal"></label>
           <template v-if="row.kind !== XIAOHEIHE_MONITOR.kind">
-            <label class="text-xs font-medium text-ink-2">{{ kindFieldLabel(row.kind) }}<input v-model="draft.target_value" required maxlength="128" :type="row.kind === 'feed' ? 'url' : 'text'" :pattern="row.kind === 'uid' ? '[0-9]+' : undefined" class="input mt-1.5 h-9 w-full font-normal"></label>
+            <label class="text-xs font-medium text-ink-2">{{ kindFieldLabel(row.kind) }}<input v-model="draft.target_value" required :maxlength="isUrlKind(row.kind) ? 255 : 128" :type="isUrlKind(row.kind) ? 'url' : 'text'" :pattern="row.kind === 'uid' ? '[0-9]+' : undefined" class="input mt-1.5 h-9 w-full font-normal"></label>
+            <template v-if="isWebKind(row.kind)">
+              <label class="text-xs font-medium text-ink-2">内容选择器（可选）<input v-model="draft.selector" maxlength="200" placeholder="CSS 或 XPath" class="input mono mt-1.5 h-9 w-full text-xs font-normal"></label>
+              <label class="text-xs font-medium text-ink-2">排除选择器（可选）<input v-model="draft.excludeSelector" maxlength="200" placeholder="如 .ads, footer" class="input mono mt-1.5 h-9 w-full text-xs font-normal"></label>
+              <label v-if="row.kind === WEB_LIST_MONITOR.kind" class="text-xs font-medium text-ink-2">链接匹配规则（可选）<input v-model="draft.linkPattern" maxlength="200" placeholder="/blog/ 或 regex:..." class="input mono mt-1.5 h-9 w-full text-xs font-normal"></label>
+              <label v-if="row.kind === WEB_PAGE_MONITOR.kind" class="text-xs font-medium text-ink-2">忽略动态行（逗号分隔，可选）<input v-model="draft.ignoreText" class="input mono mt-1.5 h-9 w-full text-xs font-normal"></label>
+            </template>
             <div class="grid grid-cols-2 gap-3">
               <label v-if="isKeywordKind(row.kind)" class="text-xs font-medium text-ink-2">{{ row.kind === XIAOHEIHE_KEYWORD_MONITOR.kind ? '最低阅读量' : '最低播放量' }}<input v-model.number="draft.min_views" type="number" required min="0" max="10000000" class="input mt-1.5 h-9 w-full font-normal"></label>
               <label class="text-xs font-medium text-ink-2">采集间隔（分钟）<input v-model.number="draft.interval_minutes" type="number" required :min="Math.min(row.interval_minutes, customQuota.min_interval_minutes)" max="1440" class="input mt-1.5 h-9 w-full font-normal"></label>

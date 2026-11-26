@@ -40,8 +40,8 @@ class CustomFeed(Base):
     name: Mapped[str] = mapped_column(String(64))
     kind: Mapped[str] = mapped_column(String(16))  # uid / keyword；站点源支持 notices
     platform: Mapped[str] = mapped_column(String(16), default="bilibili")
-    # uid 监控存 UID；关键词监控存关键词
-    target_value: Mapped[str] = mapped_column(String(128))
+    # uid 监控存 UID；关键词监控存关键词；RSS/网页监控存公开 URL
+    target_value: Mapped[str] = mapped_column(String(255))
     source_id: Mapped[int | None] = mapped_column(ForeignKey("custom_feed_sources.id", name="fk_custom_feed_source", ondelete="SET NULL"), index=True)
     # 个人筛选与共享采集目标分开；公开开关、邮件开关继续独立维护。
     filters: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -91,7 +91,7 @@ class CustomFeedSource(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[str] = mapped_column(String(16))
     kind: Mapped[str] = mapped_column(String(16))
-    target_value: Mapped[str] = mapped_column(String(128))
+    target_value: Mapped[str] = mapped_column(String(255))
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime)

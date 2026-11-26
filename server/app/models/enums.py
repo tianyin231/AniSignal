@@ -15,6 +15,7 @@ class Platform(StrEnum):
     XIAOHEIHE = "xiaoheihe"
     STEAM = "steam"
     RSS = "rss"
+    WEB_PAGE = "web_page"
     GAME_OFFICIAL = "game_official"
 
 
@@ -54,6 +55,8 @@ class TargetType(StrEnum):
     NOTICES = "notices"
     CHANNEL_RSS = "channel_rss"
     FEED = "feed"
+    PAGE_WATCH = "page_watch"
+    LIST_WATCH = "list_watch"
 
 
 class ContentType(StrEnum):
@@ -62,6 +65,7 @@ class ContentType(StrEnum):
     POST = "post"
     NOTICE = "notice"
     RSS_ITEM = "rss_item"
+    WEB_PAGE = "web_page"
 
 
 class Identity(StrEnum):

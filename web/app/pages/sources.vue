@@ -27,6 +27,7 @@ const regionLabel: Record<string, string> = {
   youtube: '海外',
   x: '海外',
   rss: '通用',
+  web_page: '通用',
   game_official: '官方',
 }
 
@@ -37,6 +38,8 @@ const targetTypeLabels: Record<string, string> = {
   notices: '官方公告',
   channel_rss: '频道 RSS',
   feed: 'RSS 订阅',
+  page_watch: '单页变更',
+  list_watch: '列表新增',
 }
 </script>
 

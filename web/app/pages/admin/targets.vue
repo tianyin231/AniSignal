@@ -394,8 +394,24 @@ const combos: Record<string, string[]> = {
   youtube: ['channel_rss'],
   x: ['account_dynamics'],
   rss: ['feed'],
+  web_page: ['page_watch', 'list_watch'],
 }
 const collectPlatforms = Object.keys(platformLabels).filter(platform => platform in combos)
+
+interface WebPreviewResult {
+  mode: string
+  url: string
+  title: string
+  site_name: string | null
+  published_at: string | null
+  extractor: string
+  text_length: number
+  text_preview: string
+  media_count: number
+  detected_feeds: { url: string; title: string; type: string }[]
+  spa_warning: boolean
+  items: { title: string; url: string; published_at: string | null }[]
+}
 
 const form = reactive({
   platform: 'bilibili',
@@ -408,7 +424,15 @@ const form = reactive({
   tier: 'general',
   community: 'wuwa',
   is_official: false,
+  web_selector: '',
+  web_exclude_selector: '',
+  web_link_pattern: '',
+  web_ignore_patterns: '',
+  web_fetch_body: true,
 })
+const webPreview = ref<WebPreviewResult | null>(null)
+const webPreviewing = ref(false)
+const webPreviewError = ref<string | null>(null)
 const creating = ref(false)
 const formError = ref<string | null>(null)
 const editingId = ref<number | null>(null)
@@ -471,6 +495,11 @@ const defaultMinViews = () => (supportsViews.value && form.platform === 'bilibil
 
 const targetPlaceholder = computed(() => {
   if (form.platform === 'rss') return 'RSS / Atom 地址，如 https://openai.com/news/rss.xml'
+  if (form.platform === 'web_page') {
+    return form.target_type === 'list_watch'
+      ? '列表页地址，如 https://example.com/news 或 /blog'
+      : '目标网页地址，如 https://example.com/changelog'
+  }
   if (form.platform === 'youtube') return 'YouTube 频道链接、@handle 或 UC 开头的频道 ID'
   if (form.platform === 'x') return '@账号 或 https://x.com/账号'
   if (form.platform === 'game_official') return '仅支持 genshin / endfield / nikke'
@@ -489,12 +518,17 @@ watch(adminCommunities, (list) => {
 }, { immediate: true })
 
 watch(() => form.platform, () => {
+  webPreview.value = null
+  webPreviewError.value = null
   if (!editingId.value) {
     form.target_type = availableTypes.value[0] ?? 'keyword_search'
-    form.interval_minutes = form.platform === 'x' ? 60 : 30
+    form.interval_minutes = form.platform === 'x' || form.platform === 'web_page' ? 60 : 30
+    if (form.platform === 'web_page') form.is_official = true
   }
 })
 watch(() => form.target_type, (next) => {
+  webPreview.value = null
+  webPreviewError.value = null
   if (next === 'keyword_search') form.is_official = false
 })
 watch([() => form.target_type, () => form.community, supportsViews], () => {
@@ -555,6 +589,53 @@ onMounted(async () => {
   }
 })
 
+function buildWebConfigPayload() {
+  if (form.platform !== 'web_page') return undefined
+  const ignores = form.web_ignore_patterns.split(/[,，\n]+/).map(x => x.trim()).filter(Boolean)
+  return {
+    selector: form.web_selector.trim(),
+    exclude_selector: form.web_exclude_selector.trim(),
+    link_pattern: form.target_type === 'list_watch' ? form.web_link_pattern.trim() : '',
+    ignore_patterns: form.target_type === 'page_watch' ? ignores : [],
+    fetch_body: form.target_type === 'list_watch' ? form.web_fetch_body : undefined,
+  }
+}
+
+async function previewWebPage() {
+  if (form.platform !== 'web_page' || !form.target_value.trim() || webPreviewing.value) return
+  webPreviewing.value = true
+  webPreviewError.value = null
+  try {
+    webPreview.value = await api<WebPreviewResult>('/api/admin/web-page/preview', {
+      method: 'POST',
+      body: {
+        url: form.target_value.trim(),
+        mode: form.target_type === 'list_watch' ? 'list_watch' : 'page_watch',
+        web_config: buildWebConfigPayload(),
+      },
+    })
+    if (!form.display_name.trim() && webPreview.value?.title) {
+      form.display_name = webPreview.value.title.slice(0, 64)
+    }
+  } catch (exc: any) {
+    webPreview.value = null
+    webPreviewError.value = apiErrorDetail(exc, '网页解析测试失败')
+  } finally {
+    webPreviewing.value = false
+  }
+}
+
+function useDetectedFeed(feedUrl: string, feedTitle: string) {
+  if (editingId.value !== null) return
+  form.platform = 'rss'
+  form.target_type = 'feed'
+  form.target_value = feedUrl
+  if (!form.display_name.trim() && feedTitle) form.display_name = feedTitle.slice(0, 64)
+  webPreview.value = null
+  webPreviewError.value = null
+  toast.info('已切换为该站点官方 RSS 订阅源')
+}
+
 async function create() {
   if (!form.target_value.trim() || creating.value) return
   creating.value = true
@@ -574,6 +655,7 @@ async function create() {
         tier: form.tier,
         community: form.community,
         is_official: form.target_type !== 'keyword_search' && form.is_official,
+        web_config: buildWebConfigPayload(),
       },
     })
     editingId.value = null
@@ -583,7 +665,14 @@ async function create() {
     form.co_terms = ''
     form.min_views = defaultMinViews()
     form.tier = 'general'
-    form.is_official = false
+    form.is_official = form.platform === 'web_page'
+    form.web_selector = ''
+    form.web_exclude_selector = ''
+    form.web_link_pattern = ''
+    form.web_ignore_patterns = ''
+    form.web_fetch_body = true
+    webPreview.value = null
+    webPreviewError.value = null
     await Promise.all([refresh(), loadCommunities()])
   } catch (exc: any) {
     formError.value = apiErrorDetail(exc, exc?.statusCode === 409 ? '该分区下已存在相同的采集目标' : '保存失败，请重试')
@@ -595,11 +684,19 @@ async function create() {
 async function edit(target: CollectTarget) {
   editingId.value = target.id
   formError.value = null
+  webPreview.value = null
+  webPreviewError.value = null
+  const webCfg = target.web_config || {}
   Object.assign(form, {
     platform: target.platform, target_type: target.target_type, target_value: target.target_value,
     display_name: target.display_name || '', interval_minutes: target.interval_minutes,
     co_terms: (target.co_terms || []).join('，'), min_views: target.min_views || 0,
     tier: target.tier, community: target.community, is_official: !!target.is_official,
+    web_selector: webCfg.selector || '',
+    web_exclude_selector: webCfg.exclude_selector || '',
+    web_link_pattern: webCfg.link_pattern || '',
+    web_ignore_patterns: (webCfg.ignore_patterns || []).join('\n'),
+    web_fetch_body: webCfg.fetch_body !== false,
   })
   await nextTick()
   form.min_views = target.min_views || 0
@@ -612,6 +709,13 @@ function cancelEdit() {
   form.display_name = ''
   form.co_terms = ''
   form.is_official = false
+  form.web_selector = ''
+  form.web_exclude_selector = ''
+  form.web_link_pattern = ''
+  form.web_ignore_patterns = ''
+  form.web_fetch_body = true
+  webPreview.value = null
+  webPreviewError.value = null
   formError.value = null
 }
 
@@ -951,6 +1055,87 @@ async function remove(target: CollectTarget) {
         <input v-model="form.is_official" type="checkbox" class="checkbox" :disabled="['keyword_search', 'topic_search'].includes(form.target_type)">
         <span>标记为官方账号（入库内容标为「官方」）</span>
       </label>
+      <div v-if="form.platform === 'web_page'" class="col-span-full space-y-3 rounded-xl border border-line bg-chip/30 p-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-xs font-medium text-ink-2">网页解析规则（可选，留空自动使用 Trafilatura + Readability 通用提取）</span>
+          <button
+            type="button"
+            class="rounded-md border border-line bg-card px-3 py-1 text-xs font-medium text-brand-ink transition-colors hover:bg-chip disabled:opacity-50"
+            :disabled="webPreviewing || !form.target_value.trim()"
+            @click="previewWebPage"
+          >
+            {{ webPreviewing ? '解析中…' : '测试解析' }}
+          </button>
+        </div>
+        <div class="grid gap-2.5 sm:grid-cols-2">
+          <input
+            v-model="form.web_selector"
+            maxlength="200"
+            placeholder="内容区域选择器（CSS/XPath，如 main、#changelog、//article）"
+            aria-label="内容区域选择器"
+            class="input mono px-3 py-2 text-xs"
+          >
+          <input
+            v-model="form.web_exclude_selector"
+            maxlength="200"
+            placeholder="排除噪音区域（CSS/XPath，如 .ads, footer, .timestamp）"
+            aria-label="排除噪音选择器"
+            class="input mono px-3 py-2 text-xs"
+          >
+          <input
+            v-if="form.target_type === 'list_watch'"
+            v-model="form.web_link_pattern"
+            maxlength="200"
+            placeholder="文章链接匹配（路径前缀如 /blog/ 或 regex:/news/2026）"
+            aria-label="文章链接匹配规则"
+            class="input mono px-3 py-2 text-xs"
+          >
+          <label v-if="form.target_type === 'list_watch'" class="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+            <input v-model="form.web_fetch_body" type="checkbox" class="checkbox">
+            <span>新发现文章自动补读全文与发布时间</span>
+          </label>
+          <input
+            v-if="form.target_type === 'page_watch'"
+            v-model="form.web_ignore_patterns"
+            placeholder="忽略动态噪音行（逗号分隔，如 在线人数,regex:更新于\\s+\\d+分钟前）"
+            aria-label="忽略变更行规则"
+            class="input mono px-3 py-2 text-xs sm:col-span-2"
+          >
+        </div>
+        <p v-if="webPreviewError" class="text-xs text-red-600 dark:text-red-400">{{ webPreviewError }}</p>
+        <div v-if="webPreview" class="space-y-2 rounded-lg border border-line bg-card p-3 text-xs">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold text-ink">{{ webPreview.title }}</span>
+            <span class="rounded bg-chip px-1.5 py-0.5 mono text-[11px] text-muted">引擎：{{ webPreview.extractor }}</span>
+            <span v-if="webPreview.mode === 'page_watch'" class="text-muted">正文 {{ webPreview.text_length }} 字 · {{ webPreview.media_count }} 图</span>
+            <span v-else class="text-muted">发现 {{ webPreview.items.length }} 条链接</span>
+          </div>
+          <p v-if="webPreview.spa_warning" class="rounded bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-300">
+            该页面静态 HTML 内容极少，可能是前端 JS 渲染页（SPA），建议改用 RSS / RSSHub 接入。
+          </p>
+          <div v-if="webPreview.detected_feeds.length" class="flex flex-wrap items-center gap-2 rounded bg-emerald-500/10 px-2.5 py-1.5 text-emerald-700 dark:text-emerald-300">
+            <span>检测到站点自带官方 RSS：</span>
+            <button
+              v-for="f in webPreview.detected_feeds"
+              :key="f.url"
+              type="button"
+              class="rounded border border-emerald-500/40 bg-card px-2 py-0.5 font-medium hover:bg-emerald-500/10 disabled:opacity-50"
+              :disabled="editingId !== null"
+              @click="useDetectedFeed(f.url, f.title)"
+            >
+              改用 {{ f.title || f.url }}
+            </button>
+          </div>
+          <pre v-if="webPreview.mode === 'page_watch'" class="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-chip/60 p-2.5 font-sans text-xs leading-relaxed text-ink-2">{{ webPreview.text_preview || '（未提取到正文）' }}</pre>
+          <ul v-else-if="webPreview.items.length" class="max-h-44 space-y-1 overflow-auto">
+            <li v-for="(item, idx) in webPreview.items" :key="idx" class="flex items-baseline justify-between gap-2 border-t border-line-soft pt-1 first:border-0 first:pt-0">
+              <a :href="item.url" target="_blank" rel="noopener" class="truncate text-ink-2 hover:text-brand-ink">{{ item.title }}</a>
+              <span v-if="item.published_at" class="mono shrink-0 text-[11px] text-faint">{{ item.published_at.slice(0, 10) }}</span>
+            </li>
+          </ul>
+          <p v-else class="text-muted">未发现匹配的文章链接，可尝试调整选择器或链接前缀规则。</p>
+        </div>
+      </div>
       <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
         {{ creating ? '保存中…' : editingId ? '保存修改' : '新增目标' }}
       </button>
@@ -1021,6 +1206,7 @@ async function remove(target: CollectTarget) {
             <td class="px-3 py-2.5">
               <span class="font-medium">{{ target.display_name && target.display_name !== target.target_value ? target.display_name : target.target_value }}</span>
               <span v-if="target.is_official" class="ml-1.5 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">官方</span>
+              <span v-if="target.web_config?.selector" class="mono ml-1.5 rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted" :title="`选择器：${target.web_config.selector}`">{{ target.web_config.selector }}</span>
               <span v-if="target.display_name && target.display_name !== target.target_value" class="mono ml-1.5 text-xs text-faint">{{ target.target_value }}</span>
             </td>
             <td class="whitespace-nowrap px-2.5 py-2.5 text-ink-2">

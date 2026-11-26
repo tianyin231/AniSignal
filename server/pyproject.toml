@@ -22,6 +22,9 @@ dependencies = [
   "trafilatura>=2.0,<3",
   "qrcode[pil]>=8.2,<9",
   "pycryptodome>=3.23.0",
+  "parsel>=1.10,<2",
+  "readability-lxml>=0.8,<1",
+  "html2text>=2024.2.26",
 ]
 
 [dependency-groups]

@@ -56,3 +56,8 @@ class CollectTarget(Base):
     @property
     def is_official(self) -> bool:
         return bool((self.config or {}).get("is_official"))
+
+    @property
+    def web_config(self) -> dict:
+        raw = (self.config or {}).get("web")
+        return dict(raw) if isinstance(raw, dict) else {}

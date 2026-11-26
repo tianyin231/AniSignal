@@ -187,7 +187,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
   <div class="space-y-4">
     <div class="wall-heading">
       <h1 class="text-2xl font-bold text-ink">定制监控</h1>
-      <p class="mt-0.5 text-sm text-muted">全站用户自建的关键词 / UP 主 / RSS / YouTube 监控源巡查与处置。</p>
+      <p class="mt-0.5 text-sm text-muted">全站用户自建的关键词 / UP 主 / RSS / 网页监控 / YouTube 监控源巡查与处置。</p>
     </div>
 
     <section class="panel space-y-4 p-4" aria-label="定制采集公测容量">
@@ -254,6 +254,8 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <option value="uid">UID 监控</option>
           <option value="keyword">关键词监控</option>
           <option value="feed">RSS 订阅</option>
+          <option value="page_watch">网页变更</option>
+          <option value="list_watch">网页列表</option>
           <option value="channel_rss">YouTube 频道</option>
           <option value="steam_app">Steam 游戏</option>
           <option value="notices">官方公告</option>
