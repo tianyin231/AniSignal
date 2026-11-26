@@ -32,7 +32,7 @@ const PROVIDER_LABELS: Record<string, string> = Object.fromEntries(PROVIDERS.map
 const MODE_LABELS: Record<string, string> = {
   keywords: '命中关注词',
   all: '偏好分区重要事件',
-  revisions: '仅官方公告修订',
+  revisions: '仅官方原文修订',
 }
 
 const { user } = useAuth()

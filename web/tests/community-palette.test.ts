@@ -39,10 +39,10 @@ test('动态十六进制主题样式同时输出浅色与深色 CSS 规则并自
   assert.equal(css.split('.ch-hex-ef4444{').length - 1, 1)
 })
 
-test('定制监控类型与平台徽章支持 RSS、自定义网页、YouTube 频道、Steam 游戏与小黑盒', () => {
+test('定制监控类型与平台徽章支持 RSS、网页监测、YouTube 频道、Steam 游戏与小黑盒', () => {
   assert.equal(customKindLabel('feed'), 'RSS 订阅')
-  assert.equal(customKindLabel('page_watch'), '网页变更')
-  assert.equal(customKindLabel('list_watch'), '网页列表')
+  assert.equal(customKindLabel('page_watch'), '单页变更')
+  assert.equal(customKindLabel('list_watch'), '列表更新')
   assert.equal(customKindLabel('channel_rss'), 'YouTube 频道')
   assert.equal(customKindLabel('steam_app'), 'Steam 游戏')
   assert.equal(customKindLabel('xhh_account'), '小黑盒账号')

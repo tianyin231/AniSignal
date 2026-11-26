@@ -74,8 +74,8 @@ export interface CustomQuota {
 
 export const ACCOUNT_TABS = [
   { key: 'feed', label: '关注流' },
-  { key: 'notify', label: '通知' },
-  { key: 'custom', label: '定制监控' },
+  { key: 'notify', label: '消息通知' },
+  { key: 'custom', label: '我的监控' },
   { key: 'profile', label: '账号与安全' },
 ] as const
 export type AccountTab = typeof ACCOUNT_TABS[number]['key']
@@ -218,8 +218,8 @@ export function createAccountCenter() {
   const aiReady = computed(() => notificationReady.value && !loading.keywords && !errors.keywords && enabledKeywords.value.length > 0)
   const notificationBlockReason = computed(() => {
     if (loading.notifications || errors.notifications) return ''
-    if (!notifications.value?.enabled) return '开启邮件通知后才能接收早报，也才能手动发送。'
-    if (!loading.keywords && !errors.keywords && !enabledKeywords.value.length) return '每日早报已开启；AI 精炼和重要变化提醒需要先添加关键词。'
+    if (!notifications.value?.enabled) return '开启邮件通知后方可接收早报及手动发送'
+    if (!loading.keywords && !errors.keywords && !enabledKeywords.value.length) return '每日早报已开启；AI 摘要邮件和重要变化提醒需先添加关键词'
     return ''
   })
 
@@ -249,7 +249,7 @@ export function createAccountCenter() {
   }
   function toggleRevision() {
     const revision_enabled = !notifications.value?.revision_enabled
-    return updateNotifications('revision', { revision_enabled }, revision_enabled ? '官方公告修订提醒已开启，只提醒之后的新修订。' : '官方公告修订提醒已关闭。')
+    return updateNotifications('revision', { revision_enabled }, revision_enabled ? '官方原文修订提醒已开启，仅提醒之后的新修订' : '官方原文修订提醒已关闭')
   }
   async function sendNotification(kind: 'morning' | 'ai') {
     if (notifyBusy.value) return

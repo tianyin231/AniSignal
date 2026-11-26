@@ -1,6 +1,6 @@
 # AniSignal Web
 
-[产品首页](../README.md) · [功能指南](../docs/features.md) · [部署指南](../docs/deployment.md)
+[产品首页](../README.md) · [功能指南](../docs/features.md) · [文字与界面规范](../docs/ui-copy-guidelines.md) · [部署指南](../docs/deployment.md)
 
 信号台的阅读界面，基于 Nuxt 4、Tailwind CSS 4 与 TypeScript。聚合首页、分区、事件证据、商品进展、定制监控、账号中心与管理后台都从后端 API 取数。
 
@@ -41,6 +41,7 @@ npm run build
 - 站点文案由 `useSiteConfig()` 读取。当前采集主题不等于固定产品范围；新增分区要核对注册、导航、过滤条件与查询缓存，不能只替换标签。
 - 认证页与账号中心使用独立布局。管理端异步操作应提供忙碌状态与 toast，不使用 `alert()`。
 - 视觉走「信号台」设计令牌：颜色只用 `main.css` 的 `--sd-*` 变量对应的 Tailwind 色名（`bg-card`、`text-ink`、`text-muted`、`bg-brand`、`bg-wuwa-soft` 等），深色模式只改变量；内容卡片用 `.panel`，直接压在背景上的标题/栏目条加 `.wall-surface`。
+- 界面文案与术语遵循[文字规范与前端减负指南](../docs/ui-copy-guidelines.md)，平台、监控类型、目标类型与状态文案统一由 `app/utils/lexicon.ts` 导出，禁止在页面内各自维护重复字典。
 - 频道主题：布局按当前频道挂 `.ch-<分区>`，`accent` 系列色随之变为该游戏品牌色；分区色、徽章只在 `useGameSection.ts` 的 `COMMUNITY_CLASSES` 维护。论坛蓝仍是主按钮与链接色。
 - 随机壁纸是站点特色功能，必须保留：开启时 `<html data-wallpaper>` 让卡片自动切为毛玻璃，新增浮在背景上的区块要在壁纸模式下核对可读性。时间格式沿用项目公共格式化工具。
 - 纯计算工具放在 `app/utils/` 并补 `tests/*.test.ts`，用 `node --test tests/*.test.ts` 运行。

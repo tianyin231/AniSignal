@@ -19,7 +19,7 @@ onBeforeUnmount(() => {
 
 const categoryLabels: Record<string, string> = {
   kuro: '库洛',
-  bilibili: 'B站',
+  bilibili: 'B 站',
   youtube: 'YouTube',
   miyoushe: '米游社',
   web: '活动',

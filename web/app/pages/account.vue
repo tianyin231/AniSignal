@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, Code2 } from 'lucide-vue-next'
 import { ACCOUNT_CENTER, ACCOUNT_TABS, createAccountCenter, type AccountTab } from '~/composables/useAccountCenter'
 import { loginRoute } from '~/utils/safe-redirect'
 
@@ -25,6 +26,9 @@ function tabRoute(key: AccountTab) {
   return { path: '/account', query: key === 'feed' ? query : { ...query, tab: key } }
 }
 const selectTab = (key: AccountTab) => router.replace(tabRoute(key))
+
+const ADVANCED_HASHES = new Set(['#webhooks', '#rss', '#mcp'])
+const advancedNotifyOpen = ref(ADVANCED_HASHES.has(route.hash))
 
 const keywordsPanel = ref<{ focus: () => void } | null>(null)
 async function focusKeywords() {
@@ -62,6 +66,7 @@ onMounted(() => {
   watch(user, (value) => {
     if (scrolled || !value) return
     scrolled = true
+    if (ADVANCED_HASHES.has(route.hash)) advancedNotifyOpen.value = true
     nextTick(() => document.getElementById(route.hash.slice(1))?.scrollIntoView({ block: 'start' }))
   }, { immediate: true })
 })
@@ -91,16 +96,51 @@ onBeforeUnmount(center.dispose)
       <AccountFeed class="lg:col-start-1 lg:row-span-2 lg:row-start-1" @add-keyword="focusKeywords" />
       <AccountPreferences class="lg:col-start-2 lg:row-start-2" @saved="onPreferencesSaved" />
     </div>
-    <div v-else-if="tab === 'notify'" class="grid items-start gap-5 lg:grid-cols-2">
-      <div class="space-y-5">
-        <AccountEmail @add-keyword="focusKeywords" />
-        <AccountWebhooks />
-      </div>
-      <div class="space-y-5">
-        <AccountBotAccess />
-        <RssSubscribe compact personal />
-        <McpConnect compact personal />
-      </div>
+    <div v-else-if="tab === 'notify'" class="space-y-6">
+      <section aria-label="常用通知">
+        <div class="grid items-start gap-5 lg:grid-cols-2">
+          <AccountEmail @add-keyword="focusKeywords" />
+          <AccountBotAccess />
+        </div>
+      </section>
+
+      <section aria-labelledby="advanced-notify-title" class="space-y-4">
+        <button
+          type="button"
+          class="panel flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left transition-colors hover:border-faint/60"
+          :aria-expanded="advancedNotifyOpen"
+          aria-controls="advanced-notify-grid"
+          @click="advancedNotifyOpen = !advancedNotifyOpen"
+        >
+          <span class="flex min-w-0 items-center gap-3">
+            <span class="grid size-9 shrink-0 place-items-center rounded-xl bg-chip text-ink-2" aria-hidden="true">
+              <Code2 :size="17" />
+            </span>
+            <span class="min-w-0">
+              <span id="advanced-notify-title" class="block text-sm font-bold text-ink">开发者与进阶接入</span>
+              <span class="mt-0.5 block truncate text-xs text-muted">Webhook 推送 · 个人 RSS 订阅 · MCP 接入</span>
+            </span>
+          </span>
+          <span class="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-muted">
+            {{ advancedNotifyOpen ? '收起' : '展开配置' }}
+            <ChevronDown :size="15" class="transition-transform" :class="{ 'rotate-180': advancedNotifyOpen }" />
+          </span>
+        </button>
+
+        <div v-if="advancedNotifyOpen" id="advanced-notify-grid" class="grid items-start gap-5 lg:grid-cols-2">
+          <div id="webhooks" class="scroll-mt-24">
+            <AccountWebhooks />
+          </div>
+          <div class="space-y-5">
+            <div id="rss" class="scroll-mt-24">
+              <RssSubscribe compact personal />
+            </div>
+            <div id="mcp" class="scroll-mt-24">
+              <McpConnect compact personal />
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
     <AccountMonitors v-else-if="tab === 'custom'" />
     <div v-else class="space-y-5">

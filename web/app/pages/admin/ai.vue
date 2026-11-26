@@ -2,7 +2,7 @@
 import { Bot, Coins, Cpu, Zap } from 'lucide-vue-next'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
-useSeoMeta({ title: 'AI 层 · AniSignal 管理看板' })
+useSeoMeta({ title: 'AI 配置 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
 const { refreshSiteConfig } = useSiteConfig()
@@ -189,7 +189,7 @@ async function translateMissing() {
 <template>
   <div class="space-y-6">
     <div class="wall-heading">
-      <h1 class="text-2xl font-bold">AI 层（LLM）</h1>
+      <h1 class="text-2xl font-bold">AI 配置</h1>
       <p class="mt-0.5 text-sm text-muted">
         配置 OpenAI 兼容接口，管理事件摘要与内容翻译任务，跟踪 token 消耗与费用。
       </p>

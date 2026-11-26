@@ -16,7 +16,7 @@ const STATUS: Record<NotificationState, { label: string, tone: string }> = {
   failed: { label: '失败', tone: 'bg-hot/10 text-hot' },
 }
 const KIND: Record<string, string> = {
-  morning: '每日早报', ai: 'AI 精炼', instant: '重要变化', webhook: 'Webhook 推送', custom: '定制监控', admin: '管理员通知', broadcast: '站点公告',
+  morning: '每日早报', ai: 'AI 摘要邮件', instant: '重要变化', webhook: 'Webhook 推送', custom: '定制监控', admin: '管理员通知', broadcast: '站点公告',
 }
 const records = computed(() => (notifications.value?.records ?? []).slice(0, 5).map(record => ({
   ...record,
@@ -71,12 +71,12 @@ const needsKeyword = computed(() => notificationReady.value && !loading.keywords
       </div>
       <div class="flex items-center gap-3 py-3">
         <div class="min-w-0 flex-1">
-          <dt class="font-semibold text-ink">官方公告修订提醒</dt>
-          <dd class="mt-0.5 text-xs leading-relaxed text-muted">监测到官方原文实质改字、改时间或换图时即时发信，按偏好分区与屏蔽词筛选，不补发历史。</dd>
+          <dt class="font-semibold text-ink">官方原文修订</dt>
+          <dd class="mt-0.5 text-xs leading-relaxed text-muted">监测到官方原文实质修改文字、时间或图片时即时发信，按偏好分区与屏蔽词筛选，不补发历史。</dd>
         </div>
         <UiSwitch
           :on="notifications?.revision_enabled ?? false"
-          :label="notifications?.revision_enabled ? '关闭官方公告修订提醒' : '开启官方公告修订提醒'"
+          :label="notifications?.revision_enabled ? '关闭官方原文修订提醒' : '开启官方原文修订提醒'"
           :disabled="!notificationReady || (!!notifyBusy && notifyBusy !== 'revision')"
           :busy="notifyBusy === 'revision'"
           @toggle="center.toggleRevision()"
@@ -86,9 +86,9 @@ const needsKeyword = computed(() => notificationReady.value && !loading.keywords
 
     <UiNotice v-if="notificationBlockReason" tone="info" class="mt-4">
       {{ notificationBlockReason }}
-      <button v-if="needsKeyword" type="button" class="link mt-1 block font-semibold" @click="emit('addKeyword')">去添加关键词</button>
+      <button v-if="needsKeyword" type="button" class="link mt-1 block font-semibold" @click="emit('addKeyword')">添加关键词</button>
     </UiNotice>
-    <UiNotice v-if="(notifications?.instant_enabled || notifications?.revision_enabled) && !notifications.enabled" tone="info" class="mt-3">即时提醒与官方修订的设置已保留，开启邮件通知后恢复。</UiNotice>
+    <UiNotice v-if="(notifications?.instant_enabled || notifications?.revision_enabled) && !notifications.enabled" tone="info" class="mt-3">即时提醒与官方原文修订设置已保留，开启邮件通知后自动恢复</UiNotice>
 
     <div class="mt-4 grid gap-2 sm:grid-cols-2">
       <button type="button" class="btn-primary inline-flex h-10 items-center justify-center gap-1.5 px-3" :disabled="!!notifyBusy || !notificationReady" @click="center.sendNotification('morning')">
@@ -100,7 +100,7 @@ const needsKeyword = computed(() => notificationReady.value && !loading.keywords
         :disabled="!!notifyBusy || !aiReady"
         @click="center.sendNotification('ai')"
       >
-        <Sparkles :size="15" /> {{ notifyBusy === 'ai' ? '提交中…' : '生成 AI 精炼' }}
+        <Sparkles :size="15" /> {{ notifyBusy === 'ai' ? '提交中…' : '生成摘要邮件' }}
       </button>
     </div>
     <p class="mt-2 flex items-start gap-1.5 text-xs leading-relaxed text-faint">

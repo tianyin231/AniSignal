@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, Settings
 import type { SteamPulseApp } from '~/composables/usePublicApi'
 import { apiErrorDetail } from '~/utils/api-errors'
 import { customFeedBadge, customKindLabel, STEAM_MONITOR, XIAOHEIHE_ACCOUNT_MONITOR, XIAOHEIHE_MONITOR } from '~/utils/custom-feeds'
+import { platformLabel } from '~/utils/lexicon'
 import { imageSrcset, imageUrl } from '~/utils/image'
 import { fmtShort, relativeTime, toTimestamp } from '~/utils/schedule'
 
@@ -72,12 +73,11 @@ watch(() => data.value?.community, (community) => {
   if (community) navigateTo({ path: '/', query: { community } }, { replace: true })
 })
 
-useSeoMeta({ title: () => `${data.value?.name ?? '定制监控'} · 定制化 · AniSignal` })
+useSeoMeta({ title: () => `${data.value?.name ?? '定制监控'} · 定制监控 · AniSignal` })
 
 const badge = computed(() => customFeedBadge(data.value?.platform ?? ''))
 const totalPages = computed(() => Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize)))
 const goPage = (value: number) => router.replace({ query: { ...route.query, page: value > 1 ? value : undefined } })
-const PLATFORM_LABEL: Record<string, string> = { bilibili: 'B站', youtube: 'YouTube', rss: 'RSS', web_page: '网页', x: 'X', game_official: '官网', xiaoheihe: '小黑盒', steam: 'Steam' }
 const triggering = ref(false)
 const triggerMsg = ref('')
 async function triggerCollect() {
@@ -97,7 +97,7 @@ const rows = computed(() => (data.value?.items ?? []).map((item) => {
   const ts = toTimestamp(item.published_at)
   return {
     ...item,
-    platformLabel: PLATFORM_LABEL[item.platform] ?? item.platform,
+    platformLabel: platformLabel(item.platform),
     views: item.view ? `${item.view.toLocaleString('zh-CN')} ${item.content_type === 'notice' || item.content_type === 'post' ? '阅读' : '播放'}` : '',
     time: Number.isFinite(ts) ? relativeTime(ts, now.value) : '',
     exactTime: Number.isFinite(ts) ? fmtShort(ts) : '',
@@ -123,7 +123,7 @@ const emptyText = computed(() => {
 <template>
   <div>
     <NuxtLink to="/custom" class="-ml-1 mb-3 inline-flex h-8 items-center gap-1 rounded-lg px-1 text-sm text-muted transition-colors hover:text-ink">
-      <ArrowLeft :size="15" /> 定制化
+      <ArrowLeft :size="15" /> 定制监控
     </NuxtLink>
 
     <div v-if="status === 'pending' && !data" class="space-y-4" aria-hidden="true">
@@ -168,7 +168,7 @@ const emptyText = computed(() => {
             :disabled="triggering"
             @click="triggerCollect"
           >
-            <RefreshCw :size="14" /> {{ triggering ? '排队中…' : '立即抓取' }}
+            <RefreshCw :size="14" /> {{ triggering ? '排队中…' : '立即采集' }}
           </button>
           <NuxtLink v-if="data.is_owner" to="/account?tab=custom" class="btn-primary inline-flex h-9 items-center gap-1.5 px-3.5">
             <Settings2 :size="15" /> 管理监控

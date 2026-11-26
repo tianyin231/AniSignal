@@ -1,13 +1,26 @@
 <script setup lang="ts">
+import {
+  ChevronDown,
+  Download,
+  MoreHorizontal,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from 'lucide-vue-next'
 import type { CollectTarget } from '~/utils/admin-types'
 import { fmtTime, platformLabels, targetTypeLabels } from '~/utils/admin-types'
 import { useAdminCommunities } from '~/utils/admin-communities'
 import { apiErrorDetail } from '~/utils/api-errors'
 import { colorToHex } from '~/utils/community-palette'
+import { TIER_META, tierLabel, webExtractorLabel } from '~/utils/lexicon'
 import type { SiteCommunityItem } from '~/composables/useSiteConfig'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
-useSeoMeta({ title: '分区与信源定制 · AniSignal 管理看板' })
+useSeoMeta({ title: '分区与信源 · AniSignal 管理看板' })
 
 interface AdminCommunityRow extends SiteCommunityItem {
   target_count: number
@@ -36,16 +49,35 @@ interface RunItem {
   items_fetched: number | null
   items_filtered: number | null
 }
+interface WebPreviewResult {
+  mode: string
+  url: string
+  title: string
+  site_name: string | null
+  published_at: string | null
+  extractor: string
+  text_length: number
+  text_preview: string
+  media_count: number
+  detected_feeds: { url: string; title: string; type: string }[]
+  spa_warning: boolean
+  items: { title: string; url: string; published_at: string | null }[]
+}
 
 const { api } = useAdminApi()
 const toast = useAdminToast()
 const { communities: adminCommunities, labelOf, badgeOf, refreshSiteConfig } = useAdminCommunities()
 
+type PageTab = 'sources' | 'communities' | 'bilibili'
+const activeTab = ref<PageTab>('sources')
+const runsOpen = ref(false)
+const openRowMenuId = ref<number | null>(null)
+
 const targets = ref<CollectTarget[]>([])
 const error = ref<string | null>(null)
 const busyId = ref<number | null>(null)
 
-/* ---------- B 站登录态（扫码 / 粘贴 Cookie / 退出） ---------- */
+/* ---------- B 站登录态（扫码 / 账号密码 / 短信 / 粘贴 Cookie / 退出） ---------- */
 const biliSession = ref<{ state: string; message: string; checked_at?: string; source?: string } | null>(null)
 const checkingBili = ref(false)
 const qrSession = ref<{ qrcode_key: string; qr_image: string; state: string; message: string } | null>(null)
@@ -54,21 +86,25 @@ const cookieText = ref('')
 const cookieSaving = ref(false)
 const webLoginMode = ref<'password' | 'sms' | null>(null)
 const showMoreBiliLogin = ref(false)
-// 未登录只是匿名采集，不是故障，用中性色；凭据失效/核验失败才用警告色。
+
 const biliStateClass = computed(() => {
   const state = biliSession.value?.state
   if (state === 'logged_in') return 'text-ok'
   return state === 'missing' || state === 'unconfigured' ? 'text-muted' : 'text-warn'
 })
-let qrTimer: ReturnType<typeof setInterval> | undefined
+const biliDotClass = computed(() => {
+  const state = biliSession.value?.state
+  if (state === 'logged_in') return 'bg-ok'
+  return !state || state === 'missing' || state === 'unconfigured' ? 'bg-faint' : 'bg-warn'
+})
 
+let qrTimer: ReturnType<typeof setInterval> | undefined
 function stopQrPoll() {
   if (qrTimer) {
     clearInterval(qrTimer)
     qrTimer = undefined
   }
 }
-onBeforeUnmount(stopQrPoll)
 
 async function loadBiliSession(check = false) {
   if (checkingBili.value) return
@@ -80,7 +116,7 @@ async function loadBiliSession(check = false) {
       notify(biliSession.value?.message ?? '检测完成')
     }
   } catch (exc: any) {
-    toast.err(exc?.data?.detail ?? exc?.message ?? 'B站登录状态检测失败')
+    toast.err(exc?.data?.detail ?? exc?.message ?? 'B 站登录状态检测失败')
   } finally {
     checkingBili.value = false
   }
@@ -157,8 +193,7 @@ async function clearBiliLogin() {
   }
 }
 
-/* ---------- 分区管理（新建 / 编辑 / 启停 / 删除 / 恢复预设） ---------- */
-const showCommunityPanel = ref(true)
+/* ---------- 站点分区管理 ---------- */
 const communityRows = ref<AdminCommunityRow[]>([])
 const deletedBuiltins = ref<DeletedBuiltinItem[]>([])
 const communityBusy = ref(false)
@@ -188,7 +223,7 @@ function resetCommunityForm() {
 }
 
 function startEditCommunity(row: AdminCommunityRow) {
-  showCommunityPanel.value = true
+  activeTab.value = 'communities'
   editingCommunityKey.value = row.key
   Object.assign(communityForm, {
     key: row.key,
@@ -224,7 +259,7 @@ async function saveCommunity() {
       toast.ok(`分区「${payload.label}」已更新`)
     } else {
       await api('/api/admin/communities', { method: 'POST', body: { key, ...payload } })
-      toast.ok(`分区「${payload.label}」已创建，可直接为其添加监控信源`)
+      toast.ok(`分区「${payload.label}」已创建`)
       form.community = key
     }
     resetCommunityForm()
@@ -245,7 +280,7 @@ async function toggleCommunityActive(row: AdminCommunityRow) {
   communityBusy.value = true
   try {
     await api(`/api/admin/communities/${row.key}`, { method: 'PUT', body: { active: !row.active } })
-    toast.ok(row.active ? `已隐藏分区「${row.label}」（后台已同步暂停其采集调度）` : `已启用分区「${row.label}」`)
+    toast.ok(row.active ? `已隐藏分区「${row.label}」` : `已启用分区「${row.label}」`)
     await Promise.all([loadCommunities(), refreshSiteConfig()])
   } catch (exc: any) {
     toast.err(apiErrorDetail(exc, '分区状态更新失败'))
@@ -262,8 +297,8 @@ async function batchCommunities(keys: string[], action: 'enable' | 'disable' | '
     const msg = action === 'delete'
       ? `已移除 ${keys.length} 个分区`
       : action === 'enable'
-        ? '已启用/恢复所选分区'
-        : '已隐藏无信源的空分区'
+        ? '已启用所选分区'
+        : '已隐藏无信源分区'
     toast.ok(msg)
     await Promise.all([loadCommunities(), refreshSiteConfig()])
   } catch (exc: any) {
@@ -276,12 +311,10 @@ async function batchCommunities(keys: string[], action: 'enable' | 'disable' | '
 function hideEmptyCommunities() {
   const emptyKeys = communityRows.value.filter(c => c.active && !c.target_count && !c.share_count).map(c => c.key)
   if (!emptyKeys.length) {
-    toast.info('当前所有启用分区均已有采集目标')
+    toast.info('当前所有启用分区均已有采集信源')
     return
   }
-  if (emptyKeys.length >= communityRows.value.filter(c => c.active).length) {
-    emptyKeys.shift()
-  }
+  if (emptyKeys.length >= communityRows.value.filter(c => c.active).length) emptyKeys.shift()
   if (!emptyKeys.length) return
   void batchCommunities(emptyKeys, 'disable')
 }
@@ -303,7 +336,7 @@ function deleteEmptyCommunities() {
     toast.info('全站至少保留一个启用分区，请先新建分区后再移除最后一个分区')
     return
   }
-  if (!confirm(`确认移除 ${emptyKeys.length} 个无信源分区？预设分区移除后仍可随时一键恢复。`)) return
+  if (!confirm(`确认移除 ${emptyKeys.length} 个无信源分区？预设分区移除后仍可随时恢复。`)) return
   void batchCommunities(emptyKeys, 'delete')
 }
 
@@ -315,8 +348,8 @@ async function deleteCommunity(row: AdminCommunityRow) {
   }
   const kindText = row.builtin ? '预设分区' : '自定义分区'
   const msg = row.target_count > 0
-    ? `删除${kindText}「${row.label}」并同时移除其下 ${row.target_count} 个采集目标？已入库的历史内容不会删除，但删除后前台不再展示；同一来源改挂到其他分区后，下次采集会自动归入新分区。`
-    : `确认删除${kindText}「${row.label}」？${row.builtin ? '（预设分区删除后仍可随时恢复）' : ''}`
+    ? `删除${kindText}「${row.label}」并同时移除其下 ${row.target_count} 个采集信源？历史内容不会删除，删除后前台不再展示。`
+    : `确认删除${kindText}「${row.label}」？${row.builtin ? '（预设分区删除后仍可恢复）' : ''}`
   if (!confirm(msg)) return
   communityBusy.value = true
   try {
@@ -335,7 +368,7 @@ async function deleteCommunity(row: AdminCommunityRow) {
   }
 }
 
-/* ---------- 一键导入预设信源 ---------- */
+/* ---------- 预设信源导入 ---------- */
 const showPresetPanel = ref(false)
 const presets = ref<PresetItem[]>([])
 const selectedPresets = ref<string[]>([])
@@ -382,7 +415,7 @@ async function importSelectedPresets() {
   }
 }
 
-/* ---------- 采集目标表单与批量操作 ---------- */
+/* ---------- 采集信源抽屉表单与批量操作 ---------- */
 const combos: Record<string, string[]> = {
   game_official: ['notices'],
   bilibili: ['keyword_search', 'account_videos', 'account_dynamics'],
@@ -398,32 +431,19 @@ const combos: Record<string, string[]> = {
 }
 const collectPlatforms = Object.keys(platformLabels).filter(platform => platform in combos)
 
-interface WebPreviewResult {
-  mode: string
-  url: string
-  title: string
-  site_name: string | null
-  published_at: string | null
-  extractor: string
-  text_length: number
-  text_preview: string
-  media_count: number
-  detected_feeds: { url: string; title: string; type: string }[]
-  spa_warning: boolean
-  items: { title: string; url: string; published_at: string | null }[]
-}
-
+const drawerOpen = ref(false)
+const drawerAdvancedOpen = ref(false)
 const form = reactive({
-  platform: 'bilibili',
-  target_type: 'keyword_search',
+  platform: 'web_page',
+  target_type: 'page_watch',
   target_value: '',
   display_name: '',
-  interval_minutes: 30,
+  interval_minutes: 60,
   co_terms: '',
-  min_views: 10000,
-  tier: 'general',
+  min_views: 0,
+  tier: 'core',
   community: 'wuwa',
-  is_official: false,
+  is_official: true,
   web_selector: '',
   web_exclude_selector: '',
   web_link_pattern: '',
@@ -464,10 +484,10 @@ async function runBatchTargets(action: 'enable' | 'disable' | 'delete', opts?: {
   if (batchBusy.value) return
   if (opts?.community) {
     const label = labelOf(opts.community)
-    if (!confirm(`确认一键移除「${label}」分区下的全部 ${filteredTargets.value.length} 个采集目标？`)) return
+    if (!confirm(`确认移除「${label}」分区下的全部 ${filteredTargets.value.length} 个采集信源？`)) return
   } else {
     if (!selectedIds.value.length) return
-    if (action === 'delete' && !confirm(`确认一键移除选中的 ${selectedIds.value.length} 个采集目标？`)) return
+    if (action === 'delete' && !confirm(`确认移除选中的 ${selectedIds.value.length} 个采集信源？`)) return
   }
   batchBusy.value = true
   try {
@@ -476,7 +496,7 @@ async function runBatchTargets(action: 'enable' | 'disable' | 'delete', opts?: {
       : { ids: selectedIds.value, action }
     const res = await api<{ affected: number }>('/api/admin/collect-targets/batch', { method: 'POST', body })
     const actionLabel = action === 'delete' ? '移除' : action === 'enable' ? '启用' : '停用'
-    toast.ok(`已批量${actionLabel} ${res.affected} 个目标`)
+    toast.ok(`已批量${actionLabel} ${res.affected} 个信源`)
     selectedIds.value = []
     await Promise.all([refresh(), loadCommunities(), refreshRuns()])
   } catch (exc: any) {
@@ -487,6 +507,7 @@ async function runBatchTargets(action: 'enable' | 'disable' | 'delete', opts?: {
 }
 
 const availableTypes = computed(() => combos[form.platform] ?? [])
+const supportsOfficial = computed(() => !['keyword_search', 'topic_search'].includes(form.target_type))
 const supportsViews = computed(() => form.community !== 'ai' && (
   (form.platform === 'bilibili' && ['keyword_search', 'account_videos'].includes(form.target_type))
   || (form.platform === 'xiaoheihe' && form.target_type === 'keyword_search')
@@ -497,7 +518,7 @@ const targetPlaceholder = computed(() => {
   if (form.platform === 'rss') return 'RSS / Atom 地址，如 https://openai.com/news/rss.xml'
   if (form.platform === 'web_page') {
     return form.target_type === 'list_watch'
-      ? '列表页地址，如 https://example.com/news 或 /blog'
+      ? '列表页地址，如 https://example.com/news'
       : '目标网页地址，如 https://example.com/changelog'
   }
   if (form.platform === 'youtube') return 'YouTube 频道链接、@handle 或 UC 开头的频道 ID'
@@ -523,7 +544,8 @@ watch(() => form.platform, () => {
   if (!editingId.value) {
     form.target_type = availableTypes.value[0] ?? 'keyword_search'
     form.interval_minutes = form.platform === 'x' || form.platform === 'web_page' ? 60 : 30
-    if (form.platform === 'web_page') form.is_official = true
+    form.is_official = form.platform === 'web_page' || form.platform === 'game_official' || form.platform === 'kuro_cn' || form.platform === 'kuro_global'
+    form.tier = form.target_type === 'keyword_search' ? 'general' : 'core'
   }
 })
 watch(() => form.target_type, (next) => {
@@ -543,6 +565,78 @@ watch([() => form.platform, () => form.community], () => {
   }
 })
 
+function resetFormDefaults() {
+  editingId.value = null
+  formError.value = null
+  webPreview.value = null
+  webPreviewError.value = null
+  const defaultCommunity = communityFilter.value
+    || (adminCommunities.value.find(c => c.active) ?? adminCommunities.value[0])?.key
+    || 'wuwa'
+  Object.assign(form, {
+    platform: 'bilibili',
+    target_type: 'keyword_search',
+    target_value: '',
+    display_name: '',
+    interval_minutes: 30,
+    co_terms: '',
+    min_views: 10000,
+    tier: 'general',
+    community: defaultCommunity,
+    is_official: false,
+    web_selector: '',
+    web_exclude_selector: '',
+    web_link_pattern: '',
+    web_ignore_patterns: '',
+    web_fetch_body: true,
+  })
+}
+
+function openCreateDrawer() {
+  resetFormDefaults()
+  drawerAdvancedOpen.value = false
+  drawerOpen.value = true
+}
+
+function closeDrawer() {
+  drawerOpen.value = false
+  editingId.value = null
+  formError.value = null
+  webPreview.value = null
+  webPreviewError.value = null
+}
+
+async function edit(target: CollectTarget) {
+  openRowMenuId.value = null
+  editingId.value = target.id
+  formError.value = null
+  webPreview.value = null
+  webPreviewError.value = null
+  const webCfg = target.web_config || {}
+  Object.assign(form, {
+    platform: target.platform, target_type: target.target_type, target_value: target.target_value,
+    display_name: target.display_name || '', interval_minutes: target.interval_minutes,
+    co_terms: (target.co_terms || []).join('，'), min_views: target.min_views || 0,
+    tier: target.tier, community: target.community, is_official: !!target.is_official,
+    web_selector: webCfg.selector || '',
+    web_exclude_selector: webCfg.exclude_selector || '',
+    web_link_pattern: webCfg.link_pattern || '',
+    web_ignore_patterns: (webCfg.ignore_patterns || []).join('\n'),
+    web_fetch_body: webCfg.fetch_body !== false,
+  })
+  drawerAdvancedOpen.value = Boolean(
+    target.co_terms?.length
+    || target.min_views
+    || webCfg.selector
+    || webCfg.exclude_selector
+    || webCfg.link_pattern
+    || webCfg.ignore_patterns?.length,
+  )
+  drawerOpen.value = true
+  await nextTick()
+  form.min_views = target.min_views || 0
+}
+
 async function refresh() {
   try {
     targets.value = await api<CollectTarget[]>('/api/admin/collect-targets')
@@ -555,10 +649,10 @@ async function refresh() {
 function formatLastError(err: string | null): string {
   if (!err) return '—'
   if (/BiliRiskControlError|风控|-352/.test(err)) {
-    return '未登录时动态接口常被风控，可在本页上方扫码登录提高成功率'
+    return '未登录时动态接口易触发风控，请前往「B 站登录态」页签扫码登录'
   }
   if (/error '(404|5\d\d)\b[^']*' for url '[^']*\/feeds\/videos\.xml/.test(err)) {
-    return 'YouTube RSS 间歇性故障，系统会在 2 小时内自动重试；也可在 .env 配置 YouTube API Key 兜底'
+    return 'YouTube RSS 间歇性异常，系统将自动重试；也可在 .env 配置 YouTube API Key'
   }
   return err
 }
@@ -575,7 +669,21 @@ async function refreshRuns() {
   } catch { /* 运行记录失败不影响主表 */ }
 }
 
+function onDocClick(event: MouseEvent) {
+  if (openRowMenuId.value === null) return
+  const target = event.target as HTMLElement | null
+  if (!target?.closest('[data-target-menu]')) openRowMenuId.value = null
+}
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    if (openRowMenuId.value !== null) openRowMenuId.value = null
+    else if (drawerOpen.value && !creating.value) closeDrawer()
+  }
+}
+
 onMounted(async () => {
+  document.addEventListener('click', onDocClick)
+  document.addEventListener('keydown', onKeydown)
   void loadBiliSession()
   void loadCommunities()
   void refreshRuns()
@@ -587,6 +695,11 @@ onMounted(async () => {
       selectedPresets.value = res.items.slice(0, 2).map(i => i.community)
     } catch { /* ignore */ }
   }
+})
+onBeforeUnmount(() => {
+  stopQrPoll()
+  document.removeEventListener('click', onDocClick)
+  document.removeEventListener('keydown', onKeydown)
 })
 
 function buildWebConfigPayload() {
@@ -619,7 +732,7 @@ async function previewWebPage() {
     }
   } catch (exc: any) {
     webPreview.value = null
-    webPreviewError.value = apiErrorDetail(exc, '网页解析测试失败')
+    webPreviewError.value = apiErrorDetail(exc, '网页解析失败，请检查地址后重试')
   } finally {
     webPreviewing.value = false
   }
@@ -633,10 +746,10 @@ function useDetectedFeed(feedUrl: string, feedTitle: string) {
   if (!form.display_name.trim() && feedTitle) form.display_name = feedTitle.slice(0, 64)
   webPreview.value = null
   webPreviewError.value = null
-  toast.info('已切换为该站点官方 RSS 订阅源')
+  toast.info('已切换为该站点官方 RSS 订阅')
 }
 
-async function create() {
+async function saveTarget() {
   if (!form.target_value.trim() || creating.value) return
   creating.value = true
   formError.value = null
@@ -650,76 +763,26 @@ async function create() {
         target_value: form.target_value.trim(),
         display_name: form.display_name.trim() || null,
         interval_minutes: Number(form.interval_minutes) || 30,
-        co_terms: form.co_terms.split(/[,，]/).map((x: string) => x.trim()).filter(Boolean),
+        co_terms: form.tier === 'general' ? form.co_terms.split(/[,，]/).map((x: string) => x.trim()).filter(Boolean) : [],
         min_views: supportsViews.value ? Number(form.min_views) || 0 : 0,
         tier: form.tier,
         community: form.community,
-        is_official: form.target_type !== 'keyword_search' && form.is_official,
+        is_official: supportsOfficial.value && form.is_official,
         web_config: buildWebConfigPayload(),
       },
     })
-    editingId.value = null
-    toast.ok(wasEditing ? '采集目标已保存' : '采集目标已创建')
-    form.target_value = ''
-    form.display_name = ''
-    form.co_terms = ''
-    form.min_views = defaultMinViews()
-    form.tier = 'general'
-    form.is_official = form.platform === 'web_page'
-    form.web_selector = ''
-    form.web_exclude_selector = ''
-    form.web_link_pattern = ''
-    form.web_ignore_patterns = ''
-    form.web_fetch_body = true
-    webPreview.value = null
-    webPreviewError.value = null
+    toast.ok(wasEditing ? '采集信源已保存' : '采集信源已创建')
+    closeDrawer()
     await Promise.all([refresh(), loadCommunities()])
   } catch (exc: any) {
-    formError.value = apiErrorDetail(exc, exc?.statusCode === 409 ? '该分区下已存在相同的采集目标' : '保存失败，请重试')
+    formError.value = apiErrorDetail(exc, exc?.statusCode === 409 ? '该分区下已存在相同的采集信源' : '保存失败，请重试')
   } finally {
     creating.value = false
   }
 }
 
-async function edit(target: CollectTarget) {
-  editingId.value = target.id
-  formError.value = null
-  webPreview.value = null
-  webPreviewError.value = null
-  const webCfg = target.web_config || {}
-  Object.assign(form, {
-    platform: target.platform, target_type: target.target_type, target_value: target.target_value,
-    display_name: target.display_name || '', interval_minutes: target.interval_minutes,
-    co_terms: (target.co_terms || []).join('，'), min_views: target.min_views || 0,
-    tier: target.tier, community: target.community, is_official: !!target.is_official,
-    web_selector: webCfg.selector || '',
-    web_exclude_selector: webCfg.exclude_selector || '',
-    web_link_pattern: webCfg.link_pattern || '',
-    web_ignore_patterns: (webCfg.ignore_patterns || []).join('\n'),
-    web_fetch_body: webCfg.fetch_body !== false,
-  })
-  await nextTick()
-  form.min_views = target.min_views || 0
-  document.getElementById('collect-target-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-function cancelEdit() {
-  editingId.value = null
-  form.target_value = ''
-  form.display_name = ''
-  form.co_terms = ''
-  form.is_official = false
-  form.web_selector = ''
-  form.web_exclude_selector = ''
-  form.web_link_pattern = ''
-  form.web_ignore_patterns = ''
-  form.web_fetch_body = true
-  webPreview.value = null
-  webPreviewError.value = null
-  formError.value = null
-}
-
 async function toggle(target: CollectTarget) {
+  openRowMenuId.value = null
   busyId.value = target.id
   try {
     await api(`/api/admin/collect-targets/${target.id}`, {
@@ -757,7 +820,7 @@ async function toggleTier(target: CollectTarget) {
       body: { tier: next },
     })
     target.tier = data.tier
-    toast.ok(`${target.display_name || target.target_value} 已切换为${next === 'core' ? '核心关键词' : '泛关键词'}`)
+    toast.ok(`「${target.display_name || target.target_value}」已切换为${tierLabel(next)}`)
   } catch (exc: any) {
     toast.err(`切换失败：${apiErrorDetail(exc, '请求失败')}`)
   } finally {
@@ -766,12 +829,13 @@ async function toggleTier(target: CollectTarget) {
 }
 
 async function remove(target: CollectTarget) {
-  if (!confirm(`删除目标「${target.display_name || target.target_value}」及其运行记录？`)) return
+  openRowMenuId.value = null
+  if (!confirm(`确认删除信源「${target.display_name || target.target_value}」及其运行记录？`)) return
   busyId.value = target.id
   try {
     await api(`/api/admin/collect-targets/${target.id}`, { method: 'DELETE' })
     selectedIds.value = selectedIds.value.filter(id => id !== target.id)
-    toast.ok('目标已删除')
+    toast.ok('信源已删除')
     await Promise.all([refresh(), loadCommunities(), refreshRuns()])
   } catch (exc: any) {
     toast.err(exc?.data?.detail ?? exc?.message ?? '删除失败，请重试')
@@ -779,48 +843,325 @@ async function remove(target: CollectTarget) {
     busyId.value = null
   }
 }
+
+const rowMenuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-ink-2 transition-colors hover:bg-chip hover:text-ink disabled:opacity-40'
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="wall-heading flex flex-wrap items-center justify-between gap-3">
+  <div class="space-y-5">
+    <!-- 页头与 3 个工作页签 -->
+    <div class="wall-heading flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 class="text-2xl font-bold">分区与监控信源定制</h1>
-        <p class="mt-0.5 text-sm text-muted">
-          自由增删改任意分区（含内置预设）、调色板定色、随时启停监控信源与后台 B 站登录态管理。
-        </p>
+        <h1 class="text-2xl font-bold text-ink">分区与信源</h1>
+        <div class="mt-3 inline-flex items-center gap-1 rounded-xl border border-line bg-card p-1 text-sm" role="tablist" aria-label="分区与信源管理">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === 'sources'"
+            class="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 transition-colors"
+            :class="activeTab === 'sources' ? 'bg-ink font-semibold text-card' : 'text-ink-2 hover:bg-chip hover:text-ink'"
+            @click="activeTab = 'sources'"
+          >
+            采集信源
+            <span class="num text-xs opacity-75">{{ targets.length }}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === 'communities'"
+            class="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 transition-colors"
+            :class="activeTab === 'communities' ? 'bg-ink font-semibold text-card' : 'text-ink-2 hover:bg-chip hover:text-ink'"
+            @click="activeTab = 'communities'"
+          >
+            站点分区
+            <span class="num text-xs opacity-75">{{ communityRows.length || adminCommunities.length }}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === 'bilibili'"
+            class="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 transition-colors"
+            :class="activeTab === 'bilibili' ? 'bg-ink font-semibold text-card' : 'text-ink-2 hover:bg-chip hover:text-ink'"
+            @click="activeTab = 'bilibili'"
+          >
+            <span class="size-2 rounded-full" :class="biliDotClass" aria-hidden="true" />
+            B 站登录态
+          </button>
+        </div>
       </div>
-      <div class="flex flex-wrap items-center gap-2">
+
+      <div v-if="activeTab === 'sources'" class="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          class="rounded-md border border-line px-3 py-2 text-sm transition-colors hover:bg-chip"
-          @click="showCommunityPanel = !showCommunityPanel"
+          class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3 text-sm text-ink-2 transition-colors hover:bg-chip hover:text-ink"
+          @click="openPresetPanel"
         >
-          {{ showCommunityPanel ? '收起分区管理' : `展开分区管理（${adminCommunities.length}）` }}
+          <Download :size="14" /> {{ showPresetPanel ? '收起预设' : '导入预设' }}
         </button>
         <button
           type="button"
-          class="btn-primary px-3.5 py-2 text-sm"
-          @click="openPresetPanel"
+          class="btn-primary inline-flex h-9 items-center gap-1.5 px-3.5 text-sm"
+          @click="openCreateDrawer"
         >
-          {{ showPresetPanel ? '收起预设导入' : '一键导入预设信源' }}
+          <Plus :size="15" /> 新建信源
         </button>
       </div>
     </div>
 
-    <!-- 分区管理面板 -->
-    <section v-if="showCommunityPanel" class="panel space-y-4 p-5">
+    <p v-if="error" class="panel px-4 py-3 text-sm text-hot">{{ error }}</p>
+
+    <!-- ==================== 页签 1：采集信源 ==================== -->
+    <template v-if="activeTab === 'sources'">
+      <!-- 预设信源导入（按需展开） -->
+      <section v-if="showPresetPanel" class="panel space-y-3 border-brand/30 bg-brand-soft/40 p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 class="text-sm font-semibold text-ink">导入预设信源包</h2>
+            <p class="mt-0.5 text-xs text-muted">勾选需要启用的分区即可幂等导入内置官方公告、视频与 RSS 信源，已存在目标自动跳过。</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs">
+            <button type="button" class="text-brand-ink hover:underline" @click="selectedPresets = presets.map(p => p.community)">全选</button>
+            <span class="text-faint">·</span>
+            <button type="button" class="text-muted hover:underline" @click="selectedPresets = []">清空</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="pack in presets"
+            :key="pack.community"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors"
+            :class="selectedPresets.includes(pack.community) ? 'border-brand bg-brand font-semibold text-white' : 'border-line bg-card text-ink-2 hover:text-ink'"
+            @click="togglePresetKey(pack.community)"
+          >
+            <span>{{ pack.label }}</span>
+            <span class="mono opacity-80">{{ pack.count }} 源</span>
+          </button>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <button
+            type="button"
+            class="btn-primary h-9 px-4 text-sm"
+            :disabled="!selectedPresets.length || importingPresets"
+            @click="importSelectedPresets"
+          >
+            {{ importingPresets ? '正在导入…' : `导入所选 ${selectedPresets.length} 个分区` }}
+          </button>
+        </div>
+      </section>
+
+      <!-- 分区筛选与批量操作栏 -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-1.5">
+          <button
+            v-for="option in [['', '全部分区'], ...adminCommunities.map(c => [c.key, c.label] as const)]"
+            :key="option[0]"
+            type="button"
+            class="h-7 rounded-full px-3 text-xs transition-colors"
+            :class="communityFilter === option[0] ? 'bg-brand font-semibold text-white' : 'bg-chip text-muted hover:text-ink'"
+            @click="communityFilter = option[0]"
+          >
+            {{ option[1] }}
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <template v-if="selectedIds.length">
+            <span class="text-muted">已选 {{ selectedIds.length }} 项</span>
+            <button type="button" class="rounded-md bg-emerald-500/10 px-2.5 py-1 font-medium text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300" :disabled="batchBusy" @click="runBatchTargets('enable')">批量启用</button>
+            <button type="button" class="rounded-md bg-chip px-2.5 py-1 text-ink-2 hover:bg-line" :disabled="batchBusy" @click="runBatchTargets('disable')">批量停用</button>
+            <button type="button" class="rounded-md bg-red-500/10 px-2.5 py-1 font-medium text-red-600 hover:bg-red-500/20 dark:text-red-300" :disabled="batchBusy" @click="runBatchTargets('delete')">移除所选</button>
+          </template>
+          <button
+            v-else-if="communityFilter && filteredTargets.length"
+            type="button"
+            class="rounded-md border border-red-500/30 px-2.5 py-1 text-red-600 hover:bg-red-500/10 dark:text-red-300"
+            :disabled="batchBusy"
+            @click="runBatchTargets('delete', { community: communityFilter })"
+          >
+            清空「{{ labelOf(communityFilter) }}」全部信源
+          </button>
+        </div>
+      </div>
+
+      <!-- 精简 6 列信源表 -->
+      <div class="panel overflow-x-auto lg:overflow-visible">
+        <table class="w-full min-w-[660px] text-left text-[13px]">
+          <thead>
+            <tr class="border-b border-line text-xs text-muted">
+              <th class="w-9 px-2.5 py-2.5">
+                <input type="checkbox" class="checkbox" :checked="allFilteredSelected" :disabled="!filteredTargets.length" aria-label="全选当前列表" @change="toggleSelectAll">
+              </th>
+              <th class="whitespace-nowrap px-2.5 py-2.5 font-medium">信源与分区</th>
+              <th class="whitespace-nowrap px-2.5 py-2.5 font-medium">平台与类型</th>
+              <th class="whitespace-nowrap px-2.5 py-2.5 font-medium">收录策略</th>
+              <th class="whitespace-nowrap px-2.5 py-2.5 font-medium">频率与最近成功</th>
+              <th class="whitespace-nowrap px-2.5 py-2.5 text-right font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-line-soft">
+            <tr v-for="(target, rowIdx) in filteredTargets" :key="target.id" :class="target.enabled ? '' : 'opacity-55'">
+              <td class="px-2.5 py-3 align-top">
+                <input v-model="selectedIds" type="checkbox" :value="target.id" class="checkbox mt-0.5" :aria-label="`选择 ${target.display_name || target.target_value}`">
+              </td>
+              <td class="w-full max-w-0 px-2.5 py-3 align-top">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="truncate font-semibold text-ink">{{ target.display_name && target.display_name !== target.target_value ? target.display_name : target.target_value }}</span>
+                  <span class="chip whitespace-nowrap" :class="badgeOf(target.community)">{{ labelOf(target.community) }}</span>
+                  <span v-if="target.is_official" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">官方</span>
+                  <span v-if="!target.enabled" class="rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted">已停用</span>
+                </div>
+                <div v-if="(target.display_name && target.display_name !== target.target_value) || target.web_config?.selector" class="mono mt-0.5 flex items-center gap-1.5 text-xs text-faint">
+                  <span v-if="target.display_name && target.display_name !== target.target_value" class="min-w-0 truncate" :title="target.target_value">{{ target.target_value }}</span>
+                  <span v-if="target.web_config?.selector" class="shrink-0 rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted" :title="`内容区域：${target.web_config.selector}`">{{ target.web_config.selector }}</span>
+                </div>
+                <p v-if="target.last_error" class="mt-1 truncate text-xs text-warn" :title="target.last_error">
+                  {{ formatLastError(target.last_error) }}
+                </p>
+              </td>
+              <td class="whitespace-nowrap px-2.5 py-3 align-top text-ink-2">
+                <div>{{ platformLabels[target.platform] ?? target.platform }}</div>
+                <div
+                  v-if="(targetTypeLabels[target.target_type] ?? target.target_type) !== (platformLabels[target.platform] ?? target.platform)"
+                  class="mt-0.5 text-xs text-faint"
+                >
+                  {{ targetTypeLabels[target.target_type] ?? target.target_type }}
+                </div>
+              </td>
+              <td class="whitespace-nowrap px-2.5 py-3 align-top">
+                <button
+                  type="button"
+                  class="chip cursor-pointer whitespace-nowrap transition-colors"
+                  :class="target.tier === 'core' ? 'bg-brand-soft text-brand-ink' : 'bg-chip text-muted'"
+                  :title="`${TIER_META[target.tier]?.desc ?? ''}，点击切换`"
+                  :disabled="busyId === target.id"
+                  @click="toggleTier(target)"
+                >
+                  {{ tierLabel(target.tier) }}
+                </button>
+                <div v-if="target.min_views || target.co_terms?.length" class="mt-1 text-[11px] text-faint">
+                  <span v-if="target.min_views" class="mono">≥ {{ target.min_views.toLocaleString('zh-CN') }}</span>
+                  <span v-if="target.min_views && target.co_terms?.length"> · </span>
+                  <span v-if="target.co_terms?.length" :title="target.co_terms.join('、')">必含 {{ target.co_terms.length }} 词</span>
+                </div>
+              </td>
+              <td class="whitespace-nowrap px-2.5 py-3 align-top text-xs">
+                <div class="mono tabular-nums text-ink-2">
+                  {{ target.platform === 'x' ? '约 ' : '' }}{{ target.interval_minutes }} 分钟
+                  <span v-if="target.total_items_new != null" class="text-faint">· 累计 {{ target.total_items_new }}</span>
+                </div>
+                <div class="mono mt-0.5 tabular-nums text-faint">{{ fmtTime(target.last_success_at) }}</div>
+              </td>
+              <td class="whitespace-nowrap px-2.5 py-3 text-right align-top">
+                <div class="inline-flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    class="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-brand-ink transition-colors hover:bg-brand-soft disabled:opacity-40"
+                    :disabled="busyId === target.id"
+                    @click="runNow(target)"
+                  >
+                    <RefreshCw :size="12" /> 采集
+                  </button>
+                  <div class="relative" data-target-menu>
+                    <button
+                      type="button"
+                      class="grid size-8 place-items-center rounded-lg text-muted transition-colors hover:bg-chip hover:text-ink"
+                      :aria-expanded="openRowMenuId === target.id"
+                      aria-haspopup="menu"
+                      :aria-label="`更多操作：${target.display_name || target.target_value}`"
+                      @click="openRowMenuId = openRowMenuId === target.id ? null : target.id"
+                    >
+                      <MoreHorizontal :size="15" />
+                    </button>
+                    <div
+                      v-if="openRowMenuId === target.id"
+                      role="menu"
+                      class="popover absolute right-0 z-30 w-32 p-1"
+                      :class="filteredTargets.length > 2 && rowIdx >= filteredTargets.length - 2 ? 'bottom-full mb-1' : 'top-full mt-1'"
+                    >
+                      <button type="button" role="menuitem" :class="rowMenuItem" :disabled="busyId === target.id" @click="edit(target)">
+                        <Pencil :size="12" /> 编辑配置
+                      </button>
+                      <button type="button" role="menuitem" :class="rowMenuItem" :disabled="busyId === target.id" @click="toggle(target)">
+                        <Pause v-if="target.enabled" :size="12" /><Play v-else :size="12" />{{ target.enabled ? '停用信源' : '启用信源' }}
+                      </button>
+                      <div class="my-1 border-t border-line-soft" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-hot transition-colors hover:bg-hot/10 disabled:opacity-40"
+                        :disabled="busyId === target.id"
+                        @click="remove(target)"
+                      >
+                        <Trash2 :size="12" /> 删除信源
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="filteredTargets.length === 0">
+              <td colspan="6" class="px-4 py-10 text-center text-sm text-faint">
+                {{ targets.length === 0 ? '暂无采集信源，可点击右上角「导入预设」或「新建信源」' : '当前筛选分区下暂无信源' }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 最近采集运行（默认折叠，按需展开） -->
+      <section class="panel overflow-hidden">
+        <button
+          type="button"
+          class="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-chip/40"
+          :aria-expanded="runsOpen"
+          @click="runsOpen = !runsOpen"
+        >
+          <span class="flex items-center gap-2 text-sm font-semibold text-ink">
+            最近采集运行
+            <span class="num rounded bg-chip px-1.5 py-0.5 text-xs font-normal text-muted">{{ runs.length }}</span>
+          </span>
+          <span class="inline-flex items-center gap-1 text-xs text-muted">
+            {{ runsOpen ? '收起' : '展开记录' }}
+            <ChevronDown :size="14" class="transition-transform" :class="{ 'rotate-180': runsOpen }" />
+          </span>
+        </button>
+        <div v-if="runsOpen" class="overflow-x-auto border-t border-line-soft">
+          <table class="w-full text-sm">
+            <tbody>
+              <tr v-for="run in runs" :key="run.id" class="border-t border-line-soft first:border-0 text-xs">
+                <td class="whitespace-nowrap px-4 py-2 text-ink-2">{{ targetName(run.target_id) }}</td>
+                <td class="mono whitespace-nowrap tabular-nums px-4 py-2 text-faint">{{ fmtTime(run.started_at) }}</td>
+                <td class="whitespace-nowrap px-4 py-2">
+                  <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : run.status === 'failed' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-chip text-muted'">{{ run.status === 'skipped' ? '冷却跳过' : run.status }}</span>
+                </td>
+                <td class="px-4 py-2 text-muted" :title="run.error ?? ''">
+                  <span class="mono">抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 入库 {{ run.items_new ?? 0 }}</span>
+                  <span v-if="run.error" class="ml-2 text-hot">{{ formatLastError(run.error) }}</span>
+                </td>
+              </tr>
+              <tr v-if="!runs.length">
+                <td colspan="4" class="px-4 py-6 text-center text-sm text-faint">暂无运行记录</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </template>
+
+    <!-- ==================== 页签 2：站点分区 ==================== -->
+    <section v-else-if="activeTab === 'communities'" class="panel space-y-4 p-5">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 class="text-sm font-semibold">站点分区定制</h2>
-          <p class="mt-0.5 text-xs text-muted">所有分区（含预设）均可编辑名称与调色板颜色、隐藏或彻底删除；隐藏/删除后自动停止对应采集并移出首页聚合。</p>
+          <h2 class="text-sm font-semibold text-ink">站点分区配置</h2>
+          <p class="mt-0.5 text-xs text-muted">编辑分区名称、主题色或启停状态；隐藏或删除后将同步暂停对应采集调度。</p>
         </div>
         <div class="flex flex-wrap gap-2 text-xs">
           <button type="button" class="rounded-md border border-line px-2.5 py-1.5 hover:bg-chip" :disabled="communityBusy" @click="hideEmptyCommunities">
-            一键隐藏无信源分区
+            隐藏无信源分区
           </button>
           <button type="button" class="rounded-md border border-red-500/30 px-2.5 py-1.5 text-red-600 hover:bg-red-500/10 dark:text-red-300" :disabled="communityBusy" @click="deleteEmptyCommunities">
-            一键移除无信源分区
+            移除无信源分区
           </button>
           <button type="button" class="rounded-md border border-line px-2.5 py-1.5 hover:bg-chip" :disabled="communityBusy" @click="batchCommunities(communityRows.map(c => c.key), 'enable')">
             全部启用
@@ -838,13 +1179,13 @@ async function remove(target: CollectTarget) {
           <span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: colorToHex(row.color) }" aria-hidden="true" />
           <span class="font-medium">{{ row.label }}</span>
           <span class="mono text-[11px] text-faint">({{ row.target_count }})</span>
-          <span v-if="row.domain === 'feed'" class="text-faint">主题流<span v-if="row.share_count"> · {{ row.share_count }} 篇收录</span></span>
-          <span v-else-if="!row.builtin" class="rounded bg-blue-500/10 px-1 py-0.5 text-[10px] text-blue-600 dark:text-blue-300">自建</span>
+          <span v-if="row.domain === 'feed'" class="text-faint">主题流<span v-if="row.share_count"> · {{ row.share_count }} 篇</span></span>
+          <span v-else-if="!row.builtin" class="rounded bg-brand-soft px-1 py-0.5 text-[10px] text-brand-ink">自建</span>
           <button type="button" class="ml-1 text-brand-ink hover:underline" :disabled="communityBusy" @click="toggleCommunityActive(row)">
             {{ row.active ? '隐藏' : '启用' }}
           </button>
           <button type="button" class="text-muted hover:text-ink hover:underline" :disabled="communityBusy" @click="startEditCommunity(row)">编辑</button>
-          <button type="button" class="text-red-500 hover:underline" :disabled="communityBusy" @click="deleteCommunity(row)">删除</button>
+          <button type="button" class="text-hot hover:underline" :disabled="communityBusy" @click="deleteCommunity(row)">删除</button>
         </div>
       </div>
 
@@ -876,7 +1217,7 @@ async function remove(target: CollectTarget) {
           v-model="communityForm.key"
           :disabled="!!editingCommunityKey"
           maxlength="16"
-          placeholder="分区标识（1~16位，如 steam / tech）"
+          placeholder="分区标识（1~16 位，如 steam / tech）"
           aria-label="分区英文标识"
           class="input mono px-3 py-2 text-sm disabled:opacity-50"
         >
@@ -901,7 +1242,7 @@ async function remove(target: CollectTarget) {
         <input
           v-if="communityForm.domain !== 'feed'"
           v-model="communityForm.official_bili_mid"
-          placeholder="官方B站UID（可选）"
+          placeholder="官方 B 站 UID（可选）"
           aria-label="官方 B 站 UID"
           class="input mono px-3 py-2 text-sm"
         >
@@ -921,75 +1262,39 @@ async function remove(target: CollectTarget) {
       </form>
     </section>
 
-    <!-- 一键导入预设信源面板 -->
-    <section v-if="showPresetPanel" class="panel space-y-3 border-blue-500/30 bg-blue-500/5 p-5">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 class="text-sm font-semibold">一键导入预设信源包</h2>
-          <p class="mt-0.5 text-xs text-muted">勾选需要监控的分区即可幂等导入官方公告、视频、频道 RSS 与一手资讯源（X 源默认停用，避免未配抓取环境报错）。</p>
-        </div>
-        <div class="flex items-center gap-2 text-xs">
-          <button type="button" class="text-brand-ink hover:underline" @click="selectedPresets = presets.map(p => p.community)">全选</button>
-          <span class="text-faint">·</span>
-          <button type="button" class="text-muted hover:underline" @click="selectedPresets = []">清空</button>
-        </div>
-      </div>
-      <div class="flex flex-wrap gap-2">
-        <button
-          v-for="pack in presets"
-          :key="pack.community"
-          type="button"
-          class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors"
-          :class="selectedPresets.includes(pack.community) ? 'border-blue-600 bg-blue-600 font-semibold text-white' : 'border-line bg-card text-ink-2 hover:text-ink'"
-          @click="togglePresetKey(pack.community)"
-        >
-          <span>{{ pack.label }}</span>
-          <span class="mono opacity-80">{{ pack.count }} 源</span>
-        </button>
-      </div>
-      <div class="flex flex-wrap items-center gap-3 pt-1">
-        <button
-          type="button"
-          class="btn-primary px-4 py-2 text-sm"
-          :disabled="!selectedPresets.length || importingPresets"
-          @click="importSelectedPresets"
-        >
-          {{ importingPresets ? '正在导入…' : `一键导入所选 ${selectedPresets.length} 个分区` }}
-        </button>
-        <span class="text-xs text-muted">已存在的同源目标会自动跳过，不会覆盖你改过的频率或门槛。</span>
-      </div>
-    </section>
-
-    <!-- B 站登录态面板 -->
-    <div v-if="biliSession" class="panel space-y-3 px-5 py-4" aria-live="polite">
+    <!-- ==================== 页签 3：B 站登录态 ==================== -->
+    <section v-else class="panel space-y-4 p-5" aria-live="polite">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p class="text-sm font-medium" :class="biliStateClass">{{ biliSession.message }}</p>
-          <p v-if="biliSession.checked_at" class="mono mt-1 text-xs text-muted">检测时间 {{ fmtTime(biliSession.checked_at) }}</p>
+          <h2 class="text-sm font-semibold text-ink">B 站采集登录态</h2>
+          <p class="mt-1 text-sm font-medium" :class="biliStateClass">
+            {{ biliSession?.message ?? '正在检测当前登录状态…' }}
+          </p>
+          <p v-if="biliSession?.checked_at" class="mono mt-1 text-xs text-muted">最近检测：{{ fmtTime(biliSession.checked_at) }}</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button type="button" class="btn-primary px-3 py-2 text-sm" :disabled="checkingBili" @click="startQrLogin">
+          <button type="button" class="btn-primary h-9 px-3.5 text-sm" :disabled="checkingBili" @click="startQrLogin">
             B 站扫码登录
           </button>
           <template v-if="showMoreBiliLogin">
-            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'password'; showCookieForm = false; closeQrLogin()">
+            <button type="button" class="h-9 rounded-md border border-line px-3 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'password'; showCookieForm = false; closeQrLogin()">
               账号密码登录
             </button>
-            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'sms'; showCookieForm = false; closeQrLogin()">
+            <button type="button" class="h-9 rounded-md border border-line px-3 text-sm hover:bg-chip" :disabled="checkingBili" @click="webLoginMode = 'sms'; showCookieForm = false; closeQrLogin()">
               短信验证码登录
             </button>
-            <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" @click="showCookieForm = !showCookieForm; webLoginMode = null; closeQrLogin()">
+            <button type="button" class="h-9 rounded-md border border-line px-3 text-sm hover:bg-chip" @click="showCookieForm = !showCookieForm; webLoginMode = null; closeQrLogin()">
               粘贴 Cookie
             </button>
           </template>
-          <button v-else type="button" class="rounded-md border border-line px-3 py-2 text-sm text-muted hover:bg-chip" @click="showMoreBiliLogin = true">
+          <button v-else type="button" class="h-9 rounded-md border border-line px-3 text-sm text-muted hover:bg-chip" @click="showMoreBiliLogin = true">
             更多登录方式
           </button>
-          <button type="button" class="rounded-md border border-line px-3 py-2 text-sm hover:bg-chip" :disabled="checkingBili" @click="loadBiliSession(true)">
+          <button type="button" class="h-9 rounded-md border border-line px-3 text-sm hover:bg-chip" :disabled="checkingBili" @click="loadBiliSession(true)">
             {{ checkingBili ? '检测中…' : '检测登录态' }}
           </button>
-          <button v-if="biliSession.state === 'logged_in'" type="button" class="rounded-md px-2.5 py-2 text-xs text-red-500 hover:bg-red-500/10" :disabled="checkingBili" @click="clearBiliLogin">
-            退出
+          <button v-if="biliSession?.state === 'logged_in'" type="button" class="h-9 rounded-md px-2.5 text-xs text-hot hover:bg-hot/10" :disabled="checkingBili" @click="clearBiliLogin">
+            清除凭据
           </button>
         </div>
       </div>
@@ -998,7 +1303,7 @@ async function remove(target: CollectTarget) {
         <img :src="qrSession.qr_image" alt="B 站登录二维码" class="size-36 rounded-lg bg-white p-1.5">
         <div class="space-y-1.5 text-sm">
           <p class="font-medium text-ink">{{ qrSession.message }}</p>
-          <p class="text-xs text-muted">打开哔哩哔哩手机 App 扫一扫确认登录，成功后保存登录凭据，重启容器不丢失。</p>
+          <p class="text-xs text-muted">使用哔哩哔哩手机客户端扫码确认，凭据持久化保存，重启容器不丢失。</p>
           <div class="flex gap-3 pt-1 text-xs">
             <button v-if="qrSession.state === 'expired'" type="button" class="text-brand-ink hover:underline" @click="startQrLogin">重新生成二维码</button>
             <button type="button" class="text-muted hover:underline" @click="closeQrLogin">关闭</button>
@@ -1018,267 +1323,187 @@ async function remove(target: CollectTarget) {
         />
         <div class="flex items-center gap-2">
           <button type="submit" class="btn-primary px-3.5 py-1.5 text-xs" :disabled="cookieSaving || !cookieText.trim()">
-            {{ cookieSaving ? '核验保存中…' : '保存并核验 Cookie' }}
+            {{ cookieSaving ? '核验中…' : '保存并核验 Cookie' }}
           </button>
           <button type="button" class="text-xs text-muted hover:underline" @click="showCookieForm = false">取消</button>
         </div>
       </form>
-    </div>
+    </section>
 
-    <!-- 新增 / 编辑单个目标 -->
-    <form id="collect-target-form" class="panel grid gap-3 p-5 sm:grid-cols-[9rem_9rem_1fr_6rem_auto]" @submit.prevent="create">
-      <p v-if="editingId" class="col-span-full text-sm font-medium">编辑采集目标 #{{ editingId }}</p>
-      <select v-model="form.platform" aria-label="平台" :disabled="editingId !== null" class="select px-3 py-2 text-sm">
-        <option v-for="value in collectPlatforms" :key="value" :value="value">{{ platformLabels[value] }}</option>
-      </select>
-      <select v-model="form.target_type" aria-label="采集类型" :disabled="editingId !== null" class="select px-3 py-2 text-sm">
-        <option v-for="type in availableTypes" :key="type" :value="type">{{ targetTypeLabels[type] ?? type }}</option>
-      </select>
-      <input
-        v-model="form.target_value"
-        :placeholder="targetPlaceholder"
-        :aria-label="form.platform === 'x' ? 'X 账号' : '目标值'"
-        class="input px-3 py-2 text-sm"
-      >
-      <input v-model.number="form.interval_minutes" :aria-label="form.platform === 'x' ? '基准采集间隔（分钟）' : '采集间隔（分钟）'" :title="form.platform === 'x' ? '每轮随机浮动 ±25%，至少间隔 30 分钟' : ''" type="number" :min="form.platform === 'x' ? 30 : 5" max="1440" class="input mono px-3 py-2 text-sm">
-      <select v-model="form.tier" class="select px-3 py-2 text-sm sm:col-span-2" title="核心关键词：商品/联名等特定内容，全量入库强及时；泛关键词：社区泛话题，走共现词与热度门槛">
-        <option value="core">准入分级：核心信源（全量入库，强及时）</option>
-        <option value="general">准入分级：泛关键词（走共现词与热度门槛）</option>
-      </select>
-      <select v-model="form.community" aria-label="所属分区" class="select px-3 py-2 text-sm" title="所属分区：决定内容与事件的归属">
-        <option v-for="c in adminCommunities" :key="c.key" :value="c.key">分区：{{ c.label }}{{ c.active ? '' : '（已隐藏）' }}</option>
-      </select>
-      <input v-model="form.display_name" aria-label="显示名称" placeholder="显示名称（可选，如 OpenAI 官方博客）" class="input px-3 py-2 text-sm sm:col-span-2">
-      <input v-model="form.co_terms" placeholder="共现词（逗号分隔，如 键盘,开箱,发货；留空不过滤；核心分级不生效）" class="input px-3 py-2 text-sm sm:col-span-2">
-      <label class="text-xs text-muted">{{ supportsViews ? '最低播放量（0 不过滤）' : '此目标没有播放量门槛' }}<input v-model.number="form.min_views" type="number" min="0" :disabled="!supportsViews" class="input mono mt-1 w-full px-3 py-2 text-sm disabled:opacity-50"></label>
-      <label class="flex items-center gap-2 self-end py-2 text-xs text-ink-2" :class="['keyword_search', 'topic_search'].includes(form.target_type) ? 'opacity-50' : 'cursor-pointer'">
-        <input v-model="form.is_official" type="checkbox" class="checkbox" :disabled="['keyword_search', 'topic_search'].includes(form.target_type)">
-        <span>标记为官方账号（入库内容标为「官方」）</span>
-      </label>
-      <div v-if="form.platform === 'web_page'" class="col-span-full space-y-3 rounded-xl border border-line bg-chip/30 p-3.5">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="text-xs font-medium text-ink-2">网页解析规则（可选，留空自动使用 Trafilatura + Readability 通用提取）</span>
-          <button
-            type="button"
-            class="rounded-md border border-line bg-card px-3 py-1 text-xs font-medium text-brand-ink transition-colors hover:bg-chip disabled:opacity-50"
-            :disabled="webPreviewing || !form.target_value.trim()"
-            @click="previewWebPage"
-          >
-            {{ webPreviewing ? '解析中…' : '测试解析' }}
-          </button>
-        </div>
-        <div class="grid gap-2.5 sm:grid-cols-2">
-          <input
-            v-model="form.web_selector"
-            maxlength="200"
-            placeholder="内容区域选择器（CSS/XPath，如 main、#changelog、//article）"
-            aria-label="内容区域选择器"
-            class="input mono px-3 py-2 text-xs"
-          >
-          <input
-            v-model="form.web_exclude_selector"
-            maxlength="200"
-            placeholder="排除噪音区域（CSS/XPath，如 .ads, footer, .timestamp）"
-            aria-label="排除噪音选择器"
-            class="input mono px-3 py-2 text-xs"
-          >
-          <input
-            v-if="form.target_type === 'list_watch'"
-            v-model="form.web_link_pattern"
-            maxlength="200"
-            placeholder="文章链接匹配（路径前缀如 /blog/ 或 regex:/news/2026）"
-            aria-label="文章链接匹配规则"
-            class="input mono px-3 py-2 text-xs"
-          >
-          <label v-if="form.target_type === 'list_watch'" class="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
-            <input v-model="form.web_fetch_body" type="checkbox" class="checkbox">
-            <span>新发现文章自动补读全文与发布时间</span>
-          </label>
-          <input
-            v-if="form.target_type === 'page_watch'"
-            v-model="form.web_ignore_patterns"
-            placeholder="忽略动态噪音行（逗号分隔，如 在线人数,regex:更新于\\s+\\d+分钟前）"
-            aria-label="忽略变更行规则"
-            class="input mono px-3 py-2 text-xs sm:col-span-2"
-          >
-        </div>
-        <p v-if="webPreviewError" class="text-xs text-red-600 dark:text-red-400">{{ webPreviewError }}</p>
-        <div v-if="webPreview" class="space-y-2 rounded-lg border border-line bg-card p-3 text-xs">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="font-semibold text-ink">{{ webPreview.title }}</span>
-            <span class="rounded bg-chip px-1.5 py-0.5 mono text-[11px] text-muted">引擎：{{ webPreview.extractor }}</span>
-            <span v-if="webPreview.mode === 'page_watch'" class="text-muted">正文 {{ webPreview.text_length }} 字 · {{ webPreview.media_count }} 图</span>
-            <span v-else class="text-muted">发现 {{ webPreview.items.length }} 条链接</span>
-          </div>
-          <p v-if="webPreview.spa_warning" class="rounded bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-300">
-            该页面静态 HTML 内容极少，可能是前端 JS 渲染页（SPA），建议改用 RSS / RSSHub 接入。
-          </p>
-          <div v-if="webPreview.detected_feeds.length" class="flex flex-wrap items-center gap-2 rounded bg-emerald-500/10 px-2.5 py-1.5 text-emerald-700 dark:text-emerald-300">
-            <span>检测到站点自带官方 RSS：</span>
-            <button
-              v-for="f in webPreview.detected_feeds"
-              :key="f.url"
-              type="button"
-              class="rounded border border-emerald-500/40 bg-card px-2 py-0.5 font-medium hover:bg-emerald-500/10 disabled:opacity-50"
-              :disabled="editingId !== null"
-              @click="useDetectedFeed(f.url, f.title)"
-            >
-              改用 {{ f.title || f.url }}
+    <!-- ==================== 右侧抽屉：新建 / 编辑采集信源 ==================== -->
+    <Teleport to="body">
+      <div v-if="drawerOpen" class="fixed inset-0 z-50 flex justify-end">
+        <div class="fixed inset-0 bg-black/40 backdrop-blur-[1px]" aria-hidden="true" @click="!creating && closeDrawer()" />
+        <aside
+          role="dialog"
+          aria-modal="true"
+          :aria-label="editingId ? `编辑采集信源 #${editingId}` : '新建采集信源'"
+          class="relative z-10 flex h-full w-full max-w-lg flex-col border-l border-line bg-card text-ink shadow-2xl"
+        >
+          <header class="flex items-center justify-between border-b border-line px-5 py-4">
+            <h2 class="text-base font-bold text-ink">{{ editingId ? `编辑采集信源 #${editingId}` : '新建采集信源' }}</h2>
+            <button type="button" class="grid size-8 place-items-center rounded-lg text-muted hover:bg-chip hover:text-ink" aria-label="关闭抽屉" @click="!creating && closeDrawer()">
+              <X :size="17" />
             </button>
-          </div>
-          <pre v-if="webPreview.mode === 'page_watch'" class="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-chip/60 p-2.5 font-sans text-xs leading-relaxed text-ink-2">{{ webPreview.text_preview || '（未提取到正文）' }}</pre>
-          <ul v-else-if="webPreview.items.length" class="max-h-44 space-y-1 overflow-auto">
-            <li v-for="(item, idx) in webPreview.items" :key="idx" class="flex items-baseline justify-between gap-2 border-t border-line-soft pt-1 first:border-0 first:pt-0">
-              <a :href="item.url" target="_blank" rel="noopener" class="truncate text-ink-2 hover:text-brand-ink">{{ item.title }}</a>
-              <span v-if="item.published_at" class="mono shrink-0 text-[11px] text-faint">{{ item.published_at.slice(0, 10) }}</span>
-            </li>
-          </ul>
-          <p v-else class="text-muted">未发现匹配的文章链接，可尝试调整选择器或链接前缀规则。</p>
-        </div>
-      </div>
-      <button type="submit" class="btn-primary px-4 py-2" :disabled="creating || !form.target_value.trim()">
-        {{ creating ? '保存中…' : editingId ? '保存修改' : '新增目标' }}
-      </button>
-      <button v-if="editingId" type="button" class="px-3 py-2 text-sm text-muted" :disabled="creating" @click="cancelEdit">取消编辑</button>
-      <p v-if="formError" class="col-span-full text-sm text-red-600 dark:text-red-400">{{ formError }}</p>
-    </form>
+          </header>
 
-    <p v-if="error" class="panel px-4 py-3 text-sm text-red-600 dark:text-red-400">{{ error }}</p>
+          <form id="target-drawer-form" class="flex-1 space-y-4 overflow-y-auto px-5 py-4" @submit.prevent="saveTarget">
+            <!-- 核心字段 -->
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="text-xs font-medium text-ink-2">所属分区
+                <select v-model="form.community" class="select mt-1.5 h-10 w-full px-3 text-sm font-normal">
+                  <option v-for="c in adminCommunities" :key="c.key" :value="c.key">{{ c.label }}{{ c.active ? '' : '（已隐藏）' }}</option>
+                </select>
+              </label>
+              <label class="text-xs font-medium text-ink-2">平台
+                <select v-model="form.platform" :disabled="editingId !== null" class="select mt-1.5 h-10 w-full px-3 text-sm font-normal disabled:opacity-55">
+                  <option v-for="value in collectPlatforms" :key="value" :value="value">{{ platformLabels[value] }}</option>
+                </select>
+              </label>
+              <label v-if="availableTypes.length > 1" class="text-xs font-medium text-ink-2 sm:col-span-2">采集类型
+                <select v-model="form.target_type" :disabled="editingId !== null" class="select mt-1.5 h-10 w-full px-3 text-sm font-normal disabled:opacity-55">
+                  <option v-for="type in availableTypes" :key="type" :value="type">{{ targetTypeLabels[type] ?? type }}</option>
+                </select>
+              </label>
+            </div>
 
-    <!-- 分区筛选与批量操作栏 -->
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex flex-wrap items-center gap-2">
-        <h2 class="text-sm font-semibold">目标列表（{{ filteredTargets.length }}）</h2>
-        <template v-if="selectedIds.length">
-          <span class="text-xs text-muted">已选 {{ selectedIds.length }} 项：</span>
-          <button type="button" class="rounded bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300" :disabled="batchBusy" @click="runBatchTargets('enable')">批量启用</button>
-          <button type="button" class="rounded bg-chip px-2.5 py-1 text-xs text-ink-2 hover:bg-line" :disabled="batchBusy" @click="runBatchTargets('disable')">批量停用</button>
-          <button type="button" class="rounded bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-500/20 dark:text-red-300" :disabled="batchBusy" @click="runBatchTargets('delete')">一键移除所选</button>
-        </template>
-        <button
-          v-else-if="communityFilter && filteredTargets.length"
-          type="button"
-          class="rounded border border-red-500/30 px-2.5 py-1 text-xs text-red-600 hover:bg-red-500/10 dark:text-red-300"
-          :disabled="batchBusy"
-          @click="runBatchTargets('delete', { community: communityFilter })"
-        >
-          清空「{{ labelOf(communityFilter) }}」全部信源
-        </button>
-      </div>
-      <div class="flex flex-wrap items-center gap-1">
-        <button
-          v-for="option in [['', '全部分区'], ...adminCommunities.map(c => [c.key, c.label] as const)]"
-          :key="option[0]"
-          type="button"
-          class="rounded-full px-2.5 py-1 text-xs transition-colors"
-          :class="communityFilter === option[0] ? 'bg-blue-600 text-white' : 'bg-chip text-muted hover:text-ink-2'"
-          @click="communityFilter = option[0]"
-        >
-          {{ option[1] }}
-        </button>
-      </div>
-    </div>
+            <div>
+              <label class="block text-xs font-medium text-ink-2">{{ form.platform === 'x' ? 'X 账号' : '采集目标' }}</label>
+              <div class="mt-1.5 flex gap-2">
+                <input
+                  v-model="form.target_value"
+                  required
+                  :placeholder="targetPlaceholder"
+                  class="input h-10 min-w-0 flex-1 px-3 text-sm"
+                >
+                <button
+                  v-if="form.platform === 'web_page'"
+                  type="button"
+                  class="h-10 shrink-0 rounded-[10px] border border-line bg-card px-3.5 text-xs font-medium text-brand-ink transition-colors hover:bg-chip disabled:opacity-50"
+                  :disabled="webPreviewing || !form.target_value.trim()"
+                  @click="previewWebPage"
+                >
+                  {{ webPreviewing ? '解析中…' : '测试解析' }}
+                </button>
+              </div>
+            </div>
 
-    <div class="panel overflow-x-auto">
-      <table class="w-full min-w-[880px] text-sm">
-        <thead>
-          <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
-            <th class="w-9 px-3 py-2.5">
-              <input type="checkbox" class="checkbox" :checked="allFilteredSelected" :disabled="!filteredTargets.length" aria-label="全选当前列表" @change="toggleSelectAll">
-            </th>
-            <th class="px-3 py-2.5 font-medium">目标</th>
-            <th class="px-2.5 py-2.5 font-medium">平台 · 类型</th>
-            <th class="px-2.5 py-2.5 font-medium">分区</th>
-            <th class="px-2.5 py-2.5 font-medium">分级</th>
-            <th class="px-2.5 py-2.5 font-medium">播放门槛</th>
-            <th class="px-2.5 py-2.5 font-medium">频率</th>
-            <th class="px-2.5 py-2.5 font-medium">最近成功</th>
-            <th class="px-2.5 py-2.5 font-medium">累计入库</th>
-            <th class="px-3 py-2.5 font-medium">最近错误</th>
-            <th class="px-3 py-2.5 text-right font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="target in filteredTargets" :key="target.id" class="border-b border-line-soft last:border-0" :class="target.enabled ? '' : 'opacity-60'">
-            <td class="px-3 py-2.5">
-              <input v-model="selectedIds" type="checkbox" :value="target.id" class="checkbox" :aria-label="`选择 ${target.display_name || target.target_value}`">
-            </td>
-            <td class="px-3 py-2.5">
-              <span class="font-medium">{{ target.display_name && target.display_name !== target.target_value ? target.display_name : target.target_value }}</span>
-              <span v-if="target.is_official" class="ml-1.5 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">官方</span>
-              <span v-if="target.web_config?.selector" class="mono ml-1.5 rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted" :title="`选择器：${target.web_config.selector}`">{{ target.web_config.selector }}</span>
-              <span v-if="target.display_name && target.display_name !== target.target_value" class="mono ml-1.5 text-xs text-faint">{{ target.target_value }}</span>
-            </td>
-            <td class="whitespace-nowrap px-2.5 py-2.5 text-ink-2">
-              {{ platformLabels[target.platform] ?? target.platform }}
-              <span class="text-faint">·</span>
-              {{ targetTypeLabels[target.target_type] ?? target.target_type }}
-            </td>
-            <td class="whitespace-nowrap px-2.5 py-2.5">
-              <span class="chip whitespace-nowrap" :class="badgeOf(target.community)">
-                {{ labelOf(target.community) }}
-              </span>
-            </td>
-            <td class="whitespace-nowrap px-2.5 py-2.5">
+            <!-- 网页解析测试预览 -->
+            <template v-if="form.platform === 'web_page'">
+              <p v-if="webPreviewError" class="text-xs text-hot">{{ webPreviewError }}</p>
+              <div v-if="webPreview" class="space-y-2 rounded-xl border border-line bg-canvas/60 p-3 text-xs">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold text-ink">{{ webPreview.title }}</span>
+                  <span class="rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted" :title="`底层引擎：${webPreview.extractor}`">{{ webExtractorLabel(webPreview.extractor) }}</span>
+                  <span v-if="webPreview.mode === 'page_watch'" class="text-muted">正文 {{ webPreview.text_length }} 字 · {{ webPreview.media_count }} 图</span>
+                  <span v-else class="text-muted">识别 {{ webPreview.items.length }} 条链接</span>
+                </div>
+                <p v-if="webPreview.spa_warning" class="rounded bg-amber-500/10 px-2.5 py-1.5 text-amber-700 dark:text-amber-300">
+                  页面静态 HTML 内容极少，可能为前端脚本渲染，建议优先改用 RSS 订阅
+                </p>
+                <div v-if="webPreview.detected_feeds.length" class="flex flex-wrap items-center gap-1.5 rounded bg-emerald-500/10 px-2.5 py-1.5 text-emerald-700 dark:text-emerald-300">
+                  <span>检测到官方 RSS：</span>
+                  <button
+                    v-for="f in webPreview.detected_feeds"
+                    :key="f.url"
+                    type="button"
+                    class="rounded border border-emerald-500/40 bg-card px-2 py-0.5 font-medium hover:bg-emerald-500/10 disabled:opacity-50"
+                    :disabled="editingId !== null"
+                    @click="useDetectedFeed(f.url, f.title)"
+                  >
+                    改用 {{ f.title || 'RSS 订阅' }}
+                  </button>
+                </div>
+                <pre v-if="webPreview.mode === 'page_watch'" class="max-h-36 overflow-auto whitespace-pre-wrap rounded bg-card p-2 font-sans leading-relaxed text-ink-2">{{ webPreview.text_preview || '（未提取到正文）' }}</pre>
+                <ul v-else-if="webPreview.items.length" class="max-h-40 space-y-1 overflow-auto">
+                  <li v-for="(item, idx) in webPreview.items" :key="idx" class="flex items-baseline justify-between gap-2 border-t border-line-soft pt-1 first:border-0 first:pt-0">
+                    <a :href="item.url" target="_blank" rel="noopener" class="truncate text-ink-2 hover:text-brand-ink">{{ item.title }}</a>
+                    <span v-if="item.published_at" class="mono shrink-0 text-[11px] text-faint">{{ item.published_at.slice(0, 10) }}</span>
+                  </li>
+                </ul>
+                <p v-else class="text-muted">未识别到文章链接，可在下方高级选项中调整内容区域或链接规则</p>
+              </div>
+            </template>
+
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="text-xs font-medium text-ink-2 sm:col-span-2">显示名称
+                <input v-model="form.display_name" placeholder="可选，如 OpenAI 官方博客" class="input mt-1.5 h-10 w-full px-3 text-sm font-normal">
+              </label>
+              <label class="text-xs font-medium text-ink-2 sm:col-span-2">收录策略
+                <select v-model="form.tier" class="select mt-1.5 h-10 w-full px-3 text-sm font-normal">
+                  <option value="core">全部收录（全量入库，不经词表与热度过滤）</option>
+                  <option value="general">条件筛选（按标题必含词与热度门槛筛选）</option>
+                </select>
+              </label>
+            </div>
+
+            <label v-if="supportsOfficial" class="flex cursor-pointer items-center gap-2 text-sm text-ink-2">
+              <input v-model="form.is_official" type="checkbox" class="checkbox">
+              <span>标记为官方来源</span>
+            </label>
+
+            <!-- 折叠高级选项（仅渲染当前平台与策略适用的字段） -->
+            <div class="border-t border-line-soft pt-3">
               <button
                 type="button"
-                class="chip cursor-pointer whitespace-nowrap transition-colors"
-                :class="target.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:bg-blue-400/15 dark:text-blue-300' : 'bg-chip text-muted'"
-                :title="target.tier === 'core' ? '核心关键词：全量入库，强及时。点击切换为泛关键词' : '泛关键词：走共现词与热度门槛。点击切换为核心关键词'"
-                :disabled="busyId === target.id"
-                @click="toggleTier(target)"
+                class="inline-flex items-center gap-1.5 text-xs font-medium text-muted transition-colors hover:text-ink"
+                :aria-expanded="drawerAdvancedOpen"
+                @click="drawerAdvancedOpen = !drawerAdvancedOpen"
               >
-                {{ target.tier === 'core' ? '核心' : '泛关键词' }}
+                <ChevronDown :size="14" class="transition-transform" :class="{ 'rotate-180': drawerAdvancedOpen }" />
+                高级选项
               </button>
-            </td>
-            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ target.min_views ? `≥${target.min_views}` : '—' }}</td>
-            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-ink-2">{{ target.platform === 'x' ? '约 ' : '' }}{{ target.interval_minutes }}min{{ target.platform === 'x' ? ' · 随机' : '' }}</td>
-            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ fmtTime(target.last_success_at) }}</td>
-            <td class="mono whitespace-nowrap px-2.5 py-2.5 text-xs text-muted">{{ target.total_items_new ?? '—' }}</td>
-            <td class="max-w-52 truncate px-3 py-2.5 text-xs text-faint" :title="target.last_error ?? ''">
-              {{ formatLastError(target.last_error) }}
-            </td>
-            <td class="whitespace-nowrap px-3 py-2.5 text-right">
-              <button type="button" class="rounded px-1.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id || creating" @click="edit(target)">编辑</button>
-              <button type="button" class="rounded px-1.5 py-1 text-xs text-blue-600 hover:underline dark:text-blue-300" :disabled="busyId === target.id" @click="runNow(target)">立即采集</button>
-              <button type="button" class="rounded px-1.5 py-1 text-xs text-muted hover:underline" :disabled="busyId === target.id" @click="toggle(target)">
-                {{ target.enabled ? '停用' : '启用' }}
-              </button>
-              <button type="button" class="rounded px-1.5 py-1 text-xs text-red-500 hover:underline dark:text-red-400" :disabled="busyId === target.id" @click="remove(target)">删除</button>
-            </td>
-          </tr>
-          <tr v-if="filteredTargets.length === 0">
-            <td colspan="11" class="px-4 py-10 text-center text-sm text-faint">
-              {{ targets.length === 0 ? '暂无采集目标，可点击上方「一键导入预设信源」或在表单中手动添加。' : '当前筛选分区下暂无目标。' }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
 
-    <section class="panel overflow-hidden">
-      <div class="flex items-center justify-between px-4 py-3">
-        <h2 class="text-sm font-semibold">最近采集运行</h2>
-        <p class="text-xs text-faint">抓取 → 过滤（分级/门槛） → 入库</p>
+              <div v-if="drawerAdvancedOpen" class="mt-3 space-y-3">
+                <div class="grid gap-3 sm:grid-cols-2">
+                  <label class="text-xs font-medium text-ink-2">采集间隔（分钟）
+                    <input v-model.number="form.interval_minutes" type="number" :min="form.platform === 'x' ? 30 : 5" max="1440" class="input mono mt-1.5 h-9 w-full px-3 text-sm font-normal">
+                  </label>
+                  <label v-if="supportsViews" class="text-xs font-medium text-ink-2">最低播放量
+                    <input v-model.number="form.min_views" type="number" min="0" class="input mono mt-1.5 h-9 w-full px-3 text-sm font-normal">
+                  </label>
+                </div>
+
+                <label v-if="form.tier === 'general'" class="block text-xs font-medium text-ink-2">标题必含词
+                  <input v-model="form.co_terms" placeholder="逗号分隔，如 键盘, 开箱, 发货（留空不限制）" class="input mt-1.5 h-9 w-full px-3 text-sm font-normal">
+                </label>
+
+                <template v-if="form.platform === 'web_page'">
+                  <label class="block text-xs font-medium text-ink-2">内容区域
+                    <input v-model="form.web_selector" maxlength="200" placeholder="留空自动提取正文，支持 CSS / XPath（如 main、#pricing）" class="input mono mt-1.5 h-9 w-full px-3 text-xs font-normal">
+                  </label>
+                  <label class="block text-xs font-medium text-ink-2">排除区域
+                    <input v-model="form.web_exclude_selector" maxlength="200" placeholder="如 .ads, footer, nav" class="input mono mt-1.5 h-9 w-full px-3 text-xs font-normal">
+                  </label>
+                  <template v-if="form.target_type === 'list_watch'">
+                    <label class="block text-xs font-medium text-ink-2">链接规则
+                      <input v-model="form.web_link_pattern" maxlength="200" placeholder="仅收录匹配路径，如 /blog/ 或 regex:/news/2026" class="input mono mt-1.5 h-9 w-full px-3 text-xs font-normal">
+                    </label>
+                    <label class="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+                      <input v-model="form.web_fetch_body" type="checkbox" class="checkbox">
+                      <span>新发现文章自动补读正文与发布时间</span>
+                    </label>
+                  </template>
+                  <label v-if="form.target_type === 'page_watch'" class="block text-xs font-medium text-ink-2">忽略内容
+                    <input v-model="form.web_ignore_patterns" placeholder="逗号分隔，如 在线人数, 浏览量" class="input mono mt-1.5 h-9 w-full px-3 text-xs font-normal">
+                  </label>
+                </template>
+              </div>
+            </div>
+
+            <p v-if="formError" class="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-hot">{{ formError }}</p>
+          </form>
+
+          <footer class="flex items-center justify-end gap-2 border-t border-line px-5 py-3.5">
+            <button type="button" class="h-9 rounded-[10px] px-3.5 text-sm text-muted hover:bg-chip hover:text-ink" :disabled="creating" @click="closeDrawer">
+              取消
+            </button>
+            <button type="submit" form="target-drawer-form" class="btn-primary h-9 px-4 text-sm" :disabled="creating || !form.target_value.trim()">
+              {{ creating ? '保存中…' : editingId ? '保存更改' : '创建信源' }}
+            </button>
+          </footer>
+        </aside>
       </div>
-      <table class="w-full text-sm">
-        <tbody>
-          <tr v-for="run in runs" :key="run.id" class="border-t border-line-soft text-xs">
-            <td class="px-4 py-2 text-ink-2">{{ targetName(run.target_id) }}</td>
-            <td class="mono px-4 py-2 text-faint">{{ fmtTime(run.started_at) }}</td>
-            <td class="px-4 py-2">
-              <span class="chip" :class="run.status === 'success' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : run.status === 'failed' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-chip text-muted'">{{ run.status === 'skipped' ? '冷却跳过' : run.status }}</span>
-            </td>
-            <td class="px-4 py-2 text-muted" :title="run.error ?? ''">
-              <span class="mono">抓取 {{ run.items_fetched ?? run.items_found ?? '—' }} · 过滤 {{ run.items_filtered ?? 0 }} · 入库 {{ run.items_new ?? 0 }}</span>
-              <span v-if="run.error" class="ml-2 text-red-600 dark:text-red-400">{{ formatLastError(run.error) }}</span>
-            </td>
-          </tr>
-          <tr v-if="!runs.length">
-            <td colspan="4" class="px-4 py-6 text-center text-sm text-faint">暂无运行记录。</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+    </Teleport>
   </div>
 </template>

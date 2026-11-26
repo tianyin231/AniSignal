@@ -238,10 +238,10 @@ async function rereview(item: ContentItem) {
           v-model="tierFilter"
           class="select px-3 py-2 text-sm"
         >
-          <option value="">全部分级</option>
-          <option value="core">核心来源</option>
-          <option value="general">泛关键词</option>
-          <option value="none">无匹配词</option>
+          <option value="">全部策略</option>
+          <option value="core">全部收录</option>
+          <option value="general">条件筛选</option>
+          <option value="none">无匹配</option>
         </select>
         <select
           v-model="communityFilter"
@@ -328,7 +328,7 @@ async function rereview(item: ContentItem) {
           <tr class="border-b border-line-soft text-left text-xs text-muted dark:border-line">
             <th class="px-4 py-2.5 font-medium">标题</th>
             <th class="px-4 py-2.5 font-medium">平台</th>
-            <th class="px-4 py-2.5 font-medium">来源分级</th>
+            <th class="whitespace-nowrap px-4 py-2.5 font-medium">收录策略</th>
             <th class="px-4 py-2.5 font-medium">审核</th>
             <th class="px-4 py-2.5 font-medium">状态</th>
             <th class="px-4 py-2.5 font-medium">采集</th>
@@ -353,7 +353,7 @@ async function rereview(item: ContentItem) {
                 class="chip"
                 :class="item.tier === 'core' ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300' : item.tier === 'general' ? 'bg-chip text-muted' : 'bg-chip text-faint dark:text-muted'"
                 :title="(item.matched_keywords || []).join('、')"
-              >{{ item.tier === 'core' ? '核心来源' : item.tier === 'general' ? '泛关键词' : '无匹配' }}</span>
+              >{{ item.tier === 'core' ? '全部收录' : item.tier === 'general' ? '条件筛选' : '无匹配' }}</span>
             </td>
             <td class="whitespace-nowrap px-4 py-2.5">
               <span v-if="item.platform === 'xiaoheihe'" class="text-xs text-muted">公开原帖</span>

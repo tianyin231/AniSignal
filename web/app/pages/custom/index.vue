@@ -6,7 +6,7 @@ import { customFeedBadge, customKindLabel } from '~/utils/custom-feeds'
 import { loginRoute } from '~/utils/safe-redirect'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
-useSeoMeta({ title: '定制监控 · AniSignal', description: '选择 B 站、RSS / Atom、自定义网页、YouTube、Steam 游戏或小黑盒，随时启停监控。' })
+useSeoMeta({ title: '定制监控 · AniSignal', description: '支持 B 站、RSS 订阅、网页监测、YouTube、Steam 与小黑盒，按需启停并推送更新。' })
 
 interface CustomFeedCard {
   id: number
@@ -114,7 +114,7 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
   <div>
     <section class="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div class="wall-heading">
-        <p class="mono mb-1.5 text-xs tracking-wide text-muted">B 站 · RSS 订阅 · 网页监控 · YouTube · Steam · 小黑盒</p>
+        <p class="mono mb-1.5 text-xs tracking-wide text-muted">B 站 · RSS 订阅 · 网页监测 · YouTube · Steam · 小黑盒</p>
         <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">定制监控</h1>
       </div>
       <div class="grid w-full grid-cols-3 gap-2 sm:flex sm:w-auto sm:gap-2.5">
@@ -165,8 +165,8 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
           </NuxtLink>
         </div>
         <div v-else class="rounded-2xl border border-dashed border-line px-5 py-14 text-center">
-          <p class="text-sm text-muted">还没有公开的定制监控。</p>
-          <p class="mt-1 text-xs text-faint">在账号中心创建监控并选择"公开到定制化频道"，就会出现在这里。</p>
+          <p class="text-sm text-muted">暂无公开的定制监控</p>
+          <p class="mt-1 text-xs text-faint">在账号中心创建监控并勾选「公开到定制监控频道」，即可在此展示</p>
         </div>
 
         <nav v-if="totalPages > 1" aria-label="分页" class="mt-5 flex items-center justify-between text-xs text-muted">
@@ -184,8 +184,8 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
           <header class="flex items-center gap-3">
             <span class="grid size-10 shrink-0 place-items-center rounded-xl bg-arknights-soft text-arknights-ink" aria-hidden="true"><Radar :size="19" /></span>
             <div class="min-w-0 flex-1">
-              <h2 id="mine-title" class="text-base font-bold text-ink">我的监控源</h2>
-              <p v-if="quota" class="text-xs text-muted">{{ quota.admitted ? `已用 ${quota.used}/${quota.max_feeds} 个` : '尚未开通公测名额' }}</p>
+              <h2 id="mine-title" class="text-base font-bold text-ink">我的监控</h2>
+              <p v-if="quota" class="text-xs text-muted">{{ quota.admitted ? `已用 ${quota.used} / ${quota.max_feeds} 项` : '尚未开通使用权限' }}</p>
             </div>
           </header>
 
@@ -236,9 +236,9 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
           </template>
           <template v-else>
             <ul class="mt-4 space-y-2 text-[13px] text-ink-2">
-              <li>· 选择 B 站关键词或 UP 主、RSS 订阅、自定义网页、YouTube、Steam 或小黑盒</li>
-              <li>· 随时一键启停、立即抓取、设置包含词与排除词</li>
-              <li>· 可设为私有独享，或公开到这里与大家共享</li>
+              <li>· 支持 RSS 订阅、单页变更、列表更新，以及 B 站、YouTube、Steam、小黑盒</li>
+              <li>· 支持立即采集、随时启停及标题包含词与排除词筛选</li>
+              <li>· 可设为私有独享，或公开至定制监控频道共享</li>
             </ul>
             <NuxtLink :to="loginRoute(createTo)" class="btn-primary mt-4 inline-flex h-9 w-full items-center justify-center">登录后创建监控</NuxtLink>
           </template>

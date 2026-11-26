@@ -1,4 +1,4 @@
-import { platformMeta, type Platform } from './data.ts'
+import { CUSTOM_KIND_LABELS, PLATFORM_META, type PlatformKey } from './lexicon.ts'
 
 export const XIAOHEIHE_MONITOR = {
   kind: 'hot_posts', platform: 'xiaoheihe', target: 'hot', name: '小黑盒热帖',
@@ -13,36 +13,23 @@ export const STEAM_MONITOR = {
   kind: 'steam_app', platform: 'steam', name: 'Steam 游戏',
 } as const
 export const WEB_PAGE_MONITOR = {
-  kind: 'page_watch', platform: 'web_page', name: '网页变更',
+  kind: 'page_watch', platform: 'web_page', name: '单页变更',
 } as const
 export const WEB_LIST_MONITOR = {
-  kind: 'list_watch', platform: 'web_page', name: '网页列表',
+  kind: 'list_watch', platform: 'web_page', name: '列表更新',
 } as const
 
 export function customKindLabel(kind: string) {
-  return ({
-    uid: 'UP 主监控',
-    keyword: '关键词监控',
-    feed: 'RSS 订阅',
-    channel_rss: 'YouTube 频道',
-    notices: '官方公告',
-    account_dynamics: '官方动态',
-    [STEAM_MONITOR.kind]: STEAM_MONITOR.name,
-    [WEB_PAGE_MONITOR.kind]: WEB_PAGE_MONITOR.name,
-    [WEB_LIST_MONITOR.kind]: WEB_LIST_MONITOR.name,
-    [XIAOHEIHE_MONITOR.kind]: XIAOHEIHE_MONITOR.name,
-    [XIAOHEIHE_ACCOUNT_MONITOR.kind]: XIAOHEIHE_ACCOUNT_MONITOR.name,
-    [XIAOHEIHE_KEYWORD_MONITOR.kind]: XIAOHEIHE_KEYWORD_MONITOR.name,
-  } as Record<string, string>)[kind] || '定制监控'
+  return CUSTOM_KIND_LABELS[kind] || '定制监控'
 }
 
 export function customPlatformBadge(platform: string, contentType: string) {
-  return ({ youtube: 'YT', rss: 'RSS', web_page: '页', x: 'X', game_official: '官', xiaoheihe: '盒', steam: 'S' } as Record<string, string>)[platform]
+  return PLATFORM_META[platform as PlatformKey]?.short
     || (contentType === 'dynamic' ? '动' : 'B')
 }
 
-/** 监控卡片的来源标识：沿用平台色块（B站粉 / YouTube 红 / X 黑 / 官网绿）。 */
+/** 监控卡片的来源标识：沿用平台色块（B 站粉 / YouTube 红 / X 黑 / 官网绿）。 */
 export function customFeedBadge(platform: string): { short: string, badge: string, label: string } {
-  const meta = platformMeta[platform as Platform]
+  const meta = PLATFORM_META[platform as PlatformKey]
   return meta ? { short: meta.short, badge: meta.badge, label: meta.label } : { short: '监', badge: 'bg-brand', label: '定制监控' }
 }

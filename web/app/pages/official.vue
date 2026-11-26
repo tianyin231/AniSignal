@@ -6,7 +6,7 @@ import type { PublicContentList } from '~/composables/usePublicApi'
 
 const tabs = [
   { key: 'all', label: '全部' },
-  { key: 'bilibili', label: 'B站' },
+  { key: 'bilibili', label: 'B 站' },
   { key: 'miyoushe', label: '米游社' },
   { key: 'kuro', label: '库街区' },
   { key: 'steam', label: 'Steam' },

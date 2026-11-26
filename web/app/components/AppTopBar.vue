@@ -217,7 +217,7 @@ async function handleLogout() {
               账号中心
             </NuxtLink>
             <NuxtLink to="/watch" class="block rounded-lg px-3 py-2 text-sm text-ink-2 hover:bg-chip" role="menuitem" @click="menuOpen = false">
-              订阅中心
+              订阅与通知
             </NuxtLink>
             <button class="block w-full rounded-lg px-3 py-2 text-left text-sm text-red-600 hover:bg-red-500/10 dark:text-red-400" role="menuitem" @click="handleLogout">
               退出登录

@@ -50,7 +50,7 @@ const MEDIA_DEFAULTS: MediaVisibility = {
 }
 
 export const TEXT_DEFAULTS: Record<string, string> = {
-  footer_note: 'AniSignal · 定制化情报采集',
+  footer_note: 'AniSignal · 跨平台事件雷达',
   contact_email: '',
   source_url: 'https://github.com/tianyin231/AniSignal',
 }

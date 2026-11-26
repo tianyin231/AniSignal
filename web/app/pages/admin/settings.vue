@@ -67,7 +67,7 @@ const xiaoheiheTestResult = ref('')
 // ---------- 媒体可见性 ----------
 interface MediaModesView { image: string; video: string }
 const PLATFORM_MEDIA: { key: string; label: string }[] = [
-  { key: 'bilibili', label: 'B站' },
+  { key: 'bilibili', label: 'B 站' },
   { key: 'youtube', label: 'YouTube' },
   { key: 'kuro_cn', label: '库街区·国服' },
   { key: 'kuro_global', label: '库街区·国际服' },
@@ -536,15 +536,15 @@ async function saveTexts() {
     <!-- AI / LLM 统一入口 -->
     <section class="panel flex flex-wrap items-center justify-between gap-3 p-5">
       <div>
-        <h2 class="text-sm font-semibold">AI 层（LLM）</h2>
+        <h2 class="text-sm font-semibold">AI 配置</h2>
         <p class="mt-1 text-xs leading-relaxed text-muted">
           当前模型：<span class="mono font-medium text-ink-2">{{ ai.model || '未配置（前台自动原文直出）' }}</span>
           <template v-if="ai.base_url"> · <span class="mono">{{ ai.base_url }}</span></template>
           <br>
-          接口地址、API Key 池、单价估算、连通测试与批量摘要/翻译统一在「AI 层」页面管理。
+          接口地址、API Key 池、单价估算、连通测试与批量摘要/翻译统一在「AI 配置」页面管理。
         </p>
       </div>
-      <NuxtLink to="/admin/ai" class="btn-primary shrink-0 px-4 py-2 text-sm">前往 AI 层配置 →</NuxtLink>
+      <NuxtLink to="/admin/ai" class="btn-primary shrink-0 px-4 py-2 text-sm">前往 AI 配置 →</NuxtLink>
     </section>
 
     <!-- 全服公告 -->

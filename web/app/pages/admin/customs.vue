@@ -4,7 +4,7 @@ import { customKindLabel } from '~/utils/custom-feeds'
 import { Search } from 'lucide-vue-next'
 
 definePageMeta({ layout: 'admin', middleware: 'admin-auth' })
-useSeoMeta({ title: '定制监控 · AniSignal 管理看板' })
+useSeoMeta({ title: '用户监控 · AniSignal 管理看板' })
 
 const { api } = useAdminApi()
 const toast = useAdminToast()
@@ -58,7 +58,7 @@ const quotaUser = reactive({ id: '', max_feeds: 10, min_interval_minutes: 30, ma
 const policyFields = [
   ['max_feeds_per_user', '默认每人监控数'], ['min_interval_minutes', '新监控最短周期（分钟）'],
   ['max_active_sources', '最多独立目标'], ['custom_hourly_budget', '定制任务预算/小时'],
-  ['platform_hourly_budget', 'B站全平台任务预算/小时'], ['platform_hourly_requests', 'B站真实请求预算/小时'],
+  ['platform_hourly_budget', 'B 站全平台任务预算/小时'], ['platform_hourly_requests', 'B 站真实请求预算/小时'],
   ['max_bot_clients_per_user', '默认每人 Bot 接入数'], ['max_bot_targets_per_user', '默认每人启用会话数'],
   ['daily_notifications_per_user', '默认每人每日通知次数'],
 ] as const
@@ -186,8 +186,8 @@ async function removeFeed(feed: CustomFeedAdminRow) {
 <template>
   <div class="space-y-4">
     <div class="wall-heading">
-      <h1 class="text-2xl font-bold text-ink">定制监控</h1>
-      <p class="mt-0.5 text-sm text-muted">全站用户自建的关键词 / UP 主 / RSS / 网页监控 / YouTube 监控源巡查与处置。</p>
+      <h1 class="text-2xl font-bold text-ink">用户监控</h1>
+      <p class="mt-0.5 text-sm text-muted">管理用户自建的 RSS 订阅、网页监测、B 站、YouTube、Steam 与小黑盒监控源及采集配额。</p>
     </div>
 
     <section class="panel space-y-4 p-4" aria-label="定制采集公测容量">
@@ -197,7 +197,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
       </div>
       <template v-if="capacityInfo && policyDraft">
         <div class="grid gap-2 text-sm text-muted sm:grid-cols-2 lg:grid-cols-4">
-          <p>本小时 B站请求 <strong class="mono text-ink">{{ capacityInfo.budget.requests ?? 0 }}/{{ capacityInfo.policy.platform_hourly_requests }}</strong></p>
+          <p>本小时 B 站请求 <strong class="mono text-ink">{{ capacityInfo.budget.requests ?? 0 }}/{{ capacityInfo.policy.platform_hourly_requests }}</strong></p>
           <p>独立目标 <strong class="mono text-ink">{{ capacityInfo.capacity.active_sources }}/{{ capacityInfo.policy.max_active_sources }}</strong></p>
           <p>预计 <strong class="mono text-ink">{{ capacityInfo.capacity.estimated_tasks_per_hour }}</strong> 任务/小时</p>
           <p>本小时定制 <strong class="mono text-ink">{{ capacityInfo.budget.custom }}/{{ capacityInfo.policy.custom_hourly_budget }}</strong> · 平台 {{ capacityInfo.budget.total }}/{{ capacityInfo.policy.platform_hourly_budget }}</p>
@@ -251,11 +251,11 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           class="select px-3 py-2 text-sm"
         >
           <option value="">全部类型</option>
-          <option value="uid">UID 监控</option>
-          <option value="keyword">关键词监控</option>
+          <option value="uid">B 站 UP 主</option>
+          <option value="keyword">B 站关键词</option>
           <option value="feed">RSS 订阅</option>
-          <option value="page_watch">网页变更</option>
-          <option value="list_watch">网页列表</option>
+          <option value="page_watch">单页变更</option>
+          <option value="list_watch">列表更新</option>
           <option value="channel_rss">YouTube 频道</option>
           <option value="steam_app">Steam 游戏</option>
           <option value="notices">官方公告</option>

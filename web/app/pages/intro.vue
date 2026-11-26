@@ -99,7 +99,7 @@ onBeforeUnmount(() => dispose?.())
  <div class="as-section-heading" data-reveal><div><span class="as-overline">01 / THE WHOLE PICTURE</span><h2 id="as-capabilities-title">不止收到消息，<br>更能理解来龙去脉。</h2></div><p>采集、整理、追踪与送达，组成完整的信息链路。<br>当前展示什么，由关键词与采集配置决定。</p></div>
  <div class="as-features"><article class="as-feature as-feature-collection" data-reveal>
  <div class="as-feature-head"><svg class="as-icon " aria-hidden="true"><use href="#as-i-layers" /></svg><span>01</span></div><p class="as-feature-kicker">多源采集与降噪</p>
- <h3>先筛选，再汇入。</h3><p>按关键词、账号或公告来源采集。用共现词、热度门槛与分类规则，让信息流更贴近你的关注范围。</p><div class="as-mini" aria-hidden="true"><div class="as-mini-tags"><span>关键词</span><span>账号动态</span><span>官网公告</span></div><div class="as-mini-flow"><i></i><i></i><i></i><b>筛选</b><i></i></div></div><a href="/contents" class="as-text-link">浏览内容库<svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a>
+ <h3>先筛选，再汇入。</h3><p>按关键词、账号或公告来源采集。用标题必含词、热度门槛与分类规则，让信息流更贴近你的关注范围。</p><div class="as-mini" aria-hidden="true"><div class="as-mini-tags"><span>关键词</span><span>账号动态</span><span>官网公告</span></div><div class="as-mini-flow"><i></i><i></i><i></i><b>筛选</b><i></i></div></div><a href="/contents" class="as-text-link">浏览内容库<svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a>
 </article>
 <article class="as-feature as-feature-evidence" data-reveal>
  <div class="as-feature-head"><svg class="as-icon " aria-hidden="true"><use href="#as-i-link" /></svg><span>02</span></div><p class="as-feature-kicker">事件归并与证据</p>
@@ -110,8 +110,8 @@ onBeforeUnmount(() => dispose?.())
  <h3>追进展，不猜结果。</h3><p>分开查看官方进展、消费者到货与质量反馈。候选线索保留，但不冒充已核验结论。</p><div class="as-mini" aria-hidden="true"><div class="as-mini-axes"><span>官方<i></i></span><span>到货<i></i></span><span>反馈<i></i></span></div></div><a href="/products" class="as-text-link">查看商品进展<svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a>
 </article>
 <article class="as-feature as-feature-personal" data-reveal>
- <div class="as-feature-head"><svg class="as-icon " aria-hidden="true"><use href="#as-i-filter" /></svg><span>04</span></div><p class="as-feature-kicker">关注流与独立监控</p>
- <h3>你的关注，有自己的范围。</h3><p>关注词筛选站内内容；独立的 B 站 UID 或关键词监控另行采集，可选择公开或私有。</p><div class="as-mini" aria-hidden="true"><div class="as-mini-tags"><span>我的关注</span><span>公开 / 私有</span><span>独立存储</span></div></div><a href="/account" class="as-text-link">管理我的关注<svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a>
+ <div class="as-feature-head"><svg class="as-icon " aria-hidden="true"><use href="#as-i-filter" /></svg><span>04</span></div><p class="as-feature-kicker">关注流与定制监控</p>
+ <h3>你的关注，有自己的范围。</h3><p>关键词关注筛选站内内容；定制监控支持 RSS 订阅、网页监测与社区账号，可选择公开或私有。</p><div class="as-mini" aria-hidden="true"><div class="as-mini-tags"><span>我的关注</span><span>公开 / 私有</span><span>独立存储</span></div></div><a href="/account" class="as-text-link">管理我的关注<svg class="as-icon " aria-hidden="true"><use href="#as-i-external" /></svg></a>
 </article>
 <article class="as-feature as-feature-ai" data-reveal>
  <div class="as-feature-head"><svg class="as-icon " aria-hidden="true"><use href="#as-i-spark" /></svg><span>05</span></div><p class="as-feature-kicker">可选 AI 辅助</p>

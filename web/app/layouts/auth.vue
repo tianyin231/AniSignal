@@ -51,7 +51,7 @@ const features = [
   { icon: ScanSearch, title: '关键词关注流', text: '角色、版本、商品名命中即收录，可按游戏筛选、排除噪音。' },
   { icon: Mail, title: '邮件早报', text: '每天 08:00 汇总；重要变化可单独即时提醒。' },
   { icon: Bot, title: 'QQ 机器人', text: '接入 AstrBot，在群里查询活动并接收推送。' },
-  { icon: Radar, title: '定制监控', text: '跟踪指定 B 站 UP 主或关键词，可公开到定制化频道。' },
+  { icon: Radar, title: '定制监控', text: '自建 RSS 订阅、网页监测或社区账号监控，可公开至定制监控频道。' },
 ]
 </script>
 

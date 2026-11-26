@@ -2,11 +2,11 @@
 import { PROJECT_GITHUB_URL } from '~/utils/project'
 const { t } = useSiteConfig()
 const repoUrl = computed(() => t('source_url').trim() || PROJECT_GITHUB_URL)
-// 原左侧栏的工具页（数据统计 / 来源健康 / 订阅中心）收进页脚第一组
+// 原左侧栏的工具页（数据统计 / 来源健康 / 订阅与通知）收进页脚第一组
 const tools = [
   { to: '/stats', label: '数据统计' },
   { to: '/sources', label: '来源健康' },
-  { to: '/watch', label: '订阅中心' },
+  { to: '/watch', label: '订阅与通知' },
 ]
 const about = [
   { to: '/intro', label: '产品介绍' },

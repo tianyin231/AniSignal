@@ -1,6 +1,7 @@
-// 领域模型与演示数据，对应设计文档 §7；全部为 mock，时间基准 2026-08-16
+// 领域模型与展示元数据；平台字典统一由 lexicon.ts 导出
+import { PLATFORM_META, type PlatformKey } from './lexicon.ts'
 
-export type Platform = 'bilibili' | 'weibo' | 'x' | 'youtube' | 'web' | 'web_page' | 'kuro' | 'miyoushe' | 'kuro_cn' | 'kuro_global' | 'rss' | 'game_official' | 'xiaoheihe' | 'steam'
+export type Platform = PlatformKey
 export type Identity = 'official' | 'seeded' | 'user' | 'media' | 'merchant' | 'unknown'
 export type Region = 'cn' | 'global'
 
@@ -96,22 +97,7 @@ export const identityMeta: Record<Identity, { label: string; badge: string; text
   },
 }
 
-export const platformMeta: Record<Platform, { label: string; short: string; badge: string }> = {
-  bilibili: { label: 'B站', short: 'B', badge: 'bg-pink-500' },
-  weibo: { label: '微博', short: '博', badge: 'bg-red-600' },
-  x: { label: 'X', short: 'X', badge: 'bg-zinc-900 dark:bg-zinc-700' },
-  rss: { label: '新闻源', short: 'RSS', badge: 'bg-teal-700' },
-  web_page: { label: '网页监控', short: '页', badge: 'bg-cyan-600' },
-  youtube: { label: 'YouTube', short: 'YT', badge: 'bg-red-500' },
-  game_official: { label: '游戏官网', short: '官', badge: 'bg-emerald-600' },
-  web: { label: '官网', short: '网', badge: 'bg-sky-600' },
-  kuro: { label: '库街区', short: '库', badge: 'bg-teal-600' },
-  miyoushe: { label: '米游社', short: '米', badge: 'bg-sky-500' },
-  xiaoheihe: { label: '小黑盒', short: '盒', badge: 'bg-zinc-800 dark:bg-zinc-700' },
-  kuro_cn: { label: '库街区·国服', short: '库', badge: 'bg-sky-600' },
-  kuro_global: { label: '库街区·国际服', short: '际', badge: 'bg-cyan-600' },
-  steam: { label: 'Steam', short: 'S', badge: 'bg-slate-800 dark:bg-slate-600' },
-}
+export const platformMeta: Record<Platform, { label: string; short: string; badge: string }> = PLATFORM_META
 
 export const regionMeta: Record<Region, string> = {
   cn: '国服',

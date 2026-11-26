@@ -1,4 +1,5 @@
 /** Admin 看板与后端 DTO 对应的类型与展示工具 */
+import { ADMIN_PLATFORM_LABELS, CONTENT_TYPE_LABELS, TARGET_TYPE_LABELS } from './lexicon.ts'
 
 export interface WebPageConfig {
   selector?: string
@@ -125,39 +126,11 @@ export interface ContentList {
   total: number
 }
 
-export const platformLabels: Record<string, string> = {
-  game_official: '游戏官网公告',
-  rss: 'RSS 新闻源',
-  web_page: '网页监控',
-  bilibili: 'B站',
-  miyoushe: '米游社',
-  xiaoheihe: '小黑盒',
-  kuro_cn: '库街区·国服',
-  kuro_global: '库街区·国际服',
-  steam: 'Steam',
-  youtube: 'YouTube',
-  x: 'X',
-}
+export const platformLabels: Record<string, string> = ADMIN_PLATFORM_LABELS
 
-export const targetTypeLabels: Record<string, string> = {
-  feed: 'RSS / Atom',
-  page_watch: '单页变更',
-  list_watch: '列表新增',
-  keyword_search: '关键词搜索',
-  account_videos: '账号视频',
-  account_dynamics: '账号动态',
-  notices: '官方公告',
-  channel_rss: '频道 RSS',
-}
+export const targetTypeLabels: Record<string, string> = TARGET_TYPE_LABELS
 
-export const contentTypeLabels: Record<string, string> = {
-  video: '视频',
-  dynamic: '动态',
-  post: '帖子',
-  notice: '公告',
-  rss_item: 'RSS',
-  web_page: '网页',
-}
+export const contentTypeLabels: Record<string, string> = CONTENT_TYPE_LABELS
 
 /** 后端时间为 naive UTC（无 Z 后缀），按北京时间展示 */
 export function fmtTime(value: string | null): string {

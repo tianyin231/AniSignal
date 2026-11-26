@@ -6,7 +6,7 @@ import { platformMeta, type Platform } from '~/utils/data'
 // 来源健康：一条正常/失败比例条 + 分组计数 + 失败来源点名。
 // 跨分区（聚合首页）按游戏分组，单分区按平台分组；只统计启用中的来源。
 type HealthSource = Pick<PublicSource, 'name' | 'community' | 'platform' | 'enabled' | 'consecutive_failures'>
-const props = defineProps<{ sources: HealthSource[] }>()
+const props = defineProps<{ sources: HealthSource[]; compact?: boolean }>()
 
 const enabled = computed(() => props.sources.filter(s => s.enabled))
 const failing = computed(() =>
@@ -46,7 +46,21 @@ const summary = computed(() =>
 </script>
 
 <template>
-  <section v-if="enabled.length" class="panel p-5" aria-labelledby="source-health-title">
+  <NuxtLink
+    v-if="enabled.length && compact && !failing.length"
+    to="/sources"
+    class="panel flex items-center justify-between gap-3 px-4 py-3 text-[13px] transition-colors hover:border-faint/60"
+    :aria-label="summary"
+  >
+    <span class="flex items-center gap-2 text-ink-2">
+      <span class="size-2 shrink-0 rounded-full bg-ok" aria-hidden="true" />
+      <span class="font-medium text-ink">来源健康</span>
+      <span class="text-muted">全部正常</span>
+    </span>
+    <span class="num text-xs font-semibold text-muted">{{ okCount }}/{{ enabled.length }} →</span>
+  </NuxtLink>
+
+  <section v-else-if="enabled.length" class="panel p-5" aria-labelledby="source-health-title">
     <header class="flex items-baseline justify-between">
       <h2 id="source-health-title" class="text-base font-bold text-ink">来源健康</h2>
       <span class="num text-[15px] font-bold text-ink">{{ okCount }}<span class="font-medium text-faint">/{{ enabled.length }}</span></span>

@@ -2,7 +2,7 @@
 import { communityClasses } from '~/composables/useGameSection'
 import { apiErrorDetail } from '~/utils/api-errors'
 
-// 个人降噪：限定分区 + 排除词，作用于关注流、每日早报和 AI 精炼邮件。
+// 个人降噪：限定分区 + 排除词，作用于关注流、每日早报与 AI 摘要邮件。
 const emit = defineEmits<{ saved: [] }>()
 interface Preferences { communities: string[], exclude_keywords: string[] }
 const { communities: activeCommunities } = useGameSection()
@@ -62,7 +62,7 @@ async function save() {
   <section class="panel p-5" aria-labelledby="preferences-title">
     <h2 id="preferences-title" class="text-base font-bold text-ink">个人降噪</h2>
     <p class="mt-1 text-xs leading-relaxed text-muted">
-      作用于关注流、每日早报和 AI 精炼邮件；定制监控按各自规则收集。想在网站列表里隐藏某个游戏或来源平台，请到
+      作用于关注流、每日早报与 AI 摘要邮件；定制监控按各自规则采集。如需在站点列表中隐藏分区或平台，请前往
       <NuxtLink :to="{ path: '/account', query: { tab: 'profile' }, hash: '#hidden-communities' }" class="text-brand-ink underline-offset-2 hover:underline">账号与安全 → 屏蔽分区与来源</NuxtLink>。
     </p>
 

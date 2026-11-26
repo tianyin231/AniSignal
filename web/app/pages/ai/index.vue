@@ -159,8 +159,6 @@ function newsLink(item: NewsItem) {
   return item.path || `/contents/${item.id}?community=ai`
 }
 function platformMark(platform: string) {
-  if (platform === 'rss') return { label: '新闻源', short: 'RSS', badge: 'bg-teal-700' }
-
   return platformMeta[platform as Platform] ?? { label: platform, short: platform.slice(0, 1).toUpperCase(), badge: 'bg-slate-500' }
 }
 function rowCover(id: number | string) {
@@ -280,7 +278,7 @@ onBeforeUnmount(() => {
 
     <div v-if="!aiConfigured" class="panel mb-4 flex flex-wrap items-center justify-between gap-3 border-ai/30 bg-ai-soft/40 px-4 py-3 text-sm text-ink-2">
       <p>当前尚未配置 AI 模型，已自动切换为<strong class="font-semibold text-ink">原文直出模式</strong>，直接显示已采集的一手信源内容。</p>
-      <NuxtLink to="/admin/ai" class="link shrink-0 text-xs font-semibold">前往后台配置 AI 精炼 →</NuxtLink>
+      <NuxtLink to="/admin/ai" class="link shrink-0 text-xs font-semibold">前往后台完成 AI 配置 →</NuxtLink>
     </div>
 
     <nav class="mb-3 flex flex-wrap items-center gap-4 text-sm text-ink-2" aria-label="AI 栏目">
@@ -293,7 +291,7 @@ onBeforeUnmount(() => {
         :class="showRaw ? 'bg-ai-soft font-semibold text-ai-ink' : 'bg-chip text-muted hover:text-ink'"
         @click="filterBy('raw', route.query.raw === '1' ? undefined : '1')"
       >
-        {{ showRaw ? '已包含未审原文（点击仅看 AI 精炼）' : '同时显示未审原文' }}
+        {{ showRaw ? '已包含未审原文（点击仅看 AI 精选）' : '同时显示未审原文' }}
       </button>
     </nav>
     <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">

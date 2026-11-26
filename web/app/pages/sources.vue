@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { fmtTime } from '~/utils/admin-types'
-import { platformMeta, type Platform } from '~/utils/data'
+import { platformInfo, platformRegion, TARGET_TYPE_LABELS } from '~/utils/lexicon'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import type { PublicSource } from '~/composables/usePublicApi'
 
-useSeoMeta({ title: '来源健康', description: '每个采集来源最近一次运行的情况与健康状态。' })
+useSeoMeta({ title: '来源健康', description: '各采集来源的最近运行状态与健康情况。' })
 
 const { api } = usePublicApi()
 // 系统级页面：展示全部分区的来源，不跟随顶栏分区
@@ -17,30 +17,6 @@ function communityBadge(community?: string) {
   const meta = communityMeta(community)
   return meta ? { label: meta.label, chip: communityClasses(meta.color).chip } : null
 }
-
-const regionLabel: Record<string, string> = {
-  bilibili: '国内',
-  miyoushe: '国内',
-  kuro_cn: '国服',
-  kuro_global: '国际服',
-  steam: '国际服',
-  youtube: '海外',
-  x: '海外',
-  rss: '通用',
-  web_page: '通用',
-  game_official: '官方',
-}
-
-const targetTypeLabels: Record<string, string> = {
-  keyword_search: '关键词搜索',
-  account_videos: '账号视频',
-  account_dynamics: '账号动态',
-  notices: '官方公告',
-  channel_rss: '频道 RSS',
-  feed: 'RSS 订阅',
-  page_watch: '单页变更',
-  list_watch: '列表新增',
-}
 </script>
 
 <template>
@@ -49,62 +25,61 @@ const targetTypeLabels: Record<string, string> = {
       <h1 class="text-2xl font-bold text-ink">来源健康</h1>
     </section>
 
-    <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-slate-400">加载中…</section>
-    <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-amber-700 dark:text-amber-300">来源暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
+    <section v-if="status === 'pending'" class="panel px-4 py-10 text-center text-sm text-muted">加载中…</section>
+    <section v-else-if="error" role="alert" class="panel px-4 py-10 text-center text-sm text-warn">来源暂时加载失败。<button type="button" class="ml-1 underline" @click="refresh()">重新加载</button></section>
     <section v-else class="panel overflow-x-auto">
-      <table class="w-full min-w-[760px] text-left text-[13px]">
+      <table class="w-full min-w-[720px] text-left text-[13px]">
         <thead>
-          <tr class="border-b border-slate-200 text-xs text-slate-400 dark:border-zinc-800">
-            <th class="px-4 py-2.5 font-medium">来源</th>
-            <th class="px-3 py-2.5 font-medium">分区</th>
-            <th class="px-3 py-2.5 font-medium">平台</th>
-            <th class="px-3 py-2.5 font-medium">区域</th>
-            <th class="px-3 py-2.5 font-medium">最近成功采集</th>
-            <th class="px-3 py-2.5 font-medium">状态</th>
-            <th class="px-4 py-2.5 font-medium">说明</th>
+          <tr class="border-b border-line text-xs text-muted">
+            <th class="whitespace-nowrap px-4 py-2.5 font-medium">来源</th>
+            <th class="whitespace-nowrap px-3 py-2.5 font-medium">分区</th>
+            <th class="whitespace-nowrap px-3 py-2.5 font-medium">平台</th>
+            <th class="whitespace-nowrap px-3 py-2.5 font-medium">最近成功采集</th>
+            <th class="whitespace-nowrap px-3 py-2.5 font-medium">状态</th>
+            <th class="whitespace-nowrap px-4 py-2.5 font-medium">说明</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100 dark:divide-zinc-800/60">
+        <tbody class="divide-y divide-line-soft">
           <tr
             v-for="s in data?.items ?? []"
             :key="`${s.platform}-${s.name}`"
             :class="s.consecutive_failures > 0 ? 'bg-amber-500/5' : ''"
           >
-            <td class="px-4 py-2.5 text-slate-700 dark:text-zinc-200">
-              {{ s.name }}
-              <span class="ml-1.5 text-xs text-slate-400">{{ targetTypeLabels[s.target_type] ?? s.target_type }}</span>
+            <td class="px-4 py-2.5 text-ink">
+              <span class="font-medium">{{ s.name }}</span>
+              <span class="ml-1.5 whitespace-nowrap text-xs text-faint">{{ TARGET_TYPE_LABELS[s.target_type] ?? s.target_type }}</span>
             </td>
-            <td class="px-3 py-2.5">
+            <td class="whitespace-nowrap px-3 py-2.5">
               <span
                 v-if="communityBadge(s.community)"
                 class="chip whitespace-nowrap"
                 :class="communityBadge(s.community)!.chip"
               >{{ communityBadge(s.community)!.label }}</span>
             </td>
-            <td class="px-3 py-2.5">
-              <span class="inline-flex items-center gap-1.5 text-slate-600 dark:text-zinc-400">
+            <td class="whitespace-nowrap px-3 py-2.5">
+              <span class="inline-flex items-center gap-1.5 text-ink-2">
                 <span
                   class="grid size-4 shrink-0 place-items-center rounded-full text-[8px] font-bold text-white"
-                  :class="platformMeta[s.platform as Platform]?.badge ?? 'bg-slate-500'"
-                >{{ platformMeta[s.platform as Platform]?.short ?? s.platform.slice(0, 1).toUpperCase() }}</span>
-                {{ platformMeta[s.platform as Platform]?.label ?? s.platform }}
+                  :class="platformInfo(s.platform).badge"
+                >{{ platformInfo(s.platform).short }}</span>
+                <span>{{ platformInfo(s.platform).label }}</span>
+                <span class="text-xs text-faint">· {{ platformRegion(s.platform) }}</span>
               </span>
             </td>
-            <td class="px-3 py-2.5 text-slate-600 dark:text-zinc-400">{{ regionLabel[s.platform] ?? '通用' }}</td>
-            <td class="mono px-3 py-2.5 text-slate-500 dark:text-zinc-400">
+            <td class="mono whitespace-nowrap tabular-nums px-3 py-2.5 text-muted">
               {{ s.last_success_at ? fmtTime(s.last_success_at) : '尚未成功' }}
             </td>
-            <td class="px-3 py-2.5">
+            <td class="whitespace-nowrap px-3 py-2.5">
               <span v-if="!s.enabled" class="chip bg-zinc-500/10 font-medium text-zinc-500 dark:text-zinc-400">已停用</span>
-              <span v-else-if="s.consecutive_failures > 0" class="chip bg-amber-500/15 font-medium text-amber-700 dark:text-amber-300">不可用</span>
+              <span v-else-if="s.consecutive_failures > 0" class="chip bg-amber-500/15 font-medium text-amber-700 dark:text-amber-300">异常</span>
               <span v-else class="chip bg-emerald-500/10 font-medium text-emerald-700 dark:text-emerald-300">正常</span>
             </td>
-            <td class="px-4 py-2.5 text-xs text-slate-400 dark:text-zinc-500">
-              {{ s.consecutive_failures > 0 ? `连续失败 ${s.consecutive_failures} 次；该来源范围内的「未发现」不代表无消息` : '—' }}
+            <td class="px-4 py-2.5 text-xs text-muted">
+              {{ s.consecutive_failures > 0 ? `连续失败 ${s.consecutive_failures} 次；期间「未发现」不代表无新消息` : '—' }}
             </td>
           </tr>
           <tr v-if="!(data?.items ?? []).length">
-            <td colspan="7" class="px-4 py-10 text-center text-sm text-slate-400">暂无已接入来源。</td>
+            <td colspan="6" class="px-4 py-10 text-center text-sm text-faint">暂无已接入来源</td>
           </tr>
         </tbody>
       </table>

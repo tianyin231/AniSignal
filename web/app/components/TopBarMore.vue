@@ -11,7 +11,7 @@ defineProps<{ channels: MoreChannel[] }>()
 const TOOLS = [
   { to: '/stats', label: '数据统计', hint: '每日入库量与采集趋势', icon: BarChart3 },
   { to: '/sources', label: '来源健康', hint: '各来源的抓取状态', icon: HeartPulse },
-  { to: '/watch', label: '订阅中心', hint: '关注流、邮件与机器人', icon: BellRing },
+  { to: '/watch', label: '订阅与通知', hint: '关注流、邮件与机器人', icon: BellRing },
   { to: '/project', label: '开源与更新', hint: '项目代码、贡献者与提交记录', icon: GitHubMark },
 ] as const
 

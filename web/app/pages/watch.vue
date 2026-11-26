@@ -4,9 +4,9 @@ import type { AccountOverview, CustomQuota, NotificationStatus } from '~/composa
 import { MAX_KEYWORDS } from '~/composables/useAccountCenter'
 import { loginRoute } from '~/utils/safe-redirect'
 
-useSeoMeta({ title: '订阅中心 · AniSignal', description: '关键词关注流、邮件早报、QQ 机器人、定制监控与 RSS：选择让游戏动态主动找到你的方式。' })
+useSeoMeta({ title: '订阅与通知 · AniSignal', description: '关键词关注、邮件早报、QQ 机器人、定制监控与 RSS 订阅：按需组合接收更新的方式。' })
 
-// 订阅中心：按"接收方式"组织。未登录时说明每种方式，登录后显示各自的当前状态并直达设置。
+// 订阅与通知：按接收方式组织。未登录时说明各方式，登录后展示当前状态并直达设置。
 const { user, loaded } = useAuth()
 interface BotClient { enabled: boolean, online: boolean, target_count: number }
 interface Status { overview?: AccountOverview, notifications?: NotificationStatus, quota?: CustomQuota, bots?: BotClient[] }
@@ -64,16 +64,16 @@ const channels: Channel[] = [
     icon: Mail,
     tile: 'bg-hsr-soft text-hsr-ink',
     title: '邮件通知',
-    text: '每天早上收到一封按你偏好筛选的早报；重要变化也可以第一时间提醒。',
-    points: ['每天 08:00 早报', '重要变化即时提醒（可选）', '随时手动生成 AI 精炼'],
+    text: '每日早报按偏好汇总站内动态；重要变化与官方原文修订支持即时提醒。',
+    points: ['每天 08:00 每日早报', '重要变化与官方原文修订即时提醒', '支持手动生成 AI 摘要邮件'],
     to: '/account?tab=notify',
     action: '邮件设置',
     state: () => {
       const n = status.value?.notifications
       if (!n) return null
       if (!n.enabled) return { tone: 'off', text: '未开启' }
-      const extras = [n.instant_enabled ? '重要变化' : '', n.revision_enabled ? '官方修订' : ''].filter(Boolean)
-      return { tone: 'on', text: extras.length ? `已开启 · 含${extras.join(' / ')}` : '已开启 · 仅每日早报' }
+      const extras = [n.instant_enabled ? '重要变化' : '', n.revision_enabled ? '官方原文修订' : ''].filter(Boolean)
+      return { tone: 'on', text: extras.length ? `已开启 · 含 ${extras.join(' / ')}` : '已开启 · 仅每日早报' }
     },
   },
   {
@@ -100,17 +100,16 @@ const channels: Channel[] = [
     icon: Radar,
     tile: 'bg-arknights-soft text-arknights-ink',
     title: '定制监控',
-    tag: '公测',
-    text: '站内没收录的 UP 主或话题，可以自己建一个监控；公开后其他人也能在定制化频道看到。',
-    points: ['跟踪 B 站 UP 主或搜索关键词', '可设播放量门槛与排除词', '新内容可邮件推送'],
+    text: '针对站内未收录的网页、RSS 源或社区账号自建监控；公开后可在定制监控频道共享。',
+    points: ['支持 RSS 订阅、单页变更与列表更新', '支持 B 站、YouTube、Steam 与小黑盒', '支持关键词筛选与新内容邮件推送'],
     to: '/account?tab=custom',
     action: '管理监控',
     extra: { label: '浏览公开监控', to: '/custom' },
     state: () => {
       const q = status.value?.quota
       if (!q) return null
-      if (!q.admitted) return { tone: 'off', text: '尚未开通公测名额' }
-      return { tone: q.used ? 'on' : 'idle', text: `已用 ${q.used}/${q.max_feeds} 个监控` }
+      if (!q.admitted) return { tone: 'off', text: '尚未开通使用权限' }
+      return { tone: q.used ? 'on' : 'idle', text: `已用 ${q.used} / ${q.max_feeds} 项监控` }
     },
   },
 ]
@@ -123,7 +122,7 @@ const signedIn = computed(() => loaded.value && !!user.value)
     <section class="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div class="wall-heading">
         <p class="mono mb-1.5 text-xs tracking-wide text-muted">选择接收信号的方式</p>
-        <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">订阅中心</h1>
+        <h1 class="text-[28px] font-bold leading-tight text-ink sm:text-[32px]">订阅与通知</h1>
         <p class="mt-2 max-w-xl text-sm leading-relaxed text-muted">全站内容不登录也能看。想让新动态主动找到你，可以挑一种或几种方式组合使用。</p>
       </div>
       <NuxtLink v-if="!signedIn" :to="loginRoute('/watch')" class="btn-primary inline-flex h-10 items-center px-5">登录 / 注册</NuxtLink>

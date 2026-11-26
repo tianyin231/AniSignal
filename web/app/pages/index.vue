@@ -419,7 +419,7 @@ onBeforeUnmount(() => {
         <TrendingCard :items="trendingList" :deltas="trendingDelta" :more-to="{ path: '/contents', query: { ...sectionQuery, tab: 'trending' } }" />
         <EventsCard :events="eventsData?.items ?? []" :show-community="aggregate" :more-to="{ path: '/events', query: sectionQuery }" />
         <CodesCard :codes="codesData?.items ?? []" :show-community="aggregate" />
-        <SourceHealthCard :sources="sourcesData?.items ?? []" />
+        <SourceHealthCard :sources="sourcesData?.items ?? []" compact />
         <SubscribeCta />
       </aside>
     </div>

@@ -39,7 +39,7 @@ const player = computed(() => {
   if (d.value.platform === 'bilibili' && d.value.content_type === 'video' && d.value.external_id.startsWith('BV')) {
     return {
       url: `https://player.bilibili.com/player.html?bvid=${encodeURIComponent(d.value.external_id)}&autoplay=0&danmaku=0`,
-      title: 'B站视频预览',
+      title: 'B 站视频预览',
       note: '播放器由 B 站提供；若视频禁止外链播放，请使用原文链接。',
     }
   }
