@@ -107,6 +107,7 @@ export const regionMeta: Record<Region, string> = {
 export interface RawItem {
   id: string
   platform: Platform
+  contentType?: string
   account: string
   region: Region
   title: string

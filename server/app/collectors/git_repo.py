@@ -20,12 +20,14 @@ import hashlib
 import logging
 import re
 from typing import Any
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 from xml.etree import ElementTree as ET
 
 import html2text
 import httpx
+from parsel import Selector
 
+from app.clock import utcnow
 from app.collectors.base import CollectorDeferred, CollectorError, USER_AGENT
 from app.collectors.rss import child as xml_child, feed_time, plain as xml_plain, tag as xml_tag, text as xml_text
 from app.config import get_settings
@@ -49,6 +51,9 @@ _SEGMENT_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$|^[A
 _PRERELEASE_HINT_RE = re.compile(r"(?:^|[.\-_+])(?:alpha|beta|rc|pre|preview|dev|nightly|canary|snapshot)\b", re.I)
 _RELEASE_TAG_PATH_RE = re.compile(r"/releases/tag/([^/?#]+)")
 _DISCUSSION_NUM_PATH_RE = re.compile(r"/discussions/(\d+)")
+_TRENDING_LANG_RE = re.compile(r"^[a-z0-9][a-z0-9.+#_-]{0,31}$")
+_INT_RE = re.compile(r"[\d,]+")
+TRENDING_PERIODS = ("daily", "weekly", "monthly")
 
 _PLATFORM_HOSTS: dict[str, set[str]] = {
     "github": {"github.com", "www.github.com"},
@@ -140,6 +145,145 @@ def normalize_repo_config(raw: dict | None, *, target_type: str = "releases") ->
             if cleaned:
                 out["labels"] = cleaned
     return out
+
+
+def normalize_trending_target(raw: str) -> str:
+    """将趋势榜单输入规整为 `daily|weekly|monthly`（可选 `:language`），支持完整 github.com/trending 链接。"""
+    value = str(raw or "").strip()
+    if not value:
+        raise ValueError("请填写榜单周期：daily / weekly / monthly（可选语言如 daily:python）")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value) or any(ch.isspace() for ch in value):
+        raise ValueError("榜单周期不能包含空白或控制字符")
+
+    period = ""
+    language = ""
+    lower = value.lower()
+    if "://" in value or lower.startswith(("github.com/", "www.github.com/")):
+        candidate = value if "://" in value else f"https://{value}"
+        parsed = urlsplit(candidate)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or host not in _PLATFORM_HOSTS["github"]:
+            raise ValueError("请填写 GitHub Trending 地址或 daily / weekly / monthly")
+        segs = [s for s in parsed.path.strip("/").split("/") if s]
+        if not segs or segs[0].lower() != "trending":
+            raise ValueError("请填写 GitHub Trending 地址或 daily / weekly / monthly")
+        if len(segs) >= 2 and segs[1].lower() not in {"developers", "repositories"}:
+            language = unquote(segs[1]).strip().lower()
+        qs = parse_qs(parsed.query)
+        period = (qs.get("since") or ["daily"])[0].strip().lower()
+    else:
+        head, sep, tail = lower.partition(":")
+        period = head.strip()
+        language = tail.strip() if sep else ""
+
+    if period not in TRENDING_PERIODS:
+        raise ValueError("趋势榜单周期仅支持 daily / weekly / monthly")
+    if language and not _TRENDING_LANG_RE.fullmatch(language):
+        raise ValueError("编程语言筛选格式无效（如 python、typescript、rust）")
+    return f"{period}:{language}" if language else period
+
+
+def parse_trending_target(value: str) -> tuple[str, str]:
+    norm = normalize_trending_target(value)
+    period, _, lang = norm.partition(":")
+    return period, lang
+
+
+def _parse_int_text(raw: str | None) -> int:
+    if not raw:
+        return 0
+    m = _INT_RE.search(raw)
+    if not m:
+        return 0
+    try:
+        return int(m.group(0).replace(",", ""))
+    except ValueError:
+        return 0
+
+
+def parse_github_trending_html(
+    html: str, *, period: str, language: str = "", limit: int = 25
+) -> tuple[list[dict], list[dict]]:
+    """解析 github.com/trending SSR HTML，返回 (raw_items, edition_entries)。"""
+    sel = Selector(text=html)
+    articles = sel.css("article.Box-row")
+    if not articles:
+        return [], []
+
+    now_iso = utcnow().replace(tzinfo=timezone.utc).isoformat()
+    raw_items: list[dict] = []
+    entries: list[dict] = []
+    seen: set[str] = set()
+
+    for article in articles:
+        href = (article.css("h2 a::attr(href)").get() or "").strip()
+        if not href:
+            continue
+        try:
+            repo = normalize_repo_target("github", href.lstrip("/"))
+        except ValueError:
+            continue
+        rkey = repo.lower()
+        if rkey in seen:
+            continue
+        seen.add(rkey)
+
+        rank = len(entries) + 1
+        desc = " ".join(part.strip() for part in article.css("p::text").getall() if part.strip())
+        lang = (article.css('[itemprop="programmingLanguage"]::text').get() or "").strip()
+
+        stars_text = " ".join(article.css('a[href$="/stargazers"]::text').getall())
+        forks_text = " ".join(article.css('a[href$="/forks"]::text').getall())
+        stars = _parse_int_text(stars_text)
+        forks = _parse_int_text(forks_text)
+        if not stars and not forks:
+            muted_nums = [_parse_int_text(t) for t in article.css("a.Link--muted::text").getall() if t.strip()]
+            muted_nums = [n for n in muted_nums if n > 0]
+            if muted_nums:
+                stars = muted_nums[0]
+            if len(muted_nums) > 1:
+                forks = muted_nums[1]
+
+        period_stars_text = " ".join(article.css("span.float-sm-right::text").getall())
+        period_stars = _parse_int_text(period_stars_text)
+        url = f"{GITHUB_WEB_ROOT}/{repo}"
+
+        entries.append(
+            {
+                "rank": rank,
+                "repo": repo,
+                "url": url,
+                "description": desc,
+                "language": lang,
+                "stars": stars,
+                "forks": forks,
+                "period_stars": period_stars,
+            }
+        )
+        raw_items.append(
+            {
+                "id": git_item_id(repo, "trending", "repo"),
+                "platform": "github",
+                "kind": "trending",
+                "repo": repo,
+                "title": repo,
+                "body": desc,
+                "url": url,
+                "published": now_iso,
+                "author": repo.split("/")[0],
+                "language": lang,
+                "stars": stars,
+                "forks": forks,
+                "period_stars": period_stars,
+                "period": period,
+                "filter_language": language,
+                "rank": rank,
+                "source_channel": "trending_html",
+            }
+        )
+        if len(entries) >= limit:
+            break
+    return raw_items, entries
 
 
 def repo_web_url(platform: str, repo: str, kind: str = "releases") -> str:
@@ -416,6 +560,7 @@ class GithubCollector(_BaseGitRepoCollector):
     def __init__(self, *, token: str | None = None) -> None:
         super().__init__()
         self._token = (get_settings().github_token if token is None else token).strip()
+        self.last_trending_edition: dict[str, Any] | None = None
 
     def _api_headers(self, etag: str | None = None) -> dict[str, str]:
         headers = {
@@ -441,6 +586,17 @@ class GithubCollector(_BaseGitRepoCollector):
     async def fetch(self, target_type: str, target_value: str, limit: int) -> FetchResult:
         self.not_modified = False
         self.last_http_cache = None
+        self.last_trending_edition = None
+
+        if target_type in ("trending", "gh_trending"):
+            try:
+                period, lang = parse_trending_target(target_value)
+            except ValueError as exc:
+                raise _fail_fast(str(exc)) from None
+            items = await self._fetch_trending(period, language=lang, limit=max(int(limit or 25), 25))
+            self._attach_source_meta(items, "GitHub Trending", default_official=False)
+            return FetchResult(platform=self.platform, fetch_kind="github_trending", items=items)
+
         try:
             repo = normalize_repo_target("github", target_value)
         except ValueError as exc:
@@ -682,6 +838,40 @@ class GithubCollector(_BaseGitRepoCollector):
                 raise CollectorError("GitHub Discussions Atom 内容超过 5 MB")
             self._record_cache(cache_key, resp.headers.get("etag"))
             return _parse_github_discussions_atom(resp.content, repo, limit=limit)
+
+    async def _fetch_trending(self, period: str, *, language: str = "", limit: int = 25) -> list[dict]:
+        path = f"/trending/{quote(language, safe='')}" if language else "/trending"
+        url = f"{GITHUB_WEB_ROOT}{path}"
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        async with httpx.AsyncClient(follow_redirects=True, **http_proxy_kwargs(self)) as client:
+            resp = await self._request(client, url, params={"since": period}, headers=headers)
+            if resp.status_code == 404:
+                raise _fail_fast(f"GitHub Trending 地址不存在（language={language or 'all'}）")
+            if resp.status_code == 429:
+                raise CollectorDeferred(
+                    "GitHub Trending 临时限流，稍后自动继续",
+                    retry_at=_retry_at_from_headers(resp.headers, default_minutes=15),
+                )
+            if resp.status_code >= 400:
+                raise CollectorError(f"GitHub Trending 返回 {resp.status_code}")
+            if len(resp.content) > MAX_ATOM_BYTES:
+                raise CollectorError("GitHub Trending 页面体积超过 5 MB")
+
+        raw_items, entries = parse_github_trending_html(
+            resp.text, period=period, language=language, limit=limit
+        )
+        if not entries:
+            raise CollectorError("GitHub Trending 页面未解析到有效仓库列表")
+        self.last_trending_edition = {
+            "period": period,
+            "language": language,
+            "entries": entries,
+        }
+        return raw_items
 
 
 class GitcodeCollector(_BaseGitRepoCollector):

@@ -76,6 +76,7 @@ export function toRawItem(item: PublicContentItem): RawItem {
   return {
     id: String(item.id),
     platform: item.platform as Platform,
+    contentType: item.content_type,
     account: item.source_name ?? '—',
     region: regionOf(item.platform),
     title: decodeEntities(item.title || item.external_id),

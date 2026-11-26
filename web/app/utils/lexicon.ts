@@ -92,6 +92,7 @@ export const TARGET_TYPE_LABELS: Record<string, string> = {
   releases: '版本发布',
   issues: '议题动态',
   discussions: '社区讨论',
+  trending: '趋势榜单',
   keyword_search: '关键词搜索',
   account_videos: '账号视频',
   account_dynamics: '账号动态',
@@ -107,6 +108,7 @@ export const CONTENT_TYPE_LABELS: Record<string, string> = {
   rss_item: 'RSS 订阅',
   web_page: '网页监测',
   release: '版本发布',
+  repo: '开源项目',
 }
 
 export const TIER_META = {

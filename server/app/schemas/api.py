@@ -53,6 +53,7 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     ("github", "releases"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
     ("github", "issues"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
     ("github", "discussions"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
+    ("github", "trending"): re.compile(r"^(?:daily|weekly|monthly)(?::[a-z0-9][a-z0-9.+#_-]{0,31})?$"),
     ("gitcode", "releases"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
     ("gitcode", "issues"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
 }
@@ -98,9 +99,14 @@ def validate_target_value(platform: object, target_type: object, value: object) 
 
         text = extract_app_id(text)
     if plat in ("github", "gitcode"):
-        from app.collectors.git_repo import normalize_repo_target
+        if plat == "github" and ttype == "trending":
+            from app.collectors.git_repo import normalize_trending_target
 
-        text = normalize_repo_target(plat, text)
+            text = normalize_trending_target(text)
+        else:
+            from app.collectors.git_repo import normalize_repo_target
+
+            text = normalize_repo_target(plat, text)
     pattern = _TARGET_VALUE_RULES.get((plat, ttype))
     if pattern is not None and not pattern.fullmatch(text):
         raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")

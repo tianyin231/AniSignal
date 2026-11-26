@@ -186,7 +186,7 @@ def filter_relevant(
                 and not any(_source_alias_hit(str(item.get("title") or ""), term) for term in meta.source_exclusions)
             ]
             co_terms = list(dict.fromkeys([*co_terms, *aliases]))
-    if target.target_type in ("notices", "page_watch"):
+    if target.target_type in ("notices", "page_watch", "trending"):
         return items, original_count - len(items)
     is_news = get_community(target.community).domain == "news"
     if is_news:
@@ -536,6 +536,41 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     else False
                 ),
             )
+            if isinstance(collector, GithubCollector) and collector.last_trending_edition:
+                from app.collectors.git_repo import git_item_id
+                from app.services.git_trending import save_trending_edition
+
+                try:
+                    ed = collector.last_trending_edition
+                    ext_to_repo = {
+                        git_item_id(str(e["repo"]), "trending", "repo"): str(e["repo"]).lower()
+                        for e in ed["entries"]
+                        if e.get("repo")
+                    }
+                    id_rows = (
+                        await session.execute(
+                            select(RawContent.external_id, RawContent.id).where(
+                                RawContent.platform == "github",
+                                RawContent.external_id.in_(list(ext_to_repo)),
+                            )
+                        )
+                    ).all() if ext_to_repo else []
+                    repo_to_id = {ext_to_repo[ext]: rid for ext, rid in id_rows if ext in ext_to_repo}
+                    await save_trending_edition(
+                        session,
+                        community=target.community,
+                        period=ed["period"],
+                        language=ed.get("language") or "",
+                        entries=ed["entries"],
+                        repo_to_content_id=repo_to_id,
+                    )
+                    await session.commit()
+                except Exception as exc:  # noqa: BLE001 - 刊物归档失败不阻断采集主链路
+                    postprocess_errors.append(f"git trending edition failed: {type(exc).__name__}: {exc}")
+                    logger.warning("git trending edition save failed for target %s", target.id, exc_info=True)
+                    await session.rollback()
+                    target = await session.get(CollectTarget, target_id)
+                    run = await session.get(CollectRun, run_id)
             if isinstance(collector, SteamCollector) and collector.last_snapshot:
                 from app.services.steam import save_steam_snapshot
 

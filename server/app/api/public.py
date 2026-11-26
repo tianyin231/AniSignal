@@ -1819,6 +1819,38 @@ async def _fetch_wallpaper_bytes(url: str) -> tuple[bytes, str]:
     return resp.content, content_type
 
 
+@router.get("/git-trending/editions")
+async def git_trending_editions(
+    request: Request,
+    community: CommunitySlug = Query(...),
+    period: str | None = Query(default=None, pattern="^(|daily|weekly|monthly)$"),
+    period_key: str | None = Query(default=None, max_length=32),
+    limit: int = Query(default=30, ge=1, le=90),
+    session: AsyncSession = Depends(get_session),
+):
+    """GitHub Trending 分期刊物（日刊 / 周刊 / 月刊）：返回跨期去重与上榜打标后的完整榜单及往期目录。"""
+    from app.services.git_trending import get_trending_editions_view
+
+    clean_period = period or None
+    clean_key = (period_key or "").strip() or None
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = (
+        f"{CACHE_PREFIX}git-trending:{community}:{clean_period or 'auto'}:{clean_key or 'latest'}:{limit}"
+    )
+    return await cached_dict(
+        cache,
+        cache_key,
+        PUBLIC_CACHE_SECONDS,
+        lambda: get_trending_editions_view(
+            session,
+            community=community,
+            period=clean_period,
+            period_key=clean_key,
+            limit=limit,
+        ),
+    )
+
+
 @router.get("/steam/pulse")
 async def steam_pulse(
     request: Request,

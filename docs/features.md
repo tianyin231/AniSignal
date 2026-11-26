@@ -48,7 +48,7 @@
 | YouTube | 频道上传列表；配置 API Key 后优先使用 Data API v3，未配置或失败时回退 RSS。 |
 | X | 低频读取公开账号动态，目前仅支持账号监控；登录限制、访问拒绝与无法解析的页面计入来源健康。 |
 | 自定义网页（`web_page`） | 支持单页变更监控（`page_watch`，自动触发版本 Diff 与修订通知）与列表页新增发现（`list_watch`）；组合 `parsel`、`trafilatura`、`readability-lxml` 与 `html2text` 通用解析栈，支持可选 CSS/XPath 选择器、排除区域、忽略行与测试解析预览（含官方 RSS 自动探测与 SPA 提示），仅访问公开静态/SSR 网页并执行逐跳 SSRF 校验。 |
-| GitHub / GitCode | 公开开源仓库采集适配器，默认纯匿名运行（可选环境变量令牌提额）；GitHub 支持版本发布（API + `ETag` 304 + 限流自动回退公开 Atom）、议题（支持标签筛选并自动剔除 PR）与公开社区讨论（Atom）；GitCode 支持公开 OpenAPI v5 版本发布与议题监控。 |
+| GitHub / GitCode | 公开开源仓库采集适配器，默认纯匿名运行（可选环境变量令牌提额）；GitHub 支持版本发布（API + `ETag` 304 + 限流自动回退公开 Atom）、议题（支持标签筛选并自动剔除 PR）、公开社区讨论（Atom）与趋势榜单（`daily` / `weekly` / `monthly`，按期归档日刊/周刊/月刊并自动跨期去重打标）；GitCode 支持公开 OpenAPI v5 版本发布与议题监控。 |
 
 平台注册见[采集编排](../server/app/services/collect.py)。分区注册见[communities.py](../server/app/communities.py)；新增分区还需同步相应枚举、前端配置及必要的历史数据迁移，不能只改展示名称。
 

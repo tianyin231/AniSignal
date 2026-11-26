@@ -45,12 +45,17 @@ def parse_git_item(raw: dict) -> NormalizedContent:
         raise ValueError("git_repo item missing repo")
 
     is_release = kind == "release"
+    is_trending = kind == "trending"
     tag_name = str(raw.get("tag_name") or "").strip()
     number = raw.get("number")
     prerelease = bool(raw.get("prerelease"))
     labels = [str(x).strip() for x in (raw.get("labels") or []) if str(x).strip()]
 
-    if is_release:
+    if is_trending:
+        title = repo[:240]
+        fallback_ident = "repo"
+        content_type = ContentType.REPO
+    elif is_release:
         title = _format_release_title(repo, tag_name, str(raw.get("name") or ""), prerelease)
         fallback_ident = tag_name or str(raw.get("url") or "")
         content_type = ContentType.RELEASE
@@ -65,10 +70,18 @@ def parse_git_item(raw: dict) -> NormalizedContent:
     identity = Identity.OFFICIAL if official else Identity.USER
 
     metrics: dict[str, int] = {}
-    if isinstance(raw.get("comments"), int) and raw["comments"] > 0:
-        metrics["reply"] = raw["comments"]
-    if isinstance(raw.get("reactions"), int) and raw["reactions"] > 0:
-        metrics["like"] = raw["reactions"]
+    if is_trending:
+        if isinstance(raw.get("period_stars"), int) and raw["period_stars"] > 0:
+            metrics["view"] = raw["period_stars"]
+        if isinstance(raw.get("stars"), int) and raw["stars"] > 0:
+            metrics["like"] = raw["stars"]
+        if isinstance(raw.get("forks"), int) and raw["forks"] > 0:
+            metrics["fork"] = raw["forks"]
+    else:
+        if isinstance(raw.get("comments"), int) and raw["comments"] > 0:
+            metrics["reply"] = raw["comments"]
+        if isinstance(raw.get("reactions"), int) and raw["reactions"] > 0:
+            metrics["like"] = raw["reactions"]
 
     return NormalizedContent(
         platform=platform,
@@ -80,7 +93,7 @@ def parse_git_item(raw: dict) -> NormalizedContent:
         published_at=feed_time(str(raw.get("published") or "")),
         author=NormalizedAuthor(
             external_id=repo.lower(),
-            name=str(raw.get("source_name") or repo),
+            name=repo if is_trending else str(raw.get("source_name") or repo),
             identity=identity,
         ),
         media=[],
@@ -94,6 +107,12 @@ def parse_git_item(raw: dict) -> NormalizedContent:
             "labels": labels,
             "state": raw.get("state"),
             "assets_count": int(raw.get("assets_count") or 0),
+            "language": str(raw.get("language") or "").strip() or None,
+            "stars": int(raw.get("stars") or 0) if is_trending else None,
+            "forks": int(raw.get("forks") or 0) if is_trending else None,
+            "period_stars": int(raw.get("period_stars") or 0) if is_trending else None,
+            "period": raw.get("period"),
+            "rank": raw.get("rank"),
             "author": str(raw.get("author") or "").strip() or None,
             "source_channel": raw.get("source_channel") or "api",
         },

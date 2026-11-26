@@ -62,6 +62,7 @@ class TargetType(StrEnum):
     RELEASES = "releases"
     ISSUES = "issues"
     DISCUSSIONS = "discussions"
+    TRENDING = "trending"
 
 
 class ContentType(StrEnum):
@@ -72,6 +73,7 @@ class ContentType(StrEnum):
     RSS_ITEM = "rss_item"
     WEB_PAGE = "web_page"
     RELEASE = "release"
+    REPO = "repo"
 
 
 class Identity(StrEnum):

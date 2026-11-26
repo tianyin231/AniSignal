@@ -1,15 +1,27 @@
 <script setup lang="ts">
-import { ArrowUpRight, BadgeCheck, GitCompareArrows, ImageIcon } from 'lucide-vue-next'
+import { ArrowUpRight, BadgeCheck, GitCompareArrows, GitFork, ImageIcon, Star } from 'lucide-vue-next'
 import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { revisionBadgeLabel } from '~/utils/content-diff'
+import { formatCompactStars } from '~/utils/git-trending'
 import { imageSrcset, imageUrl } from '~/utils/image'
+import { CONTENT_TYPE_LABELS } from '~/utils/lexicon'
 import { isRedundantExcerpt } from '~/utils/text'
 
 const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean; deltaView?: number | null }>()
 const { mediaMode } = useSiteConfig()
 const shareUrl = computed(() => !props.to && props.item.platform === 'xiaoheihe' && props.item.previewMode === 'external_only' ? props.item.originalUrl : undefined)
-const viewUnit = computed(() => props.item.platform === 'xiaoheihe' ? '阅读' : '播放')
+const isGitPlatform = computed(() => props.item.platform === 'github' || props.item.platform === 'gitcode')
+const isGitRepo = computed(() => isGitPlatform.value && props.item.contentType === 'repo')
+const viewUnit = computed(() => {
+  if (props.item.platform === 'xiaoheihe') return '阅读'
+  if (isGitRepo.value) return '新增星标'
+  return '播放'
+})
+const typeBadgeLabel = computed(() => {
+  if (!isGitPlatform.value || !props.item.contentType) return ''
+  return CONTENT_TYPE_LABELS[props.item.contentType] ?? ''
+})
 const detailTo = computed(() => props.to ?? shareUrl.value ?? `/contents/${props.item.id}`)
 const coverFailed = ref(false)
 watch(() => props.item.cover, () => (coverFailed.value = false))
@@ -29,10 +41,11 @@ const community = computed(() => {
 // 热门标记：播放量达到泛关键词准入门槛（1 万）即视为热门内容
 const HOT_VIEWS = 10_000
 const viewCount = computed(() => Number(props.item.metrics?.view ?? 0))
-const isHot = computed(() => viewCount.value >= HOT_VIEWS)
+const isHot = computed(() => !isGitRepo.value && viewCount.value >= HOT_VIEWS)
 const viewLabel = computed(() => {
   const n = viewCount.value
   if (!n) return ''
+  if (isGitRepo.value) return `+${n.toLocaleString('zh-CN')}`
   return n >= 10_000 ? `${(n / 10_000).toFixed(1)}万` : n.toLocaleString('zh-CN')
 })
 const deltaLabel = computed(() => {
@@ -79,21 +92,29 @@ const excerpt = computed(() => {
           平台公开接口未返回正文或图片，可直接打开原文核对。
         </p>
         <div class="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
+          <span v-if="typeBadgeLabel" class="rounded-md bg-chip px-1.5 py-0.5 text-[11px] font-medium text-ink-2">{{ typeBadgeLabel }}</span>
           <span v-if="item.identity === 'official'" class="inline-flex h-5 items-center gap-0.5 rounded-md bg-brand-soft px-1.5 font-semibold text-brand-ink">
             <BadgeCheck :size="12" aria-hidden="true" />官方
           </span>
-          <span v-else-if="!shareUrl && item.identity !== 'unknown'" :class="identityMeta[item.identity]?.text">{{ identityMeta[item.identity]?.label }}</span>
+          <span v-else-if="!shareUrl && !isGitRepo && item.identity !== 'unknown'" :class="identityMeta[item.identity]?.text">{{ identityMeta[item.identity]?.label }}</span>
           <span v-if="community" class="inline-flex items-center gap-1.5 text-ink-2">
             <span class="size-[7px] rounded-full" :class="community.dot" aria-hidden="true" />{{ community.label }}
           </span>
           <span class="max-w-[14rem] truncate">{{ showCover ? item.account : `${platform.label} · ${item.account}` }}</span>
           <span v-if="!shareUrl" class="mono text-faint">{{ item.publishedAt }}</span>
+          <span v-if="isGitRepo && item.metrics?.like" class="num inline-flex items-center gap-1">
+            <Star :size="11" class="text-faint" aria-hidden="true" />{{ formatCompactStars(item.metrics.like) }}
+          </span>
+          <span v-if="isGitRepo && item.metrics?.fork" class="num inline-flex items-center gap-1">
+            <GitFork :size="11" class="text-faint" aria-hidden="true" />{{ formatCompactStars(item.metrics.fork) }}
+          </span>
           <span v-if="item.platform === 'xiaoheihe' && item.metrics?.like != null" class="num">{{ item.metrics.like.toLocaleString('zh-CN') }} 赞</span>
           <span v-if="item.platform === 'xiaoheihe' && item.metrics?.reply != null" class="num">{{ item.metrics.reply.toLocaleString('zh-CN') }} 评论</span>
+          <span v-if="isGitPlatform && !isGitRepo && item.metrics?.reply" class="num">{{ item.metrics.reply.toLocaleString('zh-CN') }} 评论</span>
           <span v-if="shareUrl" class="inline-flex items-center gap-0.5 text-brand-ink">
             查看原帖 <ArrowUpRight :size="12" aria-hidden="true" />
           </span>
-          <span v-if="viewLabel" class="num font-semibold sm:hidden" :class="isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }} {{ viewUnit }}</span>
+          <span v-if="viewLabel" class="num font-semibold sm:hidden" :class="isGitRepo ? 'text-ok' : isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }} {{ viewUnit }}</span>
           <span v-if="deltaLabel" class="num rounded-full bg-hot/10 px-1.5 py-0.5 text-[11px] font-bold text-hot">{{ deltaLabel }} / 24h</span>
           <span v-if="item.translated" class="font-medium text-sky-600 dark:text-sky-400">机翻已译</span>
           <span
@@ -107,8 +128,8 @@ const excerpt = computed(() => {
           <span v-for="k in keywords" :key="k" class="rounded-md bg-chip px-1.5 py-0.5 text-[11px] text-ink-2 max-sm:hidden">{{ k }}</span>
         </div>
       </div>
-      <div v-if="viewLabel" class="hidden w-16 shrink-0 pt-0.5 text-right sm:block">
-        <div class="num text-[15px] font-bold" :class="isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }}</div>
+      <div v-if="viewLabel" class="hidden w-20 shrink-0 pt-0.5 text-right sm:block">
+        <div class="num text-[15px] font-bold tabular-nums" :class="isGitRepo ? 'text-ok' : isHot ? 'text-hot' : 'text-ink-2'">{{ viewLabel }}</div>
         <div class="mt-0.5 text-[11px] text-faint">{{ viewUnit }}</div>
       </div>
     </NuxtLink>

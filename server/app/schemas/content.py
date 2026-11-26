@@ -18,6 +18,7 @@ class ContentType(StrEnum):
     RSS_ITEM = "rss_item"
     WEB_PAGE = "web_page"
     RELEASE = "release"
+    REPO = "repo"
 
 
 class NormalizedAuthor(BaseModel):

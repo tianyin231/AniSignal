@@ -65,7 +65,8 @@ AniSignal 当前已经形成稳定的底层数据链路：
 - 目标类型：
   1. `releases`（后台）/ `gh_releases`、`gc_releases`（定制监控）：追踪正式版与预发布（prerelease）、版本号与 Release Notes，支持可选关闭预发布过滤；
   2. `issues`（后台）/ `gh_issues`、`gc_issues`（定制监控）：支持可选限定标签（单标签透传上游 API，多标签本地 OR 匹配），自动剔除 GitHub PR 避免刷屏；
-  3. `discussions`（后台）/ `gh_discussions`（定制监控，GitHub）：直连公开 `discussions.atom`，无需 GraphQL Token 即可匿名采集。
+  3. `discussions`（后台）/ `gh_discussions`（定制监控，GitHub）：直连公开 `discussions.atom`，无需 GraphQL Token 即可匿名采集；
+  4. `trending`（后台，GitHub）：采集 `github.com/trending` 的 `daily` / `weekly` / `monthly` 公开静态榜单，落库 `git_trending_editions` 按期归档日刊/周刊/月刊，自动计算跨期去重与上榜标记（首次上榜 / 连榜 N 期 / 复榜 / 跨榜提示），并在主题流页面提供专属刊物阅读台。
 
 #### 1.2 匿名优先的采集策略与限额保护
 - **GitHub Releases**：

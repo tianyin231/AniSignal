@@ -81,6 +81,7 @@ PARSERS: dict[str, tuple] = {
     "github_releases": (parse_git_item, GIT_REPO_PARSER_VERSION),
     "github_issues": (parse_git_item, GIT_REPO_PARSER_VERSION),
     "github_discussions": (parse_git_item, GIT_REPO_PARSER_VERSION),
+    "github_trending": (parse_git_item, GIT_REPO_PARSER_VERSION),
     "gitcode_releases": (parse_git_item, GIT_REPO_PARSER_VERSION),
     "gitcode_issues": (parse_git_item, GIT_REPO_PARSER_VERSION),
     "game_official_notices": (parse_game_notice, GAME_OFFICIAL_PARSER_VERSION),
@@ -508,6 +509,7 @@ _REPARSE_KIND = {
     "rss_item": "youtube_rss",
     "web_page": "web_page_watch",
     "release": "github_releases",
+    "repo": "github_trending",
 }
 
 

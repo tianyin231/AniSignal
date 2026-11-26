@@ -428,7 +428,7 @@ const combos: Record<string, string[]> = {
   x: ['account_dynamics'],
   rss: ['feed'],
   web_page: ['page_watch', 'list_watch'],
-  github: ['releases', 'issues', 'discussions'],
+  github: ['releases', 'issues', 'discussions', 'trending'],
   gitcode: ['releases', 'issues'],
 }
 const collectPlatforms = Object.keys(platformLabels).filter(platform => platform in combos)
@@ -526,7 +526,11 @@ const targetPlaceholder = computed(() => {
       ? '列表页地址，如 https://example.com/news'
       : '目标网页地址，如 https://example.com/changelog'
   }
-  if (form.platform === 'github') return 'owner/repo 或 https://github.com/owner/repo'
+  if (form.platform === 'github') {
+    return form.target_type === 'trending'
+      ? 'daily / weekly / monthly（可选语言如 daily:python）'
+      : 'owner/repo 或 https://github.com/owner/repo'
+  }
   if (form.platform === 'gitcode') return 'owner/repo 或 https://gitcode.com/owner/repo'
   if (form.platform === 'youtube') return 'YouTube 频道链接、@handle 或 UC 开头的频道 ID'
   if (form.platform === 'x') return '@账号 或 https://x.com/账号'
@@ -567,6 +571,10 @@ watch(() => form.target_type, (next) => {
   if (next === 'keyword_search') form.is_official = false
   else if (!editingId.value && (form.platform === 'github' || form.platform === 'gitcode')) {
     form.is_official = next === 'releases'
+    if (next === 'trending') {
+      form.interval_minutes = 360
+      if (!form.target_value.trim()) form.target_value = 'daily'
+    }
   }
 })
 watch([() => form.target_type, () => form.community, supportsViews], () => {
@@ -1405,7 +1413,7 @@ const rowMenuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-
             </div>
 
             <div>
-              <label class="block text-xs font-medium text-ink-2">{{ form.platform === 'x' ? 'X 账号' : isGitPlatform ? '开源仓库' : '采集目标' }}</label>
+              <label class="block text-xs font-medium text-ink-2">{{ form.platform === 'x' ? 'X 账号' : form.target_type === 'trending' ? '榜单周期' : isGitPlatform ? '开源仓库' : '采集目标' }}</label>
               <div class="mt-1.5 flex gap-2">
                 <input
                   v-model="form.target_value"

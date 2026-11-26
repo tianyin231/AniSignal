@@ -31,6 +31,7 @@ test('核心平台与目标类型遵循统一书面规范', () => {
   assert.equal(TARGET_TYPE_LABELS.releases, '版本发布')
   assert.equal(TARGET_TYPE_LABELS.issues, '议题动态')
   assert.equal(TARGET_TYPE_LABELS.discussions, '社区讨论')
+  assert.equal(TARGET_TYPE_LABELS.trending, '趋势榜单')
   assert.equal(TARGET_TYPE_LABELS.feed, 'RSS 订阅')
 })
 
