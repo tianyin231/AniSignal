@@ -19,11 +19,10 @@ import { revisionBadgeLabel } from '~/utils/content-diff'
 import { categoryMeta } from '~/utils/public-utils'
 import { imageSrcset, imageUrl } from '~/utils/image'
 import { identityMeta, platformMeta, type Identity, type Platform } from '~/utils/data'
-import { cleanPlatformText, cleanPlatformTitle, parseMarkdownBlocks } from '~/utils/text'
+import { cleanPlatformText, cleanPlatformTitle } from '~/utils/text'
 import { formatCompactStars, formatPeriodKey, languageColor, splitRepoName } from '~/utils/git-trending'
 
 const lightboxIndex = ref<number | null>(null)
-const readmeExpanded = ref(false)
 
 const route = useRoute()
 const { api } = usePublicApi()
@@ -121,13 +120,6 @@ const metricRows = computed(() =>
     value: Number(v),
   })),
 )
-
-// README 与 Release Notes 安全结构化渲染（零 raw HTML）
-const readmeBlocks = computed(() => (d.value.repo_meta?.readme ? parseMarkdownBlocks(d.value.repo_meta.readme) : []))
-const visibleReadmeBlocks = computed(() => (readmeExpanded.value ? readmeBlocks.value : readmeBlocks.value.slice(0, 18)))
-const hasMoreReadme = computed(() => readmeBlocks.value.length > 18)
-
-const releaseBlocks = computed(() => (isGitRelease.value && !d.value.text_html && d.value.text ? parseMarkdownBlocks(d.value.text) : []))
 
 const lightboxUrl = computed(() => (lightboxIndex.value !== null ? (d.value.media[lightboxIndex.value] ?? null) : null))
 function openLightboxByUrl(url: string) {
@@ -351,7 +343,7 @@ useSeoMeta({
             <p class="mt-2 text-[14px] leading-relaxed text-ink-2">{{ d.text }}</p>
           </section>
 
-          <section v-if="readmeBlocks.length" class="panel p-4 sm:p-6">
+          <section v-if="d.repo_meta?.readme" class="panel p-4 sm:p-6">
             <div class="flex items-center justify-between gap-2 border-b border-line-soft pb-3">
               <h2 class="inline-flex items-center gap-1.5 text-base font-bold text-ink">
                 <BookOpen :size="16" class="text-accent-ink" aria-hidden="true" />
@@ -359,31 +351,13 @@ useSeoMeta({
               </h2>
               <span class="text-xs text-faint">站内纯净排版</span>
             </div>
-            <div class="mt-4 space-y-3 text-[14px] leading-relaxed text-ink-2">
-              <template v-for="(blk, idx) in visibleReadmeBlocks" :key="idx">
-                <h3 v-if="blk.type === 'heading' && blk.level === 1" class="pt-2 text-lg font-bold text-ink">{{ blk.text }}</h3>
-                <h4 v-else-if="blk.type === 'heading' && blk.level === 2" class="pt-2 text-[15px] font-bold text-ink">{{ blk.text }}</h4>
-                <h5 v-else-if="blk.type === 'heading'" class="pt-1 text-sm font-semibold text-ink">{{ blk.text }}</h5>
-                <p v-else-if="blk.type === 'paragraph'" class="break-words">{{ blk.text }}</p>
-                <ul v-else-if="blk.type === 'list'" class="list-disc space-y-1 pl-5">
-                  <li v-for="(li, liIdx) in blk.items" :key="liIdx" class="break-words">{{ li }}</li>
-                </ul>
-                <blockquote v-else-if="blk.type === 'quote'" class="border-l-2 border-brand/50 bg-chip/40 px-3.5 py-2 text-[13px] text-muted">
-                  {{ blk.text }}
-                </blockquote>
-                <pre v-else-if="blk.type === 'code'" class="mono overflow-x-auto rounded-xl bg-chip px-3.5 py-3 text-xs leading-relaxed text-ink"><code>{{ blk.text }}</code></pre>
-                <hr v-else-if="blk.type === 'hr'" class="border-line-soft">
-              </template>
-            </div>
-            <div v-if="hasMoreReadme" class="mt-4 border-t border-line-soft pt-3 text-center">
-              <button
-                type="button"
-                class="inline-flex h-8 items-center rounded-lg bg-chip px-4 text-xs font-medium text-ink-2 transition-colors hover:bg-line hover:text-ink"
-                @click="readmeExpanded = !readmeExpanded"
-              >
-                {{ readmeExpanded ? '收起 README' : `展开其余 ${readmeBlocks.length - 18} 段 README 内容` }}
-              </button>
-            </div>
+            <MarkdownBlocks
+              class="mt-4"
+              :source="d.repo_meta.readme"
+              :collapse-after="18"
+              expand-label="展开 README"
+              collapse-label="收起 README"
+            />
           </section>
         </template>
 
@@ -396,22 +370,7 @@ useSeoMeta({
             class="prose-sm mt-3 max-w-none text-[14px] leading-relaxed text-ink-2 [&_a]:text-brand-ink [&_a]:underline"
             v-html="d.text_html"
           />
-          <div v-else-if="releaseBlocks.length" class="mt-3 space-y-2.5 text-[14px] leading-relaxed text-ink-2">
-            <template v-for="(blk, idx) in releaseBlocks" :key="idx">
-              <h3 v-if="blk.type === 'heading' && blk.level === 1" class="pt-2 text-lg font-bold text-ink">{{ blk.text }}</h3>
-              <h4 v-else-if="blk.type === 'heading' && blk.level === 2" class="pt-2 text-[15px] font-bold text-ink">{{ blk.text }}</h4>
-              <h5 v-else-if="blk.type === 'heading'" class="pt-1 text-sm font-semibold text-ink">{{ blk.text }}</h5>
-              <p v-else-if="blk.type === 'paragraph'" class="break-words">{{ blk.text }}</p>
-              <ul v-else-if="blk.type === 'list'" class="list-disc space-y-1 pl-5">
-                <li v-for="(li, liIdx) in blk.items" :key="liIdx" class="break-words">{{ li }}</li>
-              </ul>
-              <blockquote v-else-if="blk.type === 'quote'" class="border-l-2 border-brand/50 bg-chip/40 px-3.5 py-2 text-[13px] text-muted">
-                {{ blk.text }}
-              </blockquote>
-              <pre v-else-if="blk.type === 'code'" class="mono overflow-x-auto rounded-xl bg-chip px-3.5 py-3 text-xs leading-relaxed text-ink"><code>{{ blk.text }}</code></pre>
-              <hr v-else-if="blk.type === 'hr'" class="border-line-soft">
-            </template>
-          </div>
+          <MarkdownBlocks v-else-if="isGitRelease && d.text" class="mt-3" :source="d.text" />
           <p v-else-if="d.text" class="mt-3 whitespace-pre-wrap text-[14px] leading-relaxed text-ink-2">{{ isXiaoheihe ? cleanPlatformText(d.text) : d.text }}</p>
           <div v-else-if="d.preview_mode === 'external_only' && d.url" class="mt-3 rounded-xl border border-dashed border-warn/35 bg-warn/5 p-4">
             <p class="text-sm leading-relaxed text-muted">

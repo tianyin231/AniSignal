@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { ArrowUpRight } from 'lucide-vue-next'
 import { channelThemeClass, communityClasses, communityMeta } from '~/composables/useGameSection'
-import { imageSrcset, imageUrl } from '~/utils/image'
 
 /**
- * 游戏频道头图：深色底 + 右侧主视觉（最新精选封面），左侧游戏名、核心数字与官方入口。
- * 根节点固定挂 .dark + .ch-<分区>：不论站点处于浅色还是深色，头图内都用深色令牌与该游戏的强调色。
+ * 游戏频道头图：基于统一 SignalHero 基座，展示游戏名、核心数字与官方入口。
  */
 const props = defineProps<{
   communityKey: string
@@ -18,8 +16,6 @@ const props = defineProps<{
 
 const meta = computed(() => communityMeta(props.communityKey))
 const tone = computed(() => communityClasses(meta.value?.color ?? 'blue'))
-const coverFailed = ref(false)
-watch(() => props.cover, () => { coverFailed.value = false })
 
 const key = computed(() => props.communityKey)
 const { items: links, fetchOnce } = useOfficialLinks(key)
@@ -29,26 +25,15 @@ const quickLinks = computed(() => links.value.slice(0, 6))
 </script>
 
 <template>
-  <section
+  <SignalHero
     v-if="meta"
-    class="dark relative isolate mb-5 overflow-hidden rounded-[20px] bg-[#0c0d11] text-ink shadow-card"
-    :class="channelThemeClass(communityKey)"
+    class="mb-5"
     :aria-label="`${meta.label}频道`"
+    :cover="cover"
+    cover-width="wide"
+    :theme-class="channelThemeClass(communityKey)"
   >
-    <img
-      v-if="cover && !coverFailed"
-      :src="imageUrl(cover, 1600)"
-      :srcset="imageSrcset(cover, [640, 960, 1600])"
-      sizes="(min-width: 1280px) 827px, (min-width: 640px) 68vw, 100vw"
-      alt=""
-      decoding="async"
-      fetchpriority="high"
-      referrerpolicy="no-referrer"
-      class="absolute inset-y-0 right-0 -z-10 h-full w-full object-cover opacity-70 sm:w-[68%]"
-      @error="coverFailed = true"
-    >
-    <div class="absolute inset-0 -z-10 bg-[linear-gradient(90deg,#0c0d11_30%,rgb(12_13_17/0.85)_46%,rgb(12_13_17/0.15)_80%,rgb(12_13_17/0.35)_100%)] max-sm:bg-[linear-gradient(180deg,rgb(12_13_17/0.35)_0%,#0c0d11_75%)]" aria-hidden="true" />
-    <div class="flex flex-col gap-4 px-6 pb-7 pt-10 sm:px-9 sm:pt-12">
+    <div class="flex flex-col gap-4 py-2 sm:py-3">
       <p class="num text-xs font-medium uppercase tracking-[0.28em]" :class="tone.text">{{ meta.en }}</p>
       <h1 class="text-[40px] font-extrabold leading-none tracking-wide text-white sm:text-[56px]">{{ meta.label }}</h1>
       <div class="h-6 min-w-0">
@@ -62,7 +47,7 @@ const quickLinks = computed(() => links.value.slice(0, 6))
         <p><span class="num text-3xl font-bold" :class="tone.text">{{ newCount ?? '—' }}</span><span class="ml-1.5 text-[13px] text-white/70">条新内容 · 24h</span></p>
       </div>
       <!-- 始终预留一行入口空间；过长时横滑，避免异步加载或换行改变头图高度。 -->
-      <nav class="-mx-6 mt-1 flex h-9 gap-2 overflow-x-auto px-6 [scrollbar-width:none] sm:mx-0 sm:px-0" :aria-label="`${meta.label}官方入口`">
+      <nav class="-mx-5 mt-1 flex h-9 gap-2 overflow-x-auto px-5 [scrollbar-width:none] sm:mx-0 sm:px-0" :aria-label="`${meta.label}官方入口`">
         <a
           v-for="link in quickLinks"
           :key="link.url"
@@ -76,5 +61,5 @@ const quickLinks = computed(() => links.value.slice(0, 6))
         </a>
       </nav>
     </div>
-  </section>
+  </SignalHero>
 </template>

@@ -334,6 +334,22 @@ def _preview_mode(text: str | None, media: list, url: str | None) -> str:
     return "external_only"
 
 
+def _merge_topics(extra: dict | None, brief: dict | None, *, limit: int = 5) -> list[str]:
+    """合并来源原生话题与 AI 解读标签，保序去重。"""
+    raw_topics = (extra or {}).get("topics") or []
+    brief_tags = (brief or {}).get("tags") or []
+    return list(
+        dict.fromkeys(
+            t
+            for t in (
+                *(str(x).strip() for x in raw_topics),
+                *(str(x).strip() for x in brief_tags),
+            )
+            if t
+        )
+    )[:limit]
+
+
 @router.get("/contents", response_model=PublicContentList)
 async def list_contents(
     request: Request,
@@ -537,16 +553,7 @@ async def list_contents(
             raw_media = (normalized or {}).get("media") or []
             media = [m for m in raw_media if isinstance(m, str)] if isinstance(raw_media, list) else []
             brief_data = briefs_map.get(raw.id)
-            merged_topics = list(
-                dict.fromkeys(
-                    t
-                    for t in (
-                        *(str(x).strip() for x in (extra.get("topics") or [])),
-                        *(str(x).strip() for x in ((brief_data or {}).get("tags") or [])),
-                    )
-                    if t
-                )
-            )[:5]
+            merged_topics = _merge_topics(extra, brief_data, limit=5)
             rev = rev_summaries.get(raw.id)
             candidates.append(
                 PublicContentItem(
@@ -1203,16 +1210,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
     brief_row = await session.get(ContentBrief, content_id)
     brief = serialize_brief(brief_row)
     extra = normalized.get("extra") or {}
-    topics = list(
-        dict.fromkeys(
-            t
-            for t in (
-                *(str(x).strip() for x in (extra.get("topics") or [])),
-                *(str(x).strip() for x in ((brief or {}).get("tags") or [])),
-            )
-            if t
-        )
-    )[:8]
+    topics = _merge_topics(extra, brief, limit=8)
 
     repo_meta = None
     if raw.platform in ("github", "gitcode"):
@@ -1968,16 +1966,7 @@ async def feed_overview(
             raw_media = norm.get("media") or []
             media = [m for m in raw_media if isinstance(m, str)] if isinstance(raw_media, list) else []
             brief = briefs_map.get(raw.id)
-            item_topics = list(
-                dict.fromkeys(
-                    t
-                    for t in (
-                        *(str(x).strip() for x in (extra.get("topics") or [])),
-                        *(str(x).strip() for x in ((brief or {}).get("tags") or [])),
-                    )
-                    if t
-                )
-            )
+            item_topics = _merge_topics(extra, brief, limit=12)
             for t in item_topics:
                 topic_counter[t] += 1
 

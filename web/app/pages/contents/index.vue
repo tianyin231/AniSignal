@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { Flame, Hash, LayoutGrid, List, Radio, Search, SearchX } from 'lucide-vue-next'
+import { Flame, Hash, LayoutGrid, List, Search, SearchX } from 'lucide-vue-next'
 import type { FeedOverview, PublicContentList } from '~/composables/usePublicApi'
 import { toRawItem } from '~/utils/public-utils'
 import { communityMeta, platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
 import { platformMeta, type Platform } from '~/utils/data'
-import { fmtTime } from '~/utils/admin-types'
 import { cleanPlatformTitle } from '~/utils/text'
 import { formatCompactStars, type TrendingEditionsResponse, type TrendingPeriod } from '~/utils/git-trending'
 
@@ -124,7 +123,6 @@ const visiblePlatformTabs = computed(() =>
   platformsForCommunity(scope.value).filter(key => key in platformMeta),
 )
 const overviewTopics = computed(() => overviewData.value?.topics ?? [])
-const maxTopicCount = computed(() => Math.max(1, ...(overviewTopics.value.map(t => t.count))))
 
 watch(scope, () => {
   if (platform.value && !visiblePlatformTabs.value.includes(platform.value)) {
@@ -402,63 +400,28 @@ const customCreateTo = computed(() =>
           </ol>
         </section>
 
-        <!-- 热门话题分布 -->
-        <section v-if="overviewTopics.length" class="panel p-4">
-          <div class="flex items-center justify-between">
-            <h2 class="inline-flex items-center gap-1.5 text-sm font-bold text-ink">
-              <Hash :size="14" class="text-accent-ink" aria-hidden="true" />
-              热门话题
-            </h2>
-            <button v-if="activeTopic" type="button" class="text-[11px] text-brand-ink hover:underline" @click="applyQuery({ topic: undefined })">
-              重置
-            </button>
-          </div>
-          <ul class="mt-3 space-y-2.5">
-            <li v-for="t in overviewTopics.slice(0, 8)" :key="t.name">
-              <button type="button" class="group w-full text-left" @click="toggleTopic(t.name)">
-                <div class="flex items-center justify-between gap-2 text-xs">
-                  <span class="truncate font-medium" :class="activeTopic === t.name ? 'text-brand-ink' : 'text-ink-2 group-hover:text-ink'">
-                    {{ t.name }}
-                  </span>
-                  <span class="num shrink-0 tabular-nums text-muted">{{ t.count }}</span>
-                </div>
-                <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-chip">
-                  <div
-                    class="h-full rounded-full transition-all"
-                    :class="activeTopic === t.name ? 'bg-brand' : 'bg-accent/70'"
-                    :style="{ width: `${Math.max(10, Math.round((t.count / maxTopicCount) * 100))}%` }"
-                  />
-                </div>
-              </button>
-            </li>
-          </ul>
-        </section>
+        <!-- 热门话题分布（复用通用 BarDistributionCard） -->
+        <BarDistributionCard
+          title="热门话题"
+          :items="overviewTopics"
+          :active="activeTopic"
+          :limit="8"
+          @select="toggleTopic"
+          @reset="applyQuery({ topic: undefined })"
+        >
+          <template #icon>
+            <Hash :size="14" class="text-accent-ink" aria-hidden="true" />
+          </template>
+        </BarDistributionCard>
 
-        <!-- 收录来源状态 -->
-        <section v-if="overviewData?.sources?.length" class="panel p-4">
-          <div class="flex items-center justify-between">
-            <h2 class="inline-flex items-center gap-1.5 text-sm font-bold text-ink">
-              <Radio :size="14" class="text-ok" aria-hidden="true" />
-              收录来源
-            </h2>
-            <span class="num text-xs text-faint">{{ overviewData.sources.length }} 源</span>
-          </div>
-          <ul class="mt-3 space-y-2">
-            <li v-for="src in overviewData.sources" :key="`${src.platform}-${src.name}`" class="flex items-center justify-between gap-2 text-xs">
-              <span class="inline-flex min-w-0 items-center gap-2 text-ink-2">
-                <span
-                  class="size-2 shrink-0 rounded-full"
-                  :class="src.consecutive_failures === 0 ? 'bg-ok' : 'bg-warn'"
-                  aria-hidden="true"
-                />
-                <span class="truncate">{{ src.name }}</span>
-              </span>
-              <span class="mono shrink-0 text-[11px] text-faint">
-                {{ src.last_success_at ? fmtTime(src.last_success_at).slice(5, 16) : '待同步' }}
-              </span>
-            </li>
-          </ul>
-        </section>
+        <!-- 收录来源状态（复用通用 SourceHealthMini） -->
+        <SourceHealthMini
+          v-if="overviewData?.sources?.length"
+          :sources="overviewData.sources"
+          title="收录来源"
+          :show-more-link="false"
+          :limit="10"
+        />
       </aside>
     </div>
 

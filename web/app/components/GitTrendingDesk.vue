@@ -64,7 +64,9 @@ const filteredEntries = computed(() =>
 )
 
 const topLanguages = computed(() => (current.value?.languages ?? []).slice(0, 8))
-const maxLangCount = computed(() => Math.max(1, ...(topLanguages.value.map(l => l.count))))
+const languageBarItems = computed(() =>
+  topLanguages.value.map(l => ({ name: l.name, count: l.count, color: languageColor(l.name) })),
+)
 
 const badgeToneClass: Record<'new' | 'streak' | 'returning', string> = {
   new: 'bg-emerald-500/12 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300',
@@ -363,36 +365,15 @@ function toggleLanguage(lang: string) {
           </ul>
         </section>
 
-        <!-- 本期语言分布 -->
-        <section v-if="topLanguages.length" class="panel p-4">
-          <h2 class="text-sm font-bold text-ink">语言分布</h2>
-          <ul class="mt-3 space-y-2.5">
-            <li v-for="lang in topLanguages.slice(0, 6)" :key="lang.name">
-              <button
-                type="button"
-                class="group w-full text-left"
-                @click="toggleLanguage(lang.name)"
-              >
-                <div class="flex items-center justify-between text-xs">
-                  <span class="inline-flex items-center gap-1.5 font-medium" :class="activeLanguage === lang.name ? 'text-brand-ink' : 'text-ink-2 group-hover:text-ink'">
-                    <span class="size-2 rounded-full" :style="{ backgroundColor: languageColor(lang.name) }" aria-hidden="true" />
-                    {{ lang.name }}
-                  </span>
-                  <span class="num tabular-nums text-muted">{{ lang.count }}</span>
-                </div>
-                <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-chip">
-                  <div
-                    class="h-full rounded-full transition-all"
-                    :style="{
-                      width: `${Math.max(8, Math.round((lang.count / maxLangCount) * 100))}%`,
-                      backgroundColor: languageColor(lang.name),
-                    }"
-                  />
-                </div>
-              </button>
-            </li>
-          </ul>
-        </section>
+        <!-- 本期语言分布（复用通用 BarDistributionCard） -->
+        <BarDistributionCard
+          title="语言分布"
+          :items="languageBarItems"
+          :active="activeLanguage"
+          :limit="6"
+          @select="toggleLanguage"
+          @reset="activeLanguage = ''"
+        />
 
         <!-- 主仓库动态 -->
         <section v-if="data.releases.length" class="panel p-4">

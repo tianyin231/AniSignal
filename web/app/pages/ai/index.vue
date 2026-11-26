@@ -150,8 +150,6 @@ const leadCover = computed(() => {
   if (leadShot.value?.id && leadShot.value.id === numericId(lead.value.id) && leadShot.value.url) return leadShot.value.url
   return lead.value.image || covers.value.get(numericId(lead.value.id) ?? -1) || ''
 })
-const leadCoverFailed = ref(false)
-watch(leadCover, () => { leadCoverFailed.value = false })
 const failedCovers = ref<(number | string)[]>([])
 const feedTitle = computed(() => (filters.value.selected ? '精选' : filters.value.sort === 'hot' ? '热点' : '最新'))
 
@@ -217,35 +215,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="min-w-0 max-w-full overflow-x-clip">
-    <section
-      class="dark ch-ai relative isolate mb-5 w-full min-w-0 max-w-full overflow-hidden rounded-[20px] bg-[#0c0d11] text-ink shadow-card"
+    <SignalHero
+      class="mb-5"
+      theme-class="ch-ai"
+      :cover="leadCover"
       :aria-label="lead?.headline || 'AI 快讯'"
     >
-      <div v-if="leadCover && !leadCoverFailed" class="relative w-full min-w-0 max-w-full overflow-hidden sm:absolute sm:inset-y-0 sm:right-0 sm:-z-10 sm:w-[46%]">
-        <img
-          :src="imageUrl(leadCover, 1600)"
-          :srcset="imageSrcset(leadCover, [640, 960, 1600])"
-          sizes="(min-width: 640px) 46vw, 100vw"
-          alt=""
-          decoding="async"
-          fetchpriority="high"
-          referrerpolicy="no-referrer"
-          class="aspect-[16/9] w-full max-w-full object-cover sm:aspect-auto sm:h-full"
-          @error="leadCoverFailed = true"
-        >
-        <div class="absolute inset-0 bg-[#0c0d11]/30 sm:hidden" aria-hidden="true" />
-        <div class="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0c0d11] to-transparent sm:hidden" aria-hidden="true" />
-        <div class="absolute inset-y-0 left-0 hidden w-16 bg-gradient-to-r from-[#0c0d11] to-transparent sm:block" aria-hidden="true" />
-      </div>
-      <div
-        v-else
-        class="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(70%_90%_at_100%_0%,rgb(44_192_172/0.42),transparent_58%)]"
-        aria-hidden="true"
-      />
-      <div
-        class="relative flex w-full min-w-0 flex-col gap-3 px-5 py-6 max-sm:pr-10 sm:min-h-[340px] sm:justify-center sm:px-9 sm:py-10"
-        :class="leadCover && !leadCoverFailed ? 'sm:w-[54%]' : 'sm:max-w-3xl'"
-      >
+      <div class="flex min-w-0 flex-col gap-3 sm:min-h-[260px] sm:justify-center">
         <p class="mono text-xs tracking-wide text-white/55">{{ dateLine }}</p>
         <p class="num text-xs font-medium uppercase tracking-[0.28em] text-ai-ink">AI News</p>
         <h1 v-if="lead" class="min-w-0 max-w-full text-[26px] font-extrabold leading-[1.18] text-white sm:text-[34px]">
@@ -274,7 +250,7 @@ onBeforeUnmount(() => {
           </a>
         </div>
       </div>
-    </section>
+    </SignalHero>
 
     <div v-if="!aiConfigured" class="panel mb-4 flex flex-wrap items-center justify-between gap-3 border-ai/30 bg-ai-soft/40 px-4 py-3 text-sm text-ink-2">
       <p>当前尚未配置 AI 模型，已自动切换为<strong class="font-semibold text-ink">原文直出模式</strong>，直接显示已采集的一手信源内容。</p>
