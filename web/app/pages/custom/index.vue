@@ -236,7 +236,7 @@ const pill = 'panel flex flex-col gap-0.5 rounded-xl px-3 py-2.5 sm:flex-row sm:
           </template>
           <template v-else>
             <ul class="mt-4 space-y-2 text-[13px] text-ink-2">
-              <li>· 选择 B 站关键词或 UP 主、RSS 订阅、YouTube 频道、小黑盒热帖</li>
+              <li>· 选择 B 站关键词或 UP 主、RSS 订阅、自定义网页、YouTube、Steam 或小黑盒</li>
               <li>· 随时一键启停、立即抓取、设置包含词与排除词</li>
               <li>· 可设为私有独享，或公开到这里与大家共享</li>
             </ul>

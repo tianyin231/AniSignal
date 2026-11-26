@@ -81,13 +81,18 @@ async def public_web_url(value: str) -> str:
         return await public_feed_url(value)
     except CollectorError as exc:
         msg = str(exc).replace("RSS 地址", "网页地址")
-        raise CollectorError(msg) from exc
+        err = CollectorError(msg)
+        # SSRF / 非法地址不应继续切换代理出口重试
+        err.stop_fallback = True
+        raise err from exc
 
 
 def _check_content_type(raw_ct: str) -> str:
     ct = (raw_ct or "").split(";", 1)[0].strip().lower()
     if ct not in ALLOWED_CONTENT_TYPES:
-        raise CollectorError(f"目标地址不是可监控的网页（Content-Type: {ct}）")
+        err = CollectorError(f"目标地址不是可监控的网页（Content-Type: {ct}）")
+        err.stop_fallback = True
+        raise err
     return raw_ct
 
 
@@ -421,4 +426,6 @@ class WebPageCollector:
             )
             return FetchResult(platform=self.platform, fetch_kind=fetch_kind, items=items)
         except WebParseError as exc:
-            raise CollectorError(str(exc)) from exc
+            err = CollectorError(str(exc))
+            err.stop_fallback = True
+            raise err from exc

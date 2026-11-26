@@ -94,6 +94,9 @@ LIST_HTML = """<!doctype html>
         <a href="/blog/roadmap-2027">2027 年度路线图与架构规划</a>
       </li>
       <li>
+        <a href="/blog/2026/?label=copilot">copilot</a>
+      </li>
+      <li>
         <a href="/docs/quickstart">快速开始文档</a>
       </li>
       <li>
@@ -157,6 +160,10 @@ def test_extract_page_preserves_tables_and_detects_rss():
     assert page.detected_feeds[0].url == "https://example.com/feed.xml"
     assert page.detected_feeds[0].feed_type == "rss"
     assert page.spa_warning is False
+
+    # 文档站标题末尾的 ¶ / # 锚点符号自动清理
+    docs_page = extract_page("<html><body><h1>Release Notes¶</h1><p>Updated release notes text.</p></body></html>", "https://docs.example.com/rn")
+    assert docs_page.title == "Release Notes"
 
 
 def test_extract_page_css_xpath_exclude_and_ignore_patterns():
@@ -226,8 +233,9 @@ def test_extract_list_cleans_urls_and_filters_by_pattern():
 
 
 async def test_public_web_url_blocks_private_addresses():
-    with pytest.raises(CollectorError, match="私有网络"):
+    with pytest.raises(CollectorError, match="私有网络") as exc_info:
         await public_web_url("http://127.0.0.1:8080/secret")
+    assert getattr(exc_info.value, "stop_fallback", False) is True
     with pytest.raises(CollectorError, match="私有网络"):
         await public_web_url("http://169.254.169.254/latest/meta-data/")
     with pytest.raises(CollectorError, match="公开 HTTP"):

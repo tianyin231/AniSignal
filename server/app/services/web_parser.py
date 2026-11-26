@@ -35,6 +35,8 @@ MAX_TEXT_CHARS = 50_000
 MAX_MEDIA_ITEMS = 12
 
 _ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\ufeff]")
+_TRAILING_PERMALINK_RE = re.compile(r"[\s\u00b6#¶]+$")
+_FILTER_QUERY_KEYS = frozenset({"label", "labels", "tag", "tags", "category", "page", "sort", "filter"})
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
 _TRAILING_WS_RE = re.compile(r"[ \t]+\n")
 _CHARSET_HEADER_RE = re.compile(r"charset\s*=\s*[\"']?([A-Za-z0-9._-]+)", re.I)
@@ -441,7 +443,7 @@ def _extract_page_metadata(html_text: str, url: str) -> dict:
             published_at = None
 
     return {
-        "title": unescape(title).strip()[:240],
+        "title": _TRAILING_PERMALINK_RE.sub("", unescape(title).strip())[:240] or (urlsplit(url).hostname or url),
         "site_name": unescape(site_name).strip()[:120] or None,
         "author": unescape(author).strip()[:120] if author else None,
         "image": image or None,
@@ -802,6 +804,12 @@ def extract_list(
                 continue
             if not _match_link_pattern(canon, link_pattern):
                 continue
+            # 过滤常见的标签/分类/分页筛选链接（如 ?label=copilot），除非用户显式匹配查询参数
+            parsed_cand = urlsplit(canon)
+            if parsed_cand.query and "?" not in link_pattern:
+                q_keys = {part.split("=", 1)[0].lower() for part in parsed_cand.query.split("&") if part}
+                if q_keys and q_keys.issubset(_FILTER_QUERY_KEYS):
+                    continue
             # 无显式规则时，用 courlan 过滤掉分页/登录/标签/站外导航等非内容链接
             if not explicit_rule:
                 cand_host = (urlsplit(canon).hostname or "").lower()
