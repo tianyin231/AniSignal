@@ -610,6 +610,11 @@ _KIND_DEFAULT_PLATFORM = {
     "steam_app": "steam",
     "page_watch": "web_page",
     "list_watch": "web_page",
+    "gh_releases": "github",
+    "gh_issues": "github",
+    "gh_discussions": "github",
+    "gc_releases": "gitcode",
+    "gc_issues": "gitcode",
     "hot_posts": "xiaoheihe",
     XIAOHEIHE_ACCOUNT_KIND: XIAOHEIHE_KEY,
     XIAOHEIHE_KEYWORD_KIND: XIAOHEIHE_KEY,
@@ -661,6 +666,14 @@ def _validate_custom_target(kind: str, target: str) -> str:
         if not _HTTP_URL_RE.fullmatch(target) or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in target):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "请填写公开的 http(s) 网页地址")
         return target
+    if kind in {"gh_releases", "gh_issues", "gh_discussions", "gc_releases", "gc_issues"}:
+        from app.collectors.git_repo import normalize_repo_target
+
+        plat = _KIND_DEFAULT_PLATFORM[kind]
+        try:
+            return normalize_repo_target(plat, target)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
     return target
 
 
@@ -748,7 +761,16 @@ def _validate_custom_payload(body: dict, *, partial: bool = False, default_kind:
     filters = body.get("filters")
     if filters is not None:
         is_web = effective_kind in {"page_watch", "list_watch"}
-        allowed_keys = {"include", "exclude", "selector", "exclude_selector", "link_pattern", "ignore_patterns"} if is_web else {"include", "exclude"}
+        is_git_rel = effective_kind in {"gh_releases", "gc_releases"}
+        is_git_iss = effective_kind in {"gh_issues", "gc_issues"}
+        if is_web:
+            allowed_keys = {"include", "exclude", "selector", "exclude_selector", "link_pattern", "ignore_patterns"}
+        elif is_git_rel:
+            allowed_keys = {"include", "exclude", "include_prerelease"}
+        elif is_git_iss:
+            allowed_keys = {"include", "exclude", "labels"}
+        else:
+            allowed_keys = {"include", "exclude"}
         if not isinstance(filters, dict) or (set(filters) - allowed_keys):
             raise HTTPException(400, "筛选规则包含不支持的配置项")
         cleaned_filters: dict = {}
@@ -770,6 +792,15 @@ def _validate_custom_payload(body: dict, *, partial: bool = False, default_kind:
                 try:
                     cleaned_filters.update(normalize_web_config(web_raw))
                 except WebParseError as exc:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+        if is_git_rel or is_git_iss:
+            from app.collectors.git_repo import normalize_repo_config
+
+            repo_raw = {k: filters[k] for k in ("include_prerelease", "labels") if k in filters and filters[k] is not None}
+            if repo_raw:
+                try:
+                    cleaned_filters.update(normalize_repo_config(repo_raw, target_type=effective_kind))
+                except ValueError as exc:
                     raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
         filters = cleaned_filters
     return {
@@ -887,7 +918,7 @@ async def create_custom_feed(
         raise HTTPException(status.HTTP_409_CONFLICT, messages.get(payload["kind"], "已创建相同的小黑盒监控"))
     source = await shared_source(session, payload["platform"], payload["kind"], payload["target_value"])
     request_interval(source, interval)
-    if payload["platform"] == "web_page" and not source.last_error:
+    if payload["platform"] in {"web_page", "github", "gitcode"} and not source.last_error:
         source.next_run_at = None
     feed = CustomFeed(
         user_id=user.id,
@@ -955,7 +986,7 @@ async def update_custom_feed(
     if payload["filters"] is not None:
         feed.filters = payload["filters"]
         feed.next_run_at = None
-        if feed.platform == "web_page" and feed.source_id:
+        if feed.platform in {"web_page", "github", "gitcode"} and feed.source_id:
             from app.models import CustomFeedSource
 
             source = await session.get(CustomFeedSource, feed.source_id)

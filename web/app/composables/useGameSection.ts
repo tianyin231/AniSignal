@@ -142,7 +142,7 @@ export const PLATFORMS_BY_COMMUNITY: Record<string, string[]> = {
   nte: ['bilibili'],
   nikke: ['game_official', 'youtube', 'x'],
   infinitynikki: ['bilibili', 'steam'],
-  ai: ['bilibili', 'x', 'rss', 'web_page'],
+  ai: ['bilibili', 'x', 'rss', 'web_page', 'github', 'gitcode'],
 }
 
 function normalizeFilterPlatforms(raw: string[]): string[] {
@@ -158,7 +158,7 @@ export function platformsForCommunity(community: string): string[] {
   }
   const meta = communityMeta(community)
   if (meta?.platforms?.length) return normalizeFilterPlatforms(meta.platforms)
-  return PLATFORMS_BY_COMMUNITY[community] ?? ['bilibili', 'youtube', 'rss', 'web_page', 'x']
+  return PLATFORMS_BY_COMMUNITY[community] ?? ['bilibili', 'youtube', 'rss', 'web_page', 'github', 'gitcode', 'x']
 }
 
 export function useCommunityScope({ gameOnly = false } = {}) {

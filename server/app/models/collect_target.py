@@ -61,3 +61,8 @@ class CollectTarget(Base):
     def web_config(self) -> dict:
         raw = (self.config or {}).get("web")
         return dict(raw) if isinstance(raw, dict) else {}
+
+    @property
+    def repo_config(self) -> dict:
+        raw = (self.config or {}).get("repo")
+        return dict(raw) if isinstance(raw, dict) else {}

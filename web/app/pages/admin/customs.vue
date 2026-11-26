@@ -187,7 +187,7 @@ async function removeFeed(feed: CustomFeedAdminRow) {
   <div class="space-y-4">
     <div class="wall-heading">
       <h1 class="text-2xl font-bold text-ink">用户监控</h1>
-      <p class="mt-0.5 text-sm text-muted">管理用户自建的 RSS 订阅、网页监测、B 站、YouTube、Steam 与小黑盒监控源及采集配额。</p>
+      <p class="mt-0.5 text-sm text-muted">管理用户自建的 RSS 订阅、网页监测、GitHub / GitCode、B 站、YouTube、Steam 与小黑盒监控源及采集配额。</p>
     </div>
 
     <section class="panel space-y-4 p-4" aria-label="定制采集公测容量">
@@ -256,6 +256,11 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <option value="feed">RSS 订阅</option>
           <option value="page_watch">单页变更</option>
           <option value="list_watch">列表更新</option>
+          <option value="gh_releases">GitHub 版本</option>
+          <option value="gh_issues">GitHub 议题</option>
+          <option value="gh_discussions">GitHub 讨论</option>
+          <option value="gc_releases">GitCode 版本</option>
+          <option value="gc_issues">GitCode 议题</option>
           <option value="channel_rss">YouTube 频道</option>
           <option value="steam_app">Steam 游戏</option>
           <option value="notices">官方公告</option>

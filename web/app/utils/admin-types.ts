@@ -9,6 +9,11 @@ export interface WebPageConfig {
   fetch_body?: boolean
 }
 
+export interface RepoConfig {
+  include_prerelease?: boolean
+  labels?: string[]
+}
+
 export interface CollectTarget {
   id: number
   platform: string
@@ -19,6 +24,7 @@ export interface CollectTarget {
   enabled: boolean
   is_official: boolean
   web_config?: WebPageConfig
+  repo_config?: RepoConfig
   tier: 'core' | 'general'
   /** 游戏分区 key（合法值集合随分区注册表扩展，见 utils/admin-communities.ts） */
   community: string

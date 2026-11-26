@@ -61,6 +61,8 @@ export interface CustomFeedRow {
     exclude_selector?: string
     link_pattern?: string
     ignore_patterns?: string[]
+    include_prerelease?: boolean
+    labels?: string[]
   }
 }
 export interface CustomQuota {

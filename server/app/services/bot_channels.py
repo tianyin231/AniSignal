@@ -9,7 +9,7 @@ PLATFORMS = {
     "bilibili": ("B", ("bilibili",)),
     "youtube": ("YB", ("youtube",)),
     "x": ("X", ("x",)),
-    "web": ("官网", ("kuro_cn", "kuro_global", "game_official", "steam", "web_page")),
+    "web": ("官网", ("kuro_cn", "kuro_global", "game_official", "steam", "web_page", "github", "gitcode")),
     "miyoushe": ("米游社", ("miyoushe",)),
 }
 

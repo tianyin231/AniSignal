@@ -10,6 +10,8 @@ export type PlatformKey =
   | 'youtube'
   | 'web'
   | 'web_page'
+  | 'github'
+  | 'gitcode'
   | 'kuro'
   | 'miyoushe'
   | 'kuro_cn'
@@ -32,6 +34,8 @@ export const PLATFORM_META: Record<PlatformKey, PlatformInfo> = {
   x: { label: 'X', short: 'X', badge: 'bg-zinc-900 dark:bg-zinc-700', region: '海外' },
   rss: { label: 'RSS 订阅', short: 'RSS', badge: 'bg-teal-700', region: '通用' },
   web_page: { label: '网页监测', short: '页', badge: 'bg-cyan-600', region: '通用' },
+  github: { label: 'GitHub', short: 'GH', badge: 'bg-zinc-900 dark:bg-zinc-700', region: '海外' },
+  gitcode: { label: 'GitCode', short: 'GC', badge: 'bg-orange-600', region: '国内' },
   youtube: { label: 'YouTube', short: 'YT', badge: 'bg-red-500', region: '海外' },
   game_official: { label: '游戏官网', short: '官', badge: 'bg-emerald-600', region: '官方' },
   web: { label: '官网', short: '网', badge: 'bg-sky-600', region: '通用' },
@@ -65,6 +69,8 @@ const ADMIN_PLATFORM_ORDER: PlatformKey[] = [
   'game_official',
   'rss',
   'web_page',
+  'github',
+  'gitcode',
   'bilibili',
   'miyoushe',
   'xiaoheihe',
@@ -83,6 +89,9 @@ export const TARGET_TYPE_LABELS: Record<string, string> = {
   feed: 'RSS 订阅',
   page_watch: '单页变更',
   list_watch: '列表更新',
+  releases: '版本发布',
+  issues: '议题动态',
+  discussions: '社区讨论',
   keyword_search: '关键词搜索',
   account_videos: '账号视频',
   account_dynamics: '账号动态',
@@ -97,6 +106,7 @@ export const CONTENT_TYPE_LABELS: Record<string, string> = {
   notice: '公告',
   rss_item: 'RSS 订阅',
   web_page: '网页监测',
+  release: '版本发布',
 }
 
 export const TIER_META = {
@@ -120,7 +130,7 @@ export function tierLabel(tier: string): string {
   return TIER_META[tier as TierKey]?.label ?? tier
 }
 
-export type MonitorGroupKey = 'web' | 'media' | 'game'
+export type MonitorGroupKey = 'web' | 'code' | 'media' | 'game'
 
 export interface MonitorGroup {
   key: MonitorGroupKey
@@ -129,6 +139,7 @@ export interface MonitorGroup {
 
 export const MONITOR_GROUPS: readonly MonitorGroup[] = [
   { key: 'web', label: '网页与订阅' },
+  { key: 'code', label: '开源项目' },
   { key: 'media', label: '视频与社区' },
   { key: 'game', label: '游戏平台' },
 ] as const
@@ -171,6 +182,51 @@ export const MONITOR_KINDS: readonly MonitorKindMeta[] = [
     desc: '监测目录或公告页新增文章',
     fieldLabel: '列表页地址',
     placeholder: 'https://example.com/news',
+  },
+  {
+    key: 'gh_releases',
+    platform: 'github',
+    group: 'code',
+    label: 'GitHub 版本',
+    desc: '追踪仓库正式版与预发布版本',
+    fieldLabel: 'GitHub 仓库',
+    placeholder: 'owner/repo 或 https://github.com/owner/repo',
+  },
+  {
+    key: 'gh_issues',
+    platform: 'github',
+    group: 'code',
+    label: 'GitHub 议题',
+    desc: '追踪仓库议题，可按标签筛选',
+    fieldLabel: 'GitHub 仓库',
+    placeholder: 'owner/repo 或 https://github.com/owner/repo',
+  },
+  {
+    key: 'gh_discussions',
+    platform: 'github',
+    group: 'code',
+    label: 'GitHub 讨论',
+    desc: '追踪仓库公开社区讨论动态',
+    fieldLabel: 'GitHub 仓库',
+    placeholder: 'owner/repo 或 https://github.com/owner/repo',
+  },
+  {
+    key: 'gc_releases',
+    platform: 'gitcode',
+    group: 'code',
+    label: 'GitCode 版本',
+    desc: '追踪仓库正式版与预发布版本',
+    fieldLabel: 'GitCode 仓库',
+    placeholder: 'owner/repo 或 https://gitcode.com/owner/repo',
+  },
+  {
+    key: 'gc_issues',
+    platform: 'gitcode',
+    group: 'code',
+    label: 'GitCode 议题',
+    desc: '追踪仓库议题，可按标签筛选',
+    fieldLabel: 'GitCode 仓库',
+    placeholder: 'owner/repo 或 https://gitcode.com/owner/repo',
   },
   {
     key: 'keyword',

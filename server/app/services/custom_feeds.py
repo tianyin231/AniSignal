@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import to_naive_utc, utcnow
 from app.collectors.base import CollectorDeferred, platform_slot
 from app.collectors.bilibili import BilibiliCollector
+from app.collectors.git_repo import GitcodeCollector, GithubCollector, _matches_labels as matches_git_labels
 from app.collectors.nikke import NikkeCollector, parse_notice
 from app.collectors.rss import RssCollector
 from app.collectors.steam import SteamCollector
@@ -32,6 +33,7 @@ from app.collectors.youtube_api import YoutubeApiCollector
 from app.communities import ensure_communities_synced
 from app.custom_presets import CUSTOM_PRESETS, custom_preset
 from app.parsers.rss import parse_item as parse_rss_feed_item
+from app.parsers.git_repo import parse_git_item
 from app.parsers.steam import parse_notice as parse_steam_notice
 from app.parsers.web_page import parse_page as parse_web_page
 from app.parsers.x import parse_post
@@ -68,6 +70,14 @@ STEAM_APP_KIND = "steam_app"
 WEB_PAGE_KEY = "web_page"
 PAGE_WATCH_KIND = "page_watch"
 LIST_WATCH_KIND = "list_watch"
+GITHUB_KEY = "github"
+GITCODE_KEY = "gitcode"
+GH_RELEASES_KIND = "gh_releases"
+GH_ISSUES_KIND = "gh_issues"
+GH_DISCUSSIONS_KIND = "gh_discussions"
+GC_RELEASES_KIND = "gc_releases"
+GC_ISSUES_KIND = "gc_issues"
+GIT_REPO_PLATFORMS = {GITHUB_KEY, GITCODE_KEY}
 CUSTOM_SPECS = {
     ("bilibili", "uid"),
     ("bilibili", "keyword"),
@@ -76,6 +86,11 @@ CUSTOM_SPECS = {
     ("steam", STEAM_APP_KIND),
     (WEB_PAGE_KEY, PAGE_WATCH_KIND),
     (WEB_PAGE_KEY, LIST_WATCH_KIND),
+    (GITHUB_KEY, GH_RELEASES_KIND),
+    (GITHUB_KEY, GH_ISSUES_KIND),
+    (GITHUB_KEY, GH_DISCUSSIONS_KIND),
+    (GITCODE_KEY, GC_RELEASES_KIND),
+    (GITCODE_KEY, GC_ISSUES_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_ACCOUNT_KIND),
     (XIAOHEIHE_KEY, XIAOHEIHE_KEYWORD_KIND),
@@ -100,6 +115,10 @@ def _collector(platform: str):
         return RssCollector()
     if platform == WEB_PAGE_KEY:
         return WebPageCollector()
+    if platform == GITHUB_KEY:
+        return GithubCollector()
+    if platform == GITCODE_KEY:
+        return GitcodeCollector()
     if platform == "game_official":
         return NikkeCollector()
     if platform == "youtube":
@@ -327,12 +346,87 @@ async def _fetch_web_page_custom_items(
     return results
 
 
+async def _load_custom_git_cache(redis, source_id: int) -> dict:
+    if redis is None or not hasattr(redis, "get"):
+        return {}
+    try:
+        raw = await redis.get(f"anisignal:custom-git-cache:{source_id}")
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode("utf-8", errors="ignore")
+        return json.loads(raw) if isinstance(raw, str) and raw else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+async def _save_custom_git_cache(redis, source_id: int, payload: dict) -> None:
+    if redis is None or not hasattr(redis, "set"):
+        return
+    try:
+        await redis.set(
+            f"anisignal:custom-git-cache:{source_id}",
+            json.dumps(payload, ensure_ascii=False),
+            ex=_CUSTOM_WEB_CACHE_TTL,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+async def _fetch_git_repo_custom_items(
+    source: CustomFeedSource, feeds: list[CustomFeed], redis, session: AsyncSession | None
+) -> list[NormalizedContent]:
+    """共享单次抓取仓库公开 Release / Issue / Discussion，利用 ETag 省匿名配额并按订阅者独立筛选。"""
+    collector = _collector(source.platform)
+    repo_cfg: dict = {}
+    if source.kind in {GH_RELEASES_KIND, GC_RELEASES_KIND}:
+        # 共享源总是包含预发布，分发阶段再按用户各自的 include_prerelease 过滤。
+        repo_cfg["include_prerelease"] = True
+    elif source.kind in {GH_ISSUES_KIND, GC_ISSUES_KIND} and feeds:
+        label_sets = {
+            tuple(sorted(str(x).strip().casefold() for x in ((f.filters or {}).get("labels") or []) if str(x).strip()))
+            for f in feeds
+        }
+        if len(label_sets) == 1:
+            only_set = next(iter(label_sets))
+            if len(only_set) == 1:
+                first_labels = [str(x).strip() for x in ((feeds[0].filters or {}).get("labels") or []) if str(x).strip()]
+                if first_labels:
+                    repo_cfg["labels"] = [first_labels[0]]
+
+    cached_http = await _load_custom_git_cache(redis, source.id)
+    collector.source_config = {
+        "repo": repo_cfg,
+        "_http_cache": cached_http if isinstance(cached_http, dict) else {},
+        "is_official": source.kind in {GH_RELEASES_KIND, GC_RELEASES_KIND},
+    }
+
+    async def fetch():
+        async with platform_slot(redis, source.platform, 5.0):
+            return await collector.fetch(source.kind, source.target_value, 20)
+
+    fetch_result = await fetch_with_fallback(collector, session, source.platform, fetch)
+    if collector.last_http_cache:
+        await _save_custom_git_cache(redis, source.id, collector.last_http_cache)
+    if collector.not_modified:
+        if session is not None:
+            now = utcnow()
+            existing_rows = list(
+                await session.scalars(select(CustomSourceItem).where(CustomSourceItem.source_id == source.id))
+            )
+            for row in existing_rows:
+                row.collected_at = now
+        return []
+    items = [parse_git_item(item) for item in fetch_result.items]
+    return sorted(items, key=lambda item: item.published_at.timestamp() if item.published_at else 0, reverse=True)
+
+
 async def fetch_custom_items(source: CustomFeedSource, redis, session=None, *, feeds: list[CustomFeed] | None = None) -> list:
     """抓取并解析定制源；平台礼貌间隔与代理池回退与主采集完全一致。"""
     if source.platform == XIAOHEIHE_KEY and source.kind == XIAOHEIHE_KIND:
         return await refresh_xiaoheihe_items(session)
     if source.platform == WEB_PAGE_KEY:
         return await _fetch_web_page_custom_items(source, feeds or [], redis, session)
+    if source.platform in GIT_REPO_PLATFORMS:
+        return await _fetch_git_repo_custom_items(source, feeds or [], redis, session)
     collector = _collector(source.platform)
     if hasattr(collector, "set_cookies") and session is not None:
         from app.services.bilibili_session import get_db_cookies
@@ -430,6 +524,17 @@ async def distribute_custom_feed(session: AsyncSession, feed: CustomFeed) -> int
             continue
         text = f"{n.title or ''}\n{n.text or ''}".casefold()
         filters = feed.filters or {}
+        if feed.platform in GIT_REPO_PLATFORMS:
+            if (
+                feed.kind in {GH_RELEASES_KIND, GC_RELEASES_KIND}
+                and filters.get("include_prerelease") is False
+                and (n.extra or {}).get("prerelease")
+            ):
+                continue
+            wanted_labels = filters.get("labels") or []
+            if feed.kind in {GH_ISSUES_KIND, GC_ISSUES_KIND} and wanted_labels:
+                if not matches_git_labels((n.extra or {}).get("labels") or [], wanted_labels):
+                    continue
         if filters.get("include") and not any(term.casefold() in text for term in filters["include"]):
             continue
         if any(term.casefold() in text for term in filters.get("exclude", [])):
@@ -526,7 +631,7 @@ async def _run_shared_source(session, redis, source_id, stats):
             stats["sources"] += 1
             items = (
                 await fetch_custom_items(source, redis, session, feeds=feeds)
-                if source.platform == WEB_PAGE_KEY
+                if source.platform in {WEB_PAGE_KEY, *GIT_REPO_PLATFORMS}
                 else await fetch_custom_items(source, redis, session)
             )
             old = {row.external_id: row for row in await session.scalars(select(CustomSourceItem).where(

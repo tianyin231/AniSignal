@@ -50,6 +50,11 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     ("rss", "feed"): re.compile(r"^https?://[^\s]{1,247}$"),
     ("web_page", "page_watch"): re.compile(r"^https?://[^\s]{1,247}$"),
     ("web_page", "list_watch"): re.compile(r"^https?://[^\s]{1,247}$"),
+    ("github", "releases"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
+    ("github", "issues"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
+    ("github", "discussions"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
+    ("gitcode", "releases"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
+    ("gitcode", "issues"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
 }
 
 
@@ -92,6 +97,10 @@ def validate_target_value(platform: object, target_type: object, value: object) 
         from app.parsers.steam import extract_app_id
 
         text = extract_app_id(text)
+    if plat in ("github", "gitcode"):
+        from app.collectors.git_repo import normalize_repo_target
+
+        text = normalize_repo_target(plat, text)
     pattern = _TARGET_VALUE_RULES.get((plat, ttype))
     if pattern is not None and not pattern.fullmatch(text):
         raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")
@@ -132,6 +141,16 @@ class WebPagePreviewRequest(BaseModel):
     web_config: WebPageConfigIn | None = None
 
 
+class RepoConfigIn(BaseModel):
+    include_prerelease: bool | None = None
+    labels: list[str] = Field(default_factory=list, max_length=10)
+
+    def to_storage_dict(self, target_type: str = "releases") -> dict:
+        from app.collectors.git_repo import normalize_repo_config
+
+        return normalize_repo_config(self.model_dump(exclude_none=True), target_type=target_type)
+
+
 class CollectTargetCreate(BaseModel):
     platform: Platform
     target_type: TargetType
@@ -145,6 +164,7 @@ class CollectTargetCreate(BaseModel):
     tier: str = Field(default="general", pattern="^(core|general)$")
     community: CommunitySlug = Field(default=_DEFAULT_COMMUNITY)
     web_config: WebPageConfigIn | None = None
+    repo_config: RepoConfigIn | None = None
 
     @model_validator(mode="after")
     def _check_target_value(self):
@@ -153,6 +173,8 @@ class CollectTargetCreate(BaseModel):
             self.target_value = validate_target_value(
                 self.platform, self.target_type, self.target_value
             )
+            if self.platform in ("github", "gitcode") and self.repo_config is not None:
+                self.repo_config.to_storage_dict(str(self.target_type))
         except ValueError as exc:
             raise ValueError(str(exc)) from None
         if self.platform == "game_official" and self.target_value != self.community:
@@ -171,6 +193,7 @@ class CollectTargetUpdate(BaseModel):
     tier: str | None = Field(default=None, pattern="^(core|general)$")
     community: OptionalCommunitySlug = Field(default=None)
     web_config: WebPageConfigIn | None = None
+    repo_config: RepoConfigIn | None = None
 
 
 class CommunityCreate(BaseModel):
@@ -220,6 +243,7 @@ class CollectTargetOut(BaseModel):
     enabled: bool
     is_official: bool = False
     web_config: dict = Field(default_factory=dict)
+    repo_config: dict = Field(default_factory=dict)
     co_terms: list[str] = []
     min_views: int = 0
     tier: str = "general"

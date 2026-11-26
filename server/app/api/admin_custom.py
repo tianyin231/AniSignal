@@ -85,7 +85,7 @@ async def list_custom_feeds(
     q: str = Query(default="", max_length=120, description="监控名/目标/用户邮箱搜索"),
     kind: str = Query(
         default="",
-        pattern="^(|uid|keyword|feed|notices|channel_rss|steam_app|page_watch|list_watch|account_dynamics|hot_posts|xhh_account|xhh_keyword)$",
+        pattern="^(|uid|keyword|feed|notices|channel_rss|steam_app|page_watch|list_watch|gh_releases|gh_issues|gh_discussions|gc_releases|gc_issues|account_dynamics|hot_posts|xhh_account|xhh_keyword)$",
     ),
     feed_status: str = Query(default="", pattern="^(|active|disabled)$"),
     page: int = Query(default=1, ge=1),

@@ -515,6 +515,10 @@ async def create_target(
         web_dict = body.web_config.to_storage_dict()
         if web_dict:
             target_config["web"] = web_dict
+    if body.platform in ("github", "gitcode") and body.repo_config is not None:
+        repo_dict = body.repo_config.to_storage_dict(str(body.target_type))
+        if repo_dict:
+            target_config["repo"] = repo_dict
     target = CollectTarget(
         platform=body.platform,
         target_type=body.target_type,
@@ -614,7 +618,7 @@ async def update_target(
     if value_changed:
         target.target_value = next_value
         target.last_success_at, target.last_error, target.consecutive_failures = None, None, 0
-        if target.platform == "web_page":
+        if target.platform in ("web_page", "github", "gitcode"):
             next_cfg = dict(target.config or {})
             next_cfg.pop("_http_cache", None)
             target.config = next_cfg
@@ -624,7 +628,11 @@ async def update_target(
         target.tier = body.tier
     if body.community is not None:
         target.community = body.community
-    if body.is_official is not None or (body.web_config is not None and target.platform == "web_page"):
+    if (
+        body.is_official is not None
+        or (body.web_config is not None and target.platform == "web_page")
+        or (body.repo_config is not None and target.platform in ("github", "gitcode"))
+    ):
         next_cfg = dict(target.config or {})
         if body.is_official is not None:
             if body.is_official and target.target_type not in ("keyword_search", "topic_search"):
@@ -637,6 +645,16 @@ async def update_target(
                 next_cfg["web"] = web_dict
             else:
                 next_cfg.pop("web", None)
+            next_cfg.pop("_http_cache", None)
+        if body.repo_config is not None and target.platform in ("github", "gitcode"):
+            try:
+                repo_dict = body.repo_config.to_storage_dict(str(target.target_type))
+            except ValueError as exc:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+            if repo_dict:
+                next_cfg["repo"] = repo_dict
+            else:
+                next_cfg.pop("repo", None)
             next_cfg.pop("_http_cache", None)
         target.config = next_cfg
     if body.min_views is not None:

@@ -16,6 +16,8 @@ class Platform(StrEnum):
     STEAM = "steam"
     RSS = "rss"
     WEB_PAGE = "web_page"
+    GITHUB = "github"
+    GITCODE = "gitcode"
     GAME_OFFICIAL = "game_official"
 
 
@@ -57,6 +59,9 @@ class TargetType(StrEnum):
     FEED = "feed"
     PAGE_WATCH = "page_watch"
     LIST_WATCH = "list_watch"
+    RELEASES = "releases"
+    ISSUES = "issues"
+    DISCUSSIONS = "discussions"
 
 
 class ContentType(StrEnum):
@@ -66,6 +71,7 @@ class ContentType(StrEnum):
     NOTICE = "notice"
     RSS_ITEM = "rss_item"
     WEB_PAGE = "web_page"
+    RELEASE = "release"
 
 
 class Identity(StrEnum):

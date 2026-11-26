@@ -18,6 +18,10 @@ import type { CustomFeedRow } from '~/composables/useAccountCenter'
 import { apiErrorDetail } from '~/utils/api-errors'
 import {
   customKindLabel,
+  GC_ISSUES_MONITOR,
+  GC_RELEASES_MONITOR,
+  GH_ISSUES_MONITOR,
+  GH_RELEASES_MONITOR,
   STEAM_MONITOR,
   WEB_LIST_MONITOR,
   WEB_PAGE_MONITOR,
@@ -68,6 +72,7 @@ const groupedKinds = computed(() =>
 const blank = () => ({
   name: '', kind: 'feed' as MonitorKind, target_value: '', min_views: 0, interval_minutes: 60,
   includeText: '', excludeText: '', selector: '', excludeSelector: '', linkPattern: '', ignoreText: '',
+  includePrerelease: true, labelsText: '',
   push_enabled: false, is_public: false,
 })
 const form = reactive(blank())
@@ -75,6 +80,7 @@ const editing = ref<number | null>(null)
 const draft = reactive({
   name: '', target_value: '', min_views: 0, interval_minutes: 30,
   includeText: '', excludeText: '', selector: '', excludeSelector: '', linkPattern: '', ignoreText: '',
+  includePrerelease: true, labelsText: '',
 })
 const webPreview = ref<WebPreviewResult | null>(null)
 const webPreviewing = ref(false)
@@ -84,6 +90,8 @@ const activeKindMeta = computed(() => MONITOR_KINDS.find(k => k.key === form.kin
 const isHotPosts = computed(() => form.kind === XIAOHEIHE_MONITOR.kind)
 const isKeywordKind = (kind: string) => kind === 'keyword' || kind === XIAOHEIHE_KEYWORD_MONITOR.kind
 const isWebKind = (kind: string) => kind === WEB_PAGE_MONITOR.kind || kind === WEB_LIST_MONITOR.kind
+const isGitReleaseKind = (kind: string) => kind === GH_RELEASES_MONITOR.kind || kind === GC_RELEASES_MONITOR.kind
+const isGitIssueKind = (kind: string) => kind === GH_ISSUES_MONITOR.kind || kind === GC_ISSUES_MONITOR.kind
 const isUrlKind = (kind: string) => kind === 'feed' || isWebKind(kind)
 const existingXiaoheihe = computed(() => customFeeds.value.find(row => row.kind === XIAOHEIHE_MONITOR.kind))
 const kindFieldLabel = (kind: string) => MONITOR_KINDS.find(k => k.key === kind)?.fieldLabel ?? '监控目标'
@@ -104,6 +112,8 @@ const advancedConfiguredCount = computed(() => {
     if (form.kind === WEB_LIST_MONITOR.kind && form.linkPattern.trim()) count++
     if (form.kind === WEB_PAGE_MONITOR.kind && form.ignoreText.trim()) count++
   }
+  if (isGitReleaseKind(form.kind) && !form.includePrerelease) count++
+  if (isGitIssueKind(form.kind) && form.labelsText.trim()) count++
   return count
 })
 
@@ -139,13 +149,19 @@ function selectKind(kind: MonitorKind) {
   webPreviewError.value = ''
   if (kind === XIAOHEIHE_MONITOR.kind && !form.name.trim()) form.name = XIAOHEIHE_MONITOR.name
 }
-function buildFilters(kind: string, src: { includeText: string, excludeText: string, selector: string, excludeSelector: string, linkPattern: string, ignoreText: string }) {
+function buildFilters(kind: string, src: { includeText: string, excludeText: string, selector: string, excludeSelector: string, linkPattern: string, ignoreText: string, includePrerelease: boolean, labelsText: string }) {
   const filters: Record<string, unknown> = { include: words(src.includeText), exclude: words(src.excludeText) }
   if (isWebKind(kind)) {
     if (src.selector.trim()) filters.selector = src.selector.trim()
     if (src.excludeSelector.trim()) filters.exclude_selector = src.excludeSelector.trim()
     if (kind === WEB_LIST_MONITOR.kind && src.linkPattern.trim()) filters.link_pattern = src.linkPattern.trim()
     if (kind === WEB_PAGE_MONITOR.kind && words(src.ignoreText).length) filters.ignore_patterns = words(src.ignoreText)
+  }
+  if (isGitReleaseKind(kind) && !src.includePrerelease) {
+    filters.include_prerelease = false
+  }
+  if (isGitIssueKind(kind) && words(src.labelsText).length) {
+    filters.labels = words(src.labelsText)
   }
   return filters
 }
@@ -191,7 +207,7 @@ watch(() => [customQuota.value.xiaoheihe_hot_enabled, customQuota.value.xiaoheih
 }, { immediate: true })
 
 async function create() {
-  const { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText, ...rest } = form
+  const { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText, includePrerelease, labelsText, ...rest } = form
   const ok = await center.createCustom({
     ...rest,
     platform: activeKindMeta.value.platform,
@@ -199,7 +215,7 @@ async function create() {
     target_value: isHotPosts.value ? XIAOHEIHE_MONITOR.target : rest.target_value.trim(),
     interval_minutes: isHotPosts.value ? undefined : rest.interval_minutes,
     min_views: isKeywordKind(rest.kind) ? Number(rest.min_views) || 0 : 0,
-    filters: isHotPosts.value ? {} : buildFilters(rest.kind, { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText }),
+    filters: isHotPosts.value ? {} : buildFilters(rest.kind, { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText, includePrerelease, labelsText }),
   })
   if (ok) {
     Object.assign(form, blank(), { interval_minutes: customQuota.value.min_interval_minutes })
@@ -219,6 +235,8 @@ function startEdit(row: CustomFeedRow) {
     excludeSelector: row.filters?.exclude_selector ?? '',
     linkPattern: row.filters?.link_pattern ?? '',
     ignoreText: (row.filters?.ignore_patterns ?? []).join('，'),
+    includePrerelease: row.filters?.include_prerelease !== false,
+    labelsText: (row.filters?.labels ?? []).join('，'),
   })
   editAdvancedOpen.value = Boolean(
     row.min_views
@@ -227,18 +245,20 @@ function startEdit(row: CustomFeedRow) {
     || row.filters?.selector
     || row.filters?.exclude_selector
     || row.filters?.link_pattern
-    || row.filters?.ignore_patterns?.length,
+    || row.filters?.ignore_patterns?.length
+    || row.filters?.include_prerelease === false
+    || row.filters?.labels?.length,
   )
   customError.value = customMessage.value = ''
 }
 async function saveEdit(row: CustomFeedRow) {
-  const { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText, ...rest } = draft
+  const { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText, includePrerelease, labelsText, ...rest } = draft
   const changes: Record<string, unknown> = { name: rest.name.trim() }
   if (row.kind !== XIAOHEIHE_MONITOR.kind) {
     changes.target_value = rest.target_value.trim()
     changes.interval_minutes = rest.interval_minutes
     changes.min_views = isKeywordKind(row.kind) ? rest.min_views : 0
-    changes.filters = buildFilters(row.kind, { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText })
+    changes.filters = buildFilters(row.kind, { includeText, excludeText, selector, excludeSelector, linkPattern, ignoreText, includePrerelease, labelsText })
   }
   const ok = await center.patchCustom(row, changes, '监控配置已保存')
   if (ok) editing.value = null
@@ -274,7 +294,7 @@ const menuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-lef
         <div class="min-w-0">
           <h2 id="monitors-title" class="text-base font-bold text-ink">我的监控</h2>
           <p class="mt-1 text-xs leading-relaxed text-muted">
-            支持 RSS 订阅、网页监测、B 站、YouTube、Steam 与小黑盒。公开后将展示在<NuxtLink to="/custom" class="link">定制监控频道</NuxtLink>，私有仅自己可见。
+            支持 RSS 订阅、网页监测、GitHub / GitCode、B 站、YouTube、Steam 与小黑盒。公开后将展示在<NuxtLink to="/custom" class="link">定制监控频道</NuxtLink>，私有仅自己可见。
           </p>
         </div>
         <button v-if="!creating" type="button" class="btn-primary inline-flex h-9 items-center gap-1 px-3.5" :disabled="!canCreate || loading.custom" @click="openCreate">
@@ -427,6 +447,13 @@ const menuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-lef
                 <input v-model="form.ignoreText" placeholder="逗号分隔，如 在线人数, 浏览量" class="input mono mt-1.5 h-9 w-full text-xs font-normal">
               </label>
             </template>
+            <label v-if="isGitReleaseKind(form.kind)" class="flex cursor-pointer items-center gap-2 text-xs text-ink-2 sm:col-span-2">
+              <input v-model="form.includePrerelease" type="checkbox" class="checkbox">
+              <span>包含预发布版本（alpha / beta / rc）</span>
+            </label>
+            <label v-if="isGitIssueKind(form.kind)" class="text-xs font-medium text-ink-2 sm:col-span-2">限定标签
+              <input v-model="form.labelsText" placeholder="逗号分隔，如 announcement, roadmap, release（留空不限）" class="input mono mt-1.5 h-9 w-full text-xs font-normal">
+            </label>
           </div>
         </div>
 
@@ -473,8 +500,10 @@ const menuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-lef
             <span>· {{ lastCollected(row) }}</span>
           </p>
           <p v-if="row.enabled && row.last_error" class="mt-1 text-xs text-hot">上次采集异常：{{ row.last_error }}</p>
-          <p v-if="row.min_views || row.filters?.include?.length || row.filters?.exclude?.length || row.filters?.selector || row.filters?.link_pattern" class="mt-1 text-xs text-faint">
+          <p v-if="row.min_views || row.filters?.include?.length || row.filters?.exclude?.length || row.filters?.selector || row.filters?.link_pattern || row.filters?.include_prerelease === false || row.filters?.labels?.length" class="mt-1 text-xs text-faint">
             <template v-if="row.min_views">{{ row.kind === XIAOHEIHE_KEYWORD_MONITOR.kind ? '阅读' : '播放' }} ≥ {{ row.min_views.toLocaleString('zh-CN') }}　</template>
+            <template v-if="row.filters?.include_prerelease === false">仅正式版　</template>
+            <template v-if="row.filters?.labels?.length">标签：{{ row.filters.labels.join('、') }}　</template>
             <template v-if="row.filters?.selector">内容区域：{{ row.filters.selector }}　</template>
             <template v-if="row.filters?.link_pattern">链接规则：{{ row.filters.link_pattern }}　</template>
             <template v-if="row.filters?.include?.length">包含：{{ row.filters.include.join('、') }}　</template>
@@ -583,6 +612,11 @@ const menuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-lef
                   <label v-if="row.kind === WEB_LIST_MONITOR.kind" class="text-xs font-medium text-ink-2">链接规则<input v-model="draft.linkPattern" maxlength="200" placeholder="/blog/ 或 regex:..." class="input mono mt-1.5 h-9 w-full text-xs font-normal"></label>
                   <label v-if="row.kind === WEB_PAGE_MONITOR.kind" class="text-xs font-medium text-ink-2">忽略内容<input v-model="draft.ignoreText" placeholder="逗号分隔" class="input mono mt-1.5 h-9 w-full text-xs font-normal"></label>
                 </template>
+                <label v-if="isGitReleaseKind(row.kind)" class="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+                  <input v-model="draft.includePrerelease" type="checkbox" class="checkbox">
+                  <span>包含预发布版本（alpha / beta / rc）</span>
+                </label>
+                <label v-if="isGitIssueKind(row.kind)" class="text-xs font-medium text-ink-2">限定标签<input v-model="draft.labelsText" placeholder="逗号分隔，如 announcement, roadmap" class="input mono mt-1.5 h-9 w-full text-xs font-normal"></label>
               </div>
             </div>
             <p class="text-xs text-faint">修改目标地址将保留已采集内容，后续按新目标继续采集</p>

@@ -102,8 +102,12 @@ def canonical_target(kind, target):
     value = target.strip()
     if kind in {"uid", "xhh_account", "steam_app"} and value.isdecimal():
         return str(int(value))
-    # YouTube 频道 ID 区分大小写；仅关键词和 X 用户名可折叠大小写。
-    return value.casefold() if kind in {"keyword", "xhh_keyword", "account_dynamics"} else value
+    # YouTube 频道 ID 区分大小写；关键词、X 用户名与 Git 仓库路径可折叠大小写共享采集。
+    return value.casefold() if kind in {
+        "keyword", "xhh_keyword", "account_dynamics",
+        "gh_releases", "gh_issues", "gh_discussions",
+        "gc_releases", "gc_issues",
+    } else value
 
 
 async def insert_ignoring_duplicate(session, model, **values):

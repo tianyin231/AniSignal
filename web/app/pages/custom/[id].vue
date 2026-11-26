@@ -156,7 +156,7 @@ const emptyText = computed(() => {
         </div>
         <div class="flex flex-wrap gap-2">
           <a v-if="data.source_url" :href="data.source_url" target="_blank" rel="noopener" class="inline-flex h-9 items-center gap-1.5 rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 transition-colors hover:text-ink">
-            <ExternalLink :size="14" /> {{ data.kind === XIAOHEIHE_ACCOUNT_MONITOR.kind ? '打开小黑盒主页' : data.kind === STEAM_MONITOR.kind ? '打开 Steam 商店' : data.platform === 'web_page' ? '打开目标网页' : '源地址' }}
+            <ExternalLink :size="14" /> {{ data.kind === XIAOHEIHE_ACCOUNT_MONITOR.kind ? '打开小黑盒主页' : data.kind === STEAM_MONITOR.kind ? '打开 Steam 商店' : data.platform === 'web_page' ? '打开目标网页' : data.platform === 'github' ? '打开 GitHub 仓库' : data.platform === 'gitcode' ? '打开 GitCode 仓库' : '源地址' }}
           </a>
           <NuxtLink v-if="data.kind === XIAOHEIHE_MONITOR.kind" to="/contents?community=xiaoheihe" class="inline-flex h-9 items-center rounded-[10px] border border-line bg-card px-3.5 text-sm font-medium text-ink-2 hover:text-ink">
             小黑盒分区

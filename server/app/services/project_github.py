@@ -112,10 +112,17 @@ async def project_overview() -> dict:
         previous = _cache or _initial()
         # 某一项读取失败时沿用上次的记录，所以逐个仓库复制后再覆盖。
         data = {**previous, "repositories": [dict(repo) for repo in previous["repositories"]], "stale": False}
-        async with httpx.AsyncClient(timeout=6, headers={
-            "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2026-03-10",
+        from app.config import get_settings
+
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2026-03-10",
             "User-Agent": "AniSignal-project-page",
-        }) as client:
+        }
+        gh_token = get_settings().github_token.strip()
+        if gh_token:
+            headers["Authorization"] = f"Bearer {gh_token}"
+        async with httpx.AsyncClient(timeout=6, headers=headers) as client:
             jobs = [(target, repo, section, request) for target, repo in zip(data["repositories"], REPOSITORIES)
                     for section, request in _requests(client, repo)]
             results = await asyncio.gather(*(job[3] for job in jobs), return_exceptions=True)

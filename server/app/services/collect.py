@@ -29,6 +29,7 @@ from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
 from app.collectors.rss import RssCollector
 from app.collectors.web_page import WebPageCollector, enrich_list_items
+from app.collectors.git_repo import GitcodeCollector, GithubCollector
 from app.collectors.x import XCollector
 from app.collectors.xiaoheihe import XIAOHEIHE_MIN_INTERVAL_SECONDS, XiaoheiheCollector
 from app.collectors.steam import SteamCollector
@@ -98,6 +99,8 @@ _MERCH_UPDATE = re.compile(
 _COLLECTORS = {
     "rss": lambda: RssCollector(),
     "web_page": lambda: WebPageCollector(),
+    "github": lambda: GithubCollector(),
+    "gitcode": lambda: GitcodeCollector(),
     "bilibili": lambda: BilibiliCollector(),
     "miyoushe": lambda: MiyousheCollector(),
     "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
@@ -196,7 +199,7 @@ def filter_relevant(
                 body = str(item.get("text") or "").casefold()
                 if co_terms and not any(term.casefold() in body for term in co_terms):
                     continue
-            elif target.platform not in ("rss", "web_page") and not is_news_candidate(str(item.get("title") or "")):
+            elif target.platform not in ("rss", "web_page", "github", "gitcode") and not is_news_candidate(str(item.get("title") or "")):
                 continue
             item["_matched_keywords"] = [target.target_value]
             kept.append(item)
@@ -408,6 +411,12 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     "name": target.display_name,
                     "is_official": target.is_official,
                 }
+            if isinstance(collector, (GithubCollector, GitcodeCollector)):
+                collector.source_config = {
+                    **(target.config or {}),
+                    "name": target.display_name,
+                    "is_official": target.is_official,
+                }
             if isinstance(collector, MiyousheCollector):
                 collector.set_community(target.community)
             from app.communities import sync_communities
@@ -478,6 +487,11 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                         existing_ids=existing_ids,
                         proxy_url=proxy_url,
                     )
+            if isinstance(collector, (GithubCollector, GitcodeCollector)) and collector.last_http_cache:
+                next_cfg = dict(target.config or {})
+                if next_cfg.get("_http_cache") != collector.last_http_cache:
+                    next_cfg["_http_cache"] = collector.last_http_cache
+                    target.config = next_cfg
             items_fetched = len(fetch_result.items)
             fetch_result.items, filtered_out = filter_relevant(
                 fetch_result.items, target,
