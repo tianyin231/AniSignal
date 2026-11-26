@@ -351,9 +351,26 @@ async def get_trending_editions_view(
             "tag_name": ((ver.normalized_json or {}).get("extra") or {}).get("tag_name"),
             "repo": ((ver.normalized_json or {}).get("extra") or {}).get("repo"),
             "prerelease": bool(((ver.normalized_json or {}).get("extra") or {}).get("prerelease")),
+            "brief": None,
         }
         for raw, ver in release_rows
     ]
+
+    # 批量附加 AI 中文解读（ContentBrief），一次主键查询完成
+    from app.services.content_brief import load_briefs_map
+
+    content_ids: list[int] = [int(r["id"]) for r in releases]
+    if current is not None:
+        for entry in current.get("entries") or []:
+            if entry.get("raw_content_id"):
+                content_ids.append(int(entry["raw_content_id"]))
+    briefs_map = await load_briefs_map(session, content_ids)
+    if current is not None:
+        for entry in current.get("entries") or []:
+            cid = entry.get("raw_content_id")
+            entry["brief"] = briefs_map.get(int(cid)) if cid else None
+    for rel in releases:
+        rel["brief"] = briefs_map.get(int(rel["id"]))
 
     return {
         "community": community,
@@ -364,3 +381,48 @@ async def get_trending_editions_view(
         "current": current,
         "releases": releases,
     }
+
+
+async def get_repo_trending_history(
+    session: AsyncSession,
+    *,
+    community: str,
+    repo: str,
+) -> list[dict[str, Any]]:
+    """查询某开源仓库在该分区日刊/周刊/月刊中的历史轨迹（供站内详情页展示）。"""
+    target_key = str(repo or "").strip().lower()
+    if not target_key:
+        return []
+    rows = list(
+        await session.scalars(
+            select(GitTrendingEdition)
+            .where(GitTrendingEdition.community == community, GitTrendingEdition.language == "")
+            .order_by(GitTrendingEdition.period_key.asc())
+        )
+    )
+    grouped: dict[str, list[tuple[str, int]]] = {p: [] for p in TRENDING_PERIOD_ORDER}
+    for ed in rows:
+        if ed.period not in grouped:
+            continue
+        for idx, item in enumerate(ed.entries or [], start=1):
+            if _repo_key(item) == target_key:
+                grouped[ed.period].append((ed.period_key, int(item.get("rank") or idx)))
+                break
+
+    history: list[dict[str, Any]] = []
+    for p in TRENDING_PERIOD_ORDER:
+        hits = grouped[p]
+        if not hits:
+            continue
+        history.append(
+            {
+                "period": p,
+                "period_label": TRENDING_PERIOD_LABELS[p],
+                "appearances": len(hits),
+                "best_rank": min(rank for _, rank in hits),
+                "first_seen_key": hits[0][0],
+                "latest_key": hits[-1][0],
+                "latest_rank": hits[-1][1],
+            }
+        )
+    return history

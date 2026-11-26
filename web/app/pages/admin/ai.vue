@@ -28,6 +28,7 @@ interface AiConfig {
 }
 const TASK_MODEL_FIELDS: Array<{ key: string; label: string; hint: string }> = [
   { key: 'review_content', label: '内容初审', hint: '调用量最高，可指派轻量便宜模型' },
+  { key: 'brief_content', label: '内容解读', hint: '开源项目与主题流中文一句话定位与摘要' },
   { key: 'translate_content', label: '内容翻译', hint: '外语公告/YouTube 机翻' },
   { key: 'summarize_event', label: '事件摘要', hint: '官方事件核心摘要' },
   { key: 'extract_entities', label: '日程/官方码抽取', hint: '结构化日期与兑换码提取' },
@@ -93,6 +94,7 @@ onMounted(() => refresh())
 
 const TASK_LABELS: Record<string, string> = {
   review_content: '内容初审',
+  brief_content: '内容解读',
   summarize_event: '事件摘要',
   translate_content: '内容翻译',
   assess_product: '商品履约判断',
@@ -179,6 +181,19 @@ async function translateMissing() {
   try {
     const r = await api<{ candidates: number; queued: number; remaining: number }>('/api/admin/ai/translate-missing', { method: 'POST' })
     toast.info(r.queued ? `已新增 ${r.queued} 条翻译任务，后台处理中；当前待翻 ${r.remaining} 条（含队列中）` : r.remaining ? '本批翻译任务已在队列中，请稍后查看调用记录' : '无需补充翻译')
+    await loadUsage()
+  } catch (exc: any) {
+    toast.err(exc?.data?.detail ?? '执行失败')
+  } finally { busy.value = false; busyWhat.value = '' }
+}
+
+async function briefMissing() {
+  if (!confirm('为开源项目与启用 AI 解读的主题流补齐中文定位与摘要？')) return
+  busy.value = true; busyWhat.value = 'brief'
+  toast.info('正在提交内容解读任务…')
+  try {
+    const r = await api<{ candidates: number; queued: number; remaining: number }>('/api/admin/ai/brief-missing', { method: 'POST' })
+    toast.info(r.queued ? `已新增 ${r.queued} 条解读任务，后台处理中；当前待补 ${r.remaining} 条` : r.remaining ? '本批解读任务已在队列中，请稍后查看调用记录' : '所有符合条件的开源与主题流内容均已解读')
     await loadUsage()
   } catch (exc: any) {
     toast.err(exc?.data?.detail ?? '执行失败')
@@ -331,7 +346,8 @@ async function translateMissing() {
       </p>
       <div class="mt-3 flex flex-wrap gap-2">
         <button class="btn-primary px-4 py-2" :disabled="busy" @click="summarizeAll">{{ busyWhat === 'summarize' ? '执行中…' : '补事件摘要' }}</button>
-        <button class="rounded-md border border-line px-4 py-2 text-sm" :disabled="busy" @click="translateMissing">{{ busyWhat === 'translate' ? '执行中…' : '补内容翻译' }}</button>
+        <button class="rounded-md border border-line px-4 py-2 text-sm hover:bg-chip" :disabled="busy" @click="briefMissing">{{ busyWhat === 'brief' ? '执行中…' : '补开源/主题流解读' }}</button>
+        <button class="rounded-md border border-line px-4 py-2 text-sm hover:bg-chip" :disabled="busy" @click="translateMissing">{{ busyWhat === 'translate' ? '执行中…' : '补内容翻译' }}</button>
       </div>
     </section>
 

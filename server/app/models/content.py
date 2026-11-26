@@ -271,6 +271,32 @@ class ContentReview(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class ContentBrief(Base):
+    """主题流 / 开源项目的 AI 结构化中文解读（可重算，绑定内容指纹与版本号）。"""
+
+    __tablename__ = "content_briefs"
+    __table_args__ = (
+        Index("ix_content_briefs_updated_at", "updated_at"),
+    )
+
+    raw_content_id: Mapped[int] = mapped_column(
+        ForeignKey("raw_contents.id", name="fk_content_briefs_raw_content_id_raw_contents", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # repo（开源项目） | release（版本发布） | feed（主题流内容）
+    kind: Mapped[str] = mapped_column(String(16), default="feed")
+    headline: Mapped[str] = mapped_column(String(120))
+    tagline: Mapped[str] = mapped_column(String(240))
+    summary: Mapped[str] = mapped_column(Text)
+    highlights: Mapped[list] = mapped_column(JSON, default=list)
+    use_cases: Mapped[list] = mapped_column(JSON, default=list)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    content_version: Mapped[int] = mapped_column(Integer, default=1)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 def extract_view_count(metrics: dict | None) -> int | None:
     """从指标 JSON 提取播放量整型值；缺失或非数字返回 None。"""
     if not isinstance(metrics, dict):

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowUpRight, BadgeCheck, GitCompareArrows, GitFork, ImageIcon, Star } from 'lucide-vue-next'
+import { ArrowUpRight, BadgeCheck, GitCompareArrows, GitFork, ImageIcon, Sparkles, Star } from 'lucide-vue-next'
 import { identityMeta, platformMeta, type RawItem } from '~/utils/data'
 import { communityClasses, communityMeta } from '~/composables/useGameSection'
 import { revisionBadgeLabel } from '~/utils/content-diff'
@@ -86,8 +86,16 @@ const excerpt = computed(() => {
       </div>
       <span v-else class="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full text-[9px] font-bold text-white" :class="platform.badge" aria-hidden="true">{{ platform.short }}</span>
       <div class="min-w-0 flex-1">
-        <p class="line-clamp-2 text-[15px] font-semibold leading-normal text-ink group-hover:text-brand-ink">{{ item.title }}</p>
-        <p v-if="excerpt" class="mt-1 line-clamp-2 text-[13px] leading-relaxed text-muted">{{ excerpt }}</p>
+        <p class="line-clamp-2 text-[15px] font-semibold leading-normal text-ink group-hover:text-brand-ink">
+          {{ item.brief?.headline && isGitRepo ? `${item.title} · ${item.brief.headline}` : item.title }}
+        </p>
+        <p v-if="item.brief?.tagline" class="mt-1 line-clamp-2 text-[13px] leading-relaxed text-ink-2">
+          <span class="mr-1 inline-flex items-center gap-0.5 rounded bg-brand-soft px-1.5 py-0.5 align-middle text-[10px] font-semibold text-brand-ink">
+            <Sparkles :size="10" aria-hidden="true" />AI
+          </span>
+          {{ item.brief.tagline }}
+        </p>
+        <p v-else-if="excerpt" class="mt-1 line-clamp-2 text-[13px] leading-relaxed text-muted">{{ excerpt }}</p>
         <p v-else-if="!shareUrl && item.previewMode === 'external_only'" class="mt-1 text-xs text-amber-700 dark:text-amber-300">
           平台公开接口未返回正文或图片，可直接打开原文核对。
         </p>

@@ -1,5 +1,6 @@
 // 领域模型与展示元数据；平台字典统一由 lexicon.ts 导出
 import { PLATFORM_META, type PlatformKey } from './lexicon.ts'
+import type { ContentBrief } from './git-trending.ts'
 
 export type Platform = PlatformKey
 export type Identity = 'official' | 'seeded' | 'user' | 'media' | 'merchant' | 'unknown'
@@ -119,6 +120,10 @@ export interface RawItem {
   keywords?: string[]
   excerpt?: string
   cover?: string
+  mediaList?: string[]
+  mediaCount?: number
+  topics?: string[]
+  brief?: ContentBrief | null
   originalUrl?: string
   metrics?: Record<string, number>
   community?: string

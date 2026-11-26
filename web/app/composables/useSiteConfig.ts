@@ -30,6 +30,7 @@ export interface SiteCommunityItem {
   platforms: string[]
   active: boolean
   builtin: boolean
+  ai_summary?: boolean
   official_bili_mid?: string | null
   aliases?: string[]
 }

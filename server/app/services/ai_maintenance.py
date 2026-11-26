@@ -2,10 +2,11 @@
 
 from sqlalchemy import select
 
-from app.models import ContentTranslation, Event
+from app.models import ContentBrief, ContentTranslation, Event
 from app.services.ai import summarize_event, translate_content
+from app.services.content_brief import brief_content
 
-AI_TASKS = {"summarize_event", "translate_content"}
+AI_TASKS = {"summarize_event", "translate_content", "brief_content"}
 
 
 async def repair_ai_item(session, task: str, ref_id: int, only_missing: bool = True) -> dict:
@@ -21,4 +22,10 @@ async def repair_ai_item(session, task: str, ref_id: int, only_missing: bool = T
         if existing is not None:
             return {"status": "skipped", "reason": "already_translated"}
         return await translate_content(session, ref_id)
+    if task == "brief_content":
+        if only_missing:
+            existing = await session.scalar(select(ContentBrief.raw_content_id).where(ContentBrief.raw_content_id == ref_id))
+            if existing is not None:
+                return {"status": "skipped", "reason": "already_briefed"}
+        return await brief_content(session, ref_id, force=not only_missing)
     raise ValueError("不支持的 AI 补处理任务")

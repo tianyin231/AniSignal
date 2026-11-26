@@ -4,6 +4,7 @@ from app.models.classification import ClassificationRule
 from app.models.collect_target import CollectTarget
 from app.models.content import (
     AiUsage,
+    ContentBrief,
     ContentMatch,
     ContentReview,
     ContentSchedule,
@@ -71,6 +72,7 @@ __all__ = [
     "MetricSnapshot",
     "RedeemCode",
     "ContentTranslation",
+    "ContentBrief",
     "AiUsage",
     "ContentMatch",
     "ContentReview",

@@ -189,7 +189,7 @@ function toggleLanguage(lang: string) {
       </div>
     </section>
 
-    <!-- 主内容两栏布局：左侧榜单 + 右侧往期目录/语言分布/主仓库发版 -->
+    <!-- 主内容两栏布局：左侧榜单（整卡直进站内深度解读） + 右侧往期目录/语言分布/主仓库发版 -->
     <div v-if="current" class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <!-- 榜单列表 -->
       <section class="panel overflow-hidden" :class="{ 'opacity-65 transition-opacity': loading }">
@@ -197,95 +197,123 @@ function toggleLanguage(lang: string) {
           <li
             v-for="entry in filteredEntries"
             :key="entry.repo"
-            class="group flex items-start gap-3.5 px-4 py-4 transition-colors hover:bg-line-soft/70 sm:gap-4 sm:px-5"
+            class="group flex items-stretch transition-colors hover:bg-line-soft/75"
           >
-            <!-- 排名与升降 -->
-            <div class="flex w-9 shrink-0 flex-col items-center pt-0.5 text-center">
-              <span
-                class="num text-lg font-bold leading-none tabular-nums"
-                :class="entry.rank <= 3 ? 'text-accent-ink' : 'text-faint'"
-              >{{ String(entry.rank).padStart(2, '0') }}</span>
-              <span
-                v-if="entry.rank_delta !== null && entry.rank_delta !== 0"
-                class="num mt-1 inline-flex items-center text-[11px] font-semibold tabular-nums"
-                :class="entry.rank_delta > 0 ? 'text-ok' : 'text-faint'"
-                :title="entry.rank_delta > 0 ? `较上期上升 ${entry.rank_delta} 位` : `较上期下降 ${Math.abs(entry.rank_delta)} 位`"
+            <!-- 整行主交互：直接进入站内 AI 项目解读 + README 详情页 -->
+            <NuxtLink
+              :to="entry.raw_content_id ? `/contents/${entry.raw_content_id}` : entry.url"
+              :external="!entry.raw_content_id"
+              :target="entry.raw_content_id ? undefined : '_blank'"
+              class="flex min-w-0 flex-1 items-start gap-3.5 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:gap-4 sm:px-5"
+            >
+              <!-- 排名与升降 -->
+              <div class="flex w-9 shrink-0 flex-col items-center pt-0.5 text-center">
+                <span
+                  class="num text-lg font-bold leading-none tabular-nums"
+                  :class="entry.rank <= 3 ? 'text-accent-ink' : 'text-faint'"
+                >{{ String(entry.rank).padStart(2, '0') }}</span>
+                <span
+                  v-if="entry.rank_delta !== null && entry.rank_delta !== 0"
+                  class="num mt-1 inline-flex items-center text-[11px] font-semibold tabular-nums"
+                  :class="entry.rank_delta > 0 ? 'text-ok' : 'text-faint'"
+                  :title="entry.rank_delta > 0 ? `较上期上升 ${entry.rank_delta} 位` : `较上期下降 ${Math.abs(entry.rank_delta)} 位`"
+                >
+                  <ArrowUp v-if="entry.rank_delta > 0" :size="10" aria-hidden="true" />
+                  <ArrowDown v-else :size="10" aria-hidden="true" />
+                  {{ Math.abs(entry.rank_delta) }}
+                </span>
+              </div>
+
+              <!-- 仓库主体信息 -->
+              <div class="min-w-0 flex-1">
+                <!-- 第一行：仓库名 + 去重上榜徽章 + 跨刊标记 -->
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span class="inline-flex min-w-0 max-w-full items-baseline gap-1 text-[15px] leading-snug text-ink transition-colors group-hover:text-brand-ink">
+                    <span v-if="splitRepoName(entry.repo).owner" class="mono truncate text-xs text-muted">{{ splitRepoName(entry.repo).owner }} /</span>
+                    <span class="truncate font-bold">{{ splitRepoName(entry.repo).name }}</span>
+                  </span>
+
+                  <span
+                    class="inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-semibold"
+                    :class="badgeToneClass[trendingStatusBadge(entry, activePeriod).tone]"
+                  >
+                    {{ trendingStatusBadge(entry, activePeriod).label }}
+                  </span>
+
+                  <span
+                    v-for="other in entry.also_in"
+                    :key="other"
+                    class="inline-flex h-5 items-center rounded-md bg-chip px-1.5 text-[11px] text-ink-2"
+                  >
+                    同步进{{ periodShortLabel(other) }}
+                  </span>
+                </div>
+
+                <!-- 第二行：AI 中文一句话定位与用途（无 AI 时优雅降级显示原简介） -->
+                <template v-if="entry.brief">
+                  <p class="mt-1.5 text-[14px] font-semibold leading-snug text-ink">
+                    <span class="mr-1.5 inline-flex items-center gap-0.5 rounded bg-brand-soft px-1.5 py-0.5 align-middle text-[10px] font-semibold text-brand-ink">
+                      <Sparkles :size="10" aria-hidden="true" />AI
+                    </span>
+                    <span>{{ entry.brief.headline }}</span>
+                  </p>
+                  <p v-if="entry.brief.tagline && entry.brief.tagline !== entry.brief.headline" class="mt-1 line-clamp-2 text-[13px] leading-relaxed text-ink-2">
+                    {{ entry.brief.tagline }}
+                  </p>
+                </template>
+                <p v-else-if="entry.description" class="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-ink-2">
+                  {{ entry.description }}
+                </p>
+
+                <!-- 第三行：语言 + 星标 + Fork + AI 标签 + 历史轨迹 -->
+                <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted">
+                  <span v-if="entry.language" class="inline-flex items-center gap-1.5 text-ink-2">
+                    <span class="size-2 shrink-0 rounded-full" :style="{ backgroundColor: languageColor(entry.language) }" aria-hidden="true" />
+                    <span>{{ entry.language }}</span>
+                  </span>
+                  <span v-if="entry.stars > 0" class="num inline-flex items-center gap-1 tabular-nums" :title="`总计 ${entry.stars.toLocaleString('zh-CN')} Star`">
+                    <Star :size="12" class="text-faint" aria-hidden="true" />
+                    {{ formatCompactStars(entry.stars) }}
+                  </span>
+                  <span v-if="entry.forks > 0" class="num inline-flex items-center gap-1 tabular-nums" :title="`${entry.forks.toLocaleString('zh-CN')} Fork`">
+                    <GitFork :size="12" class="text-faint" aria-hidden="true" />
+                    {{ formatCompactStars(entry.forks) }}
+                  </span>
+                  <span v-if="entry.period_stars > 0" class="num font-semibold text-ok sm:hidden">
+                    +{{ entry.period_stars.toLocaleString('zh-CN') }} {{ periodGainLabel(activePeriod) }}
+                  </span>
+                  <span
+                    v-for="tag in (entry.brief?.tags ?? []).slice(0, 3)"
+                    :key="tag"
+                    class="rounded-md bg-chip px-1.5 py-0.5 text-[11px] text-ink-2"
+                  >
+                    {{ tag }}
+                  </span>
+                  <span v-if="entry.appearances > 1" class="mono text-faint">
+                    首见 {{ entry.first_seen_key }} · 最高 #{{ entry.best_rank }}
+                  </span>
+                </div>
+              </div>
+            </NuxtLink>
+
+            <!-- 右侧独立列：新增星标 + GitHub 直达快捷按钮（不与整卡站内链接嵌套） -->
+            <div class="flex shrink-0 flex-col items-end justify-between py-4 pr-4 sm:w-28 sm:pr-5">
+              <div v-if="entry.period_stars > 0" class="hidden text-right sm:block">
+                <div class="num text-[15px] font-bold tabular-nums text-ok">
+                  +{{ entry.period_stars.toLocaleString('zh-CN') }}
+                </div>
+                <div class="mt-0.5 text-[11px] text-faint">{{ periodGainLabel(activePeriod) }}</div>
+              </div>
+              <a
+                :href="entry.url"
+                target="_blank"
+                rel="noopener noreferrer"
+                :aria-label="`前往 GitHub 查看 ${entry.repo}`"
+                class="mt-auto inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-card px-2.5 text-[11px] font-medium text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand-ink"
               >
-                <ArrowUp v-if="entry.rank_delta > 0" :size="10" aria-hidden="true" />
-                <ArrowDown v-else :size="10" aria-hidden="true" />
-                {{ Math.abs(entry.rank_delta) }}
-              </span>
-            </div>
-
-            <!-- 仓库主体信息 -->
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                <a
-                  :href="entry.url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex min-w-0 max-w-full items-baseline gap-1 text-[15px] leading-snug text-ink transition-colors hover:text-brand-ink"
-                >
-                  <span v-if="splitRepoName(entry.repo).owner" class="mono truncate text-xs text-muted">{{ splitRepoName(entry.repo).owner }} /</span>
-                  <span class="truncate font-bold">{{ splitRepoName(entry.repo).name }}</span>
-                  <ArrowUpRight :size="13" class="shrink-0 text-faint opacity-70 transition-opacity group-hover:opacity-100" aria-hidden="true" />
-                </a>
-
-                <span
-                  class="inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-semibold"
-                  :class="badgeToneClass[trendingStatusBadge(entry, activePeriod).tone]"
-                >
-                  {{ trendingStatusBadge(entry, activePeriod).label }}
-                </span>
-
-                <span
-                  v-for="other in entry.also_in"
-                  :key="other"
-                  class="inline-flex h-5 items-center rounded-md bg-chip px-1.5 text-[11px] text-ink-2"
-                >
-                  同步进{{ periodShortLabel(other) }}
-                </span>
-              </div>
-
-              <p v-if="entry.description" class="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-ink-2">
-                {{ entry.description }}
-              </p>
-
-              <div class="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs text-muted">
-                <span v-if="entry.language" class="inline-flex items-center gap-1.5 text-ink-2">
-                  <span class="size-2 shrink-0 rounded-full" :style="{ backgroundColor: languageColor(entry.language) }" aria-hidden="true" />
-                  <span>{{ entry.language }}</span>
-                </span>
-                <span v-if="entry.stars > 0" class="num inline-flex items-center gap-1 tabular-nums" :title="`总计 ${entry.stars.toLocaleString('zh-CN')} Star`">
-                  <Star :size="12" class="text-faint" aria-hidden="true" />
-                  {{ formatCompactStars(entry.stars) }}
-                </span>
-                <span v-if="entry.forks > 0" class="num inline-flex items-center gap-1 tabular-nums" :title="`${entry.forks.toLocaleString('zh-CN')} Fork`">
-                  <GitFork :size="12" class="text-faint" aria-hidden="true" />
-                  {{ formatCompactStars(entry.forks) }}
-                </span>
-                <span v-if="entry.period_stars > 0" class="num font-semibold text-ok sm:hidden">
-                  +{{ entry.period_stars.toLocaleString('zh-CN') }} {{ periodGainLabel(activePeriod) }}
-                </span>
-                <span v-if="entry.appearances > 1" class="mono text-faint">
-                  首见 {{ entry.first_seen_key }} · 最高 #{{ entry.best_rank }}
-                </span>
-                <NuxtLink
-                  v-if="entry.raw_content_id"
-                  :to="`/contents/${entry.raw_content_id}`"
-                  class="ml-auto text-xs text-faint transition-colors hover:text-brand-ink"
-                >
-                  站内档案
-                </NuxtLink>
-              </div>
-            </div>
-
-            <!-- 右侧新增星标列 -->
-            <div v-if="entry.period_stars > 0" class="hidden w-24 shrink-0 pt-0.5 text-right sm:block">
-              <div class="num text-[15px] font-bold tabular-nums text-ok">
-                +{{ entry.period_stars.toLocaleString('zh-CN') }}
-              </div>
-              <div class="mt-0.5 text-[11px] text-faint">{{ periodGainLabel(activePeriod) }}</div>
+                <span>GitHub</span>
+                <ArrowUpRight :size="12" aria-hidden="true" />
+              </a>
             </div>
           </li>
         </ol>
@@ -304,7 +332,7 @@ function toggleLanguage(lang: string) {
       </section>
 
       <!-- 右侧栏：往期目录 + 语言分布 + 主仓库发版 -->
-      <aside class="space-y-4">
+      <aside class="space-y-4 lg:sticky lg:top-[88px]">
         <!-- 往期目录 -->
         <section class="panel p-4">
           <div class="flex items-center justify-between">
@@ -382,7 +410,12 @@ function toggleLanguage(lang: string) {
                   <span v-if="rel.prerelease" class="rounded bg-amber-500/12 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">预发布</span>
                   <span v-if="rel.published_at" class="mono ml-auto text-[11px] text-faint">{{ fmtTime(rel.published_at).slice(5, 10) }}</span>
                 </div>
-                <p class="mt-1 line-clamp-2 text-xs font-medium text-ink-2 group-hover:text-brand-ink">{{ rel.title }}</p>
+                <p class="mt-1 line-clamp-2 text-xs font-medium text-ink-2 group-hover:text-brand-ink">
+                  {{ rel.brief?.headline || rel.title }}
+                </p>
+                <p v-if="rel.brief?.tagline" class="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-muted">
+                  {{ rel.brief.tagline }}
+                </p>
               </NuxtLink>
             </li>
           </ul>

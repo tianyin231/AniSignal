@@ -18,6 +18,18 @@ export interface TrendingEditionSummary {
   captured_at: string
 }
 
+export interface ContentBrief {
+  kind: 'repo' | 'release' | 'feed' | string
+  headline: string
+  tagline: string
+  summary: string
+  highlights: string[]
+  use_cases: string[]
+  tags: string[]
+  model?: string | null
+  updated_at?: string | null
+}
+
 export interface TrendingEntry {
   rank: number
   repo: string
@@ -35,6 +47,7 @@ export interface TrendingEntry {
   best_rank: number
   rank_delta: number | null
   also_in: TrendingPeriod[]
+  brief?: ContentBrief | null
 }
 
 export interface TrendingEditionDetail {
@@ -63,6 +76,7 @@ export interface TrendingReleaseBrief {
   tag_name: string | null
   repo: string | null
   prerelease: boolean
+  brief?: ContentBrief | null
 }
 
 export interface TrendingEditionsResponse {

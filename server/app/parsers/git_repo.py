@@ -113,6 +113,7 @@ def parse_git_item(raw: dict) -> NormalizedContent:
             "period_stars": int(raw.get("period_stars") or 0) if is_trending else None,
             "period": raw.get("period"),
             "rank": raw.get("rank"),
+            "readme": str(raw.get("readme") or "").strip()[:8000] or None,
             "author": str(raw.get("author") or "").strip() or None,
             "source_channel": raw.get("source_channel") or "api",
         },

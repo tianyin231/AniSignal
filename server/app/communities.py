@@ -55,6 +55,7 @@ class CommunityMeta:
     platforms: tuple[str, ...] = ("bilibili", "youtube", "rss", "web_page", "github", "gitcode")
     active: bool = True
     builtin: bool = True
+    ai_summary: bool = False
 
     @property
     def game_names(self) -> tuple[str, ...]:
@@ -269,6 +270,7 @@ def build_custom_meta(raw: dict) -> CommunityMeta:
         platforms=platforms,
         active=bool(raw.get("active", True)),
         builtin=False,
+        ai_summary=bool(raw.get("ai_summary", False)),
     )
 
 
@@ -294,6 +296,7 @@ def _apply_builtin_override(meta: CommunityMeta, ov: dict | None, active: bool) 
         extra_names=aliases,
         source_aliases=aliases or meta.source_aliases,
         active=active,
+        ai_summary=bool(ov["ai_summary"]) if "ai_summary" in ov and ov["ai_summary"] is not None else meta.ai_summary,
     )
 
 
@@ -398,6 +401,7 @@ def community_to_public_dict(meta: CommunityMeta) -> dict:
         "platforms": list(meta.platforms),
         "active": meta.active,
         "builtin": meta.builtin,
+        "ai_summary": meta.ai_summary,
     }
 
 

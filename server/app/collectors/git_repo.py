@@ -39,11 +39,14 @@ logger = logging.getLogger(__name__)
 
 GITHUB_API_ROOT = "https://api.github.com"
 GITHUB_WEB_ROOT = "https://github.com"
+GITHUB_RAW_ROOT = "https://raw.githubusercontent.com"
 GITCODE_API_ROOT = "https://api.gitcode.com/api/v5"
 GITCODE_WEB_ROOT = "https://gitcode.com"
 
 GITHUB_API_VERSION = "2022-11-28"
 MAX_ATOM_BYTES = 5 * 1024 * 1024
+MAX_README_BYTES = 512 * 1024
+MAX_README_CHARS = 8000
 MAX_LABELS = 10
 MAX_LABEL_LEN = 64
 
@@ -324,6 +327,122 @@ def _atom_html_to_text(html_body: str) -> str:
     text = converter.handle(raw)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text or xml_plain(raw)
+
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+_MD_BADGE_LINK_RE = re.compile(r"\[!\[[^\]]*\]\([^)]+\)\]\([^)]+\)")
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+_HTML_TAG_RE = re.compile(r"</?(?:div|p|span|img|picture|source|center|br|a|table|tr|td|th|thead|tbody|details|summary|h[1-6]|sub|sup|kbd|hr)\b[^>]*>", re.I)
+
+
+def clean_readme_markdown(raw: str, *, max_chars: int = MAX_README_CHARS) -> str:
+    """清洗 GitHub README 中的徽章图、HTML 排版壳和连续空行，保留可读正文与代码说明。"""
+    text = str(raw or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.strip():
+        return ""
+    text = _HTML_COMMENT_RE.sub("", text)
+    text = _MD_BADGE_LINK_RE.sub("", text)
+    text = _MD_IMAGE_RE.sub("", text)
+    text = _HTML_TAG_RE.sub("\n", text)
+    lines: list[str] = []
+    for line in text.splitlines():
+        cleaned = line.rstrip()
+        stripped = cleaned.strip()
+        # 丢弃清洗图片/徽章后残留的纯分隔符号行（如 `| |`、`•`）
+        if stripped and re.fullmatch(r"[\s|•·\-—_=/\\]+", stripped) and not stripped.startswith("---"):
+            continue
+        lines.append(cleaned)
+    out = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+    if len(out) <= max_chars:
+        return out
+    cut = out[:max_chars]
+    last_nl = cut.rfind("\n")
+    if last_nl >= max_chars // 2:
+        cut = cut[:last_nl]
+    return cut.rstrip() + "\n…"
+
+
+async def fetch_github_repo_readme(
+    repo: str,
+    *,
+    proxy_url: str | None = None,
+    timeout: float = 12.0,
+    max_chars: int = MAX_README_CHARS,
+) -> str:
+    """匿名抓取 GitHub 仓库 README（零 API 配额消耗）：优先 raw CDN，回退网页 SSR 正文。"""
+    try:
+        clean_repo = normalize_repo_target("github", repo)
+    except ValueError:
+        return ""
+
+    headers = {"User-Agent": USER_AGENT, "Accept": "text/plain, text/markdown, text/html;q=0.8"}
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=httpx.Timeout(timeout),
+            **http_proxy_kwargs(proxy_url),
+        ) as client:
+            for candidate in ("README.md", "readme.md", "README.rst"):
+                url = f"{GITHUB_RAW_ROOT}/{clean_repo}/HEAD/{candidate}"
+                try:
+                    resp = await client.get(url, headers=headers)
+                except httpx.HTTPError:
+                    continue
+                if resp.status_code == 200 and resp.content:
+                    raw_text = resp.content[:MAX_README_BYTES].decode("utf-8", errors="replace")
+                    cleaned = clean_readme_markdown(raw_text, max_chars=max_chars)
+                    if cleaned:
+                        return cleaned
+
+            # 回退：读取仓库首页 SSR 的 <article class="markdown-body">
+            try:
+                page = await client.get(f"{GITHUB_WEB_ROOT}/{clean_repo}", headers=headers)
+            except httpx.HTTPError:
+                return ""
+            if page.status_code == 200 and page.text:
+                sel = Selector(text=page.text)
+                article_html = sel.css("article.markdown-body").get() or ""
+                if article_html:
+                    converted = _atom_html_to_text(article_html)
+                    return clean_readme_markdown(converted, max_chars=max_chars)
+    except Exception:  # noqa: BLE001 - 匿名补全失败不影响主流程
+        logger.debug("github readme fetch skipped for %s", clean_repo, exc_info=True)
+    return ""
+
+
+async def enrich_trending_items_with_readme(
+    items: list[dict],
+    *,
+    skip_repos: set[str] | None = None,
+    proxy_url: str | None = None,
+    concurrency: int = 4,
+) -> int:
+    """为新上榜且尚未入库 README 的 GitHub 仓库并发匿名补全 README 精读正文。"""
+    skipped = {r.lower() for r in (skip_repos or set())}
+    targets = [
+        item
+        for item in items
+        if item.get("kind") == "trending"
+        and item.get("repo")
+        and str(item["repo"]).lower() not in skipped
+        and not item.get("readme")
+    ]
+    if not targets:
+        return 0
+
+    sem = asyncio.Semaphore(max(1, concurrency))
+    enriched = 0
+
+    async def _one(item: dict) -> None:
+        nonlocal enriched
+        async with sem:
+            readme = await fetch_github_repo_readme(str(item["repo"]), proxy_url=proxy_url)
+            if readme:
+                item["readme"] = readme
+                enriched += 1
+
+    await asyncio.gather(*(_one(item) for item in targets), return_exceptions=True)
+    return enriched
 
 
 def _extract_label_names(raw_labels: Any) -> list[str]:

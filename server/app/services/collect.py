@@ -492,6 +492,35 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 if next_cfg.get("_http_cache") != collector.last_http_cache:
                     next_cfg["_http_cache"] = collector.last_http_cache
                     target.config = next_cfg
+            if isinstance(collector, GithubCollector) and fetch_result.fetch_kind == "github_trending" and fetch_result.items:
+                from app.collectors.git_repo import enrich_trending_items_with_readme
+                from app.models import ContentVersion
+
+                ext_ids = [str(item.get("id") or "") for item in fetch_result.items if item.get("id")]
+                existing_rows = (
+                    await session.execute(
+                        select(RawContent.external_id, ContentVersion.normalized_json)
+                        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                        .where(RawContent.platform == "github", RawContent.external_id.in_(ext_ids))
+                    )
+                ).all() if ext_ids else []
+                existing_readme_by_repo = {
+                    str(((norm or {}).get("extra") or {}).get("repo") or "").lower(): str(
+                        ((norm or {}).get("extra") or {}).get("readme") or ""
+                    )
+                    for _ext, norm in existing_rows
+                    if ((norm or {}).get("extra") or {}).get("readme")
+                }
+                # 复用已入库仓库的 README，既免重复抓网，也防止后续版本更新时把已存 README 冲空
+                for item in fetch_result.items:
+                    rkey = str(item.get("repo") or "").lower()
+                    if rkey in existing_readme_by_repo and not item.get("readme"):
+                        item["readme"] = existing_readme_by_repo[rkey]
+                await enrich_trending_items_with_readme(
+                    fetch_result.items,
+                    skip_repos=set(existing_readme_by_repo),
+                    proxy_url=proxy_url,
+                )
             items_fetched = len(fetch_result.items)
             fetch_result.items, filtered_out = filter_relevant(
                 fetch_result.items, target,
@@ -591,6 +620,24 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 pending_ids = await pending_news_ids(session, external_ids=external_ids)
                 if pending_ids:
                     await enqueue_review_jobs(redis, pending_ids)
+            if domain == "feed" and stats.touched_content_ids and hasattr(redis, "enqueue_job"):
+                from app.services.content_brief import is_brief_eligible
+                from app.services.queue import enqueue_brief_jobs
+
+                touched_rows = (
+                    await session.execute(
+                        select(RawContent.id, RawContent.platform, RawContent.content_type).where(
+                            RawContent.id.in_(stats.touched_content_ids),
+                            RawContent.hidden.is_(False),
+                        )
+                    )
+                ).all()
+                brief_ids = [
+                    cid for cid, plat, ctype in touched_rows
+                    if is_brief_eligible(target.community, plat, ctype)
+                ]
+                if brief_ids:
+                    await enqueue_brief_jobs(redis, brief_ids)
             backfilled_communities: set[str] = set()
             if fetch_result.fetch_kind == "bilibili_dynamics":
                 try:

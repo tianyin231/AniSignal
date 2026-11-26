@@ -92,6 +92,11 @@ async def local_loop(queue) -> None:
                     missing_ids = await missing_review_ids(session)
                     if news_ids or missing_ids:
                         await queue.enqueue_review(list(dict.fromkeys([*news_ids, *missing_ids])))
+                    from app.services.content_brief import pending_brief_ids
+
+                    brief_ids = await pending_brief_ids(session, limit=8)
+                    if brief_ids:
+                        await queue.enqueue_ai_batch("brief_content", brief_ids)
                     _local_news_review_at = now + _CUSTOM_SWEEP_INTERVAL
                 global _local_extract_sweep_at
                 if _local_extract_sweep_at is None or now >= _local_extract_sweep_at:
@@ -218,6 +223,8 @@ async def main() -> None:
                             await redis.set(f"anisignal:news-editorial-enqueued:{bucket}", "1", nx=True, px=6 * 60 * 60 * 1000)
                     await redis.enqueue_job(
                         "review_pending_news", _job_id=f"review-pending-news:{bucket}", _queue_name=AI_QUEUE_NAME)
+                    await redis.enqueue_job(
+                        "brief_pending_contents", _job_id=f"brief-pending:{bucket}", _queue_name=AI_QUEUE_NAME)
                     await redis.enqueue_job(
                         "review_pending_fulfillment", _job_id=f"review-pending-fulfillment:{bucket}", _queue_name=AI_QUEUE_NAME)
                     if not await redis.get(f"anisignal:custom-sweep-enqueued:{bucket}"):

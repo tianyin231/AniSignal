@@ -123,10 +123,11 @@ AniSignal 当前已经形成稳定的底层数据链路：
 
 **目标**：让自定义非游戏分区真正具备「AI 提炼 + 意图过滤 + 结构化报告推送」闭环，而不只是原始条目列表。
 
-#### 3.1 `domain="feed"` 主题流按需增强（免数据库迁移）
-目前 `domain="feed"` 完全跳过 AI 摘要、翻译与早报。可在 `site_settings("communities")` 的分区元数据里增加两个可选布尔配置（默认 `false`，保持小黑盒等现有分区零开销）：
-- `ai_summary: bool`：新内容入库后生成中文一句话摘要 / 英文 Release Notes 翻译（复用现有慢队列 `AiWorkerSettings` 与密钥池）；
-- `include_in_digest: bool`：允许用户将该主题流纳入个人早报或周期报告。
+#### 3.1 `domain="feed"` 主题流按需增强 ✅ 已落地（2026-11-27）
+- 在 `site_settings("communities")` 中新增分区级 `ai_summary` 开关（管理端「站点分区」页可按分区启停；GitHub / GitCode 开源项目与版本发布在 `domain="feed"` 下默认启用，小黑盒等中文社区默认关闭零额外开销）；
+- 新增 `content_briefs` 表（迁移 `0066`）与慢 AI 队列任务 `brief_content`：对开源仓库匿名抓取 README 精读正文（零 API 配额消耗），生成中文定位标题、一句话用途、详细摘要、核心亮点、适用场景与主题标签；
+- 升级所有 `domain="feed"` 主题流页面为双栏信号台（深色频道头图 + 多图图文卡片/紧凑双视图 + 话题筛选 + 近期热门/热门话题/来源状态侧栏），趋势榜单改为整卡直入站内 AI 解读与 README 精读详情页，并保留外链快捷直达按钮。
+- `include_in_digest: bool`（纳入个人早报/周期报告）归入 3.3 周期报告一并推进。
 
 > 说明：现有 `domain="news"` 的编辑流（去重/双盲评分/成刊）多处硬编码 `community == "ai"`（`services/ai_news.py`、`services/news_reports.py`）。若未来需要第二个独立行业新闻流，再将硬编码的 `"ai"` 泛化为 `domain == "news"`，现阶段无需大改。
 

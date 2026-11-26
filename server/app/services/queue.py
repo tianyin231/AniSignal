@@ -15,6 +15,8 @@ AI_QUEUE_NAME = "arq:queue:ai"
 AI_JOB_NAMES = frozenset({
     "summarize_event",
     "translate_content",
+    "brief_content",
+    "brief_pending_contents",
     "repair_ai_item",
     "review_contents",
     "review_pending_news",
@@ -23,6 +25,21 @@ AI_JOB_NAMES = frozenset({
     "extract_entities_sweep",
     "product_monitor_sweep",
 })
+
+
+async def enqueue_brief_jobs(redis, content_ids: list[int]) -> int:
+    """将待解读内容逐条投入慢 AI 队列，按内容 ID 去重。"""
+    queued = 0
+    for content_id in dict.fromkeys(int(cid) for cid in content_ids if cid):
+        job = await redis.enqueue_job(
+            "brief_content",
+            content_id,
+            _job_id=f"brief-content:{content_id}",
+            _queue_name=AI_QUEUE_NAME,
+        )
+        if job is not None:
+            queued += 1
+    return queued
 
 
 async def enqueue_review_jobs(redis, content_ids: list[int]) -> str | None:

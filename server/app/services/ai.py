@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 TASK_MODEL_KEYS = (
     "review_content",
     "translate_content",
+    "brief_content",
     "summarize_event",
     "extract_entities",
     "extract_community_codes",

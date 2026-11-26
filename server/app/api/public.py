@@ -52,7 +52,7 @@ from app.services.public_cache import (
     cached_dict,
     cached_model,
 )
-from app.services.urls import safe_link
+from app.services.urls import safe_link, safe_media_url
 
 router = APIRouter(prefix="/api")
 
@@ -349,6 +349,7 @@ async def list_contents(
     revised_only: bool = Query(default=False, description="仅返回有实质修订记录的内容"),
     sort: str = Query(default="time", pattern="^(time|hot)$", description="hot=按最新播放量排序"),
     q: str | None = Query(default=None, max_length=100, description="标题关键词"),
+    topic: str | None = Query(default=None, max_length=64, description="主题/AI 标签筛选"),
     limit: int = Query(default=30, ge=1, le=100),
     # 公开端点无鉴权：offset 不封顶时 `?offset=2999940` 就是一次全表扫的免费入口
     offset: int = Query(default=0, ge=0, le=MAX_PUBLIC_OFFSET),
@@ -451,7 +452,10 @@ async def list_contents(
             .correlate(RawContent)
             .scalar_subquery()
         )
+    from app.services.content_brief import load_briefs_map
     from app.services.content_diff import RevisionSummary, load_revision_summaries
+
+    clean_topic = topic.strip() if isinstance(topic, str) and topic.strip() else None
 
     async def _build_list_response() -> PublicContentList:
         active_conditions = list(conditions)
@@ -482,6 +486,25 @@ async def list_contents(
             ]
             total = len(verified_ids)
             page_ids = verified_ids[offset : offset + limit]
+        elif clean_topic:
+            # 主题/AI 标签存在 JSON 中，在 SQLite（ASCII 转义）与 MySQL 间按候选精确匹配保证一致性
+            needle = clean_topic.casefold()
+            cand_query = matching(RawContent.id, ContentVersion.normalized_json, active_conditions=active_conditions)
+            if latest_score is not None:
+                cand_query = cand_query.order_by(func.coalesce(latest_score, 0).desc())
+            cand_rows = list(
+                (await session.execute(cand_query.order_by(published.desc(), RawContent.id.desc()).limit(500))).all()
+            )
+            cand_briefs = await load_briefs_map(session, [cid for cid, _ in cand_rows])
+            matched_ids: list[int] = []
+            for cid, norm in cand_rows:
+                extra = (norm or {}).get("extra") or {}
+                item_topics = [str(t).strip() for t in (extra.get("topics") or []) if str(t).strip()]
+                brief_tags = [str(t).strip() for t in ((cand_briefs.get(cid) or {}).get("tags") or []) if str(t).strip()]
+                if any(t.casefold() == needle for t in (*item_topics, *brief_tags)):
+                    matched_ids.append(cid)
+            total = len(matched_ids)
+            page_ids = matched_ids[offset : offset + limit]
         else:
             page_ids = list(await session.scalars(ordered_query.limit(limit).offset(offset)))
             total = await session.scalar(matching(func.count(), active_conditions=active_conditions)) or 0
@@ -494,6 +517,7 @@ async def list_contents(
             .where(RawContent.id.in_(page_ids))
         ) if page_ids else []
         page_rows = {row[0].id: row for row in rows}
+        briefs_map = await load_briefs_map(session, page_ids) if page_ids else {}
         if not filter_revised:
             multi_platforms = {
                 raw.id: raw.platform
@@ -508,8 +532,21 @@ async def list_contents(
         candidates: list[PublicContentItem] = []
         for raw, source_name, source_identity, version in (page_rows[raw_id] for raw_id in page_ids):
             normalized = version.normalized_json if version else None
+            extra = (normalized or {}).get("extra") or {}
             text = (version.text if version else None) or str((normalized or {}).get("text") or "")
-            media = (normalized or {}).get("media") or []
+            raw_media = (normalized or {}).get("media") or []
+            media = [m for m in raw_media if isinstance(m, str)] if isinstance(raw_media, list) else []
+            brief_data = briefs_map.get(raw.id)
+            merged_topics = list(
+                dict.fromkeys(
+                    t
+                    for t in (
+                        *(str(x).strip() for x in (extra.get("topics") or [])),
+                        *(str(x).strip() for x in ((brief_data or {}).get("tags") or [])),
+                    )
+                    if t
+                )
+            )[:5]
             rev = rev_summaries.get(raw.id)
             candidates.append(
                 PublicContentItem(
@@ -526,8 +563,12 @@ async def list_contents(
                     identity=source_identity or "unknown",
                     category=version.category,
                     metrics=None,
-                    cover=media[0] if isinstance(media, list) and media else None,
-                    preview_mode="partial" if ((normalized or {}).get("extra") or {}).get("truncated") else _preview_mode(text, media if isinstance(media, list) else [], raw.url),
+                    cover=media[0] if media else None,
+                    media_list=media[:3],
+                    media_count=len(media),
+                    topics=merged_topics,
+                    brief=brief_data,
+                    preview_mode="partial" if extra.get("truncated") else _preview_mode(text, media, raw.url),
                     matched_keywords=(raw.matched_keywords or []),
                     community=(raw.community or DEFAULT_COMMUNITY),
                     revision_count=rev.revision_count if rev else 0,
@@ -776,6 +817,7 @@ async def rss_feed(
         revised_only=only_revised,
         sort="time",
         q=q,
+        topic=None,
         limit=limit,
         offset=0,
         session=session,
@@ -1154,6 +1196,48 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         and review.news.get("content_hash") == raw.content_hash
         and review.news.get("content_version") == version.version
     ) else None
+
+    from app.models import ContentBrief
+    from app.services.content_brief import serialize_brief
+
+    brief_row = await session.get(ContentBrief, content_id)
+    brief = serialize_brief(brief_row)
+    extra = normalized.get("extra") or {}
+    topics = list(
+        dict.fromkeys(
+            t
+            for t in (
+                *(str(x).strip() for x in (extra.get("topics") or [])),
+                *(str(x).strip() for x in ((brief or {}).get("tags") or [])),
+            )
+            if t
+        )
+    )[:8]
+
+    repo_meta = None
+    if raw.platform in ("github", "gitcode"):
+        repo_name = str(extra.get("repo") or "").strip() or None
+        trending_history = []
+        if raw.content_type == "repo" and repo_name:
+            from app.services.git_trending import get_repo_trending_history
+
+            trending_history = await get_repo_trending_history(
+                session, community=raw.community, repo=repo_name
+            )
+        repo_meta = {
+            "repo": repo_name,
+            "kind": extra.get("kind"),
+            "language": extra.get("language"),
+            "stars": extra.get("stars"),
+            "forks": extra.get("forks"),
+            "period_stars": extra.get("period_stars"),
+            "tag_name": extra.get("tag_name"),
+            "prerelease": bool(extra.get("prerelease")),
+            "labels": list(extra.get("labels") or []),
+            "readme": extra.get("readme") or None,
+            "trending_history": trending_history,
+        }
+
     return ContentDetailOut(
         id=raw.id,
         community=raw.community,
@@ -1165,7 +1249,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         title=(version.title if version else None) or raw.external_id,
         text=text or None,
         text_html=_sanitize_html(text) if text else None,
-        text_truncated=bool((normalized.get("extra") or {}).get("truncated")),
+        text_truncated=bool(extra.get("truncated")),
         published_at=raw.published_at,
         collected_at=raw.collected_at,
         last_seen_at=raw.last_seen_at,
@@ -1177,11 +1261,14 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
         metrics_history=list(reversed(history)),
         event=event,
         translation=translation,
+        brief=brief,
+        topics=topics,
+        repo_meta=repo_meta,
         matched_keywords=(raw.matched_keywords or []),
         version=version.version if version else None,
         revision_count=rev_summary.revision_count if rev_summary else 0,
         has_source_revision=rev_summary.has_source_revision if rev_summary else False,
-        preview_mode="partial" if (normalized.get("extra") or {}).get("truncated") else _preview_mode(text, media, raw.url),
+        preview_mode="partial" if extra.get("truncated") else _preview_mode(text, media, raw.url),
     )
 
 
@@ -1817,6 +1904,173 @@ async def _fetch_wallpaper_bytes(url: str) -> tuple[bytes, str]:
     if resp.status_code != 200 or not content_type.startswith("image/"):
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "壁纸源暂时不可用")
     return resp.content, content_type
+
+
+@router.get("/feeds/overview")
+async def feed_overview(
+    request: Request,
+    community: CommunitySlug = Query(...),
+    session: AsyncSession = Depends(get_session),
+):
+    """独立主题流信号台总览（小黑盒 / 开源 / 自建 feed 分区）：头图焦点、近期热门、话题分布与来源健康。"""
+    from collections import Counter
+
+    from app.models import ContentBrief
+    from app.services.content_brief import load_briefs_map
+    from app.services.xiaoheihe import XIAOHEIHE_KEY, xiaoheihe_feed_status
+
+    cache = getattr(request.app.state, "redis", None)
+    cache_key = f"{CACHE_PREFIX}feed-overview:{community}"
+
+    async def _load() -> dict:
+        now = utcnow()
+        pub_ts = func.coalesce(RawContent.published_at, RawContent.collected_at)
+        total_count = await session.scalar(
+            select(func.count(RawContent.id)).where(
+                RawContent.community == community,
+                RawContent.hidden.is_(False),
+            )
+        ) or 0
+        recent_24h = await session.scalar(
+            select(func.count(RawContent.id)).where(
+                RawContent.community == community,
+                RawContent.hidden.is_(False),
+                RawContent.collected_at >= now - timedelta(hours=24),
+            )
+        ) or 0
+        brief_count = await session.scalar(
+            select(func.count(ContentBrief.raw_content_id))
+            .join(RawContent, RawContent.id == ContentBrief.raw_content_id)
+            .where(RawContent.community == community, RawContent.hidden.is_(False))
+        ) or 0
+
+        rows = (
+            await session.execute(
+                select(RawContent, Source.name, ContentVersion)
+                .options(defer(RawContent.raw_json))
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .outerjoin(Source, Source.id == RawContent.source_id)
+                .where(RawContent.community == community, RawContent.hidden.is_(False))
+                .order_by(pub_ts.desc(), RawContent.id.desc())
+                .limit(120)
+            )
+        ).all()
+
+        ids = [raw.id for raw, _, _ in rows]
+        metrics_map = await _latest_metrics(session, ids)
+        briefs_map = await load_briefs_map(session, ids)
+
+        topic_counter: Counter[str] = Counter()
+        scored: list[tuple[int, dict]] = []
+        for raw, source_name, ver in rows:
+            norm = ver.normalized_json or {}
+            extra = norm.get("extra") or {}
+            raw_media = norm.get("media") or []
+            media = [m for m in raw_media if isinstance(m, str)] if isinstance(raw_media, list) else []
+            brief = briefs_map.get(raw.id)
+            item_topics = list(
+                dict.fromkeys(
+                    t
+                    for t in (
+                        *(str(x).strip() for x in (extra.get("topics") or [])),
+                        *(str(x).strip() for x in ((brief or {}).get("tags") or [])),
+                    )
+                    if t
+                )
+            )
+            for t in item_topics:
+                topic_counter[t] += 1
+
+            m = metrics_map.get(raw.id) or {}
+            if raw.content_type == "repo":
+                score = int(m.get("view") or 0) * 10 + int(m.get("like") or 0)
+            else:
+                score = int(m.get("like") or 0) * 3 + int(m.get("reply") or 0) * 2 + int(m.get("view") or 0)
+            scored.append(
+                (
+                    score,
+                    {
+                        "id": raw.id,
+                        "platform": raw.platform,
+                        "content_type": raw.content_type,
+                        "title": (ver.title if ver else None) or raw.external_id,
+                        "excerpt": _excerpt((ver.text if ver else None) or ""),
+                        "brief": brief,
+                        "cover": safe_media_url(media[0]) if media else None,
+                        "media_count": len(media),
+                        "source_name": source_name,
+                        "published_at": raw.published_at,
+                        "collected_at": raw.collected_at,
+                        "metrics": m or None,
+                        "topics": item_topics[:4],
+                        "url": safe_link(raw.url),
+                    },
+                )
+            )
+
+        hot_sorted = sorted(scored, key=lambda pair: (pair[0], pair[1]["id"]), reverse=True)
+        hot_items = [item for _, item in hot_sorted[:5]]
+
+        # 头图焦点：优先带封面的高互动内容，其次带 AI 解读的热门内容，最后取首条
+        lead = (
+            next((item for _, item in hot_sorted if item.get("cover")), None)
+            or next((item for _, item in hot_sorted if item.get("brief")), None)
+            or (hot_items[0] if hot_items else None)
+        )
+
+        target_rows = list(
+            await session.scalars(
+                select(CollectTarget)
+                .where(CollectTarget.community == community, CollectTarget.enabled.is_(True))
+                .order_by(CollectTarget.id.asc())
+            )
+        )
+        sources = [
+            {
+                "name": t.display_name or t.target_value,
+                "platform": t.platform,
+                "target_type": t.target_type,
+                "last_success_at": t.last_success_at,
+                "consecutive_failures": t.consecutive_failures,
+            }
+            for t in target_rows
+        ]
+
+        updated_at = None
+        stale = False
+        if community == XIAOHEIHE_KEY:
+            st = await xiaoheihe_feed_status(session)
+            updated_at = st.updated_at
+            stale = st.stale
+        else:
+            ts_list = [t.last_success_at for t in target_rows if t.last_success_at]
+            if ts_list:
+                updated_at = max(ts_list)
+            elif rows:
+                updated_at = rows[0][0].collected_at
+            stale = bool(target_rows and all(t.last_error for t in target_rows))
+
+        topics = [
+            {"name": name, "count": count}
+            for name, count in sorted(topic_counter.items(), key=lambda p: (-p[1], p[0].lower()))[:14]
+        ]
+
+        meta = COMMUNITIES.get(community)
+        return {
+            "community": community,
+            "total_count": total_count,
+            "recent_24h_count": recent_24h,
+            "brief_count": brief_count,
+            "ai_summary": bool(meta and meta.ai_summary),
+            "updated_at": updated_at,
+            "stale": stale,
+            "lead": lead,
+            "hot_items": hot_items,
+            "topics": topics,
+            "sources": sources,
+        }
+
+    return await cached_dict(cache, cache_key, PUBLIC_CACHE_SECONDS, _load)
 
 
 @router.get("/git-trending/editions")

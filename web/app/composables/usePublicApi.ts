@@ -2,6 +2,8 @@
  * 公开 API 客户端（无需鉴权）：内容流、来源健康、统计。
  */
 
+import type { ContentBrief } from '~/utils/git-trending'
+
 export interface PublicContentItem {
   id: number
   platform: string
@@ -17,12 +19,77 @@ export interface PublicContentItem {
   category: string | null
   metrics: Record<string, number> | null
   cover: string | null
+  media_list?: string[]
+  media_count?: number
+  topics?: string[]
+  brief?: ContentBrief | null
   preview_mode: 'full' | 'partial' | 'external_only'
   matched_keywords: string[]
   community?: string
   delta_view?: number | null
   revision_count?: number
   has_source_revision?: boolean
+}
+
+export interface FeedOverviewItem {
+  id: number
+  platform: string
+  content_type: string
+  title: string
+  excerpt: string | null
+  brief?: ContentBrief | null
+  cover: string | null
+  media_count: number
+  source_name: string | null
+  published_at: string | null
+  collected_at: string
+  metrics: Record<string, number> | null
+  topics: string[]
+  url: string | null
+}
+
+export interface FeedOverview {
+  community: string
+  total_count: number
+  recent_24h_count: number
+  brief_count: number
+  ai_summary: boolean
+  updated_at: string | null
+  stale: boolean
+  lead: FeedOverviewItem | null
+  hot_items: FeedOverviewItem[]
+  topics: { name: string; count: number }[]
+  sources: {
+    name: string
+    platform: string
+    target_type: string
+    last_success_at: string | null
+    consecutive_failures: number
+  }[]
+}
+
+export interface RepoTrendingHistoryItem {
+  period: 'daily' | 'weekly' | 'monthly'
+  period_label: string
+  appearances: number
+  best_rank: number
+  first_seen_key: string
+  latest_key: string
+  latest_rank: number
+}
+
+export interface RepoMeta {
+  repo: string | null
+  kind: string | null
+  language: string | null
+  stars: number | null
+  forks: number | null
+  period_stars: number | null
+  tag_name: string | null
+  prerelease: boolean
+  labels: string[]
+  readme: string | null
+  trending_history: RepoTrendingHistoryItem[]
 }
 
 export interface PublicContentList {
@@ -379,6 +446,9 @@ export interface ContentDetail {
   metrics_history: ContentMetricPoint[]
   event: { id: number; title: string; category: string; confidence: string } | null
   translation: { lang: string; text: string; model: string | null } | null
+  brief?: ContentBrief | null
+  topics?: string[]
+  repo_meta?: RepoMeta | null
   matched_keywords: string[]
   version: number | null
   revision_count?: number

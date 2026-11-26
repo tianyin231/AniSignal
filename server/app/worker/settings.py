@@ -53,6 +53,41 @@ async def translate_content(ctx, content_id: int) -> dict:
     return result
 
 
+async def brief_content(ctx, content_id: int) -> dict:
+    """AI 主题流 / 开源项目中文结构化解读。"""
+    from app.db import SessionLocal
+    from app.services.content_brief import brief_content as run
+
+    async with SessionLocal() as session:
+        result = await run(session, content_id)
+    if result.get("status") == "deferred":
+        raise Retry(defer=65)
+    return result
+
+
+async def brief_pending_contents(ctx) -> dict:
+    """补偿尚未生成或版本过期的主题流 / 开源项目 AI 中文解读。"""
+    import secrets
+    from app.db import SessionLocal
+    from app.services.content_brief import brief_pending_contents as run
+
+    token = secrets.token_hex(16)
+    key = "anisignal:brief-pending-lock"
+    if not await ctx["redis"].set(key, token, nx=True, ex=1900):
+        return {"status": "busy"}
+    try:
+        async with SessionLocal() as session:
+            result = await run(session, limit=12)
+        if result.get("ok") or result.get("failed"):
+            logger.info("brief_pending_contents -> %s", result)
+        return result
+    finally:
+        await ctx["redis"].eval(
+            "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0",
+            1, key, token,
+        )
+
+
 async def repair_ai_item(ctx, task: str, ref_id: int, only_missing: bool = True) -> dict:
     from app.db import SessionLocal
     from app.services.ai_maintenance import repair_ai_item as run
@@ -328,6 +363,8 @@ _FAST_FUNCTIONS = [
 _AI_FUNCTIONS = [
     summarize_event,
     translate_content,
+    brief_content,
+    func(brief_pending_contents, keep_result=0),
     func(repair_ai_item, keep_result=0),
     func(review_contents, keep_result=0, max_tries=3),
     review_pending_news,

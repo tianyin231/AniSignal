@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import get_queue, require_admin
 from app.clock import utcnow
-from app.communities import COMMUNITY_REQUIRED_QUERY_DEP
+from app.communities import COMMUNITY_OPTIONAL_QUERY_DEP, COMMUNITY_REQUIRED_QUERY_DEP
 from app.db import get_session
 from app.models import AiUsage
 from app.services import settings as settings_service
@@ -406,4 +406,24 @@ async def translate_missing(session: AsyncSession = Depends(get_session), queue=
     except Exception as exc:
         logger.exception("failed to enqueue translations")
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "翻译队列暂不可用，请稍后重试") from exc
+    return {"candidates": len(ids), "queued": queued, "remaining": remaining}
+
+
+@router.post("/brief-missing")
+async def brief_missing(
+    community: str | None = COMMUNITY_OPTIONAL_QUERY_DEP,
+    session: AsyncSession = Depends(get_session),
+    queue=Depends(get_queue),
+):
+    """为开源项目与开启 AI 解读的主题流补齐结构化中文解读。"""
+    from app.services.content_brief import pending_brief_ids
+
+    all_ids = await pending_brief_ids(session, community=community, limit=200)
+    remaining = len(all_ids)
+    ids = all_ids[:50]
+    try:
+        queued = await queue.enqueue_ai_batch("brief_content", ids, only_missing=False) if ids else 0
+    except Exception as exc:
+        logger.exception("failed to enqueue content briefs")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "解读队列暂不可用，请稍后重试") from exc
     return {"candidates": len(ids), "queued": queued, "remaining": remaining}

@@ -1,7 +1,7 @@
 /** 公开站共享工具：平台→区域、类目元数据、API→UI 适配 */
 
 import { fmtTime } from '~/utils/admin-types'
-import { decodeEntities } from '~/utils/text'
+import { cleanPlatformText, cleanPlatformTitle } from '~/utils/text'
 import { type Identity, type Platform, type RawItem, type Region, type AppEvent, type SourceRef } from '~/utils/data'
 import type { ApiEvent, ApiProduct, PublicContentItem } from '~/composables/usePublicApi'
 
@@ -79,13 +79,17 @@ export function toRawItem(item: PublicContentItem): RawItem {
     contentType: item.content_type,
     account: item.source_name ?? '—',
     region: regionOf(item.platform),
-    title: decodeEntities(item.title || item.external_id),
+    title: cleanPlatformTitle(item.title || item.external_id),
     publishedAt: item.published_at ? fmtTime(item.published_at) : '发布时间未知',
     identity: item.identity as Identity,
     category: item.category ? (categoryMeta[item.category]?.label ?? item.category) : undefined,
     keywords: item.matched_keywords ?? [],
-    excerpt: item.text_excerpt ? decodeEntities(item.text_excerpt) : undefined,
+    excerpt: item.text_excerpt ? cleanPlatformText(item.text_excerpt) : undefined,
     cover: item.cover ?? undefined,
+    mediaList: item.media_list ?? (item.cover ? [item.cover] : []),
+    mediaCount: item.media_count ?? (item.media_list?.length || (item.cover ? 1 : 0)),
+    topics: item.topics ?? [],
+    brief: item.brief ?? null,
     originalUrl: item.url ?? undefined,
     metrics: item.metrics ?? undefined,
     community: item.community,

@@ -211,6 +211,7 @@ class CommunityCreate(BaseModel):
     official_bili_mid: str | None = Field(default=None, max_length=24, pattern=r"^(\d{1,20})?$")
     aliases: list[str] = Field(default_factory=list, max_length=16)
     active: bool = True
+    ai_summary: bool = False
 
 
 class CommunityUpdate(BaseModel):
@@ -221,6 +222,7 @@ class CommunityUpdate(BaseModel):
     official_bili_mid: str | None = Field(default=None, max_length=24, pattern=r"^(\d{1,20})?$")
     aliases: list[str] | None = Field(default=None, max_length=16)
     active: bool | None = None
+    ai_summary: bool | None = None
 
 
 class CommunityBatchRequest(BaseModel):
@@ -317,6 +319,18 @@ class ContentListOut(BaseModel):
     total: int
 
 
+class ContentBriefOut(BaseModel):
+    kind: str = "feed"
+    headline: str
+    tagline: str
+    summary: str = ""
+    highlights: list[str] = []
+    use_cases: list[str] = []
+    tags: list[str] = []
+    model: str | None = None
+    updated_at: datetime | None = None
+
+
 class PublicContentItem(BaseModel):
     id: int
     platform: Platform
@@ -332,6 +346,10 @@ class PublicContentItem(BaseModel):
     category: str | None = None
     metrics: dict | None
     cover: SafeMedia
+    media_list: SafeMediaList = []
+    media_count: int = 0
+    topics: list[str] = []
+    brief: ContentBriefOut | None = None
     preview_mode: str  # full / partial / external_only
     matched_keywords: list[str] = []
     community: str = _DEFAULT_COMMUNITY
@@ -382,6 +400,9 @@ class ContentDetailOut(BaseModel):
     metrics_history: list[ContentMetricPoint] = []
     event: dict | None = None
     translation: dict | None = None
+    brief: ContentBriefOut | None = None
+    topics: list[str] = []
+    repo_meta: dict | None = None
     matched_keywords: list[str] = []
     version: int | None = None
     revision_count: int = 0

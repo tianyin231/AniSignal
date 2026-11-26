@@ -273,6 +273,11 @@ async def test_git_community_trending_and_main_repo_e2e(client, session_factory,
 
     monkeypatch.setattr("app.collectors.git_repo._BaseGitRepoCollector._request", fake_request)
 
+    async def fake_readme(repo: str, **_kwargs) -> str:
+        return f"# {repo}\n\nMock README documentation for {repo}."
+
+    monkeypatch.setattr("app.collectors.git_repo.fetch_github_repo_readme", fake_readme)
+
     # 1) 创建自定义主题流分区 git / 开源
     c_resp = await client.post(
         "/api/admin/communities",
@@ -354,6 +359,24 @@ async def test_git_community_trending_and_main_repo_e2e(client, session_factory,
     assert payload["current"]["stats"]["total"] == 2
     assert payload["current"]["entries"][0]["repo"] == "acme/vision"
     assert payload["current"]["entries"][0]["also_in"] == ["weekly"]
-    assert payload["current"]["entries"][0]["raw_content_id"] is not None
+    repo_content_id = payload["current"]["entries"][0]["raw_content_id"]
+    assert repo_content_id is not None
     assert len(payload["releases"]) == 1
     assert payload["releases"][0]["tag_name"] == "v1.3.0"
+
+    # 5) 站内详情返回 README、仓库元数据与日/周刊上榜轨迹
+    detail_resp = await client.get(f"/api/contents/{repo_content_id}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    assert detail["repo_meta"]["repo"] == "acme/vision"
+    assert "Mock README documentation" in (detail["repo_meta"]["readme"] or "")
+    periods_hit = [item["period"] for item in detail["repo_meta"]["trending_history"]]
+    assert periods_hit == ["daily", "weekly"]
+
+    # 6) 通用主题流总览接口返回焦点、热门与来源状态
+    ov_resp = await client.get("/api/feeds/overview", params={"community": "git"})
+    assert ov_resp.status_code == 200
+    ov = ov_resp.json()
+    assert ov["total_count"] == 3
+    assert len(ov["hot_items"]) >= 2
+    assert len(ov["sources"]) == 3
