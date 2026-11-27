@@ -169,9 +169,8 @@ async def load_candidates(
         return []
     published = func.coalesce(RawContent.published_at, RawContent.collected_at)
     feed_partitions = feed_community_keys()
-    query = (
-        select(RawContent, ContentVersion, Source, ContentTranslation)
-        .options(defer(RawContent.raw_json), defer(Source.raw_json))
+    id_query = (
+        select(RawContent.id)
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .where(RawContent.hidden.is_(False), *extra_conditions)
         .join(Source, RawContent.source_id == Source.id, isouter=True)
@@ -193,14 +192,33 @@ async def load_candidates(
         .order_by(published.desc(), RawContent.id.desc())
     )
     if keywords is None:
-        query = query.limit(200)
+        id_query = id_query.limit(200)
 
+    # 两阶段先取排序后的 ID 再分批水合，避免大正文/JSON 撑爆 MySQL sort_buffer（1038），
+    # 同时保留“最多 200 条命中、不全量载入正文”的内存边界。
+    ordered_ids = list(await session.scalars(id_query))
     candidates: list[dict] = []
-    # 关键词在清理 HTML、翻译和溯源词后匹配，不能先截断全站最新 200 条。
-    # 游标分批取数，最多保留 200 条命中，避免把整个时间窗口载入内存。
-    rows = await session.stream(query.execution_options(yield_per=200))
-    try:
-        async for raw, version, source, translation in rows:
+    chunk_size = 200
+    for start in range(0, len(ordered_ids), chunk_size):
+        chunk = ordered_ids[start : start + chunk_size]
+        hydrated = {
+            row[0].id: row
+            for row in (
+                await session.execute(
+                    select(RawContent, ContentVersion, Source, ContentTranslation)
+                    .options(defer(RawContent.raw_json), defer(Source.raw_json))
+                    .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                    .join(Source, RawContent.source_id == Source.id, isouter=True)
+                    .join(ContentTranslation, ContentTranslation.raw_content_id == RawContent.id, isouter=True)
+                    .where(RawContent.id.in_(chunk))
+                )
+            ).all()
+        }
+        for cid in chunk:
+            pair = hydrated.get(cid)
+            if pair is None:
+                continue
+            raw, version, source, translation = pair
             title = _plain(version.title or raw.external_id)
             text = _plain(version.text or "")
             translated = _plain(translation.text if translation else "")
@@ -245,9 +263,7 @@ async def load_candidates(
             if not is_empty_dynamic_item(candidate):
                 candidates.append(candidate)
                 if len(candidates) == 200:
-                    break
-    finally:
-        await rows.close()
+                    return candidates
     return candidates
 
 

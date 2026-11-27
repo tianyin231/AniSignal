@@ -71,17 +71,34 @@ class NewsRecord:
 
 
 async def load_news_records(session, *, since=None, until=None, content_ids=None, include_archived=False) -> list[NewsRecord]:
-    query = (await approved_news_query(session, include_archived=include_archived)).add_columns(NewsGrouping, Event).outerjoin(
-        NewsGrouping, NewsGrouping.raw_content_id == RawContent.id).outerjoin(Event, Event.id == NewsGrouping.event_id)
+    id_query = await approved_news_query(session, include_archived=include_archived, only_ids=True)
     if since:
-        query = query.where(func.coalesce(RawContent.published_at, RawContent.collected_at) >= since)
+        id_query = id_query.where(func.coalesce(RawContent.published_at, RawContent.collected_at) >= since)
     if until:
-        query = query.where(func.coalesce(RawContent.published_at, RawContent.collected_at) < until)
+        id_query = id_query.where(func.coalesce(RawContent.published_at, RawContent.collected_at) < until)
     if content_ids is not None:
-        query = query.where(RawContent.id.in_(content_ids))
-    rows = (await session.execute(query.order_by(func.coalesce(RawContent.published_at, RawContent.collected_at), RawContent.id)
-        .execution_options(populate_existing=True))).all()
-    return [NewsRecord(*row) for row in rows]
+        id_query = id_query.where(RawContent.id.in_(content_ids))
+    ordered_ids = list(
+        await session.scalars(
+            id_query.order_by(func.coalesce(RawContent.published_at, RawContent.collected_at), RawContent.id)
+        )
+    )
+    if not ordered_ids:
+        return []
+    query = (
+        (await approved_news_query(session, include_archived=include_archived))
+        .add_columns(NewsGrouping, Event)
+        .outerjoin(NewsGrouping, NewsGrouping.raw_content_id == RawContent.id)
+        .outerjoin(Event, Event.id == NewsGrouping.event_id)
+        .where(RawContent.id.in_(ordered_ids))
+    )
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(query.execution_options(populate_existing=True))
+        ).all()
+    }
+    return [NewsRecord(*fetched[cid]) for cid in ordered_ids if cid in fetched]
 
 
 def _tokens(text: str) -> set[str]:

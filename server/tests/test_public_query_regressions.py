@@ -2,11 +2,11 @@
 
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.api import public
 from app.clock import utcnow
-from app.models import ContentVersion, Event, Evidence, MetricSnapshot, Product, RawContent
+from app.models import ContentReview, ContentVersion, Event, Evidence, MetricSnapshot, Product, RawContent, Source
 
 
 async def add_content(session, name, *, age=0, community="wuwa", hidden=False, views=None):
@@ -148,3 +148,106 @@ async def test_sitemap_lists_public_pages_and_skips_inactive_or_ai_events(client
     assert f"/events/{closed.id}</loc>" not in response.text
     assert f"/events/{news.id}</loc>" not in response.text
     public._SITEMAP_CACHE.clear()
+
+
+async def test_ordered_public_queries_avoid_wide_blob_columns_in_sort_buffer(client, session):
+    """回归：首页精选、主题流总览、话题筛选、外链榜与热度飙升排序阶段不得选大 JSON/TEXT 列。
+
+    MySQL 8.4 默认 sort_buffer_size 为 256 KiB；在带 ORDER BY 的语句里直选 raw_json /
+    normalized_json / content_versions.text 会触发 OperationalError(1038, Out of sort memory)。
+    """
+    now = utcnow()
+    official = Source(platform="bilibili", external_id="off-1", name="官方账号", identity="official", raw_json={"big": "x" * 2048})
+    session.add(official)
+    await session.flush()
+
+    raw = RawContent(
+        platform="bilibili",
+        content_type="post",
+        external_id="highlight-wide-1",
+        community="wuwa",
+        source_id=official.id,
+        url="https://example.com/post/1",
+        published_at=now - timedelta(hours=1),
+        raw_json={"payload": "a" * 4096},
+    )
+    session.add(raw)
+    await session.flush()
+    session.add(
+        ContentVersion(
+            raw_content_id=raw.id,
+            version=1,
+            title="官方版本前瞻",
+            text="查看活动详情 https://example.com/event-demo " + ("长正文" * 200),
+            normalized_json={
+                "media": ["https://example.com/cover.jpg"],
+                "extra": {"topics": ["前瞻"]},
+            },
+            category="official_announce",
+        )
+    )
+    session.add(
+        ContentReview(
+            raw_content_id=raw.id,
+            relevant=True,
+            promotional=False,
+            violation=False,
+            quality_score=90,
+            links=[{"url": "https://example.com/ai-event", "label": "活动专题页"}],
+            model="test",
+        )
+    )
+    session.add_all(
+        [
+            MetricSnapshot(raw_content_id=raw.id, metrics={"view": 100}, captured_at=now - timedelta(hours=6)),
+            MetricSnapshot(raw_content_id=raw.id, metrics={"view": 900}, captured_at=now - timedelta(minutes=10)),
+        ]
+    )
+    await session.commit()
+
+    captured_sql: list[str] = []
+    engine = session.bind.sync_engine
+
+    def _capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+        captured_sql.append(statement)
+
+    public._official_links_cache.clear()
+    event.listen(engine, "before_cursor_execute", _capture)
+    try:
+        r_highlights = await client.get("/api/highlights", params={"community": "all", "limit": 5})
+        r_overview = await client.get("/api/feeds/overview", params={"community": "wuwa"})
+        r_topic = await client.get("/api/contents", params={"community": "wuwa", "topic": "前瞻"})
+        r_trending = await client.get("/api/trending", params={"community": "wuwa", "hours": 24, "limit": 5})
+        r_links = await client.get("/api/official-links", params={"community": "wuwa"})
+    finally:
+        event.remove(engine, "before_cursor_execute", _capture)
+        public._official_links_cache.clear()
+
+    assert r_highlights.status_code == 200
+    assert [item["external_id"] for item in r_highlights.json()["items"]] == ["highlight-wide-1"]
+    assert r_overview.status_code == 200
+    assert r_overview.json()["total_count"] == 1
+    assert r_topic.status_code == 200
+    assert [item["external_id"] for item in r_topic.json()["items"]] == ["highlight-wide-1"]
+    assert r_trending.status_code == 200
+    assert [item["external_id"] for item in r_trending.json()["items"]] == ["highlight-wide-1"]
+    assert r_links.status_code == 200
+    assert any(item["url"] == "https://example.com/ai-event" for item in r_links.json()["items"])
+
+    forbidden_in_sort = (
+        "raw_contents.raw_json",
+        "sources.raw_json",
+        "content_versions.normalized_json",
+        "content_versions.text",
+        "content_reviews.news",
+        "content_reviews.links",
+        "content_reviews.fulfillment",
+        "metric_snapshots.metrics",
+    )
+    for sql in captured_sql:
+        upper = sql.upper()
+        if "ORDER BY" not in upper or "RAW_CONTENTS" not in upper:
+            continue
+        select_head = sql.split("FROM", 1)[0].lower()
+        for col in forbidden_in_sort:
+            assert col not in select_head, f"Wide column {col} selected in ORDER BY query: {sql}"

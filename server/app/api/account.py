@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from pydantic import BaseModel, Field
 from sqlalchemy import literal, or_, select, func, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.api.auth import get_current_user, sync_hidden_cookie
 from app.clock import utcnow
@@ -543,14 +544,28 @@ async def my_feed(
         or 0
     )
 
-    rows = await session.execute(
-        _join_latest(select(RawContent, Source, ContentVersion))
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(*conditions)
-        .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
-        .limit(limit)
-        .offset(offset)
+    page_ids = list(
+        await session.scalars(
+            _join_latest(select(RawContent.id))
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .where(*conditions)
+            .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
     )
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                _join_latest(select(RawContent, Source, ContentVersion))
+                .options(defer(RawContent.raw_json), defer(Source.raw_json))
+                .join(Source, RawContent.source_id == Source.id, isouter=True)
+                .where(RawContent.id.in_(page_ids))
+            )
+        ).all()
+    } if page_ids else {}
+    rows = [fetched[cid] for cid in page_ids if cid in fetched]
     items: list[PublicContentItem] = []
     for raw, source, version in rows:
         normalized = version.normalized_json or {}

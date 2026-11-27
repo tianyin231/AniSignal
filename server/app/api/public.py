@@ -503,15 +503,21 @@ async def list_contents(
             total = len(verified_ids)
             page_ids = verified_ids[offset : offset + limit]
         elif clean_topic:
-            # 主题/AI 标签存在 JSON 中，在 SQLite（ASCII 转义）与 MySQL 间按候选精确匹配保证一致性
+            # 主题/AI 标签存在 JSON 中，在 SQLite（ASCII 转义）与 MySQL 间按候选精确匹配保证一致性；
+            # 两阶段先取排序后的 ID 再水合 normalized_json，避免大 JSON 进 MySQL sort_buffer
             needle = clean_topic.casefold()
-            cand_query = matching(RawContent.id, ContentVersion.normalized_json, active_conditions=active_conditions)
-            if latest_score is not None:
-                cand_query = cand_query.order_by(func.coalesce(latest_score, 0).desc())
-            cand_rows = list(
-                (await session.execute(cand_query.order_by(published.desc(), RawContent.id.desc()).limit(500))).all()
-            )
-            cand_briefs = await load_briefs_map(session, [cid for cid, _ in cand_rows])
+            cand_ids = list(await session.scalars(ordered_query.limit(500)))
+            norm_map = dict(
+                (
+                    await session.execute(
+                        select(RawContent.id, ContentVersion.normalized_json)
+                        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                        .where(RawContent.id.in_(cand_ids))
+                    )
+                ).all()
+            ) if cand_ids else {}
+            cand_rows = [(cid, norm_map.get(cid)) for cid in cand_ids]
+            cand_briefs = await load_briefs_map(session, cand_ids)
             matched_ids: list[int] = []
             for cid, norm in cand_rows:
                 extra = (norm or {}).get("extra") or {}
@@ -988,15 +994,29 @@ async def personal_rss_feed(
             headers={"Cache-Control": "private, max-age=120"},
         )
 
-    rows = await session.execute(
-        select(RawContent, Source, ContentVersion)
-        .options(defer(RawContent.raw_json))
-        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-        .outerjoin(Source, Source.id == RawContent.source_id)
-        .where(*conditions)
-        .order_by(func.coalesce(RawContent.published_at, RawContent.collected_at).desc(), RawContent.id.desc())
-        .limit(limit)
+    page_ids = list(
+        await session.scalars(
+            select(RawContent.id)
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+            .outerjoin(Source, Source.id == RawContent.source_id)
+            .where(*conditions)
+            .order_by(func.coalesce(RawContent.published_at, RawContent.collected_at).desc(), RawContent.id.desc())
+            .limit(limit)
+        )
     )
+    fetched_rows = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, Source, ContentVersion)
+                .options(defer(RawContent.raw_json), defer(Source.raw_json))
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .outerjoin(Source, Source.id == RawContent.source_id)
+                .where(RawContent.id.in_(page_ids))
+            )
+        ).all()
+    } if page_ids else {}
+    rows = [fetched_rows[cid] for cid in page_ids if cid in fetched_rows]
     items: list[PublicContentItem] = []
     for raw, source, version in rows:
         normalized = (version.normalized_json if version else None) or {}
@@ -1594,21 +1614,36 @@ async def _collect_official_links(session: AsyncSession, community: str) -> list
     from html import unescape
 
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
-    rows = await session.execute(
-        select(RawContent, ContentVersion, Source)
-        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
-        .where(
-            Source.identity == "official",
-            RawContent.hidden.is_(False),
-            RawContent.community == community,
-            ContentReview.links.is_(None),  # AI 已提取过的内容不再走规则回退
-            publication_time >= utcnow() - timedelta(days=30),
+    candidate_ids = list(
+        await session.scalars(
+            select(RawContent.id)
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
+            .where(
+                Source.identity == "official",
+                RawContent.hidden.is_(False),
+                RawContent.community == community,
+                ContentReview.links.is_(None),  # AI 已提取过的内容不再走规则回退
+                publication_time >= utcnow() - timedelta(days=30),
+            )
+            .order_by(publication_time.desc(), RawContent.id.desc())
+            .limit(300)
         )
-        .order_by(publication_time.desc(), RawContent.id.desc())
-        .limit(300)
     )
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, ContentVersion, Source)
+                .options(defer(RawContent.raw_json), defer(Source.raw_json))
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .join(Source, RawContent.source_id == Source.id, isouter=True)
+                .where(RawContent.id.in_(candidate_ids))
+            )
+        ).all()
+    } if candidate_ids else {}
+    rows = [fetched[cid] for cid in candidate_ids if cid in fetched]
     occurrences: dict[str, list[tuple[RawContent, ContentVersion, str]]] = {}
     for raw, version, source in rows:
         raw_text = version.text or str((version.normalized_json or {}).get("text") or "")
@@ -1662,21 +1697,42 @@ async def _ai_official_links(session: AsyncSession, community: str) -> list[dict
     一律不进面板；标签不可读（如官网英文页的 "information"）时回退来源内容标题。
     """
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
-    rows = await session.execute(
-        select(RawContent, ContentReview, ContentVersion)
-        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-        .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .where(
-            Source.identity == "official",
-            ContentReview.links.is_not(None),
-            RawContent.hidden.is_(False),
-            RawContent.community == community,
-            publication_time >= utcnow() - timedelta(days=30),
+    candidate_ids = list(
+        await session.scalars(
+            select(RawContent.id)
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+            .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .where(
+                Source.identity == "official",
+                ContentReview.links.is_not(None),
+                RawContent.hidden.is_(False),
+                RawContent.community == community,
+                publication_time >= utcnow() - timedelta(days=30),
+            )
+            .order_by(publication_time.desc(), RawContent.id.desc())
+            .limit(300)
         )
-        .order_by(publication_time.desc(), RawContent.id.desc())
-        .limit(300)
     )
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, ContentReview, ContentVersion)
+                .options(
+                    defer(RawContent.raw_json),
+                    defer(ContentVersion.text),
+                    defer(ContentVersion.normalized_json),
+                    defer(ContentReview.fulfillment),
+                    defer(ContentReview.news),
+                )
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
+                .where(RawContent.id.in_(candidate_ids))
+            )
+        ).all()
+    } if candidate_ids else {}
+    rows = [fetched[cid] for cid in candidate_ids if cid in fetched]
     items: list[dict] = []
     seen: set[str] = set()
     from html import unescape
@@ -1941,19 +1997,29 @@ async def feed_overview(
             .where(RawContent.community == community, RawContent.hidden.is_(False))
         ) or 0
 
-        rows = (
-            await session.execute(
-                select(RawContent, Source.name, ContentVersion)
-                .options(defer(RawContent.raw_json))
+        ids = list(
+            await session.scalars(
+                select(RawContent.id)
                 .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-                .outerjoin(Source, Source.id == RawContent.source_id)
                 .where(RawContent.community == community, RawContent.hidden.is_(False))
                 .order_by(pub_ts.desc(), RawContent.id.desc())
                 .limit(120)
             )
-        ).all()
+        )
+        fetched = {
+            row[0].id: row
+            for row in (
+                await session.execute(
+                    select(RawContent, Source.name, ContentVersion)
+                    .options(defer(RawContent.raw_json))
+                    .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                    .outerjoin(Source, Source.id == RawContent.source_id)
+                    .where(RawContent.id.in_(ids))
+                )
+            ).all()
+        } if ids else {}
+        rows = [fetched[cid] for cid in ids if cid in fetched]
 
-        ids = [raw.id for raw, _, _ in rows]
         metrics_map = await _latest_metrics(session, ids)
         briefs_map = await load_briefs_map(session, ids)
 

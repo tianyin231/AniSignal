@@ -8,6 +8,7 @@
 
 - **SQLAlchemy `Result` 只能迭代一次**：需要对查询结果多趟遍历（如先按分区分组再过滤）时，务必先 `list()` / `.all()` 物化。
 - **防止隐式笛卡尔积**：在 `WHERE` 子句中引用关联表（如 `ContentReview`）时，必须在查询中显式 `.join()`，否则结果集与 `total` 会成倍膨胀。
+- **MySQL 排序缓冲区防溢出（1038 `Out of sort memory`）**：凡涉及 `RawContent` 关联 `ContentVersion` / `ContentReview` / `Source` 且带非索引表达式排序（如 `ORDER BY COALESCE(published_at, collected_at) DESC, id DESC LIMIT N`）的查询，严禁直接把宽表 ORM 实体或大 `JSON`/`TEXT` 列放进同一条带 `ORDER BY` 的 `SELECT`；一律采用**两阶段查 ID**——首查仅 `SELECT RawContent.id` 排序截断，次查按 `RawContent.id.in_(ids)`（无 `ORDER BY`）配合 `defer(...)` 跳过未用大字段并在 Python 按首查顺序重排。
 - **FastAPI `Query` 可空正则**：筛选参数默认值为 `""` 且带 `pattern` 时，正则须写成 `^(|a|b)$`（写成 `^(a|b)$` 会导致空筛选返回 422）。
 - **单测直接调用 FastAPI 端点函数**：绕过路由直接调用 handler 时，`Query(...)` 默认对象不会被解析，须显式传入全部参数。
 - **多入口共享配置字段保护**：`/api/admin/settings/ai` 与 `/api/admin/ai/config` 共享同一份 `site_settings("ai")`；新增配置字段时，所有写入路径必须保留未传字段，避免误清空密钥池或定价配置。

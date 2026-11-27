@@ -345,7 +345,14 @@ def _event_matches_preferences(user: User, event: Event) -> bool:
 
 async def _event_sources(session: AsyncSession, event_id: int) -> list[dict]:
     rows = await session.execute(
-        select(RawContent, ContentVersion, Source.name)
+        select(
+            RawContent.id,
+            RawContent.external_id,
+            RawContent.platform,
+            RawContent.url,
+            ContentVersion.title,
+            Source.name,
+        )
         .join(Evidence, Evidence.raw_content_id == RawContent.id)
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(Source, Source.id == RawContent.source_id)
@@ -359,12 +366,12 @@ async def _event_sources(session: AsyncSession, event_id: int) -> list[dict]:
     )
     return [
         {
-            "id": raw.id,
-            "title": version.title or raw.external_id,
-            "source": source_name or raw.platform,
-            "url": _safe_url(raw.url),
+            "id": raw_id,
+            "title": title or external_id,
+            "source": source_name or platform,
+            "url": _safe_url(url),
         }
-        for raw, version, source_name in rows
+        for raw_id, external_id, platform, url, title, source_name in rows
     ]
 
 

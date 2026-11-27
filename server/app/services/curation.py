@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.communities import (
@@ -440,10 +441,9 @@ async def select_trending(
     first_view = func.coalesce(first_snapshot.view_count, 0)
     last_view = func.coalesce(last_snapshot.view_count, 0)
     delta = last_view - first_view
-    query = (
-        select(delta.label("delta_view"), last_snapshot.metrics, RawContent,
-               Source.name, Source.identity, ContentVersion)
-        .options(defer(RawContent.raw_json))
+    # 两阶段查 ID：ORDER BY 仅在排序缓冲区放整数字段，避免 MySQL 256 KiB sort_buffer 溢出（1038）
+    id_query = (
+        select(delta.label("delta_view"), last_snapshot.id.label("last_snap_id"), RawContent.id)
         .select_from(snap_sq)
         .join(first_snapshot, first_snapshot.id == snap_sq.c.first_id)
         .join(last_snapshot, last_snapshot.id == snap_sq.c.last_id)
@@ -454,12 +454,42 @@ async def select_trending(
         .order_by(delta.desc(), RawContent.id.desc())
     )
     if item_filter is None:
-        query = query.limit(limit)
-    # 按热度顺序分批过滤，取够符合订阅的条目再停止，避免先取榜首而漏掉结果。
-    rows = await session.stream(query.execution_options(yield_per=100))
+        id_query = id_query.limit(limit)
+    ranked = list((await session.execute(id_query)).all())
     items: list[dict] = []
-    try:
-        async for delta_view, metrics, raw, source_name, source_identity, version in rows:
+    # 按热度顺序分批水合与过滤，取够符合订阅的条目再停止，避免先取榜首而漏掉结果。
+    chunk_size = 100
+    for start in range(0, len(ranked), chunk_size):
+        chunk = ranked[start : start + chunk_size]
+        chunk_ids = [cid for _d, _sid, cid in chunk]
+        snap_ids = [sid for _d, sid, _cid in chunk]
+        hydrated = {
+            row[0].id: row
+            for row in (
+                await session.execute(
+                    select(RawContent, Source.name, Source.identity, ContentVersion)
+                    .options(defer(RawContent.raw_json))
+                    .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                    .join(Source, RawContent.source_id == Source.id, isouter=True)
+                    .where(RawContent.id.in_(chunk_ids))
+                )
+            ).all()
+        }
+        snaps = dict(
+            (
+                await session.execute(
+                    select(MetricSnapshot.id, MetricSnapshot.metrics).where(
+                        MetricSnapshot.id.in_(snap_ids)
+                    )
+                )
+            ).all()
+        )
+        for delta_view, last_snap_id, cid in chunk:
+            pair = hydrated.get(cid)
+            if pair is None:
+                continue
+            raw, source_name, source_identity, version = pair
+            metrics = snaps.get(last_snap_id)
             normalized = version.normalized_json if version else None
             media = (normalized or {}).get("media") or []
             text = (version.text if version else None) or str((normalized or {}).get("text") or "")
@@ -491,9 +521,7 @@ async def select_trending(
             if item_filter is None or item_filter({**item, "text": text}):
                 items.append(item)
                 if len(items) == limit:
-                    break
-    finally:
-        await rows.close()
+                    return items
     return items
 
 
@@ -503,22 +531,46 @@ async def select_highlights(
 ) -> list[dict]:
     """返回官方与社区混排精选；AI 结果缺失时使用可解释的规则分数。"""
     publication_time = func.coalesce(RawContent.published_at, RawContent.collected_at)
-    rows = list(
-        await session.execute(
-            select(RawContent, Source, ContentVersion, ContentReview)
+    # 两阶段查 ID：首查仅排序 RawContent.id，避免 4 表宽行 JSON/TEXT 撑爆 MySQL sort_buffer（1038）
+    candidate_ids = list(
+        await session.scalars(
+            select(RawContent.id)
             .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
-        .where(
-            publication_time >= utcnow() - HIGHLIGHT_WINDOW,
-            RawContent.hidden.is_(False),
-            *community_conditions(RawContent.community, community, exclude),
-            *where,
-        )
-        .order_by(publication_time.desc(), RawContent.id.desc())
-        .limit(200)
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
+            .where(
+                publication_time >= utcnow() - HIGHLIGHT_WINDOW,
+                RawContent.hidden.is_(False),
+                *community_conditions(RawContent.community, community, exclude),
+                *where,
+            )
+            .order_by(publication_time.desc(), RawContent.id.desc())
+            .limit(200)
         )
     )
+    if not candidate_ids:
+        return []
+
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, Source, ContentVersion, ContentReview)
+                .options(
+                    defer(RawContent.raw_json),
+                    defer(Source.raw_json),
+                    defer(ContentReview.links),
+                    defer(ContentReview.fulfillment),
+                    defer(ContentReview.news),
+                )
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .join(Source, RawContent.source_id == Source.id, isouter=True)
+                .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
+                .where(RawContent.id.in_(candidate_ids))
+            )
+        ).all()
+    }
+    rows = [fetched[cid] for cid in candidate_ids if cid in fetched]
     if not rows:
         return []
 

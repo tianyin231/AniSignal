@@ -89,25 +89,40 @@ async def list_news(
         result["sources"] = await _monitoring_sources(session, result["sources"])
         return result
     news = ContentReview.news
-    query = (await approved_news_query(session)).where(RawContent.published_at >= utcnow() - timedelta(hours=hours))
+    id_query = (await approved_news_query(session, only_ids=True)).where(
+        RawContent.published_at >= utcnow() - timedelta(hours=hours)
+    )
     if blocked:
-        query = query.where(RawContent.platform.notin_(blocked))
+        id_query = id_query.where(RawContent.platform.notin_(blocked))
     if kind != "all":
-        query = query.where(news["kind"].as_string() == kind)
+        id_query = id_query.where(news["kind"].as_string() == kind)
     if topic:
         # JSON 文本查询同时兼容 SQLite 开发库和 MySQL；词表限定可避免用户通配符。
-        query = query.where(news["topics"].as_string().contains(f'"{topic}"', autoescape=True))
+        id_query = id_query.where(news["topics"].as_string().contains(f'"{topic}"', autoescape=True))
     if q.strip():
-        query = query.where(or_(
+        id_query = id_query.where(or_(
             ContentVersion.title.icontains(q.strip(), autoescape=True),
             ContentVersion.text.icontains(q.strip(), autoescape=True),
             news["headline"].as_string().icontains(q.strip(), autoescape=True),
             Source.name.icontains(q.strip(), autoescape=True),
         ))
-    total = await session.scalar(select(func.count()).select_from(query.subquery())) or 0
-    rows = (await session.execute(query.order_by(
-        RawContent.published_at.desc(), RawContent.id.desc(),
-    ).limit(limit).offset(offset))).all()
+    total = await session.scalar(select(func.count()).select_from(id_query.subquery())) or 0
+    page_ids = list(
+        await session.scalars(
+            id_query.order_by(RawContent.published_at.desc(), RawContent.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    )
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                (await approved_news_query(session)).where(RawContent.id.in_(page_ids))
+            )
+        ).all()
+    } if page_ids else {}
+    rows = [fetched[cid] for cid in page_ids if cid in fetched]
     items = []
     for raw, version, source, review in rows:
         value = review.news

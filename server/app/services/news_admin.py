@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.collectors.rss import public_feed_url, rss_id
@@ -117,7 +118,7 @@ async def content_row(session, key):
 
 
 async def content_search(session, q):
-    query = select(RawContent, ContentVersion, ContentReview, Source).join(
+    id_query = select(RawContent.id).join(
         ContentVersion, ContentVersion.id == RawContent.latest_version_id
     ).outerjoin(
         ContentReview, ContentReview.raw_content_id == RawContent.id
@@ -126,9 +127,30 @@ async def content_search(session, q):
         alias = await session.get(NewsArchive, ("article", q))
         match = re.fullmatch(r"(?:as|content)-(\d+)", q)
         rid = alias.raw_content_id if alias else int(match[1]) if match else -1
-        query = query.where(or_(ContentVersion.title.icontains(q, autoescape=True), RawContent.url.icontains(q, autoescape=True),
+        id_query = id_query.where(or_(ContentVersion.title.icontains(q, autoescape=True), RawContent.url.icontains(q, autoescape=True),
             RawContent.id == rid))
-    rows = (await session.execute(query.order_by(RawContent.collected_at.desc()).limit(50))).all()
+    page_ids = list(await session.scalars(id_query.order_by(RawContent.collected_at.desc()).limit(50)))
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, ContentVersion, ContentReview, Source)
+                .options(
+                    defer(RawContent.raw_json),
+                    defer(ContentVersion.text),
+                    defer(ContentVersion.normalized_json),
+                    defer(Source.raw_json),
+                    defer(ContentReview.links),
+                    defer(ContentReview.fulfillment),
+                )
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
+                .outerjoin(Source, Source.id == RawContent.source_id)
+                .where(RawContent.id.in_(page_ids))
+            )
+        ).all()
+    } if page_ids else {}
+    rows = [fetched[cid] for cid in page_ids if cid in fetched]
     aliases = await native_news.article_aliases(session, [row.id for row, _, _, _ in rows])
     return {"rows": [{"id": aliases[raw.id].key if raw.id in aliases else f"content-{raw.id}", "title": version.title,
         "source": source.name if source else "来源未署名", "processing_state": "reviewed" if review else "pending",

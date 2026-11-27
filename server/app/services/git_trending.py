@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.models import ContentVersion, GitTrendingEdition, RawContent
@@ -329,9 +330,9 @@ async def get_trending_editions_view(
         )
 
     # 顺带读取同分区最新的主仓库 Release，供刊物边栏展示
-    release_rows = (
-        await session.execute(
-            select(RawContent, ContentVersion)
+    release_ids = list(
+        await session.scalars(
+            select(RawContent.id)
             .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
             .where(
                 RawContent.community == community,
@@ -341,7 +342,19 @@ async def get_trending_editions_view(
             .order_by(desc(RawContent.published_at), desc(RawContent.id))
             .limit(4)
         )
-    ).all()
+    )
+    fetched_releases = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, ContentVersion)
+                .options(defer(RawContent.raw_json), defer(ContentVersion.text))
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .where(RawContent.id.in_(release_ids))
+            )
+        ).all()
+    } if release_ids else {}
+    release_rows = [fetched_releases[cid] for cid in release_ids if cid in fetched_releases]
     releases = [
         {
             "id": raw.id,

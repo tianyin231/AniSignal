@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import format_beijing, utcnow
 from app.communities import DEFAULT_COMMUNITY, crosstalk_names, ensure_communities_synced, get_community
@@ -491,15 +492,34 @@ async def summarize_event(
 
     config = config_for_task(await get_ai_config(session), "summarize_event")
 
-    rows = await session.execute(
-        select(RawContent, ContentVersion, Evidence, Source)
-        .join(Evidence, Evidence.raw_content_id == RawContent.id)
-        .outerjoin(Source, Source.id == RawContent.source_id)
-        .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-        .where(Evidence.event_id == event_id, Evidence.role != "excluded", RawContent.hidden.is_(False))
-        .order_by(RawContent.published_at.asc())
-        .limit(8)
+    ev_raw_ids = list(
+        await session.scalars(
+            select(RawContent.id)
+            .join(Evidence, Evidence.raw_content_id == RawContent.id)
+            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+            .where(Evidence.event_id == event_id, Evidence.role != "excluded", RawContent.hidden.is_(False))
+            .order_by(RawContent.published_at.asc(), RawContent.id.asc())
+            .limit(8)
+        )
     )
+    fetched_ev = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, ContentVersion, Evidence, Source)
+                .options(
+                    defer(RawContent.raw_json),
+                    defer(Source.raw_json),
+                    defer(ContentVersion.normalized_json),
+                )
+                .join(Evidence, Evidence.raw_content_id == RawContent.id)
+                .outerjoin(Source, Source.id == RawContent.source_id)
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .where(Evidence.event_id == event_id, RawContent.id.in_(ev_raw_ids))
+            )
+        ).all()
+    } if ev_raw_ids else {}
+    rows = [fetched_ev[cid] for cid in ev_raw_ids if cid in fetched_ev]
     evidences = []
     identities = []
     evidence_context = [event.title]
@@ -668,23 +688,48 @@ async def assess_product_stage(session: AsyncSession, product_id: int) -> dict:
     if not await check_ai_budget(session, config):
         return {"status": "deferred", "reason": "daily_budget_exceeded"}
 
-    rows = list(
-        await session.execute(
-            select(RawContent, ContentVersion, Event, Source)
-            .join(Evidence, Evidence.raw_content_id == RawContent.id)
-            .join(Event, Evidence.event_id == Event.id)
-            .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
-            .join(Source, RawContent.source_id == Source.id, isouter=True)
-            .where(
-                Event.product_id == product_id,
-                Event.is_active.is_(True),
-                Event.category.in_(["unboxing", "arrived"]),
-                Evidence.role != "excluded",
+    pair_ids = list(
+        (
+            await session.execute(
+                select(RawContent.id, Event.id)
+                .join(Evidence, Evidence.raw_content_id == RawContent.id)
+                .join(Event, Evidence.event_id == Event.id)
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .where(
+                    Event.product_id == product_id,
+                    Event.is_active.is_(True),
+                    Event.category.in_(["unboxing", "arrived"]),
+                    Evidence.role != "excluded",
+                )
+                .order_by(RawContent.published_at.desc(), RawContent.id.desc())
+                .limit(30)
             )
-            .order_by(RawContent.published_at.desc(), RawContent.id.desc())
-            .limit(30)
-        )
+        ).all()
     )
+    if pair_ids:
+        raw_ids = list(dict.fromkeys(rid for rid, _eid in pair_ids))
+        event_ids = list(dict.fromkeys(eid for _rid, eid in pair_ids))
+        fetched_pairs = {
+            (row[0].id, row[2].id): row
+            for row in (
+                await session.execute(
+                    select(RawContent, ContentVersion, Event, Source)
+                    .options(
+                        defer(RawContent.raw_json),
+                        defer(Source.raw_json),
+                        defer(ContentVersion.normalized_json),
+                    )
+                    .join(Evidence, Evidence.raw_content_id == RawContent.id)
+                    .join(Event, Evidence.event_id == Event.id)
+                    .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                    .join(Source, RawContent.source_id == Source.id, isouter=True)
+                    .where(RawContent.id.in_(raw_ids), Event.id.in_(event_ids))
+                )
+            ).all()
+        }
+        rows = [fetched_pairs[pair] for pair in pair_ids if pair in fetched_pairs]
+    else:
+        rows = []
 
     candidates: list[dict] = []
     candidate_accounts: dict[int, str] = {}

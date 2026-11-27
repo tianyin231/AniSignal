@@ -229,8 +229,8 @@ async def discover_merch_candidates(
     if not await check_ai_budget(session, config):
         return {"scanned": 0, "created": 0, "skipped_reason": "daily_budget_exceeded"}
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
-    rows = list(await session.execute(
-        select(RawContent, ContentVersion, Source)
+    content_versions = list(await session.execute(
+        select(RawContent.id, ContentVersion.version)
         .join(Source, Source.id == RawContent.source_id)
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(MerchScan, MerchScan.raw_content_id == RawContent.id)
@@ -250,7 +250,6 @@ async def discover_merch_candidates(
     ))
     created = 0
     scanned = 0
-    content_versions = [(raw.id, version.version) for raw, version, _source in rows]
     for raw_id, version_number in content_versions:
         raw = await session.get(RawContent, raw_id, populate_existing=True)
         version = await session.scalar(select(ContentVersion).where(

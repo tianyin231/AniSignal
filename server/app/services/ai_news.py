@@ -116,7 +116,7 @@ def reference_links(text: str) -> list[dict]:
     return links
 
 
-async def approved_news_query(session: AsyncSession, *, include_archived=False):
+async def approved_news_query(session: AsyncSession, *, include_archived=False, only_ids: bool = False):
     """网页和机器人共用准入条件，不能拿旧版本的审核结果推送新正文。"""
     from app.services.settings import get_media_visibility, hidden_platforms
 
@@ -126,8 +126,17 @@ async def approved_news_query(session: AsyncSession, *, include_archived=False):
     if include_archived:
         # 旧引擎已公开、但已退出资讯池的文章仍保留详情；不进入列表或机器人候选。
         approved = or_(approved, news["imported_publication"]["visibility"].as_string() == "public")
-    query = (select(RawContent, ContentVersion, Source, ContentReview)
-        .options(defer(RawContent.raw_json), defer(ContentVersion.normalized_json))
+    base = (
+        select(RawContent.id)
+        if only_ids
+        else select(RawContent, ContentVersion, Source, ContentReview).options(
+            defer(RawContent.raw_json),
+            defer(ContentVersion.normalized_json),
+            defer(ContentReview.links),
+            defer(ContentReview.fulfillment),
+        )
+    )
+    query = (base
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(Source, Source.id == RawContent.source_id)
         .join(ContentReview, ContentReview.raw_content_id == RawContent.id)
@@ -187,9 +196,8 @@ async def raw_news_feed(
         .scalar_subquery()
     )
     ts = func.coalesce(RawContent.published_at, RawContent.collected_at)
-    query = (
-        select(RawContent, ContentVersion, Source, ContentReview)
-        .options(defer(RawContent.raw_json))
+    id_query = (
+        select(RawContent.id)
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(Source, Source.id == RawContent.source_id)
         .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
@@ -214,13 +222,13 @@ async def raw_news_feed(
     )
     hidden = set(hidden_platforms(await get_media_visibility(session))) | set(exclude_platforms)
     if hidden:
-        query = query.where(RawContent.platform.notin_(sorted(hidden)))
+        id_query = id_query.where(RawContent.platform.notin_(sorted(hidden)))
     if kind == "rumor":
-        query = query.where(review_current, news["kind"].as_string() == "rumor")
+        id_query = id_query.where(review_current, news["kind"].as_string() == "rumor")
     elif kind == "report":
-        query = query.where(or_(~review_current, news["kind"].as_string() == "report"))
+        id_query = id_query.where(or_(~review_current, news["kind"].as_string() == "report"))
     if topic:
-        query = query.where(
+        id_query = id_query.where(
             or_(
                 and_(review_current, news["topics"].as_string().contains(f'"{topic}"', autoescape=True)),
                 ContentVersion.title.icontains(topic, autoescape=True),
@@ -229,7 +237,7 @@ async def raw_news_feed(
         )
     if q.strip():
         needle = q.strip()
-        query = query.where(
+        id_query = id_query.where(
             or_(
                 ContentVersion.title.icontains(needle, autoescape=True),
                 ContentVersion.text.icontains(needle, autoescape=True),
@@ -237,12 +245,31 @@ async def raw_news_feed(
                 Source.name.icontains(needle, autoescape=True),
             )
         )
-    total = await session.scalar(select(func.count()).select_from(query.subquery())) or 0
-    rows = (
-        await session.execute(
-            query.order_by(ts.desc(), RawContent.id.desc()).limit(limit).offset(offset)
+    total = await session.scalar(select(func.count()).select_from(id_query.subquery())) or 0
+    page_ids = list(
+        await session.scalars(
+            id_query.order_by(ts.desc(), RawContent.id.desc()).limit(limit).offset(offset)
         )
-    ).all()
+    )
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, ContentVersion, Source, ContentReview)
+                .options(
+                    defer(RawContent.raw_json),
+                    defer(Source.raw_json),
+                    defer(ContentReview.links),
+                    defer(ContentReview.fulfillment),
+                )
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .outerjoin(Source, Source.id == RawContent.source_id)
+                .outerjoin(ContentReview, ContentReview.raw_content_id == RawContent.id)
+                .where(RawContent.id.in_(page_ids))
+            )
+        ).all()
+    } if page_ids else {}
+    rows = [fetched[cid] for cid in page_ids if cid in fetched]
     items: list[dict] = []
     for raw, version, source, review in rows:
         is_approved = bool(
@@ -331,14 +358,27 @@ async def load_bot_news(session: AsyncSession, keywords, start_at, end_at, *, co
     from app.services import aihot
     if aihot.enabled():
         return await aihot.bot_items(keywords, start_at, end_at, collected_after=collected_after)
-    query = (await approved_news_query(session)).where(
+    id_query = (await approved_news_query(session, only_ids=True)).where(
         RawContent.published_at >= start_at, RawContent.published_at < end_at,
         ContentReview.updated_at < end_at,
     )
     if collected_after:
         # 审核异步完成；按审核时间扫增量，避免采集后先扫过、审核后再也收不到。
-        query = query.where(ContentReview.updated_at > collected_after)
-    rows = (await session.execute(query.order_by(RawContent.published_at.desc(), RawContent.id.desc()).limit(200))).all()
+        id_query = id_query.where(ContentReview.updated_at > collected_after)
+    candidate_ids = list(
+        await session.scalars(
+            id_query.order_by(RawContent.published_at.desc(), RawContent.id.desc()).limit(200)
+        )
+    )
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                (await approved_news_query(session)).where(RawContent.id.in_(candidate_ids))
+            )
+        ).all()
+    } if candidate_ids else {}
+    rows = [fetched[cid] for cid in candidate_ids if cid in fetched]
     items = []
     for raw, version, source, review in rows:
         news = review.news

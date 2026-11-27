@@ -445,9 +445,8 @@ async def _tool_search_signals(session: AsyncSession, ctx: McpContext, args: dic
         if search_cond is not None:
             conditions.append(search_cond)
 
-    stmt = (
-        select(RawContent, Source.name, Source.identity, ContentVersion)
-        .options(defer(RawContent.raw_json))
+    id_stmt = (
+        select(RawContent.id)
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
         .outerjoin(Source, Source.id == RawContent.source_id)
         .where(*conditions)
@@ -463,11 +462,24 @@ async def _tool_search_signals(session: AsyncSession, ctx: McpContext, args: dic
             .correlate(RawContent)
             .scalar_subquery()
         )
-        stmt = stmt.order_by(func.coalesce(latest_view, 0).desc(), RawContent.id.desc())
+        id_stmt = id_stmt.order_by(func.coalesce(latest_view, 0).desc(), RawContent.id.desc())
     else:
-        stmt = stmt.order_by(func.coalesce(RawContent.published_at, RawContent.collected_at).desc(), RawContent.id.desc())
+        id_stmt = id_stmt.order_by(func.coalesce(RawContent.published_at, RawContent.collected_at).desc(), RawContent.id.desc())
 
-    rows = list((await session.execute(stmt.limit(limit * 2))).all())
+    cand_ids = list(await session.scalars(id_stmt.limit(limit * 2)))
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, Source.name, Source.identity, ContentVersion)
+                .options(defer(RawContent.raw_json), defer(ContentVersion.normalized_json))
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .outerjoin(Source, Source.id == RawContent.source_id)
+                .where(RawContent.id.in_(cand_ids))
+            )
+        ).all()
+    } if cand_ids else {}
+    rows = [fetched[cid] for cid in cand_ids if cid in fetched]
     excluded_kw = ctx.excluded_keywords
     filtered = []
     for row in rows:
@@ -1093,23 +1105,37 @@ async def _tool_get_my_watch_feed(session: AsyncSession, ctx: McpContext, args: 
     sections: list[str] = []
     if keywords:
         title_conds = [func.lower(ContentVersion.title).contains(k.keyword.lower(), autoescape=True) for k in keywords]
-        rows = list(
-            (
+        page_ids = list(
+            await session.scalars(
+                select(RawContent.id)
+                .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
+                .outerjoin(Source, Source.id == RawContent.source_id)
+                .where(
+                    or_(*title_conds),
+                    RawContent.hidden.is_(False),
+                    *preference_conditions(ctx.user.feed_preferences),
+                )
+                .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
+                .limit(limit)
+            )
+        )
+        fetched = {
+            row[0].id: row
+            for row in (
                 await session.execute(
                     select(RawContent, Source.name, ContentVersion)
-                    .options(defer(RawContent.raw_json))
+                    .options(
+                        defer(RawContent.raw_json),
+                        defer(ContentVersion.text),
+                        defer(ContentVersion.normalized_json),
+                    )
                     .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
                     .outerjoin(Source, Source.id == RawContent.source_id)
-                    .where(
-                        or_(*title_conds),
-                        RawContent.hidden.is_(False),
-                        *preference_conditions(ctx.user.feed_preferences),
-                    )
-                    .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
-                    .limit(limit)
+                    .where(RawContent.id.in_(page_ids))
                 )
             ).all()
-        )
+        } if page_ids else {}
+        rows = [fetched[cid] for cid in page_ids if cid in fetched]
         kw_lines = [f"### 我的关键词关注流（启用词：{', '.join(k.keyword for k in keywords)}）"]
         if not rows:
             kw_lines.append("暂无命中关注词的新内容。")

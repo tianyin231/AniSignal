@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.clock import utcnow
 from app.communities import (
@@ -857,16 +858,31 @@ async def list_contents(
             if term:
                 core_terms.add(term)
 
-    # 分级筛选时全量扫描后 Python 过滤分页（SQL offset 会漏掉窗口外的匹配行）
-    rows = await session.execute(
-        select(RawContent, Source.name)
-        .join(Source, RawContent.source_id == Source.id, isouter=True)
-        .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
-        .where(*conditions)
-        .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
-        .limit(2000 if tier is not None else limit)
-        .offset(0 if tier is not None else offset)
+    # 分级筛选时全量扫描后 Python 过滤分页（SQL offset 会漏掉窗口外的匹配行）；
+    # 两阶段先查 ID 再水合，避免 RawContent.raw_json 撑爆 MySQL sort_buffer
+    page_ids = list(
+        await session.scalars(
+            select(RawContent.id)
+            .join(Source, RawContent.source_id == Source.id, isouter=True)
+            .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
+            .where(*conditions)
+            .order_by(RawContent.collected_at.desc(), RawContent.id.desc())
+            .limit(2000 if tier is not None else limit)
+            .offset(0 if tier is not None else offset)
+        )
     )
+    fetched = {
+        row[0].id: row
+        for row in (
+            await session.execute(
+                select(RawContent, Source.name)
+                .options(defer(RawContent.raw_json))
+                .join(Source, RawContent.source_id == Source.id, isouter=True)
+                .where(RawContent.id.in_(page_ids))
+            )
+        ).all()
+    } if page_ids else {}
+    rows = [fetched[cid] for cid in page_ids if cid in fetched]
     all_items = []
     content_tiers: dict[int, str] = {}
     for raw, name in rows:
@@ -882,12 +898,23 @@ async def list_contents(
             continue
         all_items.append((raw, name, content_tier))
         content_tiers[raw.id] = content_tier
-    content_ids = [raw.id for raw, _, _ in all_items]
+    if tier is not None:
+        total = len(all_items)
+        page_items = all_items[offset:offset + limit]
+    else:
+        page_items = all_items
+    content_ids = [raw.id for raw, _, _ in page_items]
 
     reviews: dict[int, ContentReview] = {}
     if content_ids:
         review_rows = await session.execute(
-            select(ContentReview).where(ContentReview.raw_content_id.in_(content_ids))
+            select(ContentReview)
+            .options(
+                defer(ContentReview.links),
+                defer(ContentReview.fulfillment),
+                defer(ContentReview.news),
+            )
+            .where(ContentReview.raw_content_id.in_(content_ids))
         )
         reviews = {row.raw_content_id: row for row in review_rows.scalars()}
 
@@ -896,6 +923,7 @@ async def list_contents(
     if content_ids:
         version_rows = await session.execute(
             select(ContentVersion)
+            .options(defer(ContentVersion.text), defer(ContentVersion.normalized_json))
             .where(ContentVersion.raw_content_id.in_(content_ids))
             .order_by(ContentVersion.raw_content_id, ContentVersion.version.desc())
         )
@@ -909,7 +937,7 @@ async def list_contents(
         for snapshot in snapshot_rows.scalars():
             latest_metrics.setdefault(snapshot.raw_content_id, snapshot.metrics)
 
-    matched_keyword_map = {raw.id: (raw.matched_keywords or [])[:8] for raw, _, _ in all_items}
+    matched_keyword_map = {raw.id: (raw.matched_keywords or [])[:8] for raw, _, _ in page_items}
     items = [
         ContentItemOut(
             id=raw.id,
@@ -940,13 +968,10 @@ async def list_contents(
                 else None
             ),
         )
-        for raw, name, content_tier in all_items
+        for raw, name, content_tier in page_items
     ]
 
-    if tier is not None:
-        total = len(items)
-        items = items[offset:offset + limit]
-    else:
+    if tier is None:
         total = await session.scalar(
             select(func.count(RawContent.id))
             .join(ContentReview, ContentReview.raw_content_id == RawContent.id, isouter=True)
