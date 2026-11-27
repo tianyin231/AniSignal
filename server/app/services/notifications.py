@@ -168,7 +168,9 @@ async def load_candidates(
     if keywords == [] or content_ids == []:
         return []
     published = func.coalesce(RawContent.published_at, RawContent.collected_at)
-    feed_partitions = feed_community_keys()
+    # 独立主题流默认不混入全站早报，管理端显式勾选「纳入早报与汇总」后才放行。
+    from app.communities import get_community
+    excluded_feeds = tuple(k for k in feed_community_keys() if not get_community(k).include_in_digest)
     id_query = (
         select(RawContent.id)
         .join(ContentVersion, ContentVersion.id == RawContent.latest_version_id)
@@ -179,7 +181,7 @@ async def load_candidates(
             published >= start_at,
             published < end_at,
             RawContent.platform != "xiaoheihe",
-            *([RawContent.community.notin_(feed_partitions)] if feed_partitions else []),
+            *([RawContent.community.notin_(excluded_feeds)] if excluded_feeds else []),
             *preference_conditions(preferences),
             *([RawContent.community == community] if community != "all" else []),
             *([RawContent.collected_at > collected_after] if collected_after else []),

@@ -29,6 +29,7 @@ interface AiConfig {
 const TASK_MODEL_FIELDS: Array<{ key: string; label: string; hint: string }> = [
   { key: 'review_content', label: '内容初审', hint: '调用量最高，可指派轻量便宜模型' },
   { key: 'brief_content', label: '内容解读', hint: '开源项目与主题流中文一句话定位与摘要' },
+  { key: 'periodic_report', label: '周期报告', hint: '日报与周报主题聚类与总览' },
   { key: 'translate_content', label: '内容翻译', hint: '外语公告/YouTube 机翻' },
   { key: 'summarize_event', label: '事件摘要', hint: '官方事件核心摘要' },
   { key: 'extract_entities', label: '日程/官方码抽取', hint: '结构化日期与兑换码提取' },
@@ -95,6 +96,7 @@ onMounted(() => refresh())
 const TASK_LABELS: Record<string, string> = {
   review_content: '内容初审',
   brief_content: '内容解读',
+  periodic_report: '周期报告',
   summarize_event: '事件摘要',
   translate_content: '内容翻译',
   assess_product: '商品履约判断',

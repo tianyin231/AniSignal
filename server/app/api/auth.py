@@ -315,6 +315,11 @@ async def _current_user(request: Request, session: AsyncSession) -> User | None:
     return await get_user_by_token(session, token)
 
 
+async def get_optional_user(request: Request, session: AsyncSession = Depends(get_session)) -> User | None:
+    """FastAPI 依赖：登录可选的公开/混合端点使用。"""
+    return await _current_user(request, session)
+
+
 async def get_current_user(request: Request, session: AsyncSession = Depends(get_session)) -> User:
     """FastAPI 依赖：需要登录的端点使用。"""
     user = await _current_user(request, session)

@@ -206,6 +206,7 @@ const communityForm = reactive({
   color: 'blue' as SiteCommunityItem['color'],
   domain: 'feed' as SiteCommunityItem['domain'],
   ai_summary: false,
+  include_in_digest: false,
   official_bili_mid: '',
   aliases: '',
 })
@@ -220,7 +221,7 @@ async function loadCommunities() {
 
 function resetCommunityForm() {
   editingCommunityKey.value = null
-  Object.assign(communityForm, { key: '', label: '', en: '', color: 'blue', domain: 'feed', ai_summary: false, official_bili_mid: '', aliases: '' })
+  Object.assign(communityForm, { key: '', label: '', en: '', color: 'blue', domain: 'feed', ai_summary: false, include_in_digest: false, official_bili_mid: '', aliases: '' })
 }
 
 function startEditCommunity(row: AdminCommunityRow) {
@@ -233,6 +234,7 @@ function startEditCommunity(row: AdminCommunityRow) {
     color: row.color,
     domain: row.domain || 'game',
     ai_summary: Boolean(row.ai_summary),
+    include_in_digest: Boolean(row.include_in_digest),
     official_bili_mid: row.official_bili_mid || '',
     aliases: (row.aliases || []).join('，'),
   })
@@ -252,6 +254,7 @@ async function saveCommunity() {
     color: communityForm.color,
     domain: communityForm.domain,
     ai_summary: communityForm.domain === 'feed' ? Boolean(communityForm.ai_summary) : false,
+    include_in_digest: communityForm.domain === 'feed' ? Boolean(communityForm.include_in_digest) : false,
     official_bili_mid: communityForm.official_bili_mid.trim() || null,
     aliases: communityForm.aliases.split(/[,，]/).map(s => s.trim()).filter(Boolean),
     active: editingCommunity.value?.active ?? true,
@@ -1219,6 +1222,7 @@ const rowMenuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-
           <span class="mono text-[11px] text-faint">({{ row.target_count }})</span>
           <span v-if="row.domain === 'feed'" class="text-faint">主题流<span v-if="row.share_count"> · {{ row.share_count }} 篇</span></span>
           <span v-if="row.domain === 'feed' && row.ai_summary" class="rounded bg-brand-soft px-1 py-0.5 text-[10px] font-medium text-brand-ink">AI 解读</span>
+          <span v-if="row.domain === 'feed' && row.include_in_digest" class="rounded bg-chip px-1 py-0.5 text-[10px] font-medium text-ink-2">早报</span>
           <span v-else-if="!row.builtin && row.domain !== 'feed'" class="rounded bg-brand-soft px-1 py-0.5 text-[10px] text-brand-ink">自建</span>
           <button type="button" class="ml-1 text-brand-ink hover:underline" :disabled="communityBusy" @click="toggleCommunityActive(row)">
             {{ row.active ? '隐藏' : '启用' }}
@@ -1285,14 +1289,19 @@ const rowMenuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-
           aria-label="官方 B 站 UID"
           class="input mono px-3 py-2 text-sm"
         >
-        <label
+        <div
           v-if="communityForm.domain === 'feed'"
-          class="inline-flex items-center gap-2 rounded-[10px] border border-line bg-card px-3 py-2 text-xs text-ink-2 sm:col-span-4"
+          class="flex flex-wrap items-center gap-4 rounded-[10px] border border-line bg-card px-3 py-2 text-xs text-ink-2 sm:col-span-4"
         >
-          <input v-model="communityForm.ai_summary" type="checkbox" class="checkbox">
-          <span class="font-medium text-ink">启用 AI 中文解读</span>
-          <span class="text-muted">新内容入库自动生成中文一句话定位与要点（GitHub 开源项目默认启用）</span>
-        </label>
+          <label class="inline-flex items-center gap-2">
+            <input v-model="communityForm.ai_summary" type="checkbox" class="checkbox">
+            <span class="font-medium text-ink">启用 AI 中文解读</span>
+          </label>
+          <label class="inline-flex items-center gap-2">
+            <input v-model="communityForm.include_in_digest" type="checkbox" class="checkbox">
+            <span class="font-medium text-ink">纳入早报与汇总</span>
+          </label>
+        </div>
         <AdminCommunityColorPicker v-model="communityForm.color" class="sm:col-span-4" />
         <input
           v-model="communityForm.aliases"

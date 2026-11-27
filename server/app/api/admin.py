@@ -163,6 +163,7 @@ async def create_community_admin(body: CommunityCreate, session: AsyncSession = 
         "official_bili_mid": (body.official_bili_mid or "").strip(),
         "aliases": [x.strip() for x in body.aliases if x.strip()],
         "ai_summary": bool(body.ai_summary),
+        "include_in_digest": bool(body.include_in_digest),
     }
     if key in BUILTIN_COMMUNITIES:
         deleted.discard(key)
@@ -204,6 +205,8 @@ async def update_community_admin(key: str, body: CommunityUpdate, session: Async
             ov["aliases"] = [x.strip() for x in body.aliases if x.strip()]
         if body.ai_summary is not None:
             ov["ai_summary"] = bool(body.ai_summary)
+        if body.include_in_digest is not None:
+            ov["include_in_digest"] = bool(body.include_in_digest)
         overrides[key] = ov
         if body.active is not None:
             disabled.discard(key) if body.active else disabled.add(key)
@@ -226,6 +229,8 @@ async def update_community_admin(key: str, body: CommunityUpdate, session: Async
                     item["active"] = body.active
                 if body.ai_summary is not None:
                     item["ai_summary"] = bool(body.ai_summary)
+                if body.include_in_digest is not None:
+                    item["include_in_digest"] = bool(body.include_in_digest)
                 break
     await set_setting(session, "communities", _pack_communities_raw(disabled, deleted, overrides, custom))
     data = await _admin_communities_payload(session)

@@ -322,3 +322,25 @@ export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
     ],
   },
 ] as const
+
+export const REPORT_PERIOD_LABELS: Record<string, string> = {
+  daily: '日报',
+  weekly: '周报',
+}
+
+export const WEBHOOK_PROVIDER_LABELS: Record<string, string> = {
+  bark: 'Bark',
+  feishu: '飞书',
+  dingtalk: '钉钉',
+  wecom: '企业微信',
+  discord: 'Discord',
+  ntfy: 'ntfy',
+  generic: '通用 JSON',
+}
+
+export const WEBHOOK_MODE_LABELS: Record<string, string> = {
+  keywords: '命中关注词',
+  all: '偏好分区重要事件',
+  revisions: '仅官方原文修订',
+  reports: '仅接收周期报告',
+}

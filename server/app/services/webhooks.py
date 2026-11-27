@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 MAX_WEBHOOKS = 3
 WEBHOOK_TIMEOUT_SECONDS = 10.0
 WEBHOOK_PROVIDERS = ("generic", "bark", "feishu", "dingtalk", "wecom", "discord", "ntfy")
-WEBHOOK_MODES = ("keywords", "all", "revisions")
+WEBHOOK_MODES = ("keywords", "all", "revisions", "reports")
 _TEST_COOLDOWN_SECONDS = 10.0
 _TEST_LAST_AT: dict[int, float] = {}
 
@@ -133,6 +133,156 @@ def build_webhook_request(
 
     headers: dict[str, str] = {"User-Agent": "AniSignal-Webhook/1.0"}
     target_url = url
+
+    # 周期报告（日报 / 周报）：各渠道启用完整结构化 Markdown 卡片 / Embed 呈现
+    if payload.get("type") == "periodic_report":
+        report_md = str(payload.get("markdown") or "").strip()
+        sections = payload.get("sections") or []
+        overview = _plain(payload.get("summary") or "")[:500]
+        short_bullets: list[str] = []
+        for sec in sections:
+            for item in (sec.get("items") or [])[:2]:
+                short_bullets.append(f"· {_plain(item.get('title') or '')[:60]}")
+                if len(short_bullets) >= 4:
+                    break
+            if len(short_bullets) >= 4:
+                break
+        digest_plain = "\n".join([p for p in (overview, *short_bullets) if p]) or title
+        md_compact_lines: list[str] = []
+        if overview:
+            md_compact_lines.extend([overview, ""])
+        for sec in sections[:4]:
+            sec_label = _plain(sec.get("label") or "动态")
+            md_compact_lines.append(f"**{sec_label}**")
+            for item in (sec.get("items") or [])[:5]:
+                it_title = _plain(item.get("title") or "")[:90]
+                it_url = _safe_url(item.get("url"))
+                meta = _plain(item.get("metrics_text") or item.get("source") or "")
+                suffix = f"（{meta}）" if meta else ""
+                md_compact_lines.append(f"- [{it_title}]({it_url}){suffix}" if it_url else f"- {it_title}{suffix}")
+            md_compact_lines.append("")
+        md_compact_lines.append(f"[阅读完整报告]({detail_url})")
+        card_md = "\n".join(md_compact_lines).strip()
+
+        if provider == "bark":
+            body_obj = {
+                "title": title,
+                "body": digest_plain[:1500],
+                "url": detail_url,
+                "group": "AniSignal 报告",
+            }
+            headers["Content-Type"] = "application/json; charset=utf-8"
+            if secret:
+                headers["Authorization"] = f"Bearer {secret}"
+            return target_url, headers, json.dumps(body_obj, ensure_ascii=False).encode("utf-8")
+
+        if provider == "feishu":
+            body_obj = {
+                "msg_type": "interactive",
+                "card": {
+                    "header": {
+                        "title": {"tag": "plain_text", "content": title[:100]},
+                        "template": "indigo",
+                    },
+                    "elements": [{"tag": "markdown", "content": card_md[:3600]}],
+                },
+            }
+            if secret:
+                ts_str = str(ts)
+                body_obj["timestamp"] = ts_str
+                body_obj["sign"] = _feishu_sign(ts_str, secret)
+            headers["Content-Type"] = "application/json; charset=utf-8"
+            return target_url, headers, json.dumps(body_obj, ensure_ascii=False).encode("utf-8")
+
+        if provider == "dingtalk":
+            md_text = f"### {title}\n\n" + card_md
+            body_obj = {
+                "msgtype": "markdown",
+                "markdown": {"title": title[:100], "text": md_text[:3600]},
+            }
+            if secret:
+                ts_ms = str(ts * 1000)
+                target_url = _append_query(
+                    target_url, {"timestamp": ts_ms, "sign": _dingtalk_sign(ts_ms, secret)}
+                )
+            headers["Content-Type"] = "application/json; charset=utf-8"
+            return target_url, headers, json.dumps(body_obj, ensure_ascii=False).encode("utf-8")
+
+        if provider == "wecom":
+            md_text = f"## {title}\n{card_md}"
+            body_obj = {"msgtype": "markdown", "markdown": {"content": md_text[:3800]}}
+            headers["Content-Type"] = "application/json; charset=utf-8"
+            return target_url, headers, json.dumps(body_obj, ensure_ascii=False).encode("utf-8")
+
+        if provider == "discord":
+            embed_fields = []
+            for sec in sections[:5]:
+                sec_lines = []
+                for item in (sec.get("items") or [])[:4]:
+                    it_title = _plain(item.get("title") or "")[:80]
+                    it_url = _safe_url(item.get("url"))
+                    sec_lines.append(f"• [{it_title}]({it_url})" if it_url else f"• {it_title}")
+                if sec_lines:
+                    embed_fields.append(
+                        {
+                            "name": _plain(sec.get("label") or "动态")[:128],
+                            "value": "\n".join(sec_lines)[:1000],
+                            "inline": False,
+                        }
+                    )
+            embed = {
+                "title": title[:256],
+                "url": detail_url,
+                "description": (overview or digest_plain)[:2000],
+                "color": 5793266,
+                "fields": embed_fields,
+                "footer": {"text": f"AniSignal · {payload.get('period_key') or ''}"},
+            }
+            body_obj = {"username": "AniSignal", "embeds": [embed]}
+            headers["Content-Type"] = "application/json; charset=utf-8"
+            return target_url, headers, json.dumps(body_obj, ensure_ascii=False).encode("utf-8")
+
+        if provider == "ntfy":
+            headers["Title"] = Header(title[:160], "utf-8").encode(maxlinelen=998)
+            headers["Click"] = detail_url
+            headers["Tags"] = "newspaper"
+            headers["Content-Type"] = "text/plain; charset=utf-8"
+            if secret:
+                headers["Authorization"] = f"Bearer {secret}"
+            return target_url, headers, digest_plain[:2000].encode("utf-8")
+
+        body_obj = {
+            "source": "anisignal",
+            "type": "periodic_report",
+            "timestamp": ts,
+            "report": {
+                "id": payload.get("report_id"),
+                "title": title,
+                "period": payload.get("period"),
+                "period_key": payload.get("period_key"),
+                "scope_type": payload.get("scope_type"),
+                "scope_key": payload.get("scope_key"),
+                "community_label": community_label,
+                "overview": overview,
+                "item_count": payload.get("item_count", 0),
+                "ai_generated": bool(payload.get("ai_generated")),
+                "url": detail_url,
+                "markdown": report_md[:12000],
+                "sections": sections,
+            },
+        }
+        raw_bytes = json.dumps(body_obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
+        if secret:
+            ts_str = str(ts)
+            sig = hmac.new(
+                secret.encode("utf-8"),
+                f"{ts_str}.".encode("utf-8") + raw_bytes,
+                hashlib.sha256,
+            ).hexdigest()
+            headers["X-AniSignal-Timestamp"] = ts_str
+            headers["X-AniSignal-Signature"] = f"sha256={sig}"
+        return target_url, headers, raw_bytes
 
     if provider == "bark":
         body_obj = {

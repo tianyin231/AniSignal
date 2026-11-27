@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Plus, Send, Trash2, Webhook } from 'lucide-vue-next'
 import { apiErrorDetail, apiErrorStatus } from '~/utils/api-errors'
+import { WEBHOOK_MODE_LABELS, WEBHOOK_PROVIDER_LABELS } from '~/utils/lexicon'
 import { relativeTime, toTimestamp } from '~/utils/schedule'
 
 interface WebhookRow {
@@ -28,12 +29,8 @@ const PROVIDERS = [
   { key: 'generic', label: '通用 JSON', urlHint: 'https://example.com/webhook', secretHint: '选填：HMAC-SHA256 签名密钥' },
 ] as const
 
-const PROVIDER_LABELS: Record<string, string> = Object.fromEntries(PROVIDERS.map(p => [p.key, p.label]))
-const MODE_LABELS: Record<string, string> = {
-  keywords: '命中关注词',
-  all: '偏好分区重要事件',
-  revisions: '仅官方原文修订',
-}
+const PROVIDER_LABELS = WEBHOOK_PROVIDER_LABELS
+const MODE_LABELS = WEBHOOK_MODE_LABELS
 
 const { user } = useAuth()
 const items = ref<WebhookRow[]>([])
@@ -226,7 +223,7 @@ async function removeRow(row: WebhookRow) {
             <Send :size="12" aria-hidden="true" />{{ busy === `test-${row.id}` ? '发送中…' : '测试' }}
           </button>
           <button
-            v-if="row.events_mode !== 'revisions'"
+            v-if="row.events_mode !== 'revisions' && row.events_mode !== 'reports'"
             type="button"
             class="inline-flex h-7 items-center gap-1 rounded-lg border border-line px-2.5 font-medium transition-colors disabled:opacity-40"
             :class="row.include_revisions ? 'border-warn/40 bg-warn/10 text-warn hover:bg-warn/15' : 'text-muted hover:bg-chip hover:text-ink'"
@@ -259,7 +256,8 @@ async function removeRow(row: WebhookRow) {
         <select v-model="form.events_mode" aria-label="触发范围" class="select h-9 text-xs">
           <option value="keywords">命中关注词的重要事件</option>
           <option value="all">偏好分区全部重要事件</option>
-          <option value="revisions">仅官方公告修订（抓暗改）</option>
+          <option value="revisions">仅官方原文修订</option>
+          <option value="reports">仅接收周期报告（日报 / 周报）</option>
         </select>
         <input
           v-model="form.secret"
@@ -270,9 +268,9 @@ async function removeRow(row: WebhookRow) {
           class="input h-9 text-xs"
         >
       </div>
-      <label v-if="form.events_mode !== 'revisions'" class="flex items-center gap-2 text-xs text-ink-2">
+      <label v-if="form.events_mode !== 'revisions' && form.events_mode !== 'reports'" class="flex items-center gap-2 text-xs text-ink-2">
         <input v-model="form.include_revisions" type="checkbox" class="accent-brand">
-        <span>同时推送官方公告实质修订（抓暗改）</span>
+        <span>同时推送官方原文修订</span>
       </label>
       <div class="flex items-center gap-2 pt-1">
         <button type="submit" class="btn-primary inline-flex h-9 items-center gap-1.5 px-3.5 text-xs" :disabled="!!busy">

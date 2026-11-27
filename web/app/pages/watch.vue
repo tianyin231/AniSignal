@@ -65,9 +65,10 @@ const channels: Channel[] = [
     tile: 'bg-hsr-soft text-hsr-ink',
     title: '邮件通知',
     text: '每日早报按偏好汇总站内动态；重要变化与官方原文修订支持即时提醒。',
-    points: ['每天 08:00 每日早报', '重要变化与官方原文修订即时提醒', '支持手动生成 AI 摘要邮件'],
+    points: ['每天 08:00 每日早报，08:30 周期日报 / 周报', '重要变化与官方原文修订即时提醒', '支持手动生成 AI 摘要邮件与 Webhook 推送'],
     to: '/account?tab=notify',
-    action: '邮件设置',
+    action: '通知设置',
+    extra: { label: '浏览周期报告', to: '/reports' },
     state: () => {
       const n = status.value?.notifications
       if (!n) return null

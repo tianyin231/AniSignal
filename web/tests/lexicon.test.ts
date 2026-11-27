@@ -7,7 +7,10 @@ import {
   MONITOR_GROUPS,
   MONITOR_KINDS,
   PLATFORM_META,
+  REPORT_PERIOD_LABELS,
   TARGET_TYPE_LABELS,
+  WEBHOOK_MODE_LABELS,
+  WEBHOOK_PROVIDER_LABELS,
   platformLabel,
   platformRegion,
   tierLabel,
@@ -63,4 +66,12 @@ test('后台分组导航包含 4 组且路径无重复', () => {
   const paths = ADMIN_NAV_GROUPS.flatMap(g => g.items.map(i => i.to))
   assert.equal(paths.length, 13)
   assert.equal(new Set(paths).size, 13)
+})
+
+test('周期报告与 Webhook 术语映射完整', () => {
+  assert.equal(REPORT_PERIOD_LABELS.daily, '日报')
+  assert.equal(REPORT_PERIOD_LABELS.weekly, '周报')
+  assert.equal(WEBHOOK_MODE_LABELS.reports, '仅接收周期报告')
+  assert.equal(WEBHOOK_PROVIDER_LABELS.feishu, '飞书')
+  assert.equal(WEBHOOK_PROVIDER_LABELS.generic, '通用 JSON')
 })

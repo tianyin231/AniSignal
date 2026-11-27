@@ -39,6 +39,7 @@ from app.models.source import Source
 from app.models.statistics import CollectionDailyStat, ContentDailyStat
 from app.models.steam import SteamAppSnapshot
 from app.models.git_trending import GitTrendingEdition
+from app.models.report import PeriodicReport, ReportSubscription
 from app.models.user import EmailCode, NotificationDelivery, User, UserKeyword, UserSession, UserWebhook
 
 from app.models.news_archive import NewsArchive
@@ -66,6 +67,8 @@ __all__ = [
     "CollectionDailyStat",
     "SteamAppSnapshot",
     "GitTrendingEdition",
+    "PeriodicReport",
+    "ReportSubscription",
     "RawContent",
     "ContentVersion",
     "ContentSchedule",

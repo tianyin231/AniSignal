@@ -300,6 +300,34 @@ async def send_morning_notifications(ctx) -> dict:
                 await redis.release_if_match(key, token)
 
 
+async def send_periodic_reports(ctx) -> dict:
+    """北京时间 08:30 通用周期报告批次（日报每日触发，周报每周一触发）。"""
+    import secrets
+    from app.db import SessionLocal
+    from app.services.periodic_reports import run_scheduled_reports
+
+    redis = ctx.get("redis") if isinstance(ctx, dict) else None
+    key = "anisignal:periodic-reports-lock"
+    token = secrets.token_hex(16)
+    if redis is not None and not await redis.set(key, token, nx=True, ex=1900):
+        return {"status": "busy"}
+    try:
+        async with SessionLocal() as session:
+            result = await run_scheduled_reports(session)
+            if result.get("due"):
+                logger.info("periodic reports -> %s", result)
+            return result
+    finally:
+        if redis is not None:
+            if hasattr(redis, "eval"):
+                await redis.eval(
+                    "if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1]) end return 0",
+                    1, key, token,
+                )
+            elif hasattr(redis, "release_if_match"):
+                await redis.release_if_match(key, token)
+
+
 async def on_startup(ctx) -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -372,6 +400,7 @@ _AI_FUNCTIONS = [
     review_pending_fulfillment,
     extract_entities_sweep,
     product_monitor_sweep,
+    send_periodic_reports,
 ]
 
 

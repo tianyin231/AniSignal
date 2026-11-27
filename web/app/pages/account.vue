@@ -15,7 +15,7 @@ provide(ACCOUNT_CENTER, center)
 const TAB_KEYS = new Set<string>(ACCOUNT_TABS.map(t => t.key))
 // 旧版单页的锚点 → 对应标签页（站内旧链接与书签仍然有效）
 const LEGACY_HASH: Record<string, AccountTab> = {
-  '#keyword-monitor': 'feed', '#email-notifications': 'notify', '#bot-access': 'notify', '#custom-monitors': 'custom',
+  '#keyword-monitor': 'feed', '#email-notifications': 'notify', '#bot-access': 'notify', '#periodic-reports': 'notify', '#custom-monitors': 'custom',
 }
 const tab = computed<AccountTab>(() => {
   const value = String(route.query.tab ?? '')
@@ -29,6 +29,12 @@ const selectTab = (key: AccountTab) => router.replace(tabRoute(key))
 
 const ADVANCED_HASHES = new Set(['#webhooks', '#rss', '#mcp'])
 const advancedNotifyOpen = ref(ADVANCED_HASHES.has(route.hash))
+
+async function openWebhooks() {
+  advancedNotifyOpen.value = true
+  await nextTick()
+  document.getElementById('webhooks')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 const keywordsPanel = ref<{ focus: () => void } | null>(null)
 async function focusKeywords() {
@@ -97,11 +103,12 @@ onBeforeUnmount(center.dispose)
       <AccountPreferences class="lg:col-start-2 lg:row-start-2" @saved="onPreferencesSaved" />
     </div>
     <div v-else-if="tab === 'notify'" class="space-y-6">
-      <section aria-label="常用通知">
+      <section aria-label="常用通知" class="space-y-5">
         <div class="grid items-start gap-5 lg:grid-cols-2">
           <AccountEmail @add-keyword="focusKeywords" />
           <AccountBotAccess />
         </div>
+        <AccountReportSubscriptions @open-webhooks="openWebhooks" />
       </section>
 
       <section aria-labelledby="advanced-notify-title" class="space-y-4">

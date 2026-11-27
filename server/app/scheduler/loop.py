@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _SHANGHAI = timezone(timedelta(hours=8))
 _local_morning_date = None
+_local_reports_date = None
 _local_custom_sweep_at = None
 _local_fulfillment_sweep_at = None
 _local_editorial_sweep_at = None
@@ -31,6 +32,11 @@ _CUSTOM_SWEEP_INTERVAL = timedelta(minutes=5)
 def _morning_due(now: datetime) -> tuple[bool, str]:
     local = now.replace(tzinfo=timezone.utc).astimezone(_SHANGHAI)
     return local.hour >= 8, local.date().isoformat()
+
+
+def _reports_due(now: datetime) -> tuple[bool, str]:
+    local = now.replace(tzinfo=timezone.utc).astimezone(_SHANGHAI)
+    return (local.hour > 8 or (local.hour == 8 and local.minute >= 30)), local.date().isoformat()
 
 
 async def local_loop(queue) -> None:
@@ -61,6 +67,12 @@ async def local_loop(queue) -> None:
                     await queue.enqueue_morning()
                     _local_morning_date = day
                     logger.info("local enqueued morning notifications for %s", day)
+                global _local_reports_date
+                reports_now, reports_day = _reports_due(now)
+                if reports_now and _local_reports_date != reports_day:
+                    await queue.enqueue_reports()
+                    _local_reports_date = reports_day
+                    logger.info("local enqueued periodic reports for %s", reports_day)
                 global _local_custom_sweep_at
                 global _local_editorial_sweep_at
                 if _local_editorial_sweep_at is None or now >= _local_editorial_sweep_at:
@@ -159,6 +171,25 @@ async def _enqueue_morning_if_due(redis, now: datetime) -> None:
     logger.info("enqueued morning notifications for %s job=%s", day, getattr(job, "job_id", None))
 
 
+async def _enqueue_reports_if_due(redis, now: datetime) -> None:
+    """北京时间 08:30 投递通用周期报告批次（走慢 AI 队列）。"""
+    due, day = _reports_due(now)
+    if not due:
+        return
+    key = f"anisignal:periodic-reports-enqueued:{day}"
+    if await redis.get(key):
+        return
+    from app.services.queue import AI_QUEUE_NAME
+
+    job = await redis.enqueue_job(
+        "send_periodic_reports",
+        _job_id=f"periodic-reports:{day}",
+        _queue_name=AI_QUEUE_NAME,
+    )
+    await redis.set(key, "1", nx=True, px=36 * 60 * 60 * 1000)
+    logger.info("enqueued periodic reports for %s job=%s", day, getattr(job, "job_id", None))
+
+
 async def _enqueue_retention_if_due(redis, now: datetime) -> None:
     """北京时间凌晨 3～6 点跑一次数据保留，错过当天的窗口就等下一天。"""
     local = now.replace(tzinfo=timezone.utc).astimezone(_SHANGHAI)
@@ -206,6 +237,7 @@ async def main() -> None:
                             target.next_run_at,
                         )
                     await _enqueue_morning_if_due(redis, now)
+                    await _enqueue_reports_if_due(redis, now)
                     await _enqueue_retention_if_due(redis, now)
                     # 半小时检测一次授权状态；固定桶 ID 在任务结果保留期内去重。
                     await redis.enqueue_job("check_bilibili_session", _job_id=f"bili-session:{int(now.timestamp() // 1800)}")

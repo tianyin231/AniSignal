@@ -16,7 +16,7 @@ const STATUS: Record<NotificationState, { label: string, tone: string }> = {
   failed: { label: '失败', tone: 'bg-hot/10 text-hot' },
 }
 const KIND: Record<string, string> = {
-  morning: '每日早报', ai: 'AI 摘要邮件', instant: '重要变化', webhook: 'Webhook 推送', custom: '定制监控', admin: '管理员通知', broadcast: '站点公告',
+  morning: '每日早报', ai: 'AI 摘要邮件', report: '周期报告', instant: '重要变化', webhook: 'Webhook 推送', custom: '定制监控', admin: '管理员通知', broadcast: '站点公告',
 }
 const records = computed(() => (notifications.value?.records ?? []).slice(0, 5).map(record => ({
   ...record,

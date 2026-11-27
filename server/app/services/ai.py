@@ -52,6 +52,7 @@ TASK_MODEL_KEYS = (
     "news_score",
     "bot_brief",
     "bot_news_dedupe",
+    "periodic_report",
 )
 
 

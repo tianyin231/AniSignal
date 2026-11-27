@@ -31,6 +31,7 @@ export interface SiteCommunityItem {
   active: boolean
   builtin: boolean
   ai_summary?: boolean
+  include_in_digest?: boolean
   official_bili_mid?: string | null
   aliases?: string[]
 }

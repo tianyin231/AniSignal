@@ -193,7 +193,7 @@ export function useActiveChannel() {
     if (route.path === '/ai' || route.path.startsWith('/ai/')) return 'ai'
     if (route.path.startsWith('/custom')) return 'custom'
     if (['/sources', '/stats'].includes(route.path)) return 'home'
-    if (['/account', '/watch', '/project'].includes(route.path)) return null
+    if (['/account', '/watch', '/project'].includes(route.path) || route.path === '/reports' || route.path.startsWith('/reports/')) return null
     const query = String(route.query.community || '')
     const queryKey = query && communityMeta(query) ? query : null
     if (route.path === '/') return queryKey ?? 'home'

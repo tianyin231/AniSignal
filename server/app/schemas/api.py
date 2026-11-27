@@ -207,6 +207,7 @@ class CommunityCreate(BaseModel):
     aliases: list[str] = Field(default_factory=list, max_length=16)
     active: bool = True
     ai_summary: bool = False
+    include_in_digest: bool = False
 
 
 class CommunityUpdate(BaseModel):
@@ -218,6 +219,7 @@ class CommunityUpdate(BaseModel):
     aliases: list[str] | None = Field(default=None, max_length=16)
     active: bool | None = None
     ai_summary: bool | None = None
+    include_in_digest: bool | None = None
 
 
 class CommunityBatchRequest(BaseModel):

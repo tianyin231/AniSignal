@@ -24,6 +24,7 @@ AI_JOB_NAMES = frozenset({
     "review_pending_fulfillment",
     "extract_entities_sweep",
     "product_monitor_sweep",
+    "send_periodic_reports",
 })
 
 
@@ -68,6 +69,9 @@ class BaseQueue:
         raise NotImplementedError
 
     async def enqueue_morning(self) -> str | None:
+        raise NotImplementedError
+
+    async def enqueue_reports(self) -> str | None:
         raise NotImplementedError
 
     async def enqueue_review(self, content_ids: list[int]) -> str | None:
@@ -186,6 +190,19 @@ class LocalQueue(BaseQueue):
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return f"local:morning:{time.time():.0f}"
+
+    async def enqueue_reports(self) -> str | None:
+        from app.db import SessionLocal
+        from app.services.periodic_reports import run_scheduled_reports
+
+        async def run() -> None:
+            async with SessionLocal() as session:
+                await run_scheduled_reports(session)
+
+        task = asyncio.create_task(run())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return f"local:reports:{time.time():.0f}"
 
     async def enqueue_review(self, content_ids: list[int]) -> str | None:
         from app.db import SessionLocal
@@ -362,6 +379,10 @@ class ArqQueue(BaseQueue):
 
     async def enqueue_morning(self) -> str | None:
         job = await self._pool.enqueue_job("send_morning_notifications")
+        return getattr(job, "job_id", None) if job is not None else None
+
+    async def enqueue_reports(self) -> str | None:
+        job = await self._pool.enqueue_job("send_periodic_reports", _queue_name=AI_QUEUE_NAME)
         return getattr(job, "job_id", None) if job is not None else None
 
     async def enqueue_review(self, content_ids: list[int]) -> str | None:

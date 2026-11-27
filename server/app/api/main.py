@@ -116,6 +116,14 @@ app.include_router(companion_router)
 app.include_router(companion_admin_router)
 from app.api.mcp import router as mcp_router
 app.include_router(mcp_router)
+from app.api.reports import (
+    account_router as account_reports_router,
+    admin_router as admin_reports_router,
+    public_router as public_reports_router,
+)
+app.include_router(public_reports_router)
+app.include_router(account_reports_router)
+app.include_router(admin_reports_router)
 
 
 @app.get("/api/healthz")

@@ -1217,7 +1217,7 @@ async def create_webhook(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "不支持的 Webhook 渠道类型")
     mode = body.events_mode.strip().lower()
     if mode not in WEBHOOK_MODES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "推送范围仅支持 keywords、all 或 revisions")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "推送范围仅支持 keywords、all、revisions 或 reports")
     try:
         clean_url = validate_webhook_url_static(body.url)
     except WebhookError as exc:

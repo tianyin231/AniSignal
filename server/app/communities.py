@@ -56,6 +56,7 @@ class CommunityMeta:
     active: bool = True
     builtin: bool = True
     ai_summary: bool = False
+    include_in_digest: bool = False
 
     @property
     def game_names(self) -> tuple[str, ...]:
@@ -271,6 +272,7 @@ def build_custom_meta(raw: dict) -> CommunityMeta:
         active=bool(raw.get("active", True)),
         builtin=False,
         ai_summary=bool(raw.get("ai_summary", False)),
+        include_in_digest=bool(raw.get("include_in_digest", False)),
     )
 
 
@@ -297,6 +299,11 @@ def _apply_builtin_override(meta: CommunityMeta, ov: dict | None, active: bool) 
         source_aliases=aliases or meta.source_aliases,
         active=active,
         ai_summary=bool(ov["ai_summary"]) if "ai_summary" in ov and ov["ai_summary"] is not None else meta.ai_summary,
+        include_in_digest=(
+            bool(ov["include_in_digest"])
+            if "include_in_digest" in ov and ov["include_in_digest"] is not None
+            else meta.include_in_digest
+        ),
     )
 
 
@@ -402,6 +409,7 @@ def community_to_public_dict(meta: CommunityMeta) -> dict:
         "active": meta.active,
         "builtin": meta.builtin,
         "ai_summary": meta.ai_summary,
+        "include_in_digest": meta.include_in_digest,
     }
 
 
