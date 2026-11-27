@@ -30,8 +30,8 @@ def user_facing_error(platform: str | None, error: str | None) -> str | None:
     if "CollectorDeferred" in error or "限流" in error or "冷却" in error:
         return "采集暂缓，稍后会自动重试"
     if re.search(r"\b404\b", error):
-        if platform in {"github", "gitcode"}:
-            return "仓库不存在、未公开或未开启对应功能，请检查仓库名"
+        if platform == "github":
+            return "GitHub 仓库不存在或未公开，请检查仓库名"
         return "地址无法访问（404），请检查链接是否正确"
     if re.search(r"Timeout|timed out|ConnectError|ConnectTimeout|ReadTimeout", error):
         return "连接超时，系统会自动重试"

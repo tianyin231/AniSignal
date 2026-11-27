@@ -1213,7 +1213,7 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
     topics = _merge_topics(extra, brief, limit=8)
 
     repo_meta = None
-    if raw.platform in ("github", "gitcode"):
+    if raw.platform == "github":
         repo_name = str(extra.get("repo") or "").strip() or None
         trending_history = []
         if raw.content_type == "repo" and repo_name:
@@ -1231,7 +1231,6 @@ async def get_content_detail(content_id: int, session: AsyncSession = Depends(ge
             "period_stars": extra.get("period_stars"),
             "tag_name": extra.get("tag_name"),
             "prerelease": bool(extra.get("prerelease")),
-            "labels": list(extra.get("labels") or []),
             "readme": extra.get("readme") or None,
             "trending_history": trending_history,
         }

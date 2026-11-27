@@ -11,7 +11,7 @@ import { isRedundantExcerpt } from '~/utils/text'
 const props = defineProps<{ item: RawItem; to?: string; showCommunity?: boolean; deltaView?: number | null }>()
 const { mediaMode } = useSiteConfig()
 const shareUrl = computed(() => !props.to && props.item.platform === 'xiaoheihe' && props.item.previewMode === 'external_only' ? props.item.originalUrl : undefined)
-const isGitPlatform = computed(() => props.item.platform === 'github' || props.item.platform === 'gitcode')
+const isGitPlatform = computed(() => props.item.platform === 'github')
 const isGitRepo = computed(() => isGitPlatform.value && props.item.contentType === 'repo')
 const viewUnit = computed(() => {
   if (props.item.platform === 'xiaoheihe') return '阅读'

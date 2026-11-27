@@ -50,10 +50,10 @@ def _default_source_url(feed: CustomFeed) -> str | None:
         return safe_link(feed.target_value)
     if feed.platform == "web_page":
         return safe_link(feed.target_value)
-    if feed.platform in {"github", "gitcode"}:
-        from app.collectors.git_repo import repo_web_url
+    if feed.platform == "github":
+        from app.collectors.github import repo_web_url
 
-        return safe_link(repo_web_url(feed.platform, feed.target_value, feed.kind))
+        return safe_link(repo_web_url(feed.target_value, feed.kind))
     if feed.platform == "steam" and feed.target_value.isdigit():
         return steam_store_url(feed.target_value)
     return None

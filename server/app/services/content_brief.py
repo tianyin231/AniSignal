@@ -1,7 +1,7 @@
 """主题流与开源项目 AI 中文解读服务（ContentBrief，可重算，未配置 AI 时安全跳过）。
 
 设计原则：
-- 面向英文开源项目（GitHub / GitCode）和开启 `ai_summary` 的 `domain="feed"` 主题流；
+- 面向英文开源项目（GitHub）和开启 `ai_summary` 的 `domain="feed"` 主题流；
 - 开源仓库优先结合匿名抓取的 README 节选与项目简介生成中文定位标题、一句话用途、核心亮点与适用场景；
 - 复用主系统 AI 密钥池、按任务分层模型（`brief_content`）、每日预算熔断与 `ai_usage` 记账；
 - 绝不触发 `RawContent.hidden` 自动下架，失败仅记录用量并按退避规则稍后补偿。
@@ -79,7 +79,7 @@ def is_brief_eligible(community: str, platform: str, content_type: str) -> bool:
         return False
     if meta.ai_summary:
         return True
-    return platform in {"github", "gitcode"} and content_type in {"repo", "release"}
+    return platform == "github" and content_type in {"repo", "release"}
 
 
 def serialize_brief(brief: ContentBrief | None) -> dict[str, Any] | None:
@@ -167,7 +167,7 @@ async def ensure_repo_readme(session: AsyncSession, raw: RawContent, version: Co
     repo = str(extra.get("repo") or version.title or "").strip()
     if "/" not in repo:
         return ""
-    from app.collectors.git_repo import fetch_github_repo_readme
+    from app.collectors.github_trending import fetch_github_repo_readme
 
     readme = await fetch_github_repo_readme(repo)
     if not readme:
@@ -335,7 +335,7 @@ async def pending_brief_ids(
         scope_clauses.append(
             and_(
                 RawContent.community.in_(git_only_keys),
-                RawContent.platform.in_(("github", "gitcode")),
+                RawContent.platform == "github",
                 RawContent.content_type.in_(("repo", "release")),
             )
         )

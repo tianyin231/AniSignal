@@ -29,7 +29,7 @@ from app.collectors.youtube_api import YoutubeApiCollector
 from app.collectors.youtube_rss import YoutubeRssCollector
 from app.collectors.rss import RssCollector
 from app.collectors.web_page import WebPageCollector, enrich_list_items
-from app.collectors.git_repo import GitcodeCollector, GithubCollector
+from app.collectors.github import GithubCollector
 from app.collectors.x import XCollector
 from app.collectors.xiaoheihe import XIAOHEIHE_MIN_INTERVAL_SECONDS, XiaoheiheCollector
 from app.collectors.steam import SteamCollector
@@ -100,7 +100,6 @@ _COLLECTORS = {
     "rss": lambda: RssCollector(),
     "web_page": lambda: WebPageCollector(),
     "github": lambda: GithubCollector(),
-    "gitcode": lambda: GitcodeCollector(),
     "bilibili": lambda: BilibiliCollector(),
     "miyoushe": lambda: MiyousheCollector(),
     "youtube": lambda: (YoutubeApiCollector() if get_settings().youtube_api_key else YoutubeRssCollector()),
@@ -199,7 +198,7 @@ def filter_relevant(
                 body = str(item.get("text") or "").casefold()
                 if co_terms and not any(term.casefold() in body for term in co_terms):
                     continue
-            elif target.platform not in ("rss", "web_page", "github", "gitcode") and not is_news_candidate(str(item.get("title") or "")):
+            elif target.platform not in ("rss", "web_page", "github") and not is_news_candidate(str(item.get("title") or "")):
                 continue
             item["_matched_keywords"] = [target.target_value]
             kept.append(item)
@@ -411,7 +410,7 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                     "name": target.display_name,
                     "is_official": target.is_official,
                 }
-            if isinstance(collector, (GithubCollector, GitcodeCollector)):
+            if isinstance(collector, GithubCollector):
                 collector.source_config = {
                     **(target.config or {}),
                     "name": target.display_name,
@@ -487,13 +486,13 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                         existing_ids=existing_ids,
                         proxy_url=proxy_url,
                     )
-            if isinstance(collector, (GithubCollector, GitcodeCollector)) and collector.last_http_cache:
+            if isinstance(collector, GithubCollector) and collector.last_http_cache:
                 next_cfg = dict(target.config or {})
                 if next_cfg.get("_http_cache") != collector.last_http_cache:
                     next_cfg["_http_cache"] = collector.last_http_cache
                     target.config = next_cfg
             if isinstance(collector, GithubCollector) and fetch_result.fetch_kind == "github_trending" and fetch_result.items:
-                from app.collectors.git_repo import enrich_trending_items_with_readme
+                from app.collectors.github_trending import enrich_trending_items_with_readme
                 from app.models import ContentVersion
 
                 ext_ids = [str(item.get("id") or "") for item in fetch_result.items if item.get("id")]
@@ -566,7 +565,7 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 ),
             )
             if isinstance(collector, GithubCollector) and collector.last_trending_edition:
-                from app.collectors.git_repo import git_item_id
+                from app.collectors.github import git_item_id
                 from app.services.git_trending import save_trending_edition
 
                 try:

@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import func, select
 
 from app.clock import utcnow
-from app.collectors.git_repo import clean_readme_markdown
+from app.collectors.github_trending import clean_readme_markdown
 from app.models import ContentBrief, ContentVersion, RawContent
 from app.services.content_brief import (
     brief_content,
@@ -177,7 +177,7 @@ async def test_content_brief_pipeline_and_public_views(client, session_factory, 
             return json.dumps(payload, ensure_ascii=False), {"prompt_tokens": 120, "completion_tokens": 90}
 
         monkeypatch.setattr("app.services.content_brief.get_ai_config", fake_ai_cfg)
-        monkeypatch.setattr("app.collectors.git_repo.fetch_github_repo_readme", fake_readme)
+        monkeypatch.setattr("app.collectors.github_trending.fetch_github_repo_readme", fake_readme)
         monkeypatch.setattr("app.services.content_brief.chat", fake_chat)
 
         pending = await pending_brief_ids(s, community="git")

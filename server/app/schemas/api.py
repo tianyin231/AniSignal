@@ -51,11 +51,7 @@ _TARGET_VALUE_RULES: dict[tuple[str, str], re.Pattern] = {
     ("web_page", "page_watch"): re.compile(r"^https?://[^\s]{1,247}$"),
     ("web_page", "list_watch"): re.compile(r"^https?://[^\s]{1,247}$"),
     ("github", "releases"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
-    ("github", "issues"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
-    ("github", "discussions"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
     ("github", "trending"): re.compile(r"^(?:daily|weekly|monthly)(?::[a-z0-9][a-z0-9.+#_-]{0,31})?$"),
-    ("gitcode", "releases"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
-    ("gitcode", "issues"): re.compile(r"^[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}$"),
 }
 
 
@@ -98,15 +94,15 @@ def validate_target_value(platform: object, target_type: object, value: object) 
         from app.parsers.steam import extract_app_id
 
         text = extract_app_id(text)
-    if plat in ("github", "gitcode"):
-        if plat == "github" and ttype == "trending":
-            from app.collectors.git_repo import normalize_trending_target
+    if plat == "github":
+        if ttype == "trending":
+            from app.collectors.github_trending import normalize_trending_target
 
             text = normalize_trending_target(text)
         else:
-            from app.collectors.git_repo import normalize_repo_target
+            from app.collectors.github import normalize_github_repo
 
-            text = normalize_repo_target(plat, text)
+            text = normalize_github_repo(text)
     pattern = _TARGET_VALUE_RULES.get((plat, ttype))
     if pattern is not None and not pattern.fullmatch(text):
         raise ValueError(f"target_value 不符合 {platform}/{target_type} 的格式要求")
@@ -149,10 +145,9 @@ class WebPagePreviewRequest(BaseModel):
 
 class RepoConfigIn(BaseModel):
     include_prerelease: bool | None = None
-    labels: list[str] = Field(default_factory=list, max_length=10)
 
     def to_storage_dict(self, target_type: str = "releases") -> dict:
-        from app.collectors.git_repo import normalize_repo_config
+        from app.collectors.github import normalize_repo_config
 
         return normalize_repo_config(self.model_dump(exclude_none=True), target_type=target_type)
 
@@ -179,7 +174,7 @@ class CollectTargetCreate(BaseModel):
             self.target_value = validate_target_value(
                 self.platform, self.target_type, self.target_value
             )
-            if self.platform in ("github", "gitcode") and self.repo_config is not None:
+            if self.platform == "github" and self.repo_config is not None:
                 self.repo_config.to_storage_dict(str(self.target_type))
         except ValueError as exc:
             raise ValueError(str(exc)) from None
@@ -243,8 +238,8 @@ class TargetBatchRequest(BaseModel):
 
 class CollectTargetOut(BaseModel):
     id: int
-    platform: Platform
-    target_type: TargetType
+    platform: str
+    target_type: str
     target_value: str
     display_name: str | None
     interval_minutes: int
@@ -297,7 +292,7 @@ class XiaoheiheShareCreate(BaseModel):
 
 class ContentItemOut(BaseModel):
     id: int
-    platform: Platform
+    platform: str
     content_type: str
     external_id: str
     community: str = _DEFAULT_COMMUNITY
@@ -333,7 +328,7 @@ class ContentBriefOut(BaseModel):
 
 class PublicContentItem(BaseModel):
     id: int
-    platform: Platform
+    platform: str
     content_type: str
     external_id: str
     url: SafeLink
@@ -381,7 +376,7 @@ class ContentDetailOut(BaseModel):
     id: int
     community: str = _DEFAULT_COMMUNITY
     news: dict | None = None
-    platform: Platform
+    platform: str
     content_type: str
     external_id: str
     url: SafeLink
@@ -472,7 +467,7 @@ class ContentVersionHistoryOut(BaseModel):
 
 class PublicSource(BaseModel):
     name: str
-    platform: Platform
+    platform: str
     target_type: str
     enabled: bool
     last_success_at: datetime | None

@@ -17,7 +17,6 @@ class Platform(StrEnum):
     RSS = "rss"
     WEB_PAGE = "web_page"
     GITHUB = "github"
-    GITCODE = "gitcode"
     GAME_OFFICIAL = "game_official"
 
 
@@ -60,8 +59,6 @@ class TargetType(StrEnum):
     PAGE_WATCH = "page_watch"
     LIST_WATCH = "list_watch"
     RELEASES = "releases"
-    ISSUES = "issues"
-    DISCUSSIONS = "discussions"
     TRENDING = "trending"
 
 

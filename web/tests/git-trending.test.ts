@@ -6,6 +6,7 @@ import {
   languageColor,
   periodGainLabel,
   splitRepoName,
+  trendingEntryToRawItem,
   trendingStatusBadge,
 } from '../app/utils/git-trending.ts'
 
@@ -44,4 +45,38 @@ test('仓库名拆解、语言色点与跨期上榜标记生成准确', () => {
     trendingStatusBadge({ status: 'returning', streak_count: 1, appearances: 4 }, 'monthly'),
     { label: '复榜 · 第 4 次', tone: 'returning' },
   )
+
+  const raw = trendingEntryToRawItem({
+    rank: 1,
+    repo: 'acme/vision',
+    url: 'https://github.com/acme/vision',
+    description: 'Vision toolkit',
+    language: 'Python',
+    stars: 9800,
+    forks: 420,
+    period_stars: 1200,
+    raw_content_id: 42,
+    status: 'new',
+    streak_count: 1,
+    appearances: 1,
+    first_seen_key: '2026-11-27',
+    best_rank: 1,
+    rank_delta: null,
+    also_in: ['weekly'],
+    brief: {
+      kind: 'repo',
+      headline: '视觉智能体工具集',
+      tagline: '开源多模态视觉框架',
+      summary: '完整介绍',
+      highlights: [],
+      use_cases: [],
+      tags: ['AI', '视觉'],
+    },
+  })
+  assert.equal(raw.id, '42')
+  assert.equal(raw.platform, 'github')
+  assert.equal(raw.contentType, 'repo')
+  assert.deepEqual(raw.metrics, { view: 1200, like: 9800, fork: 420 })
+  assert.deepEqual(raw.topics, ['AI', '视觉'])
+  assert.equal(raw.previewMode, 'full')
 })

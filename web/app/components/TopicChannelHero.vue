@@ -92,7 +92,7 @@ const hasTopAside = computed(() => Boolean(props.hasGitEditions && topTrending.v
         <time v-if="updatedLabel" class="mono text-xs text-white/50">更新于 {{ updatedLabel }}</time>
       </div>
 
-      <NuxtLink v-if="leadHeadline && leadLink" :to="leadLink" class="group block max-w-2xl">
+      <NuxtLink v-if="leadHeadline && leadLink" :to="leadLink" class="group block max-w-2xl" :class="hasTopAside ? 'lg:hidden' : ''">
         <p class="line-clamp-2 text-[15px] font-semibold leading-snug text-white/95 transition-colors group-hover:text-white">
           <span class="mr-1.5 rounded bg-white/12 px-1.5 py-0.5 text-[11px] font-semibold" :class="accent.text">
             {{ hasGitEditions ? '本期榜首' : '焦点动态' }}

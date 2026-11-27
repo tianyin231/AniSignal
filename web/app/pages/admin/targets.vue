@@ -431,8 +431,7 @@ const combos: Record<string, string[]> = {
   x: ['account_dynamics'],
   rss: ['feed'],
   web_page: ['page_watch', 'list_watch'],
-  github: ['releases', 'issues', 'discussions', 'trending'],
-  gitcode: ['releases', 'issues'],
+  github: ['releases', 'trending'],
 }
 const collectPlatforms = Object.keys(platformLabels).filter(platform => platform in combos)
 
@@ -455,7 +454,6 @@ const form = reactive({
   web_ignore_patterns: '',
   web_fetch_body: true,
   repo_include_prerelease: true,
-  repo_labels: '',
 })
 const webPreview = ref<WebPreviewResult | null>(null)
 const webPreviewing = ref(false)
@@ -514,7 +512,7 @@ async function runBatchTargets(action: 'enable' | 'disable' | 'delete', opts?: {
 }
 
 const availableTypes = computed(() => combos[form.platform] ?? [])
-const isGitPlatform = computed(() => form.platform === 'github' || form.platform === 'gitcode')
+const isGitPlatform = computed(() => form.platform === 'github')
 const supportsOfficial = computed(() => !['keyword_search', 'topic_search'].includes(form.target_type))
 const supportsViews = computed(() => form.community !== 'ai' && (
   (form.platform === 'bilibili' && ['keyword_search', 'account_videos'].includes(form.target_type))
@@ -534,7 +532,6 @@ const targetPlaceholder = computed(() => {
       ? 'daily / weekly / monthly（可选语言如 daily:python）'
       : 'owner/repo 或 https://github.com/owner/repo'
   }
-  if (form.platform === 'gitcode') return 'owner/repo 或 https://gitcode.com/owner/repo'
   if (form.platform === 'youtube') return 'YouTube 频道链接、@handle 或 UC 开头的频道 ID'
   if (form.platform === 'x') return '@账号 或 https://x.com/账号'
   if (form.platform === 'game_official') return '仅支持 genshin / endfield / nikke'
@@ -557,13 +554,13 @@ watch(() => form.platform, () => {
   webPreviewError.value = null
   if (!editingId.value) {
     form.target_type = availableTypes.value[0] ?? 'keyword_search'
-    form.interval_minutes = ['x', 'web_page', 'github', 'gitcode'].includes(form.platform) ? 60 : 30
+    form.interval_minutes = ['x', 'web_page', 'github'].includes(form.platform) ? 60 : 30
     form.is_official = (
       form.platform === 'web_page'
       || form.platform === 'game_official'
       || form.platform === 'kuro_cn'
       || form.platform === 'kuro_global'
-      || ((form.platform === 'github' || form.platform === 'gitcode') && form.target_type === 'releases')
+      || (form.platform === 'github' && form.target_type === 'releases')
     )
     form.tier = form.target_type === 'keyword_search' ? 'general' : 'core'
   }
@@ -572,7 +569,7 @@ watch(() => form.target_type, (next) => {
   webPreview.value = null
   webPreviewError.value = null
   if (next === 'keyword_search') form.is_official = false
-  else if (!editingId.value && (form.platform === 'github' || form.platform === 'gitcode')) {
+  else if (!editingId.value && form.platform === 'github') {
     form.is_official = next === 'releases'
     if (next === 'trending') {
       form.interval_minutes = 360
@@ -617,7 +614,6 @@ function resetFormDefaults() {
     web_ignore_patterns: '',
     web_fetch_body: true,
     repo_include_prerelease: true,
-    repo_labels: '',
   })
 }
 
@@ -654,7 +650,6 @@ async function edit(target: CollectTarget) {
     web_ignore_patterns: (webCfg.ignore_patterns || []).join('\n'),
     web_fetch_body: webCfg.fetch_body !== false,
     repo_include_prerelease: repoCfg.include_prerelease !== false,
-    repo_labels: (repoCfg.labels || []).join('，'),
   })
   drawerAdvancedOpen.value = Boolean(
     target.co_terms?.length
@@ -663,8 +658,7 @@ async function edit(target: CollectTarget) {
     || webCfg.exclude_selector
     || webCfg.link_pattern
     || webCfg.ignore_patterns?.length
-    || repoCfg.include_prerelease === false
-    || repoCfg.labels?.length,
+    || repoCfg.include_prerelease === false,
   )
   drawerOpen.value = true
   await nextTick()
@@ -752,9 +746,6 @@ function buildRepoConfigPayload() {
   if (!isGitPlatform.value) return undefined
   if (form.target_type === 'releases') {
     return { include_prerelease: form.repo_include_prerelease }
-  }
-  if (form.target_type === 'issues') {
-    return { labels: form.repo_labels.split(/[,，\n]+/).map(x => x.trim()).filter(Boolean) }
   }
   return {}
 }
@@ -1057,11 +1048,10 @@ const rowMenuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-
                   <span v-if="target.is_official" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">官方</span>
                   <span v-if="!target.enabled" class="rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted">已停用</span>
                 </div>
-                <div v-if="(target.display_name && target.display_name !== target.target_value) || target.web_config?.selector || target.repo_config?.include_prerelease === false || target.repo_config?.labels?.length" class="mono mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-faint">
+                <div v-if="(target.display_name && target.display_name !== target.target_value) || target.web_config?.selector || target.repo_config?.include_prerelease === false" class="mono mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-faint">
                   <span v-if="target.display_name && target.display_name !== target.target_value" class="min-w-0 truncate" :title="target.target_value">{{ target.target_value }}</span>
                   <span v-if="target.web_config?.selector" class="shrink-0 rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted" :title="`内容区域：${target.web_config.selector}`">{{ target.web_config.selector }}</span>
                   <span v-if="target.repo_config?.include_prerelease === false" class="shrink-0 rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted">仅正式版</span>
-                  <span v-if="target.repo_config?.labels?.length" class="shrink-0 rounded bg-chip px-1.5 py-0.5 text-[11px] text-muted" :title="`限定标签：${target.repo_config.labels.join('、')}`">标签 {{ target.repo_config.labels.join(' / ') }}</span>
                 </div>
                 <p v-if="target.last_error" class="mt-1 truncate text-xs text-warn" :title="target.last_error">
                   {{ formatLastError(target.last_error) }}
@@ -1301,7 +1291,7 @@ const rowMenuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-
         >
           <input v-model="communityForm.ai_summary" type="checkbox" class="checkbox">
           <span class="font-medium text-ink">启用 AI 中文解读</span>
-          <span class="text-muted">新内容入库自动生成中文一句话定位与要点（GitHub / GitCode 开源项目默认启用）</span>
+          <span class="text-muted">新内容入库自动生成中文一句话定位与要点（GitHub 开源项目默认启用）</span>
         </label>
         <AdminCommunityColorPicker v-model="communityForm.color" class="sm:col-span-4" />
         <input
@@ -1546,15 +1536,10 @@ const rowMenuItem = 'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-
                   </label>
                 </template>
 
-                <template v-if="isGitPlatform">
-                  <label v-if="form.target_type === 'releases'" class="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
-                    <input v-model="form.repo_include_prerelease" type="checkbox" class="checkbox">
-                    <span>包含预发布版本（alpha / beta / rc）</span>
-                  </label>
-                  <label v-if="form.target_type === 'issues'" class="block text-xs font-medium text-ink-2">限定标签
-                    <input v-model="form.repo_labels" placeholder="逗号分隔，如 announcement, roadmap, release（留空不限）" class="input mono mt-1.5 h-9 w-full px-3 text-xs font-normal">
-                  </label>
-                </template>
+                <label v-if="isGitPlatform && form.target_type === 'releases'" class="flex cursor-pointer items-center gap-2 text-xs text-ink-2">
+                  <input v-model="form.repo_include_prerelease" type="checkbox" class="checkbox">
+                  <span>包含预发布版本（alpha / beta / rc）</span>
+                </label>
               </div>
             </div>
 

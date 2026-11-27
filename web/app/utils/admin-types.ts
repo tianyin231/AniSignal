@@ -11,7 +11,6 @@ export interface WebPageConfig {
 
 export interface RepoConfig {
   include_prerelease?: boolean
-  labels?: string[]
 }
 
 export interface CollectTarget {

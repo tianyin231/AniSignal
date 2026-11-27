@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.collectors.git_repo import (
+from app.collectors.github_trending import (
     normalize_trending_target,
     parse_github_trending_html,
     parse_trending_target,
@@ -271,12 +271,12 @@ async def test_git_community_trending_and_main_repo_e2e(client, session_factory,
             )
         raise AssertionError(f"unexpected url: {url}")
 
-    monkeypatch.setattr("app.collectors.git_repo._BaseGitRepoCollector._request", fake_request)
+    monkeypatch.setattr("app.collectors.github.GithubCollector._request", fake_request)
 
     async def fake_readme(repo: str, **_kwargs) -> str:
         return f"# {repo}\n\nMock README documentation for {repo}."
 
-    monkeypatch.setattr("app.collectors.git_repo.fetch_github_repo_readme", fake_readme)
+    monkeypatch.setattr("app.collectors.github_trending.fetch_github_repo_readme", fake_readme)
 
     # 1) 创建自定义主题流分区 git / 开源
     c_resp = await client.post(

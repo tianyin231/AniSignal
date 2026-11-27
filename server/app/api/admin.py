@@ -520,7 +520,7 @@ async def create_target(
         web_dict = body.web_config.to_storage_dict()
         if web_dict:
             target_config["web"] = web_dict
-    if body.platform in ("github", "gitcode") and body.repo_config is not None:
+    if body.platform == "github" and body.repo_config is not None:
         repo_dict = body.repo_config.to_storage_dict(str(body.target_type))
         if repo_dict:
             target_config["repo"] = repo_dict
@@ -623,7 +623,7 @@ async def update_target(
     if value_changed:
         target.target_value = next_value
         target.last_success_at, target.last_error, target.consecutive_failures = None, None, 0
-        if target.platform in ("web_page", "github", "gitcode"):
+        if target.platform in ("web_page", "github"):
             next_cfg = dict(target.config or {})
             next_cfg.pop("_http_cache", None)
             target.config = next_cfg
@@ -636,7 +636,7 @@ async def update_target(
     if (
         body.is_official is not None
         or (body.web_config is not None and target.platform == "web_page")
-        or (body.repo_config is not None and target.platform in ("github", "gitcode"))
+        or (body.repo_config is not None and target.platform == "github")
     ):
         next_cfg = dict(target.config or {})
         if body.is_official is not None:
@@ -651,7 +651,7 @@ async def update_target(
             else:
                 next_cfg.pop("web", None)
             next_cfg.pop("_http_cache", None)
-        if body.repo_config is not None and target.platform in ("github", "gitcode"):
+        if body.repo_config is not None and target.platform == "github":
             try:
                 repo_dict = body.repo_config.to_storage_dict(str(target.target_type))
             except ValueError as exc:

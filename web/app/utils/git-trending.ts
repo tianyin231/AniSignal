@@ -1,5 +1,7 @@
 /** GitHub Trending 刊物展示与标记辅助函数（纯函数，含单测）。 */
 
+import type { RawItem } from './data.ts'
+
 export type TrendingPeriod = 'daily' | 'weekly' | 'monthly'
 
 export interface TrendingPeriodMeta {
@@ -192,4 +194,27 @@ const LANGUAGE_COLORS: Record<string, string> = {
 
 export function languageColor(language: string): string {
   return LANGUAGE_COLORS[(language || '').trim().toLowerCase()] ?? '#64748B'
+}
+
+export function trendingEntryToRawItem(entry: TrendingEntry): RawItem {
+  const metrics: Record<string, number> = {}
+  if (entry.period_stars > 0) metrics.view = entry.period_stars
+  if (entry.stars > 0) metrics.like = entry.stars
+  if (entry.forks > 0) metrics.fork = entry.forks
+  return {
+    id: entry.raw_content_id ? String(entry.raw_content_id) : entry.repo,
+    platform: 'github',
+    contentType: 'repo',
+    account: entry.repo,
+    region: 'global',
+    title: entry.repo,
+    publishedAt: '',
+    identity: 'user',
+    excerpt: entry.description || undefined,
+    topics: (entry.brief?.tags ?? []).slice(0, 3),
+    brief: entry.brief ?? null,
+    originalUrl: entry.url,
+    metrics,
+    previewMode: entry.raw_content_id ? 'full' : 'external_only',
+  }
 }

@@ -1,26 +1,11 @@
 <script setup lang="ts">
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpRight,
-  BookOpen,
-  ChevronLeft,
-  ChevronRight,
-  Flame,
-  GitFork,
-  Sparkles,
-  Star,
-  Tag,
-} from 'lucide-vue-next'
+import { BookOpen, ChevronLeft, ChevronRight, Flame, Sparkles, Tag } from 'lucide-vue-next'
 import { fmtTime } from '~/utils/admin-types'
 import {
-  formatCompactStars,
   formatPeriodKey,
   languageColor,
-  periodGainLabel,
   periodShortLabel,
-  splitRepoName,
-  trendingStatusBadge,
+  trendingEntryToRawItem,
   type TrendingEditionsResponse,
   type TrendingPeriod,
 } from '~/utils/git-trending'
@@ -33,19 +18,17 @@ const props = defineProps<{
 const emit = defineEmits<{
   selectPeriod: [period: TrendingPeriod]
   selectIssue: [periodKey: string]
+  selectTopic: [topic: string]
 }>()
 
 const onlyNew = ref(false)
 const activeLanguage = ref('')
 
-// 切换周期或期次时重置语言筛选，避免切到没有该语言的期次出现误空
+// 切换周期或期次时重置已不存在的语言筛选
 watch(
   () => [props.data.active_period, props.data.current?.period_key],
   () => {
-    if (
-      activeLanguage.value
-      && !(props.data.current?.languages ?? []).some(l => l.name === activeLanguage.value)
-    ) {
+    if (activeLanguage.value && !(props.data.current?.languages ?? []).some(l => l.name === activeLanguage.value)) {
       activeLanguage.value = ''
     }
   },
@@ -53,26 +36,16 @@ watch(
 
 const current = computed(() => props.data.current)
 const activePeriod = computed<TrendingPeriod>(() => props.data.active_period)
-const allEntries = computed(() => current.value?.entries ?? [])
-
-const filteredEntries = computed(() =>
-  allEntries.value.filter((entry) => {
-    if (onlyNew.value && entry.status !== 'new') return false
-    if (activeLanguage.value && entry.language !== activeLanguage.value) return false
-    return true
-  }),
+const filteredRows = computed(() =>
+  (current.value?.entries ?? [])
+    .filter(entry => (!onlyNew.value || entry.status === 'new') && (!activeLanguage.value || entry.language === activeLanguage.value))
+    .map(entry => ({ entry, item: trendingEntryToRawItem(entry) })),
 )
 
 const topLanguages = computed(() => (current.value?.languages ?? []).slice(0, 8))
 const languageBarItems = computed(() =>
   topLanguages.value.map(l => ({ name: l.name, count: l.count, color: languageColor(l.name) })),
 )
-
-const badgeToneClass: Record<'new' | 'streak' | 'returning', string> = {
-  new: 'bg-emerald-500/12 text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300',
-  streak: 'bg-amber-500/12 text-amber-700 dark:bg-amber-400/15 dark:text-amber-300',
-  returning: 'bg-sky-500/12 text-sky-700 dark:bg-sky-400/15 dark:text-sky-300',
-}
 
 function toggleLanguage(lang: string) {
   activeLanguage.value = activeLanguage.value === lang ? '' : lang
@@ -81,10 +54,9 @@ function toggleLanguage(lang: string) {
 
 <template>
   <div class="space-y-4">
-    <!-- 刊头控制条：周期切换 + 期次翻阅 + 统计摘要 -->
+    <!-- 刊头控制条：周期切换 + 期次翻阅 + 统计与语言筛选 -->
     <section class="panel p-4 sm:p-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <!-- 日刊 / 周刊 / 月刊 -->
         <div class="inline-flex rounded-[10px] bg-chip p-[3px]" role="tablist" aria-label="刊物周期">
           <button
             v-for="p in data.periods"
@@ -102,7 +74,6 @@ function toggleLanguage(lang: string) {
           </button>
         </div>
 
-        <!-- 期次翻阅 -->
         <div v-if="current" class="flex items-center gap-1.5">
           <button
             type="button"
@@ -130,19 +101,14 @@ function toggleLanguage(lang: string) {
         </div>
       </div>
 
-      <!-- 本期统计与筛选条 -->
       <div v-if="current" class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line-soft pt-3.5">
         <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted">
-          <span>
-            本期 <strong class="num text-sm font-bold text-ink">{{ current.stats.total }}</strong> 项
-          </span>
+          <span>本期 <strong class="num text-sm font-bold text-ink">{{ current.stats.total }}</strong> 项</span>
           <span class="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
-            <Sparkles :size="12" aria-hidden="true" />
-            首次上榜 <strong class="num text-sm font-bold">{{ current.stats.new_count }}</strong>
+            <Sparkles :size="12" aria-hidden="true" />首次上榜 <strong class="num text-sm font-bold">{{ current.stats.new_count }}</strong>
           </span>
           <span v-if="current.stats.streak_count > 0" class="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
-            <Flame :size="12" aria-hidden="true" />
-            连榜 <strong class="num font-semibold">{{ current.stats.streak_count }}</strong>
+            <Flame :size="12" aria-hidden="true" />连榜 <strong class="num font-semibold">{{ current.stats.streak_count }}</strong>
           </span>
           <span v-if="current.stats.returning_count > 0" class="text-sky-700 dark:text-sky-300">
             复榜 <strong class="num font-semibold">{{ current.stats.returning_count }}</strong>
@@ -164,7 +130,6 @@ function toggleLanguage(lang: string) {
         </button>
       </div>
 
-      <!-- 编程语言筛选胶囊 -->
       <div v-if="topLanguages.length > 1" class="mt-3 flex flex-wrap items-center gap-1.5" aria-label="编程语言筛选">
         <button
           type="button"
@@ -191,136 +156,19 @@ function toggleLanguage(lang: string) {
       </div>
     </section>
 
-    <!-- 主内容两栏布局：左侧榜单（整卡直进站内深度解读） + 右侧往期目录/语言分布/主仓库发版 -->
+    <!-- 两栏阅读台：左侧复用 TopicFeedCard，右侧往期目录 / 语言分布 / 主仓库发版 -->
     <div v-if="current" class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <!-- 榜单列表 -->
-      <section class="panel overflow-hidden" :class="{ 'opacity-65 transition-opacity': loading }">
-        <ol v-if="filteredEntries.length" class="divide-y divide-line-soft">
-          <li
-            v-for="entry in filteredEntries"
-            :key="entry.repo"
-            class="group flex items-stretch transition-colors hover:bg-line-soft/75"
-          >
-            <!-- 整行主交互：直接进入站内 AI 项目解读 + README 详情页 -->
-            <NuxtLink
-              :to="entry.raw_content_id ? `/contents/${entry.raw_content_id}` : entry.url"
-              :external="!entry.raw_content_id"
-              :target="entry.raw_content_id ? undefined : '_blank'"
-              class="flex min-w-0 flex-1 items-start gap-3.5 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand sm:gap-4 sm:px-5"
-            >
-              <!-- 排名与升降 -->
-              <div class="flex w-9 shrink-0 flex-col items-center pt-0.5 text-center">
-                <span
-                  class="num text-lg font-bold leading-none tabular-nums"
-                  :class="entry.rank <= 3 ? 'text-accent-ink' : 'text-faint'"
-                >{{ String(entry.rank).padStart(2, '0') }}</span>
-                <span
-                  v-if="entry.rank_delta !== null && entry.rank_delta !== 0"
-                  class="num mt-1 inline-flex items-center text-[11px] font-semibold tabular-nums"
-                  :class="entry.rank_delta > 0 ? 'text-ok' : 'text-faint'"
-                  :title="entry.rank_delta > 0 ? `较上期上升 ${entry.rank_delta} 位` : `较上期下降 ${Math.abs(entry.rank_delta)} 位`"
-                >
-                  <ArrowUp v-if="entry.rank_delta > 0" :size="10" aria-hidden="true" />
-                  <ArrowDown v-else :size="10" aria-hidden="true" />
-                  {{ Math.abs(entry.rank_delta) }}
-                </span>
-              </div>
-
-              <!-- 仓库主体信息 -->
-              <div class="min-w-0 flex-1">
-                <!-- 第一行：仓库名 + 去重上榜徽章 + 跨刊标记 -->
-                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span class="inline-flex min-w-0 max-w-full items-baseline gap-1 text-[15px] leading-snug text-ink transition-colors group-hover:text-brand-ink">
-                    <span v-if="splitRepoName(entry.repo).owner" class="mono truncate text-xs text-muted">{{ splitRepoName(entry.repo).owner }} /</span>
-                    <span class="truncate font-bold">{{ splitRepoName(entry.repo).name }}</span>
-                  </span>
-
-                  <span
-                    class="inline-flex h-5 items-center rounded-md px-1.5 text-[11px] font-semibold"
-                    :class="badgeToneClass[trendingStatusBadge(entry, activePeriod).tone]"
-                  >
-                    {{ trendingStatusBadge(entry, activePeriod).label }}
-                  </span>
-
-                  <span
-                    v-for="other in entry.also_in"
-                    :key="other"
-                    class="inline-flex h-5 items-center rounded-md bg-chip px-1.5 text-[11px] text-ink-2"
-                  >
-                    同步进{{ periodShortLabel(other) }}
-                  </span>
-                </div>
-
-                <!-- 第二行：AI 中文一句话定位与用途（无 AI 时优雅降级显示原简介） -->
-                <template v-if="entry.brief">
-                  <p class="mt-1.5 text-[14px] font-semibold leading-snug text-ink">
-                    <span class="mr-1.5 inline-flex items-center gap-0.5 rounded bg-brand-soft px-1.5 py-0.5 align-middle text-[10px] font-semibold text-brand-ink">
-                      <Sparkles :size="10" aria-hidden="true" />AI
-                    </span>
-                    <span>{{ entry.brief.headline }}</span>
-                  </p>
-                  <p v-if="entry.brief.tagline && entry.brief.tagline !== entry.brief.headline" class="mt-1 line-clamp-2 text-[13px] leading-relaxed text-ink-2">
-                    {{ entry.brief.tagline }}
-                  </p>
-                </template>
-                <p v-else-if="entry.description" class="mt-1.5 line-clamp-2 text-[13px] leading-relaxed text-ink-2">
-                  {{ entry.description }}
-                </p>
-
-                <!-- 第三行：语言 + 星标 + Fork + AI 标签 + 历史轨迹 -->
-                <div class="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted">
-                  <span v-if="entry.language" class="inline-flex items-center gap-1.5 text-ink-2">
-                    <span class="size-2 shrink-0 rounded-full" :style="{ backgroundColor: languageColor(entry.language) }" aria-hidden="true" />
-                    <span>{{ entry.language }}</span>
-                  </span>
-                  <span v-if="entry.stars > 0" class="num inline-flex items-center gap-1 tabular-nums" :title="`总计 ${entry.stars.toLocaleString('zh-CN')} Star`">
-                    <Star :size="12" class="text-faint" aria-hidden="true" />
-                    {{ formatCompactStars(entry.stars) }}
-                  </span>
-                  <span v-if="entry.forks > 0" class="num inline-flex items-center gap-1 tabular-nums" :title="`${entry.forks.toLocaleString('zh-CN')} Fork`">
-                    <GitFork :size="12" class="text-faint" aria-hidden="true" />
-                    {{ formatCompactStars(entry.forks) }}
-                  </span>
-                  <span v-if="entry.period_stars > 0" class="num font-semibold text-ok sm:hidden">
-                    +{{ entry.period_stars.toLocaleString('zh-CN') }} {{ periodGainLabel(activePeriod) }}
-                  </span>
-                  <span
-                    v-for="tag in (entry.brief?.tags ?? []).slice(0, 3)"
-                    :key="tag"
-                    class="rounded-md bg-chip px-1.5 py-0.5 text-[11px] text-ink-2"
-                  >
-                    {{ tag }}
-                  </span>
-                  <span v-if="entry.appearances > 1" class="mono text-faint">
-                    首见 {{ entry.first_seen_key }} · 最高 #{{ entry.best_rank }}
-                  </span>
-                </div>
-              </div>
-            </NuxtLink>
-
-            <!-- 右侧独立列：新增星标 + GitHub 直达快捷按钮（不与整卡站内链接嵌套） -->
-            <div class="flex shrink-0 flex-col items-end justify-between py-4 pr-4 sm:w-28 sm:pr-5">
-              <div v-if="entry.period_stars > 0" class="hidden text-right sm:block">
-                <div class="num text-[15px] font-bold tabular-nums text-ok">
-                  +{{ entry.period_stars.toLocaleString('zh-CN') }}
-                </div>
-                <div class="mt-0.5 text-[11px] text-faint">{{ periodGainLabel(activePeriod) }}</div>
-              </div>
-              <a
-                :href="entry.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                :aria-label="`前往 GitHub 查看 ${entry.repo}`"
-                class="mt-auto inline-flex h-7 items-center gap-1 rounded-lg border border-line bg-card px-2.5 text-[11px] font-medium text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand-ink"
-              >
-                <span>GitHub</span>
-                <ArrowUpRight :size="12" aria-hidden="true" />
-              </a>
-            </div>
-          </li>
-        </ol>
-
-        <div v-else class="px-5 py-12 text-center text-sm text-muted">
+      <div class="min-w-0 space-y-3" :class="{ 'opacity-65 transition-opacity': loading }">
+        <template v-if="filteredRows.length">
+          <TopicFeedCard
+            v-for="row in filteredRows"
+            :key="row.entry.repo"
+            :item="row.item"
+            :trending="{ entry: row.entry, period: activePeriod }"
+            @select-topic="emit('selectTopic', $event)"
+          />
+        </template>
+        <section v-else class="panel px-5 py-12 text-center text-sm text-muted">
           <p>当前筛选条件下暂无上榜项目</p>
           <button
             v-if="onlyNew || activeLanguage"
@@ -330,12 +178,10 @@ function toggleLanguage(lang: string) {
           >
             重置筛选查看全部 {{ current.stats.total }} 项
           </button>
-        </div>
-      </section>
+        </section>
+      </div>
 
-      <!-- 右侧栏：往期目录 + 语言分布 + 主仓库发版 -->
       <aside class="space-y-4 lg:sticky lg:top-[88px]">
-        <!-- 往期目录 -->
         <section class="panel p-4">
           <div class="flex items-center justify-between">
             <h2 class="inline-flex items-center gap-1.5 text-sm font-bold text-ink">
@@ -354,18 +200,13 @@ function toggleLanguage(lang: string) {
                   : 'text-ink-2 hover:bg-chip hover:text-ink'"
                 @click="emit('selectIssue', ed.period_key)"
               >
-                <span class="min-w-0 truncate">
-                  <span class="mono tabular-nums">{{ formatPeriodKey(activePeriod, ed.period_key) }}</span>
-                </span>
-                <span class="num shrink-0 text-[11px] opacity-80">
-                  {{ ed.item_count }} 项 · {{ ed.new_count }} 新
-                </span>
+                <span class="mono min-w-0 truncate tabular-nums">{{ formatPeriodKey(activePeriod, ed.period_key) }}</span>
+                <span class="num shrink-0 text-[11px] opacity-80">{{ ed.item_count }} 项 · {{ ed.new_count }} 新</span>
               </button>
             </li>
           </ul>
         </section>
 
-        <!-- 本期语言分布（复用通用 BarDistributionCard） -->
         <BarDistributionCard
           title="语言分布"
           :items="languageBarItems"
@@ -375,14 +216,11 @@ function toggleLanguage(lang: string) {
           @reset="activeLanguage = ''"
         />
 
-        <!-- 主仓库动态 -->
         <section v-if="data.releases.length" class="panel p-4">
-          <div class="flex items-center justify-between">
-            <h2 class="inline-flex items-center gap-1.5 text-sm font-bold text-ink">
-              <Tag :size="14" class="text-accent-ink" aria-hidden="true" />
-              主仓库发版
-            </h2>
-          </div>
+          <h2 class="inline-flex items-center gap-1.5 text-sm font-bold text-ink">
+            <Tag :size="14" class="text-accent-ink" aria-hidden="true" />
+            主仓库发版
+          </h2>
           <ul class="mt-3 divide-y divide-line-soft">
             <li v-for="rel in data.releases" :key="rel.id" class="py-2.5 first:pt-0 last:pb-0">
               <NuxtLink :to="`/contents/${rel.id}`" class="group block">
@@ -404,7 +242,6 @@ function toggleLanguage(lang: string) {
       </aside>
     </div>
 
-    <!-- 当前周期尚未采集首期 -->
     <section v-else class="panel px-5 py-12 text-center">
       <p class="text-sm font-medium text-ink">{{ periodShortLabel(activePeriod) }}首期尚未归档</p>
       <p class="mt-1 text-xs text-muted">完成一次「GitHub · 趋势榜单」采集后将自动生成本期榜单</p>

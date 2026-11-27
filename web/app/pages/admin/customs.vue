@@ -257,10 +257,6 @@ async function removeFeed(feed: CustomFeedAdminRow) {
           <option value="page_watch">单页变更</option>
           <option value="list_watch">列表更新</option>
           <option value="gh_releases">GitHub 版本</option>
-          <option value="gh_issues">GitHub 议题</option>
-          <option value="gh_discussions">GitHub 讨论</option>
-          <option value="gc_releases">GitCode 版本</option>
-          <option value="gc_issues">GitCode 议题</option>
           <option value="channel_rss">YouTube 频道</option>
           <option value="steam_app">Steam 游戏</option>
           <option value="notices">官方公告</option>

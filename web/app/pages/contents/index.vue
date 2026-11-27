@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Flame, Hash, LayoutGrid, List, Search, SearchX } from 'lucide-vue-next'
+import { Flame, Hash, Search, SearchX } from 'lucide-vue-next'
 import type { FeedOverview, PublicContentList } from '~/composables/usePublicApi'
 import { toRawItem } from '~/utils/public-utils'
 import { communityMeta, platformsForCommunity, useCommunityScope } from '~/composables/useGameSection'
@@ -24,12 +24,12 @@ const topic = computed(() => {
 })
 const sort = computed(() => String(route.query.sort || 'latest'))
 const tab = computed(() => (topic.value ? 'latest' : String(route.query.tab || 'latest')))
+const isHotMode = computed(() => (topic.value ? sort.value === 'hot' : tab.value === 'trending'))
 const trendingPeriod = computed(() => {
   const raw = String(route.query.period || '')
   return (['daily', 'weekly', 'monthly'].includes(raw) ? raw : '') as TrendingPeriod | ''
 })
 const trendingIssue = computed(() => String(route.query.issue || ''))
-const layoutMode = ref<'card' | 'list'>('card')
 const searchInput = ref(q.value)
 watch(q, (v) => (searchInput.value = v))
 
@@ -44,10 +44,7 @@ const shouldLoadOverview = computed(() => Boolean(topic.value))
 
 const overviewRequest = useLazyAsyncData(
   () => `feed-overview-${scope.value}`,
-  (_app, { signal }) => api<FeedOverview>('/api/feeds/overview', {
-    signal,
-    query: { community: scope.value },
-  }),
+  (_app, { signal }) => api<FeedOverview>('/api/feeds/overview', { signal, query: { community: scope.value } }),
   { enabled: shouldLoadOverview, watch: [scope] },
 )
 const gitTrendingRequest = useLazyAsyncData(
@@ -89,40 +86,31 @@ const [
   { data: trendingData, status: trendingStatus, error: trendingError },
   { data: rawGitTrendingData, status: gitTrendingStatus },
   { data: rawOverviewData },
-] = await Promise.all([
-  contentsRequest,
-  trendingRequest,
-  gitTrendingRequest,
-  overviewRequest,
-])
+] = await Promise.all([contentsRequest, trendingRequest, gitTrendingRequest, overviewRequest])
 
-// 按当前 scope 严格隔离，避免客户端在「开源 ↔ 小黑盒」间切换时短暂残留上一个分区的头图/侧栏数据
+// 按当前 scope 严格隔离，避免客户端在主题流间切换时残留上一分区的头图/侧栏数据
 const overviewData = computed(() => (rawOverviewData.value?.community === scope.value ? rawOverviewData.value : null))
 const gitTrendingData = computed(() => (rawGitTrendingData.value?.community === scope.value ? rawGitTrendingData.value : null))
 
 const hasGitEditions = computed(() => Boolean(shouldCheckGitTrending.value && gitTrendingData.value?.has_editions))
-const showGitDesk = computed(() => {
-  if (!hasGitEditions.value) return false
-  if (route.query.view === 'feed') return false
-  if (q.value || platform.value || activeTopic.value || sort.value === 'hot') return false
-  return true
-})
+const showGitDesk = computed(() =>
+  hasGitEditions.value && route.query.view !== 'feed' && !q.value && !platform.value && !activeTopic.value && sort.value !== 'hot',
+)
+
+const activeStatus = computed(() => (tab.value === 'trending' ? trendingStatus.value : status.value))
+const activeError = computed(() => (tab.value === 'trending' ? trendingError.value : error.value))
 const retry = () => (tab.value === 'trending' ? trendingRequest.refresh() : contentsRequest.refresh())
 
 const list = computed(() =>
-  tab.value === 'trending'
-    ? (trendingData.value?.items ?? []).map(toRawItem)
-    : (data.value?.items ?? []).map(toRawItem),
+  (tab.value === 'trending' ? (trendingData.value?.items ?? []) : (data.value?.items ?? [])).map(toRawItem),
 )
 const trendingDelta = computed(() =>
   new Map((trendingData.value?.items ?? []).map(item => [String(item.id), item.delta_view ?? 0])),
 )
 const totalPages = computed(() => Math.min(MAX_PAGE, Math.max(1, Math.ceil((data.value?.total ?? 0) / pageSize))))
-
-const visiblePlatformTabs = computed(() =>
-  platformsForCommunity(scope.value).filter(key => key in platformMeta),
-)
+const visiblePlatformTabs = computed(() => platformsForCommunity(scope.value).filter(key => key in platformMeta))
 const overviewTopics = computed(() => overviewData.value?.topics ?? [])
+const hasActiveFilters = computed(() => Boolean(q.value || activeTopic.value || platform.value))
 
 watch(scope, () => {
   if (platform.value && !visiblePlatformTabs.value.includes(platform.value)) {
@@ -132,6 +120,11 @@ watch(scope, () => {
 
 function applyQuery(patch: Record<string, string | undefined>) {
   router.replace({ query: { ...route.query, page: undefined, ...patch } })
+}
+
+function selectMode(hot: boolean) {
+  if (topic.value) applyQuery({ sort: hot ? 'hot' : undefined })
+  else applyQuery({ tab: hot ? 'trending' : undefined })
 }
 
 function switchFeedView(view: 'editions' | 'feed') {
@@ -151,11 +144,10 @@ function selectTrendingIssue(periodKey: string) {
 }
 
 function toggleTopic(tag: string) {
-  const next = activeTopic.value === tag ? undefined : tag
-  applyQuery({ ...(hasGitEditions.value ? { view: 'feed' } : {}), topic: next })
+  applyQuery({ ...(hasGitEditions.value ? { view: 'feed' } : {}), topic: activeTopic.value === tag ? undefined : tag })
 }
 
-function clearTopicFilters() {
+function clearFilters() {
   searchInput.value = ''
   applyQuery({ q: undefined, platform: undefined, topic: undefined, sort: undefined })
 }
@@ -168,9 +160,9 @@ function formatHotMetric(item: FeedOverview['hot_items'][number]): string {
     if (m.like) return `★ ${formatCompactStars(Number(m.like))}`
     return ''
   }
-  if (m.like != null && m.like > 0) return `${Number(m.like).toLocaleString('zh-CN')} 赞`
-  if (m.reply != null && m.reply > 0) return `${Number(m.reply).toLocaleString('zh-CN')} 评`
-  if (m.view != null && m.view > 0) return `${Number(m.view).toLocaleString('zh-CN')} 阅`
+  if (m.like) return `${Number(m.like).toLocaleString('zh-CN')} 赞`
+  if (m.reply) return `${Number(m.reply).toLocaleString('zh-CN')} 评`
+  if (m.view) return `${Number(m.view).toLocaleString('zh-CN')} 阅`
   return ''
 }
 
@@ -181,7 +173,6 @@ const customCreateTo = computed(() =>
 
 <template>
   <div class="space-y-5">
-    <!-- 主题流信号台频道头图（小黑盒 / 开源 / 所有自定义 domain="feed" 分区） -->
     <TopicChannelHero
       v-if="topic"
       :topic="topic"
@@ -192,90 +183,70 @@ const customCreateTo = computed(() =>
       :custom-create-to="customCreateTo"
       @switch-view="switchFeedView"
     />
-
-    <!-- 游戏分区内容库导航 -->
     <template v-else>
       <h1 class="sr-only">内容库</h1>
       <SectionNav />
     </template>
 
-    <!-- 专属趋势刊物台（当该主题流拥有 GitHub Trending 归档且处于刊物视图时） -->
+    <!-- 趋势刊物视图（有 GitHub Trending 归档且未切入全部收录时） -->
     <GitTrendingDesk
       v-if="showGitDesk && gitTrendingData"
       :data="gitTrendingData"
       :loading="gitTrendingStatus === 'pending'"
       @select-period="selectTrendingPeriod"
       @select-issue="selectTrendingIssue"
+      @select-topic="toggleTopic"
     />
 
-    <!-- 升级后的双栏信号台主题流（小黑盒 / 开源全部收录 / 所有自定义 feed 分区） -->
-    <div v-else-if="topic" class="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <!-- 左主栏：筛选控制条 + 卡片/列表内容流 -->
+    <!-- 统一内容流骨架（按分区配置按需挂出话题筛选与右侧信号栏） -->
+    <div v-else :class="topic ? 'grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]' : ''">
       <div class="min-w-0 space-y-4">
         <section class="panel p-3.5 sm:p-4">
           <div class="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <form class="flex min-w-0 w-full items-center gap-2 sm:w-auto sm:flex-initial" role="search" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
+            <form
+              v-if="tab !== 'trending'"
+              class="flex min-w-0 w-full items-center gap-2 sm:w-auto sm:flex-initial"
+              role="search"
+              @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })"
+            >
               <div class="relative min-w-0 flex-1 sm:flex-initial">
                 <Search :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" aria-hidden="true" />
-                <input v-model="searchInput" type="search" aria-label="关键词搜索" placeholder="搜索标题、正文或项目名" class="input h-9 w-full pl-9 text-[13px] sm:w-64">
+                <input
+                  v-model="searchInput"
+                  type="search"
+                  :aria-label="topic ? '关键词搜索' : '标题关键词'"
+                  :placeholder="topic ? '搜索标题、正文或项目名' : '搜索标题关键词'"
+                  class="input h-9 w-full pl-9 text-[13px] sm:w-64"
+                >
               </div>
               <button type="submit" class="btn-primary h-9 shrink-0 px-3.5 text-xs">搜索</button>
             </form>
 
-            <div class="flex items-center justify-between gap-2 sm:justify-end">
-              <div class="flex gap-0.5 rounded-[10px] bg-chip p-[3px]" role="tablist" aria-label="排序">
-                <button
-                  type="button"
-                  role="tab"
-                  :aria-selected="sort !== 'hot'"
-                  class="h-8 rounded-lg px-3 text-[13px] transition-colors"
-                  :class="sort !== 'hot' ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
-                  @click="applyQuery({ sort: undefined })"
-                >
-                  最新
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  :aria-selected="sort === 'hot'"
-                  class="inline-flex h-8 items-center gap-1 rounded-lg px-3 text-[13px] transition-colors"
-                  :class="sort === 'hot' ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
-                  @click="applyQuery({ sort: 'hot' })"
-                >
-                  <Flame :size="14" class="text-hot" aria-hidden="true" />热门
-                </button>
-              </div>
-
-              <!-- 卡片 / 紧凑列表双视图切换 -->
-              <div class="inline-flex rounded-[10px] bg-chip p-[3px]" role="group" aria-label="浏览密度">
-                <button
-                  type="button"
-                  class="grid size-8 place-items-center rounded-lg transition-colors"
-                  :class="layoutMode === 'card' ? 'bg-card text-ink shadow-sm' : 'text-muted hover:text-ink'"
-                  :aria-pressed="layoutMode === 'card'"
-                  aria-label="卡片视图"
-                  title="图文卡片视图"
-                  @click="layoutMode = 'card'"
-                >
-                  <LayoutGrid :size="15" aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  class="grid size-8 place-items-center rounded-lg transition-colors"
-                  :class="layoutMode === 'list' ? 'bg-card text-ink shadow-sm' : 'text-muted hover:text-ink'"
-                  :aria-pressed="layoutMode === 'list'"
-                  aria-label="紧凑列表"
-                  title="紧凑列表视图"
-                  @click="layoutMode = 'list'"
-                >
-                  <List :size="15" aria-hidden="true" />
-                </button>
-              </div>
+            <div class="flex gap-0.5 self-start rounded-[10px] bg-chip p-[3px] sm:self-auto" role="tablist" aria-label="排序">
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="!isHotMode"
+                class="h-8 rounded-lg px-3.5 text-[13px] transition-colors"
+                :class="!isHotMode ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
+                @click="selectMode(false)"
+              >
+                最新
+              </button>
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="isHotMode"
+                class="inline-flex h-8 items-center gap-1 rounded-lg px-3.5 text-[13px] transition-colors"
+                :class="isHotMode ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
+                @click="selectMode(true)"
+              >
+                <Flame :size="14" class="text-hot" aria-hidden="true" />{{ topic ? '热门' : '热度飙升' }}
+              </button>
             </div>
           </div>
 
-          <!-- 平台筛选（多平台分区显示） -->
-          <div v-if="visiblePlatformTabs.length > 1" class="mt-3 flex flex-wrap gap-1.5 border-t border-line-soft pt-3" aria-label="平台筛选">
+          <div v-if="visiblePlatformTabs.length > 1 && tab !== 'trending'" class="mt-3 flex flex-wrap gap-1.5 border-t border-line-soft pt-3" aria-label="平台筛选">
             <button
               type="button"
               class="h-7 rounded-full px-3 text-xs transition-colors"
@@ -298,8 +269,7 @@ const customCreateTo = computed(() =>
             </button>
           </div>
 
-          <!-- 话题 / AI 标签筛选胶囊（自动聚合小黑盒话题或 AI 主题标签） -->
-          <div v-if="overviewTopics.length > 1" class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line-soft pt-3" aria-label="话题筛选">
+          <div v-if="topic && overviewTopics.length > 1" class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line-soft pt-3" aria-label="话题筛选">
             <button
               type="button"
               class="h-7 rounded-full px-3 text-xs transition-colors"
@@ -324,16 +294,14 @@ const customCreateTo = computed(() =>
           </div>
         </section>
 
-        <!-- 加载 / 错误 / 内容流 -->
-        <section v-if="status === 'pending' && !list.length" class="panel px-4 py-12 text-center text-sm text-muted">
+        <section v-if="activeStatus === 'pending' && !list.length" class="panel px-4 py-12 text-center text-sm text-muted">
           加载中…
         </section>
-        <section v-else-if="error" role="alert" class="panel px-4 py-12 text-center text-sm text-warn">
+        <section v-else-if="activeError" role="alert" class="panel px-4 py-12 text-center text-sm text-warn">
           内容暂时加载失败。<button type="button" class="ml-1 font-medium underline" @click="retry">重新加载</button>
         </section>
         <template v-else-if="list.length">
-          <!-- 图文卡片视图（默认） -->
-          <div v-if="layoutMode === 'card'" class="space-y-3" :class="{ 'opacity-65 transition-opacity': status === 'pending' }">
+          <div v-if="topic" class="space-y-3" :class="{ 'opacity-65 transition-opacity': activeStatus === 'pending' }">
             <TopicFeedCard
               v-for="item in list"
               :key="item.id"
@@ -342,19 +310,17 @@ const customCreateTo = computed(() =>
               @select-topic="toggleTopic"
             />
           </div>
-
-          <!-- 紧凑列表视图 -->
-          <section v-else class="panel overflow-hidden" :class="{ 'opacity-65 transition-opacity': status === 'pending' }">
+          <section v-else class="panel overflow-hidden" :class="{ 'opacity-65 transition-opacity': activeStatus === 'pending' }">
             <RawFeedRow
               v-for="item in list"
               :key="item.id"
               :item="item"
-              :show-community="false"
+              :show-community="isAll"
+              :delta-view="tab === 'trending' ? trendingDelta.get(item.id) ?? 0 : 0"
             />
           </section>
 
-          <!-- 分页 -->
-          <div v-if="totalPages > 1" class="panel flex items-center justify-between px-4 py-2.5 text-xs text-muted">
+          <div v-if="tab !== 'trending' && totalPages > 1" class="panel flex items-center justify-between px-4 py-2.5 text-xs text-muted">
             <span class="num">共 {{ data?.total ?? 0 }} 条</span>
             <div class="flex items-center gap-3">
               <button type="button" :disabled="page <= 1" class="transition-colors hover:text-ink disabled:opacity-40" @click="applyQuery({ page: String(page - 1) })">« 上一页</button>
@@ -365,27 +331,25 @@ const customCreateTo = computed(() =>
         </template>
         <section v-else class="panel px-5 py-12 text-center text-sm text-muted">
           <SearchX :size="24" class="mx-auto mb-2 text-faint" aria-hidden="true" />
-          <p>{{ q || activeTopic || platform ? '当前筛选条件下暂无匹配内容' : isXiaoheihe ? '暂无小黑盒帖子。' : '暂无内容。' }}</p>
-          <button v-if="q || activeTopic || platform" type="button" class="mt-2 text-xs font-medium text-brand-ink hover:underline" @click="clearTopicFilters">
+          <p>
+            {{ hasActiveFilters ? '当前筛选条件下暂无匹配内容' : tab === 'trending' ? '24 小时内还没有明显的热度变化。' : isXiaoheihe ? '暂无小黑盒帖子。' : '暂无内容。' }}
+          </p>
+          <button v-if="hasActiveFilters" type="button" class="mt-2 text-xs font-medium text-brand-ink hover:underline" @click="clearFilters">
             清除筛选
           </button>
         </section>
       </div>
 
-      <!-- 右侧信号栏：近期热门 + 热门话题分布 + 收录来源状态 -->
-      <aside class="space-y-4 lg:sticky lg:top-[88px]">
-        <!-- 近期热门 -->
+      <!-- 主题流右侧信号栏 -->
+      <aside v-if="topic" class="space-y-4 lg:sticky lg:top-[88px]">
         <section v-if="overviewData?.hot_items?.length" class="panel p-4">
           <h2 class="inline-flex items-center gap-1.5 text-sm font-bold text-ink">
-            <Flame :size="14" class="text-hot" aria-hidden="true" />
-            近期热门
+            <Flame :size="14" class="text-hot" aria-hidden="true" />近期热门
           </h2>
           <ol class="mt-3 divide-y divide-line-soft">
             <li v-for="(hot, idx) in overviewData.hot_items" :key="hot.id" class="py-2.5 first:pt-0 last:pb-0">
               <NuxtLink :to="`/contents/${hot.id}`" class="group flex items-start gap-2.5">
-                <span class="num w-4 shrink-0 pt-0.5 text-xs font-bold tabular-nums" :class="idx < 3 ? 'text-accent-ink' : 'text-faint'">
-                  {{ idx + 1 }}
-                </span>
+                <span class="num w-4 shrink-0 pt-0.5 text-xs font-bold tabular-nums" :class="idx < 3 ? 'text-accent-ink' : 'text-faint'">{{ idx + 1 }}</span>
                 <div class="min-w-0 flex-1">
                   <p class="line-clamp-2 text-[13px] font-medium leading-snug text-ink transition-colors group-hover:text-brand-ink">
                     {{ hot.brief?.headline || cleanPlatformTitle(hot.title) }}
@@ -400,7 +364,6 @@ const customCreateTo = computed(() =>
           </ol>
         </section>
 
-        <!-- 热门话题分布（复用通用 BarDistributionCard） -->
         <BarDistributionCard
           title="热门话题"
           :items="overviewTopics"
@@ -409,12 +372,9 @@ const customCreateTo = computed(() =>
           @select="toggleTopic"
           @reset="applyQuery({ topic: undefined })"
         >
-          <template #icon>
-            <Hash :size="14" class="text-accent-ink" aria-hidden="true" />
-          </template>
+          <template #icon><Hash :size="14" class="text-accent-ink" aria-hidden="true" /></template>
         </BarDistributionCard>
 
-        <!-- 收录来源状态（复用通用 SourceHealthMini） -->
         <SourceHealthMini
           v-if="overviewData?.sources?.length"
           :sources="overviewData.sources"
@@ -424,91 +384,5 @@ const customCreateTo = computed(() =>
         />
       </aside>
     </div>
-
-    <!-- 游戏分区内容库视图（保持与原有游戏分区一致） -->
-    <template v-else>
-      <section class="panel p-3.5 sm:p-4">
-        <div class="flex flex-wrap items-center justify-between gap-2.5">
-          <form v-if="tab !== 'trending'" class="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial" role="search" @submit.prevent="applyQuery({ q: searchInput.trim() || undefined })">
-            <div class="relative min-w-0 flex-1 sm:flex-initial">
-              <Search :size="15" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-faint" aria-hidden="true" />
-              <input v-model="searchInput" type="search" aria-label="标题关键词" placeholder="搜索标题关键词" class="input h-9 w-full pl-9 text-[13px] sm:w-64">
-            </div>
-            <button type="submit" class="btn-primary h-9 shrink-0 px-3.5 text-xs">搜索</button>
-          </form>
-
-          <div class="flex gap-0.5 rounded-[10px] bg-chip p-[3px]" role="tablist" aria-label="排序">
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="tab !== 'trending'"
-              class="h-8 rounded-lg px-3.5 text-[13px] transition-colors"
-              :class="tab !== 'trending' ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
-              @click="applyQuery({ tab: undefined })"
-            >
-              最新
-            </button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="tab === 'trending'"
-              class="inline-flex h-8 items-center gap-1 rounded-lg px-3.5 text-[13px] transition-colors"
-              :class="tab === 'trending' ? 'bg-card font-semibold text-ink shadow-sm' : 'text-muted hover:text-ink'"
-              @click="applyQuery({ tab: 'trending' })"
-            >
-              <Flame :size="14" class="text-hot" aria-hidden="true" />热度飙升
-            </button>
-          </div>
-        </div>
-
-        <div v-if="visiblePlatformTabs.length > 1 && tab !== 'trending'" class="mt-3 flex flex-wrap gap-1.5 border-t border-line-soft pt-3" aria-label="平台筛选">
-          <button
-            type="button"
-            class="h-7 rounded-full px-3 text-xs transition-colors"
-            :class="!platform ? 'bg-ink font-semibold text-card' : 'bg-chip text-ink-2 hover:text-ink'"
-            :aria-pressed="!platform"
-            @click="applyQuery({ platform: undefined })"
-          >
-            全部平台
-          </button>
-          <button
-            v-for="key in visiblePlatformTabs"
-            :key="key"
-            type="button"
-            class="h-7 rounded-full px-3 text-xs transition-colors"
-            :class="platform === key ? 'bg-ink font-semibold text-card' : 'bg-chip text-ink-2 hover:text-ink'"
-            :aria-pressed="platform === key"
-            @click="applyQuery({ platform: key })"
-          >
-            {{ platformMeta[key as Platform]?.label }}
-          </button>
-        </div>
-      </section>
-
-      <section v-if="(tab === 'trending' ? trendingStatus : status) === 'pending'" class="panel px-4 py-10 text-center text-sm text-muted">加载中…</section>
-      <section v-else-if="tab === 'trending' ? trendingError : error" role="alert" class="panel px-4 py-10 text-center text-sm text-warn">
-        内容暂时加载失败。<button type="button" class="ml-1 font-medium underline" @click="retry">重新加载</button>
-      </section>
-      <section v-else class="panel overflow-hidden">
-        <RawFeedRow
-          v-for="item in list"
-          :key="item.id"
-          :item="item"
-          :show-community="isAll"
-          :delta-view="tab === 'trending' ? trendingDelta.get(item.id) ?? 0 : 0"
-        />
-        <p v-if="!list.length" class="px-4 py-12 text-center text-sm text-muted">
-          {{ tab === 'trending' ? '24 小时内还没有明显的热度变化。' : '没有匹配的内容。' }}
-        </p>
-        <div v-if="tab !== 'trending' && totalPages > 1" class="flex items-center justify-between border-t border-line-soft px-4 py-2.5 text-xs text-faint">
-          <span class="num">共 {{ data?.total ?? 0 }} 条</span>
-          <div class="flex items-center gap-3">
-            <button type="button" :disabled="page <= 1" class="transition-colors hover:text-ink disabled:opacity-40" @click="applyQuery({ page: String(page - 1) })">« 上一页</button>
-            <span class="mono tabular-nums">{{ page }} / {{ totalPages }}</span>
-            <button type="button" :disabled="page >= totalPages" class="transition-colors hover:text-ink disabled:opacity-40" @click="applyQuery({ page: String(page + 1) })">下一页 »</button>
-          </div>
-        </div>
-      </section>
-    </template>
   </div>
 </template>

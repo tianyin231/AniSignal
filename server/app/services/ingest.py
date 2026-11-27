@@ -35,7 +35,7 @@ from app.parsers.steam import PARSER_VERSION as STEAM_PARSER_VERSION
 from app.parsers.steam import parse_notice as parse_steam_notice
 from app.parsers.rss import PARSER_VERSION as RSS_PARSER_VERSION, parse_item as parse_feed_item
 from app.parsers.web_page import PARSER_VERSION as WEB_PAGE_PARSER_VERSION, parse_page as parse_web_page
-from app.parsers.git_repo import PARSER_VERSION as GIT_REPO_PARSER_VERSION, parse_git_item
+from app.parsers.github import PARSER_VERSION as GITHUB_PARSER_VERSION, parse_github_item
 from app.parsers.game_official import PARSER_VERSION as GAME_OFFICIAL_PARSER_VERSION, parse_notice as parse_game_notice
 from app.collectors.nikke import parse_notice as parse_nikke_notice
 from app.schemas.content import NormalizedContent
@@ -78,12 +78,8 @@ PARSERS: dict[str, tuple] = {
     "rss_feed": (parse_feed_item, RSS_PARSER_VERSION),
     "web_page_watch": (parse_web_page, WEB_PAGE_PARSER_VERSION),
     "web_page_list": (parse_web_page, WEB_PAGE_PARSER_VERSION),
-    "github_releases": (parse_git_item, GIT_REPO_PARSER_VERSION),
-    "github_issues": (parse_git_item, GIT_REPO_PARSER_VERSION),
-    "github_discussions": (parse_git_item, GIT_REPO_PARSER_VERSION),
-    "github_trending": (parse_git_item, GIT_REPO_PARSER_VERSION),
-    "gitcode_releases": (parse_git_item, GIT_REPO_PARSER_VERSION),
-    "gitcode_issues": (parse_git_item, GIT_REPO_PARSER_VERSION),
+    "github_releases": (parse_github_item, GITHUB_PARSER_VERSION),
+    "github_trending": (parse_github_item, GITHUB_PARSER_VERSION),
     "game_official_notices": (parse_game_notice, GAME_OFFICIAL_PARSER_VERSION),
     "nikke_notices": (parse_nikke_notice, "1"),
     "custom_source_archive": (parse_custom_archive, "1"),
@@ -113,7 +109,7 @@ def target_source_external_id(platform: str, target_value: str) -> str:
         return web_id(f"site:{target_value}")
     if platform == "x":
         return target_value.strip().removeprefix("@").lower()
-    if platform in ("github", "gitcode"):
+    if platform == "github":
         return target_value.strip().lower()
     return target_value
 
@@ -536,7 +532,6 @@ async def reparse_contents(
             "rss": "rss_feed",
             "web_page": "web_page_watch",
             "github": "github_releases",
-            "gitcode": "gitcode_releases",
             "xiaoheihe": "xiaoheihe_posts",
             "steam": "steam_notices",
         }.get(

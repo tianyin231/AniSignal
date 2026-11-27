@@ -62,7 +62,6 @@ export interface CustomFeedRow {
     link_pattern?: string
     ignore_patterns?: string[]
     include_prerelease?: boolean
-    labels?: string[]
   }
 }
 export interface CustomQuota {

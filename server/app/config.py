@@ -52,9 +52,8 @@ class Settings(BaseSettings):
     # YouTube Data API v3 key（配置后 YouTube 目标改走官方接口，RSS 作为失败回退）
     youtube_api_key: str = ""
 
-    # 开发者平台只读令牌（完全可选；留空默认匿名采集，GitHub Releases 限流时自动回退公开 Atom）
+    # GitHub 只读令牌（完全可选；留空默认匿名采集，Releases 限流时自动回退公开 Atom）
     github_token: str = ""
-    gitcode_token: str = ""
 
     # 运营方配置的一路公开 RSS/Atom 或独立小黑盒只读网关（DB site_settings 优先，此处兜底）。
     xiaoheihe_feed_url: str = ""

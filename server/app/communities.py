@@ -52,7 +52,7 @@ class CommunityMeta:
     official_merch_bili_sources: tuple[tuple[str, str], ...] = ()
     official_notice_region: str = "cn"
     en: str = ""
-    platforms: tuple[str, ...] = ("bilibili", "youtube", "rss", "web_page", "github", "gitcode")
+    platforms: tuple[str, ...] = ("bilibili", "youtube", "rss", "web_page", "github")
     active: bool = True
     builtin: bool = True
     ai_summary: bool = False
@@ -207,7 +207,7 @@ BUILTIN_COMMUNITIES: dict[str, CommunityMeta] = {
         game_note="区分已发布、测试中与传闻；不把转述当作事实确认；",
         other_games_examples="", color="teal", bili_mid_setting=None,
         official_bili_mid_default=None, domain="news",
-        platforms=("rss", "bilibili", "x", "web_page", "github", "gitcode"),
+        platforms=("rss", "bilibili", "x", "web_page", "github"),
     ),
     "xiaoheihe": CommunityMeta(
         key="xiaoheihe", label="小黑盒", en="HeyBox",
@@ -249,7 +249,7 @@ def build_custom_meta(raw: dict) -> CommunityMeta:
     color = normalize_community_color(raw.get("color"), default="blue")
     bili_mid = str(raw.get("official_bili_mid") or "").strip() or None
     aliases = tuple(dict.fromkeys(str(x).strip() for x in (raw.get("aliases") or []) if str(x).strip()))
-    platforms = tuple(raw.get("platforms") or ("bilibili", "youtube", "rss", "web_page", "github", "gitcode", "x", "steam"))
+    platforms = tuple(raw.get("platforms") or ("bilibili", "youtube", "rss", "web_page", "github", "x", "steam"))
     if domain == "feed" and "xiaoheihe" not in platforms:
         platforms += ("xiaoheihe",)
     note = f"不要把《{label}》写成其它游戏或无关作品；"

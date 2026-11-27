@@ -55,33 +55,29 @@ AniSignal 当前已经形成稳定的底层数据链路：
 
 ## 4. 分期演进方案
 
-### Phase 1：开发者平台信源（GitHub / GitCode）✅ 已落地（2026-11-26）
+### Phase 1：开发者平台信源（GitHub）✅ 已落地并按收束规划收敛（2026-11-27）
 
-**目标**：第一时间满足「持续追踪热门开源项目版本发布与重大动态」的核心诉求，坚持**默认匿名可用、零数据库迁移**，同步接入后台采集目标（`/admin/targets`）与用户定制监控（`/account`）。
+**目标**：聚焦「热门开源项目趋势刊物 + 仓库版本发布追踪」核心场景，坚持**默认匿名可用、零数据库迁移**，同步接入后台采集目标（`/admin/targets`）与用户定制监控（`/account`）。
+
+> 注：2026-11-27 按架构收束规划（决策 A2），移除了低频的 GitCode 平台及 GitHub Issues / Discussions 采集分支，将原千行 `git_repo.py` 拆分为 `github.py`（Releases 与采集器）与 `github_trending.py`（Trending 榜单与匿名 README 抓取）。
 
 #### 1.1 平台与目标类型
-- 新增平台：`github`（GitHub）、`gitcode`（GitCode）。
-- 目标值规范化（`normalize_repo_target`）：支持输入 `owner/repo` 或对应平台完整仓库链接（自动剥离 `.git`、`/releases`、`/issues` 等尾部路径并校验归属域名），统一归一化为 `owner/repo`；用户定制监控按小写折叠共享单一 `CustomFeedSource`。
+- 平台：`github`（GitHub）。
+- 目标值规范化（`normalize_github_repo`）：支持输入 `owner/repo` 或公开 GitHub 仓库链接（自动剥离 `.git`、`/releases` 等尾部路径并校验域名），统一归一化为 `owner/repo`；用户定制监控按小写折叠共享单一 `CustomFeedSource`。
 - 目标类型：
-  1. `releases`（后台）/ `gh_releases`、`gc_releases`（定制监控）：追踪正式版与预发布（prerelease）、版本号与 Release Notes，支持可选关闭预发布过滤；
-  2. `issues`（后台）/ `gh_issues`、`gc_issues`（定制监控）：支持可选限定标签（单标签透传上游 API，多标签本地 OR 匹配），自动剔除 GitHub PR 避免刷屏；
-  3. `discussions`（后台）/ `gh_discussions`（定制监控，GitHub）：直连公开 `discussions.atom`，无需 GraphQL Token 即可匿名采集；
-  4. `trending`（后台，GitHub）：采集 `github.com/trending` 的 `daily` / `weekly` / `monthly` 公开静态榜单，落库 `git_trending_editions` 按期归档日刊/周刊/月刊，自动计算跨期去重与上榜标记（首次上榜 / 连榜 N 期 / 复榜 / 跨榜提示），并在主题流页面提供专属刊物阅读台。
+  1. `releases`（后台）/ `gh_releases`（定制监控）：追踪正式版与预发布（prerelease）、版本号与 Release Notes，支持可选关闭预发布过滤；
+  2. `trending`（后台，GitHub）：采集 `github.com/trending` 的 `daily` / `weekly` / `monthly` 公开静态榜单，落库 `git_trending_editions` 按期归档日刊/周刊/月刊，自动计算跨期去重与上榜标记（首次上榜 / 连榜 N 期 / 复榜 / 跨榜提示），并在主题流页面提供专属刊物阅读台。
 
 #### 1.2 匿名优先的采集策略与限额保护
 - **GitHub Releases**：
   - 优先调用 `GET https://api.github.com/repos/{owner}/{repo}/releases`，持久化 `ETag` 配合 `If-None-Match` 实现无更新时 `304 Not Modified` 零配额消耗；
   - 匿名额度触发 `403/429` 限流或上游故障时，自动回退至无配额限制的原生 Atom 源 `https://github.com/{owner}/{repo}/releases.atom`（同样带 `ETag`）；
   - REST API 与 Atom 回退共用基于 `{owner}/{repo}:release:{tag_name}` 的稳定 `external_id`，来回切换绝不重复入库，修改 Release Notes 自动追加 `ContentVersion` 并联动 Diff 修订通知。
-- **GitHub Issues / Discussions**：
-  - Issues 带 `ETag` 匿名拉取，触顶时解析 `X-RateLimit-Reset` 抛出 `CollectorDeferred` 延后调度而非计入失败；Discussions 直接走公开 Atom 零限额。
-- **GitCode Releases / Issues**：
-  - 调用公开只读 OpenAPI v5（`https://api.gitcode.com/api/v5/repos/{owner}/{repo}/releases` 与 `/issues`），匿名可用，触发 `429` 自动 `CollectorDeferred` 退避；404 仓库不存在直接 `stop_fallback = True` 止损。
-- **可选提额令牌**：保留可选环境变量 `ANISIGNAL_GITHUB_TOKEN` 与 `ANISIGNAL_GITCODE_TOKEN`（默认留空即纯匿名，重度实例按需通过 `.env` 配置）。
+- **可选提额令牌**：保留可选环境变量 `ANISIGNAL_GITHUB_TOKEN`（默认留空即纯匿名，重度实例按需通过 `.env` 配置）。
 
 #### 1.3 已落地模块
-- `server/app/collectors/git_repo.py`、`server/app/parsers/git_repo.py`：统一采集器、仓库归一化、ETag 缓存与内容解析
-- `server/app/models/enums.py`、`server/app/schemas/content.py`、`server/app/schemas/api.py`、`server/app/models/collect_target.py`：新平台/目标类型/内容类型枚举与 `repo_config` 校验
+- `server/app/collectors/github.py`、`server/app/collectors/github_trending.py`、`server/app/parsers/github.py`：Releases 采集器、Trending 榜单与匿名 README 抓取及内容解析
+- `server/app/models/enums.py`、`server/app/schemas/content.py`、`server/app/schemas/api.py`、`server/app/models/collect_target.py`：平台/目标类型/内容类型枚举与 `repo_config` 校验
 - `server/app/services/collect.py`、`server/app/services/ingest.py`、`server/app/services/custom_feeds.py`、`server/app/services/custom_policy.py`、`server/app/api/admin.py`、`server/app/api/account.py`、`server/app/api/admin_custom.py`、`server/app/api/custom.py`：后台目标与共享定制监控全链路接入
 - `web/app/utils/lexicon.ts`、`web/app/utils/custom-feeds.ts`、`web/app/pages/admin/targets.vue`、`web/app/components/account/Monitors.vue`、`web/app/pages/admin/customs.vue`、`web/app/pages/custom/`：平台徽章、「开源项目」选源分组与按需折叠的高级选项
 

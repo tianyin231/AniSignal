@@ -21,18 +21,6 @@ export const WEB_LIST_MONITOR = {
 export const GH_RELEASES_MONITOR = {
   kind: 'gh_releases', platform: 'github', name: 'GitHub 版本',
 } as const
-export const GH_ISSUES_MONITOR = {
-  kind: 'gh_issues', platform: 'github', name: 'GitHub 议题',
-} as const
-export const GH_DISCUSSIONS_MONITOR = {
-  kind: 'gh_discussions', platform: 'github', name: 'GitHub 讨论',
-} as const
-export const GC_RELEASES_MONITOR = {
-  kind: 'gc_releases', platform: 'gitcode', name: 'GitCode 版本',
-} as const
-export const GC_ISSUES_MONITOR = {
-  kind: 'gc_issues', platform: 'gitcode', name: 'GitCode 议题',
-} as const
 
 export function customKindLabel(kind: string) {
   return CUSTOM_KIND_LABELS[kind] || '定制监控'
