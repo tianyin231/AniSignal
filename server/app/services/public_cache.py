@@ -48,6 +48,8 @@ _locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictio
 _default_redis: Any = None
 # 每个分区一份官方动态外链面板缓存（鸣潮/碧蓝航线等独立）
 official_links_cache: dict[str, dict] = {}
+# 公开站点地图进程内缓存（按站点基址隔离）
+sitemap_cache: dict[str, tuple[float, str]] = {}
 
 
 def invalidate_official_links_cache() -> None:

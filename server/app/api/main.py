@@ -12,18 +12,32 @@ from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 
 from app.api.account import router as account_router
+from app.api.account_bot import router as account_bot_router
 from app.api.admin import router as admin_router
 from app.api.admin_ai import router as admin_ai_router
-from app.api.admin_users import router as admin_users_router
-from app.api.admin_custom import router as admin_custom_router
-from app.api.admin_settings import router as admin_settings_router
-from app.api.admin_proxies import router as admin_proxies_router
-from app.api.admin_bilibili import router as admin_bilibili_router
-from app.api.auth import router as auth_router
-from app.api.public import router as public_router
-from app.api.project import router as project_router
-from app.api.ai_news import router as ai_news_router
 from app.api.admin_aihot import router as admin_aihot_router
+from app.api.admin_bilibili import router as admin_bilibili_router
+from app.api.admin_custom import router as admin_custom_router
+from app.api.admin_proxies import router as admin_proxies_router
+from app.api.admin_settings import router as admin_settings_router
+from app.api.admin_users import router as admin_users_router
+from app.api.ai_news import router as ai_news_router
+from app.api.auth import router as auth_router
+from app.api.bot import router as bot_router, tools_router
+from app.api.bot_companion import admin_router as companion_admin_router, router as companion_router
+from app.api.custom import router as custom_router
+from app.api.mcp import router as mcp_router
+from app.api.project import router as project_router
+from app.api.public import router as public_router
+from app.api.public_calendar import router as public_calendar_router
+from app.api.public_entities import router as public_entities_router
+from app.api.public_feeds import router as public_feeds_router
+from app.api.public_syndication import router as public_syndication_router
+from app.api.reports import (
+    account_router as account_reports_router,
+    admin_router as admin_reports_router,
+    public_router as public_reports_router,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -91,39 +105,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(admin_router)
-app.include_router(public_router)
-app.include_router(project_router)
-app.include_router(ai_news_router)
-app.include_router(admin_aihot_router)
-app.include_router(auth_router)
-app.include_router(account_router)
-from app.api.account_bot import router as account_bot_router
-app.include_router(account_bot_router)
-app.include_router(admin_settings_router)
-app.include_router(admin_proxies_router)
-app.include_router(admin_bilibili_router)
-app.include_router(admin_ai_router)
-app.include_router(admin_users_router)
-app.include_router(admin_custom_router)
-from app.api.custom import router as custom_router
-app.include_router(custom_router)
-from app.api.bot import router as bot_router, tools_router
-app.include_router(bot_router)
-app.include_router(tools_router)
-from app.api.bot_companion import router as companion_router, admin_router as companion_admin_router
-app.include_router(companion_router)
-app.include_router(companion_admin_router)
-from app.api.mcp import router as mcp_router
-app.include_router(mcp_router)
-from app.api.reports import (
-    account_router as account_reports_router,
-    admin_router as admin_reports_router,
-    public_router as public_reports_router,
-)
-app.include_router(public_reports_router)
-app.include_router(account_reports_router)
-app.include_router(admin_reports_router)
+for _router in (
+    admin_router,
+    admin_settings_router,
+    admin_proxies_router,
+    admin_bilibili_router,
+    admin_ai_router,
+    admin_aihot_router,
+    admin_users_router,
+    admin_custom_router,
+    admin_reports_router,
+    companion_admin_router,
+    public_router,
+    public_calendar_router,
+    public_entities_router,
+    public_feeds_router,
+    public_syndication_router,
+    public_reports_router,
+    project_router,
+    ai_news_router,
+    custom_router,
+    auth_router,
+    account_router,
+    account_bot_router,
+    account_reports_router,
+    bot_router,
+    tools_router,
+    companion_router,
+    mcp_router,
+):
+    app.include_router(_router)
 
 
 @app.get("/api/healthz")
