@@ -27,13 +27,16 @@ npm run build
 | 位置 | 内容 |
 | --- | --- |
 | `app/pages/index.vue` | 聚合首页与分区视角。 |
-| `app/pages/intro.vue`、`ai.vue` | 产品交互介绍，以及独立的 AI 快讯分区。 |
-| `app/pages/contents/`、`events/`、`products/` | 内容预览、事件证据与商品进展。 |
-| `app/pages/custom/`、`account.vue` | 公开独立监控，以及个人关注、监控与通知设置。 |
-| `app/pages/official.vue`、`search.vue`、`sources.vue`、`stats.vue` | 官方动态、站内检索、来源健康与统计。 |
-| `app/pages/admin/` | 采集目标、内容、事件、商品、分类、用户、站点、AI、机器人与定制监控管理。 |
+| `app/pages/intro.vue`、`watch.vue` | 产品交互介绍与关注 / 推送总览。 |
+| `app/pages/ai/` | 独立的 AI 快讯分区（信息流、条目与故事详情、日报/周报与来源健康）。 |
+| `app/pages/calendar.vue` | 跨游戏活动月历、甘特图、倒计时与 `webcal://` 订阅。 |
+| `app/pages/contents/`、`events/`、`products/` | 内容预览与修订 Diff、事件证据、商品进展。 |
+| `app/pages/reports/`、`steam.vue` | 通用周期报告归档与 Steam 游戏实时遥测。 |
+| `app/pages/custom/`、`account.vue` | 公开独立监控，以及个人关注、监控、Webhook、报告订阅、个人 RSS 与 MCP 令牌管理。 |
+| `app/pages/official.vue`、`search.vue`、`sources.vue`、`stats.vue`、`project.vue` | 官方动态、站内检索、来源健康、站点统计与开源更新记录。 |
+| `app/pages/admin/` | 采集目标、内容、事件、商品、分类、用户、代理池、站点、AI、机器人与定制监控管理。 |
 | `app/layouts/`、`components/` | 页面布局与共享展示组件。 |
-| `app/composables/`、`utils/` | API、认证、站点配置、分区状态和数据适配。 |
+| `app/composables/`、`utils/` | API、认证、站点配置、分区状态、术语单一真相源（`lexicon.ts`）和数据适配。 |
 
 ## 关键约定
 
@@ -44,7 +47,7 @@ npm run build
 - 界面文案与术语遵循[文字规范与前端减负指南](../docs/ui-copy-guidelines.md)，平台、监控类型、目标类型与状态文案统一由 `app/utils/lexicon.ts` 导出，禁止在页面内各自维护重复字典。
 - 频道主题：布局按当前频道挂 `.ch-<分区>`，`accent` 系列色随之变为该游戏品牌色；分区色、徽章只在 `useGameSection.ts` 的 `COMMUNITY_CLASSES` 维护。论坛蓝仍是主按钮与链接色。
 - 随机壁纸是站点特色功能，必须保留：开启时 `<html data-wallpaper>` 让卡片自动切为毛玻璃，新增浮在背景上的区块要在壁纸模式下核对可读性。时间格式沿用项目公共格式化工具。
-- 纯计算工具放在 `app/utils/` 并补 `tests/*.test.ts`，用 `node --test tests/*.test.ts` 运行。
+- 纯计算工具放在 `app/utils/` 并补 `tests/*.test.ts`（含架构约束检查 `tests/architecture.test.ts`），用 `npm test`（`node --test tests/*.test.ts`）运行。
 - 涉及模板和交互的修改需进行浏览器检查；`npm run build` 成功不能代替页面、响应式布局与实际数据状态验证。
 
 功能范围与当前状态以代码及[功能指南](../docs/features.md)为准，不沿用历史页面数量或固定内容主题。

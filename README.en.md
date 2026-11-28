@@ -6,8 +6,8 @@
 
 **Let what matters find you.**
 
-A self-hosted, multi-section signal desk for game updates, industry news, and merchandise fulfillment.<br>
-It gathers scattered public updates across official accounts, site notices, videos, and RSS feeds, consolidates them into source-backed events, and delivers what you care about to the web, email, and QQ.
+A self-hosted, cross-platform event radar and signal desk.<br>
+It gathers scattered public updates across official accounts, notice boards, videos, open-source repositories, web pages, and RSS feeds, consolidates them into source-backed events and periodic reports, and delivers what you care about to the web, email, Webhooks, RSS, QQ, and AI clients.
 
 <p>
 <a href="https://github.com/tianyin231/AniSignal/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/tianyin231/AniSignal/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI"></a>
@@ -37,7 +37,7 @@ Keeping up with a game's next patch, a pre-ordered figure's real shipping status
 
 **AniSignal replaces unread-count fatigue with a structured signal desk:** scattered posts about the same development are consolidated into a single traceable event; multi-month merchandise pre-orders are tracked from announcement to real buyer unboxings; and industry news runs through an independent editorial pipeline with deduplication, heat decay, and daily editions—always keeping a one-click path back to the primary source.
 
-> **Language note:** The web UI and built-in game presets default to Simplified Chinese, while custom sections, RSS/Atom feeds, YouTube channels, and X sources work with content in any language.
+> **Language note:** The web UI and built-in game presets default to Simplified Chinese, while custom sections, RSS/Atom feeds, web pages, GitHub repositories, YouTube channels, and X sources work with content in any language.
 
 ## Core Experience
 
@@ -67,39 +67,41 @@ Keeping up with a game's next patch, a pre-ordered figure's real shipping status
 ## Built for Self-Hosting
 
 - **Clean Empty-DB Start & Custom Sections**: Fresh deployments boot with zero demo clutter. Create **custom sections** for any game, anime, open-source project, or beat right from `/admin/targets`—or import any of the 15 built-in preset source packs in one click, with bulk enable, disable, and cleanup controls.
-- **Progressive Dependencies (No LLM or SMTP Required)**: AI and email are *optional enhancements*, never hard boot requirements. Without an LLM key, rule-based event merging and multi-platform ingestion run normally, and `/ai` offers a one-click raw-feed view; without SMTP, admins can copy pending registration codes, activate users, or reset passwords directly in `/admin/users`.
+- **Progressive Dependencies (No LLM or SMTP Required)**: AI and email are *optional enhancements*, never hard boot requirements. Without an LLM key, rule-based event merging, web-page change diffs, multi-platform ingestion, and deterministic periodic reports run normally, and `/ai` offers a one-click raw-feed view; without SMTP, admins can copy pending registration codes, activate users, or reset passwords directly in `/admin/users`.
 - **Zero-SSH Web Administration**: Bilibili login is optional (keyword search and uploader videos work anonymously; login improves dynamics success rate) and can be done in `/admin/targets` via QR scan, password, SMS code, or cookie paste; manage OpenAI-compatible key pools, per-platform HTTP/SOCKS collector proxies, and site compliance links live in the browser. Every source tracks its own health score with automatic exponential backoff.
-- **Three-Tier Following & Multi-Channel Delivery**: Beyond public section sources curated by admins, users can subscribe to **title keywords** or run isolated **custom monitors** (Bilibili keyword / uploader, RSS / Atom, or YouTube channel; public or private; 3 per user by default), delivered via 08:00 (UTC+8) morning digests, instant alerts, or **QQ group / DM bots**.
+- **Three-Tier Following & Multi-Channel Delivery**: Beyond public section sources curated by admins, users can subscribe to **title keywords** or run isolated **custom monitors** (Bilibili keyword / uploader, RSS / Atom, custom web-page watch / list watch, GitHub releases, YouTube channel, Steam app, or Xiaoheihe; public or private; 3 per user by default). Updates deliver via 08:00 (UTC+8) morning digests, 08:30 (UTC+8) **periodic reports** (daily / weekly), **7 Webhook providers** (Feishu, DingTalk, WeCom, Discord, Bark, ntfy, generic JSON—including official revision Diff alerts), **personal filtered RSS**, **QQ group / DM bots**, and a **read-only MCP Server**.
 
 ## Source Adapters & Built-In Presets
 
-Native collectors cover **Bilibili** (official dynamics, user videos, keyword search), **YouTube** (keyless channel RSS by default, optional Data API v3), **Miyoushe**, **official game notice boards**, **standard RSS / Atom**, and **public X (Twitter) accounts**.
+Native collectors cover **Bilibili** (official dynamics, user videos, keyword search), **YouTube** (keyless channel RSS by default, optional Data API v3), **Miyoushe**, **official game notice boards**, **standard RSS / Atom**, **custom web page monitoring** (`web_page` single-page diff and list-change detection with optional CSS / XPath selectors and live parser preview), **GitHub** (repository releases and daily / weekly / monthly Trending editions with AI Chinese briefs), **Steam** (store notices, review snapshots, and live player telemetry), **Xiaoheihe**, and **public X (Twitter) accounts**.
 
-14 game section packs plus an AI News pack ship ready for optional one-click import alongside unlimited custom sections:
+14 game section packs plus an AI News pack (15 preset packs total) ship ready for optional one-click import, alongside a built-in **Xiaoheihe** topic feed section and unlimited custom sections:
 
-| Category | Sections | Preset Sources |
+| Category | Sections | Preset Sources & Capabilities |
 | :--- | :--- | :--- |
-| **Full Game Packs** | Wuthering Waves · Genshin Impact · Arknights: Endfield | Official Bilibili (incl. merch / Miyoushe), official site notices, YouTube channels, community video search |
+| **Full Game Packs** | Wuthering Waves · Genshin Impact · Arknights: Endfield | Official Bilibili (incl. merch / Miyoushe), official site notices, Steam store & telemetry, YouTube channels, community video search |
 | **Multi-Source Packs** | Honkai: Star Rail · Arknights · Azur Lane · Goddess of Victory: NIKKE | Official Bilibili / site notices, YouTube channels, community video search |
-| **Lightweight Packs** | Zenless Zone Zero · Infinity Nikki · Petit Planet · Honkai: Nexus Anima · Roco Kingdom: World · Azur Promilia · Neverness to Everness | Official Bilibili posts & videos, curated community search |
+| **Lightweight Packs** | Zenless Zone Zero · Infinity Nikki · Petit Planet · Honkai: Nexus Anima · Roco Kingdom: World · Azur Promilia · Neverness to Everness | Official Bilibili posts & videos, Steam store, curated community search |
 | **Editorial Newsroom** | AI News (`/ai`) | First-party RSS (OpenAI, Anthropic, Google AI, DeepMind, Hugging Face, etc.), Bilibili search & optional X accounts; 48h entity heat decay, dual-pass scoring & 08:00 daily editions |
-| **Custom Sections** | Unlimited admin-defined sections (slug, title, palette & aliases) | Any combination of Bilibili, YouTube, RSS/Atom, Miyoushe, or X targets, with per-target `Official` identity badges |
+| **Topic Feeds** | Xiaoheihe (built-in) · Open-Source Trends / Custom Beats | Non-game continuous tracking feeds with GitHub Trending edition archiving, AI structured briefs, Xiaoheihe, and arbitrary web / RSS aggregation |
+| **Custom Sections** | Unlimited admin-defined sections (slug, title, palette & aliases) | Any combination of supported platforms (Bilibili, YouTube, RSS/Atom, web pages, GitHub, Steam, Miyoushe, Xiaoheihe, or X), with per-target `Official` badges and periodic report subscriptions |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    S["Public Sources · Bilibili / YouTube / X / Notices / RSS"] --> C["Scheduler & Workers · collector (arq)"]
+    S["Public Sources · Bilibili / Notices / YouTube / X / RSS / Web / GitHub / Steam / Xiaoheihe"] --> C["Scheduler & Workers · collector (arq)"]
     C --> DB[("Storage · MySQL 8.4 + Redis 7")]
-    DB --> E["Event Engine · Provenance & Revisions"]
+    DB --> E["Event Engine · Provenance / Diffs / Calendar"]
     DB --> P["Merch Tracker · Unboxings & Quality"]
-    DB --> N["News Editorial · Heat Decay & Scoring"]
+    DB --> N["News & Reports · AI News / Briefs / Periodic Reports"]
     E --> API["Async API · api (FastAPI)"]
     P --> API
     N --> API
     API --> W["Web Signal Desk · web (Nuxt 4 SSR)"]
-    API --> M["Email Digests & Instant Alerts"]
+    API --> M["Email Digests · 7 Webhooks · Personal RSS"]
     API --> B["AstrBot / DSH Plugins · QQ Groups & DMs"]
+    API --> MCP["Read-Only MCP Server · AI Clients"]
 ```
 
 Production runs a clean **5-container topology** (`mysql`, `redis`, `api`, `web`, `collector`): `api`, `web`, and `collector` share a single multi-arch image without duplicating disk layers while isolating logs and scaling (`collector` uses Redis-backed leader election and per-target locks for safe horizontal scaling). For local development, the entire backend drops down to **SQLite + an in-process queue** with zero container dependencies.
@@ -169,12 +171,24 @@ Companion plugins live under [`integrations/`](integrations) and are synced to s
 - **AstrBot** ([`AstrBot_Plugin_AniSignal`](https://github.com/tianyin231/AstrBot_Plugin_AniSignal), source in [`integrations/astrbot_plugin_anisignal`](integrations/astrbot_plugin_anisignal)): install via **Plugin Management → Install from Link** (`https://github.com/tianyin231/AstrBot_Plugin_AniSignal`), configure your AniSignal URL and user token, then send `/情报订阅` or `/帮助`. See the [AstrBot plugin README](integrations/astrbot_plugin_anisignal/README.md).
 - **DeepSeek Harness (`dsh`)** ([`DSH_Plugin_AniSignal`](https://github.com/tianyin231/DSH_Plugin_AniSignal), source in [`integrations/dsh_plugin_anisignal`](integrations/dsh_plugin_anisignal)): compatible with `@tencent-connect/dsh-qqbot`, `dsh-onebot-qq`, and `dsh-qq-onebot`, with native DSH Settings UI, LLM tools, and lightweight SVG/PNG brief cards. See the [DSH plugin README](integrations/dsh_plugin_anisignal/README.md).
 
+## AI Client Integration (Built-in Read-Only MCP Server)
+
+AniSignal ships with a stateless, read-only **Streamable HTTP** MCP Server (`/mcp` and `/api/mcp`) ready for Claude Code, Cursor, Windsurf, Antigravity, Cherry Studio, and other MCP clients:
+
+- **Anonymous Public Access**: Point your client to `https://anisignal.xyz/mcp` (or your self-hosted `/mcp`) to query cross-language search, event calendars, active redemption codes, official notice revision diffs, consolidated events, merch fulfillment status, live Steam telemetry, and curated AI News editions.
+- **Personalized Access**: Copy a token-authenticated config from **Account → Notifications → AI Assistant** (supports `Authorization: Bearer <token>`, `X-API-Key`, or `?token=`) to respect your section preferences and mute rules and unlock your personal watch feed via `get_my_watch_feed`.
+
+```bash
+# Claude Code quick setup (public read-only)
+claude mcp add --transport http anisignal https://anisignal.xyz/mcp
+```
+
 ## Documentation
 
 | Guide | Topics |
 | :--- | :--- |
 | [Deployment & Operations](docs/deployment.md) | 5-container topology, Nginx HTTPS template, proxy pools & fake-ip, backups, and recovery |
-| [Features & Architecture](docs/features.md) | Following tiers, idempotent ingestion, event merging, AI News scoring, and merch fulfillment |
+| [Features & Architecture](docs/features.md) | Following tiers, source adapters, event merging, AI News, periodic reports, Webhooks, bots, and MCP |
 | [Backend Reference](server/README.md) | FastAPI layout, Alembic migrations, collector adapter interfaces, and test suite |
 | [Frontend Reference](web/README.md) | Nuxt 4 SSR layout, Signal Desk design tokens, and component conventions |
 | [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) | Local workflow, privacy & SSRF guardrails, and private vulnerability reporting |

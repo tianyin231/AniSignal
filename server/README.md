@@ -8,17 +8,19 @@
 
 | 路径 | 职责 |
 | --- | --- |
-| `app/api/` | 公开、账号与管理员 API。 |
-| `app/collectors/`、`app/parsers/` | 平台采集与统一内容解析；B 站采集依赖 `bili` CLI。 |
+| `app/api/` | 公开（按子域拆分为 `public.py`、`public_calendar.py`、`public_entities.py`、`public_feeds.py`、`public_syndication.py`）、周期报告（`reports.py`）、只读 MCP（`mcp.py`）、账号、机器人与管理员 API。 |
+| `app/collectors/`、`app/parsers/` | 平台采集与统一内容解析（B 站、官网、米游社、YouTube、RSS、自定义网页、GitHub、Steam、小黑盒、X）；B 站采集依赖 `bili` CLI。 |
 | `app/services/collect.py`、`ingest.py` | 采集编排、降噪、来源状态、幂等入库及解析版本。 |
 | `app/services/events.py` | 规则事件归并、证据关联与人工修正保护。 |
-| `app/services/ai.py`、`curation.py` | 可选摘要、翻译、内容筛选及用量记录。 |
+| `app/services/ai.py`、`curation.py`、`content_brief.py` | 可选摘要、翻译、主题流与开源项目中文解读、内容筛选及用量记录。 |
 | `app/services/ai_news.py`、`app/api/ai_news.py` | AI 快讯的审核准入、主题筛选、来源追溯与公开读取。 |
 | `app/services/news_editorial.py`、`news_publication.py`、`editorial_calls.py` | AI 快讯的事件归组、双次评分、来源热度、固定日报、调用回执和额度。 |
-| `app/services/custom_feeds.py` | 用户 B 站 UID／关键词定制监控，使用独立条目存储。 |
-| `app/services/notifications.py`、`bot.py` | 邮件早报、手动通知、投递记录与可选 AstrBot 集成。 |
+| `app/services/periodic_reports.py`、`webhooks.py`、`revision_notifications.py` | 通用周期报告（日报 / 周报）、7 种 Webhook 出站推送与官方原文修订提醒。 |
+| `app/services/custom_feeds.py` | 用户独立定制监控（B 站 / RSS / 自定义网页 / GitHub / YouTube / Steam / 小黑盒），使用独立条目存储。 |
+| `app/services/notifications.py`、`bot.py`、`mcp_tools.py` | 邮件早报、手动通知、投递记录、AstrBot / DSH 机器人接口与只读 MCP 工具集。 |
+| `app/clock.py`、`app/services/urls.py`、`html.py` | 北京时间工具、逐跳出站 SSRF 校验与外部 HTML 白名单消毒的单一真相源。 |
 | `app/scheduler/`、`app/worker/` | 定时调度与后台任务。 |
-| `app/communities.py`、`app/models/` | 分区元数据与数据模型。 |
+| `app/communities.py`、`app/models/`、`app/schemas/` | 分区元数据、数据模型与请求/响应数据契约。 |
 
 主数据链路为 `采集目标 → 筛选 → 版本化入库 → 分类与事件 → 公开 API / 关注 / 通知`。定制监控走独立链路，不进入主内容库及事件引擎。
 
@@ -39,7 +41,7 @@ API 监听 `127.0.0.1:8000`，本地 Token 默认为 `local-dev`。入口会创�
 uv run pytest
 ```
 
-不要将历史测试数量或旧版本通过结果当作本次验证。生产 worker 入口为 `app.worker.settings.WorkerSettings`；完整运行方式以根目录 Compose 和 `deploy/` 脚本为准。
+不要将历史测试数量或旧版本通过结果当作本次验证。`tests/test_architecture.py` 提供分层依赖边界、无未用顶层导入与历史循环依赖防增量等静态架构护栏。生产 worker 入口为 `app.worker.settings.WorkerSettings`；完整运行方式以根目录 Compose 和 `deploy/` 脚本为准。
 
 ## 变更约定
 
