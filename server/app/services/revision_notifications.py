@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from datetime import datetime, timedelta
+from datetime import datetime
 from app.clock import format_beijing
 from html import escape
 

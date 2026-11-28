@@ -7,7 +7,7 @@ import asyncio
 import logging
 import re
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -20,7 +20,6 @@ from app.communities import (
     COMMUNITY_AGGREGATE_QUERY_DEP,
     COMMUNITY_QUERY_DEP,
     CommunityOrAllSlug,
-    CommunitySlug,
     DEFAULT_COMMUNITY,
     community_conditions,
     community_to_public_dict,
@@ -40,18 +39,17 @@ from app.schemas.api import (
     PublicStats,
     StatisticsOverview,
 )
-from app.services.hidden_communities import request_blocks, request_hidden
+from app.services.hidden_communities import request_blocks
 from app.services.html import sanitize_html as _sanitize_html
 from app.services.public_cache import (
     CACHE_PREFIX,
     SITE_CONFIG_KEY,
     cached_dict,
     cached_model,
-    invalidate_official_links_cache,
-    official_links_cache as _official_links_cache,
-    sitemap_cache as _SITEMAP_CACHE,
+    invalidate_official_links_cache,  # noqa: F401 - 测试兼容导出
+    official_links_cache as _official_links_cache,  # noqa: F401 - 测试兼容导出
+    sitemap_cache as _SITEMAP_CACHE,  # noqa: F401 - 测试兼容导出
 )
-from app.services.urls import safe_link, safe_media_url
 
 router = APIRouter(prefix="/api")
 

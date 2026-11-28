@@ -22,7 +22,6 @@ from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
 from app.schemas.ids import web_id
-from app.services.collector_proxy import http_proxy_kwargs
 from app.services.web_parser import (
     DetectedFeed,
     WebParseError,

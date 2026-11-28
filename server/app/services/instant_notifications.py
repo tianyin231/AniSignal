@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from html import escape
 
 from sqlalchemy import or_, select, update
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow

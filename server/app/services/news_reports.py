@@ -1,7 +1,6 @@
 """资讯日报读取及历史刊物兼容；只读取已生成结果，不在网页请求中调用模型。"""
 
 from copy import deepcopy
-from datetime import date
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import HTTPException

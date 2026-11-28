@@ -6,7 +6,7 @@ import re
 from urllib.parse import urljoin
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import select
 from trafilatura import extract
 
 from app.collectors.base import CollectorError, USER_AGENT

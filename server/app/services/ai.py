@@ -12,7 +12,7 @@ import logging
 import re
 import time
 from html import unescape
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import httpx
 from sqlalchemy import func, select

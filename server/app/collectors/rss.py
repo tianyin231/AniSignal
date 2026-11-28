@@ -14,7 +14,7 @@ from app.models.enums import Platform
 from app.schemas.content import FetchResult
 from app.schemas.ids import rss_id
 from app.services.collector_proxy import http_proxy_kwargs
-from app.services.urls import is_permitted_egress_ip as _is_permitted_egress_ip, resolve_public_http_url
+from app.services.urls import resolve_public_http_url
 
 MAX_FEED_BYTES = 5 * 1024 * 1024
 

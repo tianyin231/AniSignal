@@ -6,7 +6,7 @@ import re
 import time
 import unicodedata
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow

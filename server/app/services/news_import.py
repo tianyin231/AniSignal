@@ -3,7 +3,7 @@
 import argparse
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import timezone
 import gzip
 import hashlib
 import json

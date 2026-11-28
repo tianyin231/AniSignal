@@ -1,7 +1,5 @@
 """账号公测额度；邮件与 Bot 在开始发送时共用北京时间每日预算。"""
 
-from datetime import timedelta
-
 from fastapi import HTTPException
 from sqlalchemy import func, select
 

@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 
 from app.clock import utcnow
 from app.collectors.base import CollectorDeferred

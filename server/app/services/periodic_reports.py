@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.clock import BJ_TZ as BEIJING_TZ, utcnow
-from app.communities import COMMUNITIES, ensure_communities_synced, get_community
+from app.communities import COMMUNITIES, ensure_communities_synced
 from app.config import get_settings
 from app.models import (
     ContentVersion,

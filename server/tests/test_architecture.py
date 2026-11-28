@@ -178,3 +178,44 @@ def test_shared_primitives_contracts() -> None:
     assert parsed_iso == datetime(2026, 11, 28, 6, 0, tzinfo=timezone.utc)
     bj = to_beijing(datetime(2026, 11, 28, 6, 0))
     assert bj.tzinfo == BJ_TZ and bj.hour == 14
+
+
+def test_no_unused_top_level_imports() -> None:
+    """AST 静态护栏（F401）：禁止 server/app 累积未使用的顶层导入，刻意重导出须标注 # noqa: F401。"""
+    violations: list[str] = []
+    for py_file in sorted(SERVER_APP_DIR.rglob("*.py")):
+        if py_file.name == "__init__.py":
+            continue
+        src = py_file.read_text(encoding="utf-8")
+        lines = src.splitlines()
+        tree = ast.parse(src, filename=str(py_file))
+
+        used_names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                used_names.add(node.id)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for tok in re.split(r"[\[\]|,\s:()]+", node.value):
+                    if tok:
+                        used_names.add(tok.split(".")[0])
+
+        for node in tree.body:
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                continue
+            stmt_line = lines[node.lineno - 1]
+            if "noqa: F401" in stmt_line:
+                continue
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                alias_line = lines[(alias.lineno or node.lineno) - 1]
+                if "noqa: F401" in alias_line:
+                    continue
+                bound = alias.asname or alias.name.split(".")[0]
+                if bound not in used_names:
+                    rel = py_file.relative_to(SERVER_APP_DIR)
+                    violations.append(f"{rel}:{alias.lineno or node.lineno} unused import `{bound}`")
+
+    assert not violations, "检测到未使用的顶层导入：\n" + "\n".join(violations)

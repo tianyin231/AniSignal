@@ -5,7 +5,6 @@ CLI/HTTP 返回的外层结构在不同平台差异很大，且可能随版本�
 解析失败的风险由"原始数据先落库 + parser 可重跑"兜底。
 """
 
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any

@@ -20,7 +20,6 @@ from sqlalchemy.orm import defer
 from app.clock import format_beijing, utcnow
 from app.communities import COMMUNITIES, ensure_communities_synced, get_community, is_all_community
 from app.models import (
-    ContentSchedule,
     ContentTranslation,
     ContentVersion,
     CustomFeed,

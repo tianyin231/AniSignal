@@ -1,14 +1,14 @@
 """统计预聚合写入与公开统计页查询。"""
 
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import case, func, select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clock import BJ_TZ as BEIJING, beijing_date, utcnow
+from app.clock import beijing_date, utcnow
 from app.models import (
     CollectRun,
     CollectTarget,

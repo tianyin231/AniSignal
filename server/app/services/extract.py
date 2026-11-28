@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import to_naive_utc, utcnow
 from app.communities import feed_community_keys, get_community
-from app.models import BotTarget, ContentSchedule, RawContent, RedeemCode, Source, ContentVersion
+from app.models import BotTarget, ContentSchedule, RawContent, Source, ContentVersion
 from app.services.ai import ai_available, chat, get_ai_config, record_usage, retry_allowed
 from app.services.redeem_codes import (
     backfill_expiry_from_official_deadline,

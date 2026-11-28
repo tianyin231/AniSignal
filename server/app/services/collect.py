@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clock import utcnow
 from app.communities import COMMUNITIES, DEFAULT_COMMUNITY, get_community, official_merch_bilibili_sources
 from app.services.collect_errors import YOUTUBE_RSS_RETRY_MAX_MINUTES, is_youtube_rss_transient
-from app.collectors.base import CollectorDeferred, CollectorError, platform_slot
+from app.collectors.base import CollectorDeferred, CollectorError, platform_slot  # noqa: F401 - 兼容导出
 from app.collectors.bilibili import BilibiliCollector, merge_detail_text
 from app.collectors.kuro import KuroCollector
 from app.collectors.miyoushe import MiyousheCollector

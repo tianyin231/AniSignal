@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.db import get_session
-from app.models import EmailCode, User
+from app.models import User
 from app.services.auth import (
     AuthError,
     SESSION_COOKIE,

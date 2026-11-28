@@ -6,7 +6,7 @@
 
 from datetime import datetime, timezone
 
-from app.models.enums import Identity, Platform
+from app.models.enums import Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
 
 PARSER_VERSION = "1"
