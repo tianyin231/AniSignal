@@ -428,7 +428,11 @@ async def test_cli_redacts_stderr_and_malformed_stdout(monkeypatch, authorized_c
     async def execute(*args, **kw):
         return Process()
 
+    async def _no_sleep(_seconds):
+        return None
+
     monkeypatch.setattr(bili_module.asyncio, "create_subprocess_exec", execute)
+    monkeypatch.setattr(bili_module.asyncio, "sleep", _no_sleep)
     with pytest.raises(CollectorError) as error:
         await BilibiliCollector()._run("dynamics", "1")
     assert "secret" not in str(error.value) + caplog.text

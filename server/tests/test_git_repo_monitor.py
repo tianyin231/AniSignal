@@ -18,7 +18,7 @@ from app.collectors.github import (
     normalize_repo_config,
     repo_web_url,
 )
-from app.models import CollectTarget, ContentVersion, CustomFeed, CustomFeedItem, CustomFeedSource, RawContent, User
+from app.models import ContentVersion, CustomFeedItem, CustomFeedSource, RawContent, User
 from app.parsers.github import parse_github_item
 from app.services.auth import create_session, hash_password
 from app.services.collect import run_collection
@@ -406,7 +406,7 @@ async def test_custom_feeds_shared_github_releases_and_per_user_filters(client, 
     for removed_kind in ("gh_issues", "gh_discussions", "gc_releases", "gc_issues"):
         bad = await client.post(
             "/api/account/custom-feeds",
-            cookies={"anisignal_session": token_a},
+            headers={"Cookie": f"anisignal_session={token_a}"},
             json={"name": "旧类型", "kind": removed_kind, "target_value": "acme/tool"},
         )
         assert bad.status_code == 400
@@ -414,7 +414,7 @@ async def test_custom_feeds_shared_github_releases_and_per_user_filters(client, 
     # 用户 A：大小写不同，包含预发布；公开
     resp_a = await client.post(
         "/api/account/custom-feeds",
-        cookies={"anisignal_session": token_a},
+        headers={"Cookie": f"anisignal_session={token_a}"},
         json={
             "name": "Acme 全版本",
             "kind": "gh_releases",
@@ -429,7 +429,7 @@ async def test_custom_feeds_shared_github_releases_and_per_user_filters(client, 
     # 用户 B：同一仓库小写，只要正式版（排除预发布）
     resp_b = await client.post(
         "/api/account/custom-feeds",
-        cookies={"anisignal_session": token_b},
+        headers={"Cookie": f"anisignal_session={token_b}"},
         json={
             "name": "Acme 仅正式版",
             "kind": "gh_releases",

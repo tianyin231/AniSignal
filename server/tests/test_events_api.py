@@ -5,11 +5,11 @@ from datetime import timedelta
 from sqlalchemy import func, select
 
 from app.clock import utcnow
-from app.models import CollectTarget, Event, EventRevision, Evidence, Product, RawContent, Source
+from app.models import CollectTarget, Event, Evidence, Product, RawContent, Source
 from app.services.events import run_aggregation
 from app.services.ingest import ingest_items
 
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 async def _prepare(session):

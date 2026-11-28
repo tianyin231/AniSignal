@@ -133,7 +133,7 @@ async def test_monitor_edit_changes_only_its_owned_target(client, session, admin
 
 async def test_multiaxis_content_gets_receipt_and_quality_candidates(client, session, admin_headers):
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import VIDEO_RAW
+    from tests.factories import VIDEO_RAW
 
     session.add(Product(slug="mixed", name="爱弥斯键盘", watch_terms=["爱弥斯键盘"]))
     await session.commit()

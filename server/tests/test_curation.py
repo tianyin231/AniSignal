@@ -14,8 +14,8 @@ from app.services import curation
 from app.services.classify import seed_defaults
 from app.services.ingest import ingest_items
 from app.services.settings import set_setting
-from tests.test_parsers_bilibili import VIDEO_RAW
-from tests.test_parsers_others import KURO_ITEM
+from tests.factories import VIDEO_RAW
+from tests.factories import KURO_ITEM
 
 
 async def test_ai_review_is_structured_and_recorded(session, monkeypatch):
@@ -306,7 +306,7 @@ async def test_official_content_not_hidden_by_relevance(session, monkeypatch):
         "ai",
         {"base_url": "https://api.example.com/v1", "model": "review-model", "api_key": "x"},
     )
-    from tests.test_parsers_others import KURO_ITEM as _K
+    from tests.factories import KURO_ITEM as _K
 
     notice = dict(_K)
     notice["entry"] = dict(_K["entry"], id="official-new-char")
@@ -336,7 +336,7 @@ async def test_official_content_not_hidden_by_relevance(session, monkeypatch):
 
 async def test_review_prompt_carries_known_terms(session, monkeypatch):
     """审核载荷带 matched_keywords 与管理员词表，作为新内容的相关性判据。"""
-    from tests.test_parsers_bilibili import VIDEO_RAW as _V
+    from tests.factories import VIDEO_RAW as _V
 
     await seed_defaults(session)  # 分类词典种子 → known_terms
     session.add(CollectTarget(platform="bilibili", target_type="keyword_search", target_value="鸣潮", interval_minutes=30))

@@ -1,13 +1,11 @@
 """YouTube Data API 采集器：条目映射、失败回落 RSS、工厂按 key 选择。"""
 
-import json
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 from app.collectors import youtube_api as youtube_api_module
-from app.collectors.base import CollectorError
 from app.collectors.youtube_api import YoutubeApiCollector, uploads_playlist_id
 from app.config import get_settings
 

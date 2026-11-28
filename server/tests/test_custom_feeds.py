@@ -1,6 +1,5 @@
 """定制监控单测：账号 CRUD、公开目录、采集过滤与推送、管理端处置。"""
 
-import asyncio
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock
@@ -8,7 +7,6 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select, update
 
-from app.api import main as api_main
 from app.clock import utcnow
 from app.models import CustomFeed, CustomFeedItem, NotificationDelivery, User
 from app.services.auth import hash_password
@@ -41,7 +39,7 @@ async def _login(client, session, email: str) -> None:
 @pytest.fixture
 def fake_bili(monkeypatch):
     """伪 B 站采集器：关键词返回两条视频（一条 500 播放、一条 50000 播放）。"""
-    from tests.test_parsers_bilibili import VIDEO_RAW
+    from tests.factories import VIDEO_RAW
 
     hot = dict(VIDEO_RAW, bvid="BVcustomHot", title="热门定制视频", view_count=50000)
     cold = dict(VIDEO_RAW, bvid="BVcustomCold", title="冷门定制视频", view_count=500)

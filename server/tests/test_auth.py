@@ -118,9 +118,8 @@ async def test_change_password_revokes_sessions(client, session):
     assert resp.status_code == 200
 
     # 旧会话（另一设备）失效
-    resp = await client.get(
-        "/api/auth/me", cookies={"anisignal_session": other_cookie}
-    )
+    client.cookies.set("anisignal_session", other_cookie)
+    resp = await client.get("/api/auth/me")
     assert resp.status_code == 401
 
     # 新密码可登录
@@ -151,7 +150,8 @@ async def test_password_reset_flow(client, session):
     assert resp.status_code == 200
 
     # 全部旧会话失效 + 新密码可登录
-    resp = await client.get("/api/auth/me", cookies={"anisignal_session": old_cookie})
+    client.cookies.set("anisignal_session", old_cookie)
+    resp = await client.get("/api/auth/me")
     assert resp.status_code == 401
     resp = await client.post("/api/auth/login", json={"email": "e@f.com", "password": "resetpass1"})
     assert resp.status_code == 200

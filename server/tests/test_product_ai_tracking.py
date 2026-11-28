@@ -20,7 +20,7 @@ from app.services.settings import set_setting
 from tests.test_curation_fulfillment_v2 import _response
 from tests.test_fulfillment_automation import make_review
 from tests.test_product_discovery import _official
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 from app.services.ingest import ingest_items
 
 

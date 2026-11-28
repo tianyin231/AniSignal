@@ -4,39 +4,7 @@ import pytest
 
 from app.api import main as api_main
 from app.models import CollectTarget
-
-
-class _FakeQueue:
-    def __init__(self) -> None:
-        self.enqueued: list[int] = []
-        self.notifications: list[int] = []
-        self.reviewed: list[int] = []
-        self.admin_emails: list[int] = []
-
-    async def enqueue_collect(self, target_id: int) -> str | None:
-        self.enqueued.append(target_id)
-        return "fake-job-id"
-
-    async def pending_count(self) -> int | None:
-        return 3
-
-    async def enqueue_notification(self, delivery_id: int) -> str | None:
-        self.notifications.append(delivery_id)
-        return "fake-notification-job"
-
-    async def enqueue_morning(self) -> str | None:
-        return "fake-morning-job"
-
-    async def enqueue_review(self, content_ids: list[int]) -> str | None:
-        self.reviewed.extend(content_ids)
-        return "fake-review-job"
-
-    async def enqueue_admin_email(self, delivery_ids: list[int]) -> str | None:
-        self.admin_emails.extend(delivery_ids)
-        return "fake-admin-email-job"
-
-    async def enqueue_custom_sweep(self) -> str | None:
-        return "fake-custom-sweep"
+from tests.factories import FakeQueue as _FakeQueue  # noqa: F401 - 兼容导出
 
 
 async def test_healthz_open(client):
@@ -134,7 +102,7 @@ async def test_overview_and_contents_empty(client, admin_headers, fake_queue):
 
 async def test_contents_listing_after_ingest(client, admin_headers, session):
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import VIDEO_RAW
+    from tests.factories import VIDEO_RAW
 
     await ingest_items(session, "bilibili_search", [VIDEO_RAW])
     resp = await client.get("/api/admin/contents", headers=admin_headers)
@@ -153,7 +121,7 @@ async def test_content_moderation_flow(client, admin_headers, session):
 
     from app.models import RawContent, ContentVersion
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import VIDEO_RAW
+    from tests.factories import VIDEO_RAW
 
     await ingest_items(session, "bilibili_search", [dict(VIDEO_RAW, bvid="BVmod", title="鸣潮联动活动情报")])
     raw = await session.scalar(select(RawContent).where(RawContent.external_id == "BVmod"))
@@ -209,7 +177,7 @@ async def test_content_moderation_flow(client, admin_headers, session):
     # 重审：清掉旧判定并入队
     resp = await client.post(f"/api/admin/contents/{raw.id}/review", headers=admin_headers)
     assert resp.status_code == 200
-    from tests.test_admin_api import _FakeQueue
+    from tests.factories import FakeQueue as _FakeQueue
 
     fake = api_main.app.state.queue
     assert raw.id in fake.reviewed
@@ -256,7 +224,7 @@ async def test_contents_tier_and_runs_fields(client, admin_headers, session):
 
     from app.models import CollectRun, CollectTarget, RawContent
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import VIDEO_RAW
+    from tests.factories import VIDEO_RAW
 
     session.add(
         CollectTarget(
@@ -310,7 +278,7 @@ async def test_contents_review_filter_accuracy(client, admin_headers, session):
 
     from app.models import ContentReview, RawContent
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import VIDEO_RAW
+    from tests.factories import VIDEO_RAW
 
     await ingest_items(
         session,

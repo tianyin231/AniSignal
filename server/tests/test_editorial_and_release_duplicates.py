@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import AiUsage, BotDelivery, ContentMatch, ContentVersion, RawContent, Source
+from app.models import AiUsage, ContentMatch, ContentVersion, RawContent, Source
 from app.services import bot, editorial_calls, similarity
 from app.services.ai import AiPoolCoolingDown
 from app.services.editorial_calls import EditorialDeferred, call_json

@@ -7,13 +7,13 @@ import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.models import AiUsage, BotDelivery, BotTarget, ContentSchedule, ContentVersion, RawContent, RedeemCode, Source
+from app.models import AiUsage, BotDelivery, BotTarget, ContentSchedule, ContentVersion, RawContent, RedeemCode
 from app.services import extract as extract_module
 from app.services.extract import _parse_extraction, extract_entities, sweep_extractions
 from app.services.ingest import ingest_items
 
-from tests.test_parsers_bilibili import VIDEO_RAW
-from tests.test_parsers_others import KURO_ITEM
+from tests.factories import VIDEO_RAW
+from tests.factories import KURO_ITEM
 
 
 def test_parse_extraction_tolerates_fences_and_garbage():

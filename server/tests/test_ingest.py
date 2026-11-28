@@ -10,7 +10,7 @@ from app.models import ContentDailyStat, ContentVersion, MetricSnapshot, RawCont
 from app.schemas.content import FetchResult  # noqa: F401
 from app.services.ingest import SNAPSHOT_HEARTBEAT, ingest_items
 
-from tests.test_parsers_bilibili import DYNAMIC_RAW, VIDEO_RAW
+from tests.factories import DYNAMIC_RAW, VIDEO_RAW
 
 
 async def test_ingest_new_item(session):

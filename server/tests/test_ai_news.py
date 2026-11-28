@@ -14,7 +14,7 @@ from app.services.ai_news import constrain_news, is_news_candidate, parse_news, 
 from app.services.collect import filter_relevant
 from app.services.ingest import ingest_items
 from app.services.settings import set_setting
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 async def add_video(session, bvid="BVnews", hours=1, **overrides):

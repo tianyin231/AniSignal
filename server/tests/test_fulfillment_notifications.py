@@ -8,7 +8,11 @@ import pytest
 from sqlalchemy import select
 
 from app.models import (
-    NotificationDelivery, Product, ProductFulfillmentRevision, ProductSignal, ProductSignalEvidence, User,
+    NotificationDelivery,
+    Product,
+    ProductFulfillmentRevision,
+    ProductSignal,
+    ProductSignalEvidence,
 )
 from app.services import instant_notifications as instant
 from app.services.fulfillment import build_fulfillment_snapshot

@@ -8,8 +8,8 @@ from app.clock import utcnow
 from app.models import CollectTarget, MetricSnapshot, RawContent
 from app.services.ingest import ingest_items
 
-from tests.test_parsers_bilibili import DYNAMIC_RAW, VIDEO_RAW
-from tests.test_parsers_others import KURO_ITEM
+from tests.factories import DYNAMIC_RAW, VIDEO_RAW
+from tests.factories import KURO_ITEM
 
 
 async def _seed(session):
@@ -446,7 +446,7 @@ async def test_product_list_keeps_unresolved_candidates_in_the_backend(client, s
     """分析尚未完成的记录保留后台，公开页只呈现已采纳的事实。"""
     from app.models import Product, ProductSignal, ProductSignalEvidence
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import VIDEO_RAW
+    from tests.factories import VIDEO_RAW
 
     product = Product(slug="latest-cand", name="最新候选测试键盘", watch_terms=["最新候选"])
     session.add(product)

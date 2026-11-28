@@ -15,7 +15,7 @@ from app.collectors.web_page import (
     public_web_url,
     web_rule_signature,
 )
-from app.models import CollectTarget, ContentVersion, CustomFeed, CustomFeedItem, RawContent, User
+from app.models import ContentVersion, CustomFeed, CustomFeedItem, RawContent, User
 from app.services.auth import create_session, hash_password
 from app.services.collect import run_collection
 from app.services.content_diff import build_version_history

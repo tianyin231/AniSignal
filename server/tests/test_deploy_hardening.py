@@ -10,7 +10,7 @@ from app.api.auth import _secure_request
 from app.config import Settings, get_settings
 from app.services.curation import _cover_data_url
 from app.services.ingest import ingest_items
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 def test_resolved_database_url_handles_special_password_characters():

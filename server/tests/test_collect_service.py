@@ -12,7 +12,7 @@ from app.models import CollectionDailyStat, CollectRun, CollectTarget, RawConten
 from app.schemas.content import FetchResult
 from app.services.statistics import beijing_date
 
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 class _FakeRedis:
@@ -183,7 +183,7 @@ async def test_youtube_existing_other_community_content_is_not_updated(session, 
 
 async def test_merch_collection_filters_foreign_game_and_preserves_official_identity(session, patched_collect, monkeypatch):
     from app.models import Source
-    from tests.test_parsers_bilibili import DYNAMIC_RAW
+    from tests.factories import DYNAMIC_RAW
 
     target = await _make_target(session)
     target.target_type, target.target_value, target.tier = "account_dynamics", "3493082584582776", "core"
@@ -208,7 +208,7 @@ async def test_merch_collection_filters_foreign_game_and_preserves_official_iden
 
 async def test_verified_merch_source_updates_old_identity_even_if_all_posts_are_filtered(session, patched_collect, monkeypatch):
     from app.models import Source
-    from tests.test_parsers_bilibili import DYNAMIC_RAW
+    from tests.factories import DYNAMIC_RAW
 
     source = Source(platform="bilibili", external_id="508103429", name="帕姆的收藏夹", identity="unknown")
     session.add(source)
@@ -629,7 +629,7 @@ async def test_backfill_empty_draw_dynamics(session):
     from app.models import ContentVersion, RawContent
     from app.services.collect import _backfill_empty_draw_dynamics
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import DYNAMIC_RAW
+    from tests.factories import DYNAMIC_RAW
 
     await ingest_items(
         session,
@@ -664,7 +664,7 @@ async def test_backfill_empty_draw_dynamics(session):
 async def test_backfill_only_missing_draw_and_article(session):
     from app.services.collect import _backfill_empty_draw_dynamics
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import DYNAMIC_RAW
+    from tests.factories import DYNAMIC_RAW
 
     await ingest_items(session, "bilibili_dynamics", [
         dict(DYNAMIC_RAW, id="article", type="DYNAMIC_TYPE_ARTICLE", text="", pics=[]),
@@ -680,3 +680,29 @@ async def test_backfill_only_missing_draw_and_article(session):
 
     assert await _backfill_empty_draw_dynamics(session, StubCollector(), limit=1) == 1
     assert calls == ["article"]
+
+
+def test_youtube_channel_co_terms_split_multi_game_videos():
+    """跨游戏 YouTube 频道依靠各分区 co_terms 隔离视频，不串区。"""
+    titles = [
+        "MASSIVE VIEWER SUMMONS! Over 4,500+ Pulls For MITYA | Genshin Impact",
+        "COMPLETE ARGENT FLOW GUIDE! Best Builds & P0 Showcase | Arknights Endfield",
+        "MASSIVE VIEWER SUMMONS! Over 1,500+ Pulls for Suoming! | Wuthering Waves",
+        "CookieRun Is About to Be BIGGER Than EVER!",
+    ]
+    items = [{"title": title, "url": f"https://youtu.be/{i}"} for i, title in enumerate(titles)]
+    for community, terms, expected in [
+        ("genshin", ["原神", "Genshin Impact", "Genshin"], titles[0]),
+        ("endfield", ["终末地", "Arknights Endfield", "Endfield"], titles[1]),
+    ]:
+        target = CollectTarget(
+            platform="youtube",
+            target_type="channel_rss",
+            target_value="UCnRqDZs2TrRxqPAnafCJGaA",
+            community=community,
+            tier="general",
+            co_terms=terms,
+            min_views=0,
+        )
+        kept, _ = collect_module.filter_relevant([dict(item) for item in items], target)
+        assert [item["title"] for item in kept] == [expected]

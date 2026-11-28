@@ -16,7 +16,7 @@ from app.services.classify import classify_content, seed_defaults
 from app.services.events import cluster_announcements, run_aggregation
 from app.services.ingest import ingest_items
 
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 async def _video(bvid: str, title: str, owner_mid: int = 100, owner: str = "用户") -> dict:
@@ -376,7 +376,7 @@ async def test_high_confidence_cross_language_match_merges_official_contents(
     from app.clock import utcnow
     from app.services import similarity
     from app.services.settings import set_setting
-    from tests.test_parsers_others import YOUTUBE_ITEM
+    from tests.factories import YOUTUBE_ITEM
 
     await set_setting(
         session,

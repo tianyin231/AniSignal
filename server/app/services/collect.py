@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from sqlalchemy import select, text, update
+from sqlalchemy import DateTime, bindparam, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
@@ -275,7 +275,7 @@ async def _backfill_empty_draw_dynamics(
     import json as _json
 
     cutoff = utcnow() - timedelta(days=7)
-    rows = (await session.execute(text(
+    stmt = text(
         "SELECT rc.id, rc.external_id, rc.raw_json, rc.community "
         "FROM raw_contents rc JOIN content_versions cv ON cv.raw_content_id=rc.id "
         "AND cv.version=(SELECT MAX(version) FROM content_versions WHERE raw_content_id=rc.id) "
@@ -285,7 +285,8 @@ async def _backfill_empty_draw_dynamics(
         "AND COALESCE(JSON_EXTRACT(cv.normalized_json, '$.media'),'[]') IN ('[]','null') "
         "AND rc.collected_at > :cutoff "
         "ORDER BY rc.id DESC LIMIT :lim"
-    ), {"cutoff": cutoff, "lim": limit})).fetchall()
+    ).bindparams(bindparam("cutoff", type_=DateTime))
+    rows = (await session.execute(stmt, {"cutoff": cutoff, "lim": limit})).fetchall()
     if not rows:
         return 0
 

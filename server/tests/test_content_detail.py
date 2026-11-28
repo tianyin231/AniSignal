@@ -3,8 +3,8 @@
 from app.services.events import run_aggregation
 from app.services.ingest import ingest_items
 
-from tests.test_parsers_bilibili import VIDEO_RAW
-from tests.test_parsers_others import KURO_ITEM
+from tests.factories import VIDEO_RAW
+from tests.factories import KURO_ITEM
 
 
 async def test_detail_plain_text_and_metrics(client, session):

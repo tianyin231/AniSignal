@@ -10,7 +10,7 @@ from app.services import curation, fulfillment
 from app.services.ingest import ingest_items
 from app.services.settings import set_setting
 from tests.test_fulfillment_automation import make_review
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 async def _seed_product_content(session):

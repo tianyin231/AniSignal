@@ -1,14 +1,10 @@
 """共享目标、公测配额、预算、退避与迁移保留历史的回归。"""
 
-import importlib.util
 from datetime import timedelta
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 
 from app.clock import utcnow
 from app.collectors.base import CollectorDeferred, CollectorError
@@ -120,7 +116,7 @@ async def test_public_budget_defers_before_network_without_marking_failure(sessi
 
 async def test_uid_pipeline_uses_one_shared_dynamics_fetch(session,monkeypatch):
     from contextlib import asynccontextmanager
-    from tests.test_parsers_bilibili import DYNAMIC_RAW
+    from tests.factories import DYNAMIC_RAW
     a,b=await users(session)
     session.add_all([CustomFeed(user_id=u.id,name="公开动态",kind="uid",target_value="1955897084") for u in (a,b)])
     await session.commit()

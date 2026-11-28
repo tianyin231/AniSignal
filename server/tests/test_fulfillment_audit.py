@@ -9,7 +9,7 @@ from app.services.events import exclude_evidence, run_aggregation
 from app.services.fulfillment import build_fulfillment_snapshot, review_product_signal
 from app.services.ingest import ingest_items
 from tests.test_events_api import _prepare
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 async def test_disabling_receipt_event_is_not_bypassed_by_quality_axis(session):

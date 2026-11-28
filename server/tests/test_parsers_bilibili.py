@@ -2,45 +2,7 @@
 
 from app.collectors.bilibili import _extract_dynamic_detail
 from app.parsers.bilibili import parse_dynamic, parse_video
-
-VIDEO_RAW = {
-    "bvid": "BV1Mcgp6ME1x",
-    "aid": 117088291265434,
-    "cid": 40878802947,
-    "title": "视频标题",
-    "description": "视频简介",
-    "owner_mid": 29769961,
-    "owner_name": "UP主名称",
-    "view_count": 680,
-    "danmaku_count": 0,
-    "reply_count": 14,
-    "favorite_count": 3,
-    "coin_count": 6,
-    "share_count": 1,
-    "like_count": 26,
-    "pubdate": 1786625704,
-    "pubdate_text": "2026-08-13 12:55:04",
-    "duration_seconds": 251,
-    "cover_url": "https://i1.hdslb.com/bfs/archive/example.jpg",
-    "url": "https://www.bilibili.com/video/BV1Mcgp6ME1x",
-    "tags": ["鸣潮", "爱弥斯"],
-    "pages": [],
-}
-
-DYNAMIC_RAW = {
-    "id": "1235883715731652807",
-    "type": "DYNAMIC_TYPE_ARTICLE",
-    "author_mid": 1955897084,
-    "author_name": "鸣潮",
-    "pub_ts": 1786590001,
-    "pub_text": "10小时前",
-    "text": "",
-    "pics": [],
-    "video_bvid": "",
-    "stat_like": 7110,
-    "stat_reply": 1714,
-    "stat_forward": 49,
-}
+from tests.factories import DYNAMIC_RAW, VIDEO_RAW  # noqa: F401 - 公共样例单一真相源
 
 
 def test_parse_video_full_mapping():

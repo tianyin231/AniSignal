@@ -1,16 +1,12 @@
 """NIKKE 国际服官方来源、站点监控权限和迁移回归。"""
 
-import importlib.util
 import json
 from contextlib import asynccontextmanager
 from datetime import timedelta, timezone
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import func, select
 
 from app.clock import utcnow

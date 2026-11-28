@@ -1,9 +1,7 @@
 """新游戏官网适配、身份、防串区以及数据种子的回归。"""
 
-import importlib.util
 import json
 from datetime import timedelta, timezone
-from pathlib import Path
 
 import httpx
 import pytest

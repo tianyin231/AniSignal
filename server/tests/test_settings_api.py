@@ -219,7 +219,7 @@ async def test_ai_usage_recorded(client, session, admin_headers, monkeypatch):
     # 用新端点（/api/admin/ai/summarize-all 依赖事件存在）
     from app.services.events import run_aggregation
     from app.services.ingest import ingest_items
-    from tests.test_parsers_others import KURO_ITEM
+    from tests.factories import KURO_ITEM
     from sqlalchemy import select
     from app.models import AiUsage, Event
 
@@ -259,7 +259,7 @@ async def test_ai_summary_uses_latest_plain_evidence_and_rejects_unsupported_gam
     from app.services.events import run_aggregation
     from app.services.ingest import ingest_items
     from app.services.settings import set_setting
-    from tests.test_parsers_others import KURO_ITEM
+    from tests.factories import KURO_ITEM
 
     await set_setting(
         session,
@@ -320,7 +320,7 @@ async def test_media_visibility_roundtrip_and_platform_exclusion(client, admin_h
 
     from app.models import CollectTarget, RawContent
     from app.services.ingest import ingest_items
-    from tests.test_parsers_bilibili import VIDEO_RAW
+    from tests.factories import VIDEO_RAW
 
     # bilibili 目标（bilibili 平台内容）
     session.add(

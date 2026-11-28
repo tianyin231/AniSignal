@@ -1,8 +1,5 @@
 """已认证周边号的身份、分区过滤及上线种子。"""
 
-import importlib.util
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from sqlalchemy import select
@@ -11,7 +8,7 @@ from app.communities import official_merch_bilibili_sources
 from app.models import CollectTarget
 from app.parsers.bilibili import parse_dynamic, parse_video
 from app.services.collect import filter_relevant
-from tests.test_parsers_bilibili import DYNAMIC_RAW, VIDEO_RAW
+from tests.factories import DYNAMIC_RAW, VIDEO_RAW
 
 
 @pytest.mark.parametrize("mid,name", [

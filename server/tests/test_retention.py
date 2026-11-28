@@ -15,7 +15,7 @@ from app.services.retention import (
     run_retention,
     thin_metric_snapshots,
 )
-from tests.test_parsers_bilibili import DYNAMIC_RAW
+from tests.factories import DYNAMIC_RAW
 
 
 async def add_item(session, name, bodies):

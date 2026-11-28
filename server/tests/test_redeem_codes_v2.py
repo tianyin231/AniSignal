@@ -7,9 +7,7 @@ from sqlalchemy import select
 
 from app.clock import utcnow
 from app.models import BotDelivery, BotTarget, ContentSchedule, ContentVersion, RawContent, RedeemCode, Source
-from app.services import extract as extract_module
 from app.services import redeem_codes as rc_module
-from app.services.extract import extract_entities
 from app.services.redeem_codes import (
     active_livestream_communities,
     backfill_expiry_from_official_deadline,

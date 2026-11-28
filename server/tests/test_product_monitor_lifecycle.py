@@ -27,7 +27,7 @@ from app.services.product_monitoring import (
 )
 from app.collectors.base import CollectorDeferred
 from app.services.settings import get_setting, set_setting
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 NOW = utcnow()
 

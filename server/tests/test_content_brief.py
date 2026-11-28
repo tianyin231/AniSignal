@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 
 from app.clock import utcnow
 from app.collectors.github_trending import clean_readme_markdown
-from app.models import ContentBrief, ContentVersion, RawContent
+from app.models import ContentVersion, RawContent
 from app.services.content_brief import (
     brief_content,
     is_brief_eligible,

@@ -1,10 +1,8 @@
 """基础设施加固单测（#5 + #6）：AI 连接池/Redis 共享冷却/备用降级/任务分层/日预算熔断、流水表瘦身、分区锁增量聚合与快慢双队列。"""
 
-from datetime import date, datetime, timedelta
-from unittest.mock import AsyncMock
+from datetime import date, timedelta
 
 import httpx
-import pytest
 from sqlalchemy import select
 
 from app.clock import utcnow

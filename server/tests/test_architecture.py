@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import collections
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 import re
 
@@ -23,6 +24,7 @@ from app.services.collect import _COLLECTORS
 from app.services.html import sanitize_html
 
 SERVER_APP_DIR = Path(__file__).resolve().parents[1] / "app"
+SERVER_TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # 历史存量两节点循环依赖（棘轮清单：只允许减少，不允许新增；清理任意一对后必须同步移除此处）
@@ -42,13 +44,22 @@ def _module_name(path: Path) -> str:
     return "app" + ("." + ".".join(parts) if parts else "")
 
 
+@lru_cache(maxsize=1)
+def _parsed_app_files() -> tuple[tuple[Path, list[str], ast.Module], ...]:
+    """缓存全量 server/app AST 解析结果，避免多条架构护栏重复扫描磁盘与语法树。"""
+    parsed = []
+    for py_file in sorted(SERVER_APP_DIR.rglob("*.py")):
+        src = py_file.read_text(encoding="utf-8")
+        parsed.append((py_file, src.splitlines(), ast.parse(src, filename=str(py_file))))
+    return tuple(parsed)
+
+
+@lru_cache(maxsize=1)
 def _collect_import_graph() -> dict[str, set[str]]:
     """扫描 server/app 全部模块依赖图（含函数内延迟导入）。"""
     edges: dict[str, set[str]] = collections.defaultdict(set)
-    for py_file in sorted(SERVER_APP_DIR.rglob("*.py")):
-        src = py_file.read_text(encoding="utf-8")
+    for py_file, _lines, tree in _parsed_app_files():
         mod = _module_name(py_file)
-        tree = ast.parse(src, filename=str(py_file))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -180,16 +191,14 @@ def test_shared_primitives_contracts() -> None:
     assert bj.tzinfo == BJ_TZ and bj.hour == 14
 
 
-def test_no_unused_top_level_imports() -> None:
-    """AST 静态护栏（F401）：禁止 server/app 累积未使用的顶层导入，刻意重导出须标注 # noqa: F401。"""
+def _check_unused_top_level_imports(
+    files: list[tuple[Path, list[str], ast.Module]],
+    base_dir: Path,
+) -> list[str]:
     violations: list[str] = []
-    for py_file in sorted(SERVER_APP_DIR.rglob("*.py")):
+    for py_file, lines, tree in files:
         if py_file.name == "__init__.py":
             continue
-        src = py_file.read_text(encoding="utf-8")
-        lines = src.splitlines()
-        tree = ast.parse(src, filename=str(py_file))
-
         used_names: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
@@ -215,7 +224,18 @@ def test_no_unused_top_level_imports() -> None:
                     continue
                 bound = alias.asname or alias.name.split(".")[0]
                 if bound not in used_names:
-                    rel = py_file.relative_to(SERVER_APP_DIR)
+                    rel = py_file.relative_to(base_dir)
                     violations.append(f"{rel}:{alias.lineno or node.lineno} unused import `{bound}`")
+    return violations
 
+
+def test_no_unused_top_level_imports() -> None:
+    """AST 静态护栏（F401）：禁止 server/app 与 server/tests 累积未使用的顶层导入，刻意重导出须标注 # noqa: F401。"""
+    app_violations = _check_unused_top_level_imports(list(_parsed_app_files()), SERVER_APP_DIR.parent)
+    test_files = []
+    for py_file in sorted(SERVER_TESTS_DIR.glob("*.py")):
+        src = py_file.read_text(encoding="utf-8")
+        test_files.append((py_file, src.splitlines(), ast.parse(src, filename=str(py_file))))
+    test_violations = _check_unused_top_level_imports(test_files, SERVER_TESTS_DIR.parent)
+    violations = app_violations + test_violations
     assert not violations, "检测到未使用的顶层导入：\n" + "\n".join(violations)

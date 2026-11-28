@@ -1,21 +1,16 @@
 """NIKKE 国际服社交官号：身份、真实来源平台、X 冷却及独立定制数据。"""
 
-import importlib.util
 from contextlib import asynccontextmanager
 from datetime import timedelta, timezone
-from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import func, select
 
 from app.clock import utcnow
 from app.collectors.base import CollectorDeferred
 from app.custom_presets import CUSTOM_PRESETS, custom_preset
-from app.models import CustomFeed, CustomFeedItem, RawContent
+from app.models import CustomFeed, RawContent
 from app.parsers.x import parse_post
 from app.parsers.youtube import parse_rss_item
 from app.schemas.content import FetchResult

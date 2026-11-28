@@ -7,7 +7,7 @@ from app.services.classify import classify_content, seed_defaults
 from app.services.events import run_aggregation
 from app.services.ingest import ingest_items
 
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 def _video(bvid: str, title: str, owner_mid: int = 100, owner: str = "用户") -> dict:

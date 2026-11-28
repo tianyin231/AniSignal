@@ -25,7 +25,6 @@ from app.models import (
     Source,
     User,
     UserKeyword,
-    UserWebhook,
 )
 from app.services import webhooks as webhooks_service
 

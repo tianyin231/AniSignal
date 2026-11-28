@@ -24,7 +24,7 @@ from app.services.ai import translate_content
 from app.services.collect import run_collection
 from app.services.ingest import reparse_contents
 from app.services.retention import run_retention
-from app.services.steam import get_steam_pulse, save_steam_snapshot, thin_steam_snapshots
+from app.services.steam import save_steam_snapshot, thin_steam_snapshots
 
 
 @pytest.fixture(autouse=True)

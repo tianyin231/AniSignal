@@ -22,7 +22,6 @@ from app.models import (
     RawContent,
     Source,
     User,
-    UserWebhook,
 )
 from app.services import bot as bot_service
 from app.services import instant_notifications as instant

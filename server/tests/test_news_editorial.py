@@ -11,7 +11,7 @@ from app.clock import utcnow
 from app.models import AiUsage, ContentReview, ContentVersion, EditorialReceipt, Event, Evidence, NewsGrouping, RawContent, Source
 from app.services import editorial_calls
 from app.services.editorial_calls import EditorialDeferred, call_json
-from app.services.news_editorial import GROUP_PROMPT, SCORE_VERSION, group_pending_news, load_news_records, score_pending_news
+from app.services.news_editorial import GROUP_PROMPT, group_pending_news, load_news_records, score_pending_news
 from app.services.news_publication import compose_news_edition, heat_at, list_stories, read_news_edition
 from app.services.settings import set_setting
 

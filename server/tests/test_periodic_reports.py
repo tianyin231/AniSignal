@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import json
 
 from sqlalchemy import event, select
@@ -15,13 +15,9 @@ from app.models import (
     CustomFeed,
     CustomFeedItem,
     MetricSnapshot,
-    NotificationDelivery,
-    PeriodicReport,
     RawContent,
-    ReportSubscription,
     Source,
     User,
-    UserWebhook,
 )
 from app.services import periodic_reports as pr
 from app.services.auth import SESSION_COOKIE, create_session, hash_password
@@ -325,9 +321,11 @@ async def test_subscription_api_private_custom_report_and_scheduled_dispatch(
     await session.commit()
 
     # Alice 创建仅接收周期报告的 Webhook
+    hdr_a = {"Cookie": f"{SESSION_COOKIE}={token_a}"}
+    hdr_b = {"Cookie": f"{SESSION_COOKIE}={token_b}"}
     wh_resp = await client.post(
         "/api/account/webhooks",
-        cookies={SESSION_COOKIE: token_a},
+        headers=hdr_a,
         json={
             "name": "飞书周报群",
             "provider": "feishu",
@@ -341,7 +339,7 @@ async def test_subscription_api_private_custom_report_and_scheduled_dispatch(
     # 创建两条订阅：1) 私有定制周报 → Webhook；2) 公开分区日报 → 邮件
     sub1 = await client.post(
         "/api/account/reports/subscriptions",
-        cookies={SESSION_COOKIE: token_a},
+        headers=hdr_a,
         json={
             "scope_type": "custom_bundle",
             "scope_key": "all",
@@ -355,7 +353,7 @@ async def test_subscription_api_private_custom_report_and_scheduled_dispatch(
 
     sub2 = await client.post(
         "/api/account/reports/subscriptions",
-        cookies={SESSION_COOKIE: token_a},
+        headers=hdr_a,
         json={
             "scope_type": "community",
             "scope_key": "wuwa",
@@ -383,7 +381,7 @@ async def test_subscription_api_private_custom_report_and_scheduled_dispatch(
     # 手动立即发送私有定制周报
     send_resp = await client.post(
         f"/api/account/reports/subscriptions/{sub1_id}/send",
-        cookies={SESSION_COOKIE: token_a},
+        headers=hdr_a,
         json={"force": False},
     )
     assert send_resp.status_code == 200
@@ -397,23 +395,23 @@ async def test_subscription_api_private_custom_report_and_scheduled_dispatch(
     # 冷却拦截（60s 内再次手动发送返回 429）
     throttled = await client.post(
         f"/api/account/reports/subscriptions/{sub1_id}/send",
-        cookies={SESSION_COOKIE: token_a},
+        headers=hdr_a,
         json={"force": False},
     )
     assert throttled.status_code == 429
 
     # 私有定制报告权限隔离：Alice 可看，匿名与 Bob 均 404，公开列表不泄露
-    r_owner = await client.get(f"/api/reports/{private_report_id}", cookies={SESSION_COOKIE: token_a})
+    r_owner = await client.get(f"/api/reports/{private_report_id}", headers=hdr_a)
     assert r_owner.status_code == 200
     assert r_owner.json()["item_count"] == 1
     r_anon = await client.get(f"/api/reports/{private_report_id}")
     assert r_anon.status_code == 404
-    r_bob = await client.get(f"/api/reports/{private_report_id}", cookies={SESSION_COOKIE: token_b})
+    r_bob = await client.get(f"/api/reports/{private_report_id}", headers=hdr_b)
     assert r_bob.status_code == 404
     r_pub = await client.get("/api/reports")
     assert r_pub.status_code == 200
     assert all(item["id"] != private_report_id for item in r_pub.json()["items"])
-    r_mine = await client.get("/api/reports", params={"mine": "true"}, cookies={SESSION_COOKIE: token_a})
+    r_mine = await client.get("/api/reports", params={"mine": "true"}, headers=hdr_a)
     assert r_mine.status_code == 200
     assert [item["id"] for item in r_mine.json()["items"]] == [private_report_id]
 
@@ -461,7 +459,7 @@ async def test_subscription_api_private_custom_report_and_scheduled_dispatch(
     # 清理订阅
     del_resp = await client.delete(
         f"/api/account/reports/subscriptions/{sub2_id}",
-        cookies={SESSION_COOKIE: token_a},
+        headers=hdr_a,
     )
     assert del_resp.status_code == 204
     pr._MANUAL_LAST_AT.clear()

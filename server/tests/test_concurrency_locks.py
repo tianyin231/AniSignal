@@ -1,6 +1,9 @@
-"""Batch 3 运维与并发加固单测：单目标采集互斥锁、早报互斥锁、调度器原子续租。"""
+"""运维与并发互斥锁回归单测：单目标采集互斥锁、早报互斥锁、调度器原子续租。"""
 
 import asyncio
+from contextlib import asynccontextmanager
+
+from sqlalchemy import func, select
 
 import app.services.collect as collect_module
 from app.models import CollectRun, CollectTarget
@@ -8,8 +11,7 @@ from app.scheduler.loop import _LEADER_KEY, _LEADER_TTL_MS, _is_leader
 from app.schemas.content import FetchResult
 from app.services.queue import LocalRedis
 from app.worker.settings import send_morning_notifications
-from sqlalchemy import func, select
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 async def test_run_collection_per_target_mutex_prevents_concurrent_reentry(
@@ -38,7 +40,12 @@ async def test_run_collection_per_target_mutex_prevents_concurrent_reentry(
             await proceed.wait()
             return FetchResult(platform="bilibili", fetch_kind="bilibili_search", items=[VIDEO_RAW])
 
+    @asynccontextmanager
+    async def _noop_slot(*_args, **_kwargs):
+        yield
+
     monkeypatch.setattr(collect_module, "SessionLocal", session_factory)
+    monkeypatch.setattr(collect_module, "platform_slot", _noop_slot)
     monkeypatch.setitem(collect_module._COLLECTORS, "bilibili", _SlowCollector)
 
     redis = LocalRedis()

@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.models import ContentSchedule, EmailCode, RawContent
 from app.services.ingest import ingest_items
-from tests.test_parsers_bilibili import VIDEO_RAW
+from tests.factories import VIDEO_RAW
 
 
 async def _register_and_login(client, session, email="cal@t.com"):

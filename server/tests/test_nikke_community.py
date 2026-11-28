@@ -1,10 +1,5 @@
-import importlib.util
 from datetime import timedelta
-from pathlib import Path
-from unittest.mock import patch
 
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy import func, select
 
 from app.api.bot import TargetBody

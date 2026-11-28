@@ -1,58 +1,9 @@
 """kuro / miyoushe / youtube 解析器单测（样例结构按 data-sources.md 与接口文档整理）。"""
 
-from datetime import timedelta
-
-from app.clock import utcnow
 from app.parsers.kuro import parse_notice
 from app.parsers.miyoushe import parse_post
 from app.parsers.youtube import parse_rss_item
-
-# 发布时间取"昨天"：官方链接等 30 天窗口测试对固定时间戳存在边界漂移（曾因此滑出窗口）
-_KURO_START_MS = int((utcnow() - timedelta(days=1)).timestamp() * 1000)
-
-KURO_ITEM = {
-    "platform": "kuro_global",
-    "entry": {
-        "id": "50553",
-        "tabTitle": {
-            "en": "Version Update Notice",
-            "zh-Hans": "版本更新维护公告",
-        },
-        "tabBanner": {"en": "https://example.com/banner.png"},
-        "startTimeMs": _KURO_START_MS,
-    },
-    "detail": {"noticeId": 50553, "textContent": "<p>html body</p>"},
-    "list_url": "https://aki-gm-resources-back.aki-game.net/gamenotice/G153/x/notice.json",
-    "detail_url": "https://aki-gm-resources-back.aki-game.net/gamenotice/content/G153/x/50553/en.json",
-}
-
-MIYOUSHE_ITEM = {
-    "entry": {
-        "post": {
-            "post_id": 58957682,
-            "subject": "胡桃同人图",
-            "content": "正文摘要",
-            "created_at": 1786000000,
-            "images": ["https://upload-bbs.miyoushe.com/a.jpg"],
-        },
-        "user": {"uid": 123456, "nickname": "旅行者"},
-        "forum": {"name": "同人图"},
-        "stat": {"view": 1000, "like": 50, "reply": 10, "favorite": 5, "share": 2},
-    },
-    "detail": None,
-}
-
-YOUTUBE_ITEM = {
-    "id": "dQw4w9WgXcQ",
-    "channel_id": "UC0Bi5KMcECRVYis5Gb_ZYZQ",
-    "title": "Wuthering Waves — Patch Trailer",
-    "link": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    "published": "2026-08-13T12:00:00+00:00",
-    "updated": "2026-08-13T12:00:00+00:00",
-    "author": "Wuthering Waves",
-    "thumbnail": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
-    "summary": "Take a look at the patch!",
-}
+from tests.factories import KURO_ITEM, MIYOUSHE_ITEM, YOUTUBE_ITEM  # noqa: F401 - 公共样例单一真相源
 
 
 def test_parse_kuro_notice():
