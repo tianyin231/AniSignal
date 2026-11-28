@@ -1,16 +1,53 @@
 """AI 资讯的编辑筛选与溯源。摘要是对来源的转述，不是事实核查结果。"""
 
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from html import unescape
 from urllib.parse import urlsplit
 
+from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from app.clock import utcnow
-from app.models import ContentReview, ContentVersion, Evidence, NewsArchive, RawContent, Source
+from app.models import CollectTarget, ContentReview, ContentVersion, Evidence, NewsArchive, RawContent, Source
+
+
+class NewsSource(BaseModel):
+    name: str
+    platform: str
+    status: str
+    last_success_at: datetime | None
+    interval_minutes: int
+
+
+async def source_status(session: AsyncSession) -> list[NewsSource]:
+    """查询 AI 分区当前启用且非隔离信源的运行健康状态。"""
+    from app.services import settings as settings_service
+
+    hidden_platforms = settings_service.hidden_platforms(await settings_service.get_media_visibility(session))
+    targets = list(await session.scalars(select(CollectTarget).where(
+        CollectTarget.community == "ai", CollectTarget.enabled.is_(True),
+    ).order_by(CollectTarget.id)))
+    sources: list[NewsSource] = []
+    for target in targets:
+        if target.platform in hidden_platforms or (target.config or {}).get("participation_mode") == "isolated":
+            continue
+        stale = target.last_success_at and target.last_success_at < utcnow() - timedelta(
+            minutes=max(target.interval_minutes * 3, 90)
+        )
+        status = "delayed" if target.consecutive_failures or stale else (
+            "active" if target.last_success_at else "pending"
+        )
+        sources.append(NewsSource(
+            name=target.display_name or target.target_value,
+            platform=target.platform,
+            status=status,
+            last_success_at=target.last_success_at,
+            interval_minutes=target.interval_minutes,
+        ))
+    return sources
 
 NEWS_TOPICS = ("OpenAI", "Codex", "Claude", "Gemini", "DeepSeek", "开源模型", "行业动态")
 _AI_SUBJECT = re.compile(

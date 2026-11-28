@@ -13,7 +13,8 @@ import re
 from sqlalchemy import select
 
 from app.clock import utcnow
-from app.collectors.rss import feed_time, rss_id
+from app.clock import feed_time
+from app.schemas.ids import rss_id
 from app.models import (Base, CollectTarget, ContentReview, ContentVersion, Event,
     EventRevision, Evidence, NewsArchive, NewsGrouping, RawContent, Source)
 from app.parsers.rss import parse_item

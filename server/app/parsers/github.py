@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from app.collectors.github import git_item_id
-from app.collectors.rss import feed_time
+from app.clock import feed_time
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
+from app.schemas.ids import git_item_id
 
 PARSER_VERSION = "1"
 

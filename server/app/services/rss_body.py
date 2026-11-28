@@ -10,7 +10,8 @@ from sqlalchemy import func, select
 from trafilatura import extract
 
 from app.collectors.base import CollectorError, USER_AGENT
-from app.collectors.rss import MAX_FEED_BYTES, public_feed_url, rss_id
+from app.collectors.rss import MAX_FEED_BYTES, public_feed_url
+from app.schemas.ids import rss_id
 from app.models import ContentVersion, RawContent
 from app.services.collector_proxy import http_proxy_kwargs
 

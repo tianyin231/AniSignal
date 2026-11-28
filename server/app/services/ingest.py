@@ -100,11 +100,11 @@ class IngestStats:
 
 def target_source_external_id(platform: str, target_value: str) -> str:
     if platform == "rss":
-        from app.collectors.rss import rss_id
+        from app.schemas.ids import rss_id
 
         return rss_id(target_value)
     if platform == "web_page":
-        from app.collectors.web_page import web_id
+        from app.schemas.ids import web_id
 
         return web_id(f"site:{target_value}")
     if platform == "x":

@@ -11,9 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
 from app.db import get_session
-from app.models import CollectTarget, ContentReview, ContentVersion, RawContent, Source
-from app.services.ai_news import NEWS_TOPICS, approved_news_query, reference_links
-from app.services import settings as settings_service
+from app.models import ContentReview, ContentVersion, RawContent, Source
+from app.services.ai_news import NEWS_TOPICS, NewsSource, approved_news_query, reference_links, source_status
 from app.services.hidden_communities import AI_COMMUNITY, request_blocks
 
 router = APIRouter(prefix="/api/ai-news")
@@ -34,14 +33,6 @@ class NewsItem(BaseModel):
     published_at: datetime | None
     url: str | None
     references: list[dict]
-
-
-class NewsSource(BaseModel):
-    name: str
-    platform: str
-    status: str
-    last_success_at: datetime | None
-    interval_minutes: int
 
 
 class NewsList(BaseModel):
@@ -134,29 +125,6 @@ async def list_news(
             references=reference_links(version.text or ""),
         ))
     return NewsList(items=items, total=total, topics=list(NEWS_TOPICS), sources=await source_status(session))
-
-
-async def source_status(session):
-    hidden_platforms = settings_service.hidden_platforms(await settings_service.get_media_visibility(session))
-    targets = list(await session.scalars(select(CollectTarget).where(
-        CollectTarget.community == "ai", CollectTarget.enabled.is_(True),
-    ).order_by(CollectTarget.id)))
-    sources = []
-    for target in targets:
-        if target.platform in hidden_platforms or (target.config or {}).get("participation_mode") == "isolated":
-            continue
-        stale = target.last_success_at and target.last_success_at < utcnow() - timedelta(
-            minutes=max(target.interval_minutes * 3, 90)
-        )
-        status = "delayed" if target.consecutive_failures or stale else (
-            "active" if target.last_success_at else "pending"
-        )
-        sources.append(NewsSource(
-            name=target.display_name or target.target_value, platform=target.platform,
-            status=status, last_success_at=target.last_success_at,
-            interval_minutes=target.interval_minutes,
-        ))
-    return sources
 
 
 async def _monitoring_sources(session, engine_sources):

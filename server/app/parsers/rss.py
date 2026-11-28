@@ -1,8 +1,9 @@
 """RSS 原始条目转为主系统统一内容；来源身份由管理员配置决定。"""
 
-from app.collectors.rss import feed_time, rss_id
+from app.clock import feed_time
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
+from app.schemas.ids import rss_id
 
 PARSER_VERSION = "1"
 

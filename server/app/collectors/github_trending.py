@@ -15,10 +15,10 @@ from app.clock import utcnow
 from app.collectors.base import USER_AGENT
 from app.collectors.github import (
     GITHUB_WEB_ROOT,
-    git_item_id,
     html_to_markdown_text,
     normalize_github_repo,
 )
+from app.schemas.ids import git_item_id
 from app.services.collector_proxy import http_proxy_kwargs
 
 logger = logging.getLogger(__name__)

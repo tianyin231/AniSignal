@@ -10,7 +10,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import defer
 
 from app.clock import utcnow
-from app.collectors.rss import public_feed_url, rss_id
+from app.collectors.rss import public_feed_url
+from app.schemas.ids import rss_id
 from app.collectors.base import CollectorError
 from app.models import (AiUsage, CollectTarget, ContentReview, ContentVersion, EditorialReceipt,
     NewsArchive, NewsGrouping, RawContent, Source)

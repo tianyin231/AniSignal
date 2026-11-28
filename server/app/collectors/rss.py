@@ -1,29 +1,24 @@
 """将 RSS 2.0、Atom 和 RDF 信源接入统一采集队列。"""
 
 import asyncio
-import hashlib
 import ipaddress
 import re
 import socket
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree as ET
 
 import bleach
 import httpx
 
+from app.clock import feed_time
 from app.collectors.base import CollectorError, USER_AGENT
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+from app.schemas.ids import rss_id
 from app.services.collector_proxy import http_proxy_kwargs
 
 MAX_FEED_BYTES = 5 * 1024 * 1024
-
-
-def rss_id(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()[:48]
 
 
 def tag(element) -> str:
@@ -61,19 +56,6 @@ def strip_rotating_blocks(html: str) -> str:
 def plain(value: str) -> str:
     from html import unescape
     return unescape(bleach.clean(value, tags=[], strip=True)).strip()
-
-
-def feed_time(value: str):
-    if not value:
-        return None
-    try:
-        date = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError:
-        try:
-            date = parsedate_to_datetime(value)
-        except (TypeError, ValueError, OverflowError):
-            return None
-    return date.replace(tzinfo=timezone.utc) if date.tzinfo is None else date.astimezone(timezone.utc)
 
 
 def _is_permitted_egress_ip(raw_ip: str, allow_networks: tuple[ipaddress._BaseNetwork, ...]) -> bool:

@@ -46,11 +46,14 @@ from app.schemas.api import (
     StatisticsOverview,
 )
 from app.services.hidden_communities import request_blocks, request_hidden
+from app.services.html import sanitize_html as _sanitize_html
 from app.services.public_cache import (
     CACHE_PREFIX,
     SITE_CONFIG_KEY,
     cached_dict,
     cached_model,
+    invalidate_official_links_cache,
+    official_links_cache as _official_links_cache,
 )
 from app.services.urls import safe_link, safe_media_url
 
@@ -1099,25 +1102,6 @@ async def list_sources(
     return await cached_model(cache, cache_key, PUBLIC_CACHE_SECONDS, PublicSourceList, _load)
 
 
-_ALLOWED_TAGS = [
-    "a", "abbr", "b", "blockquote", "br", "code", "div", "em", "h1", "h2",
-    "h3", "h4", "h5", "h6", "hr", "i", "img", "li", "ol", "p", "pre", "q",
-    "small", "span", "strong", "sub", "sup", "table", "tbody", "td", "th",
-    "thead", "tr", "u", "ul",
-]
-_ALLOWED_ATTRS = {"a": ["href", "title"], "img": ["src", "alt"]}
-
-
-def _sanitize_html(text: str) -> str | None:
-    if "<" not in text or ">" not in text:
-        return None
-    import re
-    import bleach
-
-    cleaned = bleach.clean(text, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
-    return re.sub(r"<img\b", '<img referrerpolicy="no-referrer" loading="lazy"', cleaned)
-
-
 @router.get("/contents/{content_id}/notification-image.jpg")
 async def content_notification_image(content_id: int, session: AsyncSession = Depends(get_session)):
     from fastapi.responses import RedirectResponse
@@ -1514,8 +1498,6 @@ async def get_product_signals(
 # ---------- 官方动态外链聚合（活动/奖励/H5 直达） ----------
 
 _OFFICIAL_LINKS_TTL_SECONDS = 300.0
-# 每个分区一份缓存（鸣潮/碧蓝航线的外链面板独立）
-_official_links_cache: dict[str, dict] = {}
 _URL_PATTERN = re.compile(r"https?://[^\s<>\"'）)\]}】」]+")
 # 纯静态资源与站内图片不入链接清单
 _LINK_HOST_BLOCKLIST = ("hdslb.com", "bilivideo", "ytimg.com", "ggpht.com", "static.", "akamaized.net")
@@ -1683,11 +1665,6 @@ async def _collect_official_links(session: AsyncSession, community: str) -> list
         if len(items) >= 30:
             break
     return items
-
-
-def invalidate_official_links_cache() -> None:
-    """内容下架/删除/修订后由管理端调用，让外链聚合立即反映变化。"""
-    _official_links_cache.clear()
 
 
 async def _ai_official_links(session: AsyncSession, community: str) -> list[dict]:

@@ -565,7 +565,7 @@ async def _run_collection_unlocked(redis, target_id: int) -> dict:
                 ),
             )
             if isinstance(collector, GithubCollector) and collector.last_trending_edition:
-                from app.collectors.github import git_item_id
+                from app.schemas.ids import git_item_id
                 from app.services.git_trending import save_trending_edition
 
                 try:

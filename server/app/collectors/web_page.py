@@ -21,6 +21,7 @@ from app.collectors.rss import MAX_FEED_BYTES, public_feed_url
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+from app.schemas.ids import web_id
 from app.services.collector_proxy import http_proxy_kwargs
 from app.services.web_parser import (
     DetectedFeed,
@@ -54,10 +55,6 @@ class FetchedPage:
     etag: str | None = None
     last_modified: str | None = None
     not_modified: bool = False
-
-
-def web_id(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:48]
 
 
 def web_rule_signature(config: dict | None) -> str:

@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 
 from app.clock import utcnow
 from app.models import ContentTranslation, ContentVersion, NewsArchive, NewsGrouping
+from app.services.html import sanitize_html
 from app.services.news_editorial import load_news_records, representative
 from app.services.editorial_calls import get_policy
 from app.services.news_publication import participant, selected_score
@@ -18,7 +19,6 @@ from app.services import native_news
 
 async def raw_article(session, raw_id: int) -> dict:
     """原文直出详情页：允许读取尚未经 AI 审核（或已过审）的 AI 候选原文，拒绝已被判违规/推广的条目。"""
-    from app.api.public import _sanitize_html
     from app.models import ContentReview, Evidence, RawContent, Source
     from app.services.ai_news import plain_excerpt
 
@@ -70,7 +70,7 @@ async def raw_article(session, raw_id: int) -> dict:
         if latest_vis is not None and latest_vis.payload.get("hidden"):
             raise HTTPException(404, "资讯已撤下")
     text = version.text or ""
-    html_body = _sanitize_html(text)
+    html_body = sanitize_html(text)
     if not html_body and text.strip():
         html_body = "<p>" + escape(text).replace("\n", "<br>") + "</p>"
     translation = await session.get(ContentTranslation, raw.id)
@@ -124,8 +124,7 @@ async def article(session, key, *, original=False):
             "zh": None if original or not translation else "<p>" + escape(translation.text).replace("\n", "<br>") + "</p>",
             "complete": bool(not current_archive or archived.get("body_status") == "ok")}
     elif current_archive and mode not in {"summary-only", "none"} and archived.get("body_html"):
-        from app.api.public import _sanitize_html
-        body = {"zh": None, "original": _sanitize_html(archived["body_html"]), "complete": archived.get("body_status") == "ok"}
+        body = {"zh": None, "original": sanitize_html(archived["body_html"]), "complete": archived.get("body_status") == "ok"}
     story = None
     if row.current and row.grouping.story_id:
         story_alias = await session.scalar(select(NewsArchive).where(NewsArchive.kind == "story",

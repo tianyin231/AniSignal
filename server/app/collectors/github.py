@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-import hashlib
 import logging
 import re
 from typing import Any
@@ -22,11 +21,13 @@ from xml.etree import ElementTree as ET
 import html2text
 import httpx
 
+from app.clock import feed_time
 from app.collectors.base import CollectorDeferred, CollectorError, USER_AGENT
-from app.collectors.rss import child as xml_child, feed_time, plain as xml_plain, tag as xml_tag, text as xml_text
+from app.collectors.rss import child as xml_child, plain as xml_plain, tag as xml_tag, text as xml_text
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
+from app.schemas.ids import git_item_id
 from app.services.collector_proxy import http_proxy_kwargs
 
 logger = logging.getLogger(__name__)
@@ -97,16 +98,6 @@ def normalize_repo_config(raw: dict | None, *, target_type: str = "releases") ->
 def repo_web_url(repo: str, kind: str = "releases") -> str:
     suffix = "releases" if kind in {"releases", "gh_releases"} else ""
     return f"{GITHUB_WEB_ROOT}/{repo}/{suffix}" if suffix else f"{GITHUB_WEB_ROOT}/{repo}"
-
-
-def git_item_id(repo: str, kind: str, ident: str) -> str:
-    """生成跨 API / Atom 回退稳定的 external_id（长度始终 ≤ 64，兼容 RawContent 与 CustomFeedItem）。"""
-    clean_ident = str(ident or "").strip()
-    base = f"{repo.lower()}:{kind}:{clean_ident}"
-    if len(base) <= 64:
-        return base
-    digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:48]
-    return f"{kind}:{digest}"[:64]
 
 
 def html_to_markdown_text(html_body: str) -> str:

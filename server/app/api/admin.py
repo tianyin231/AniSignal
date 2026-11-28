@@ -22,7 +22,7 @@ from app.communities import (
     sync_communities,
 )
 from app.api.deps import get_queue, require_admin
-from app.api.public import invalidate_official_links_cache
+from app.services.public_cache import invalidate_official_links_cache
 from app.config import get_settings
 from app.db import get_session
 from app.models import (

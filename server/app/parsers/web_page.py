@@ -1,9 +1,9 @@
 """自定义网页监控原始条目转为主系统统一内容。"""
 
-from app.collectors.rss import feed_time
-from app.collectors.web_page import web_id
+from app.clock import feed_time
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
+from app.schemas.ids import web_id
 
 PARSER_VERSION = "1"
 

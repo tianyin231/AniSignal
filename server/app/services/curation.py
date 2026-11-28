@@ -243,7 +243,7 @@ async def review_contents(
             await session.commit()
     await session.commit()
     # 审核带出了 AI 提取的外链中文名，外链聚合面板需要重建
-    from app.api.public import invalidate_official_links_cache
+    from app.services.public_cache import invalidate_official_links_cache
 
     invalidate_official_links_cache()
     if hidden_ids:

@@ -114,7 +114,7 @@ async def topics(session):
 
 async def sources():
     async with SessionLocal() as session:
-        from app.api.ai_news import source_status
+        from app.services.ai_news import source_status
         return [row.model_dump() for row in await source_status(session)]
 
 

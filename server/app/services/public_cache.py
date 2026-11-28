@@ -46,6 +46,13 @@ _GZ_PREFIX = "gz:"
 _TModel = TypeVar("_TModel", bound=BaseModel)
 _locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 _default_redis: Any = None
+# 每个分区一份官方动态外链面板缓存（鸣潮/碧蓝航线等独立）
+official_links_cache: dict[str, dict] = {}
+
+
+def invalidate_official_links_cache() -> None:
+    """内容下架/删除/修订/AI 审核后调用，让官方动态外链聚合立即反映变化。"""
+    official_links_cache.clear()
 
 
 def register_cache_redis(redis: Any) -> None:
