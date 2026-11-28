@@ -1,8 +1,0 @@
-raw/
-*.db
-*.jsonl
-steam_state.json
-stability/
-*.log
-report-*.txt
-__pycache__/

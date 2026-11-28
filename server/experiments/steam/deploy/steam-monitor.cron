@@ -1,5 +1,0 @@
-# Steam 采集生产排期（纯匿名，无 cookie 维护）
-# 探针 + 采集：每 30 分钟（每轮 4 游戏 ≈ 24 请求）
-*/30 * * * * root cd /opt/steam-monitor && /usr/bin/python3 steam_probe.py >> probe.log 2>&1 && /usr/bin/python3 steam_collect.py >> collect.log 2>&1 && /usr/bin/python3 db_mirror.py >> mirror.log 2>&1
-# 运维日报：每天 09:00
-0 9 * * * root cd /opt/steam-monitor && /usr/bin/python3 ops_report.py > report-$(date +\%F).txt 2>&1
