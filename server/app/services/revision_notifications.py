@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
+from app.clock import format_beijing
 from html import escape
 
 from sqlalchemy import select
@@ -238,7 +239,7 @@ def render_revision_email(item: dict) -> tuple[str, str, str]:
     source = _plain(item["source"])
     community_label = _plain(item["community_label"])
     change_label = _plain(item["change_label"])
-    parsed_bj = (item["parsed_at"] + timedelta(hours=8)).strftime("%Y/%m/%d %H:%M")
+    parsed_bj = format_beijing(item["parsed_at"])
     detail_url = item["detail_url"]
     origin_url = item.get("url")
     subject = f"AniSignal 官方修订 · [{community_label}] {title}"[:255]
@@ -280,7 +281,7 @@ def render_revision_email(item: dict) -> tuple[str, str, str]:
 
 def format_bot_revision_message(item: dict) -> str:
     """单条官方公告修订的 Bot 推送短讯文案。"""
-    parsed_bj = (item["parsed_at"] + timedelta(hours=8)).strftime("%m/%d %H:%M")
+    parsed_bj = format_beijing(item["parsed_at"], "%m/%d %H:%M")
     lines = [
         f"[{item['community_label']}] 官方公告修订 · {_clip(item['title'], 60)}",
         f"v{item['from_version']}→v{item['to_version']} · {item['change_label']}",

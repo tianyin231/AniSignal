@@ -17,7 +17,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
-from app.clock import utcnow
+from app.clock import format_beijing, utcnow
 from app.communities import COMMUNITIES, ensure_communities_synced, get_community, is_all_community
 from app.models import (
     ContentSchedule,
@@ -91,7 +91,7 @@ class McpContext:
 def _fmt_bj(dt: datetime | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
     if dt is None:
         return "时间未知"
-    return (dt + timedelta(hours=8)).strftime(fmt) + " (UTC+8)"
+    return format_beijing(dt, fmt) + " (UTC+8)"
 
 
 def _clip(text: str | None, limit: int = 240) -> str:

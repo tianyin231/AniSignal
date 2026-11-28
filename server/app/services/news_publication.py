@@ -1,17 +1,42 @@
 """AI 资讯的统一读取与成刊；读取页面不会调用模型。"""
 
 from datetime import datetime, time, timedelta
+import re
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.clock import utcnow
-from app.models import CollectTarget, Evidence, NewsEdition
+from app.models import CollectTarget, Evidence, NewsArchive, NewsEdition
 from app.services.editorial_calls import fingerprint, get_policy
 from app.services.ai_news import news_review_identity, reference_links
 from app.services.news_editorial import SCORE_VERSION, first_party, load_news_records, representative
+from app.services.news_import import date
 
 EDITION_VERSION = "news-daily-v1"
+
+
+def available(row, now=None, *, listed=True):
+    now = now or utcnow()
+    imported = row.news.get("imported_publication") or {}
+    release = date(imported.get("visible_after"))
+    mode = (row.source.raw_json or {}).get("participation_mode", "editorial") if row.source else "editorial"
+    return (mode == "editorial" and (not listed or imported.get("eligible", True))
+        and not (row.current and row.event and not row.event.is_active)
+        and (not imported.get("selected") or bool(release and release <= now)))
+
+
+async def resolve_article(session, key, *, require_news=False):
+    alias = await session.get(NewsArchive, ("article", key))
+    match = re.fullmatch(r"(?:as|content)-(\d+)", key)
+    rid = alias.raw_content_id if alias else int(match[1]) if match else None
+    if rid is None:
+        raise HTTPException(404, "资讯不存在")
+    rows = await load_news_records(session, content_ids=[rid], include_archived=not require_news)
+    if not rows or not available(rows[0], listed=require_news):
+        raise HTTPException(404, "资讯已撤下或尚未发布")
+    return rows[0], alias
 
 
 def source_item(row):
@@ -68,7 +93,6 @@ def selected_score(row, policy):
 
 
 async def visible_records(session, *, now=None, days=30):
-    from app.services.native_news import available
     records = await load_news_records(session, since=(now or utcnow()) - timedelta(days=days),
         until=(now or utcnow()) + timedelta(microseconds=1))
     excluded = set(await session.scalars(select(Evidence.raw_content_id).where(Evidence.role == "excluded")))

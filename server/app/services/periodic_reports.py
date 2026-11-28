@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
-from app.clock import utcnow
+from app.clock import BJ_TZ as BEIJING_TZ, utcnow
 from app.communities import COMMUNITIES, ensure_communities_synced, get_community
 from app.config import get_settings
 from app.models import (
@@ -57,7 +57,6 @@ from app.services.webhooks import send_webhook_http
 
 logger = logging.getLogger(__name__)
 
-BEIJING_TZ = timezone(timedelta(hours=8))
 REPORT_PERIODS = ("daily", "weekly")
 REPORT_SCOPES = ("community", "custom_bundle")
 REPORT_CHANNELS = ("email", "webhook")

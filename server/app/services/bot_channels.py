@@ -3,7 +3,7 @@
 from sqlalchemy import and_, exists, or_, select
 
 from app.communities import COMMUNITIES
-from app.models import Event, Evidence, RawContent, Source
+from app.models import BotTarget, Event, Evidence, RawContent, Source
 
 PLATFORMS = {
     "bilibili": ("B", ("bilibili",)),
@@ -31,6 +31,22 @@ def channel_options() -> dict[str, str]:
 
 def selected_communities(channels: list[str]) -> list[str]:
     return list(dict.fromkeys(key.split(":", 1)[0] for key in channels))
+
+
+def subscribed_communities(target: BotTarget) -> list[str]:
+    if "_communities" in target.config:
+        return target.config["_communities"]
+    if target.config.get("scope_mode") == "custom":
+        return []
+    if target.config.get("channels"):
+        return selected_communities(target.config["channels"])
+    if target.config.get("scope_mode") == "channels":
+        return []
+    if selected := target.config.get("communities"):
+        return selected
+    # 兼容多选上线前的单分区配置。
+    community = target.config.get("community", "all")
+    return list(COMMUNITIES) if community == "all" else [community]
 
 
 def product_content_condition():

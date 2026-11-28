@@ -204,12 +204,8 @@
     backdrop-filter: blur(20px) saturate(1.5);
     border-bottom: 1px solid var(--sd-line);
   }
-  /*
-   * 内容卡片：信号台风格用实底卡片，层级靠边框 + 柔和投影。
-   * .panel-glass 保留为同义类，旧模板无需改名。
-   */
-  .panel,
-  .panel-glass {
+  /* 内容卡片：信号台风格用实底卡片，层级靠边框 + 柔和投影。 */
+  .panel {
     border-radius: 16px;
     background: var(--sd-card);
     border: 1px solid var(--sd-line);
@@ -349,12 +345,11 @@ html.dark[data-wallpaper] {
 .wallpaper-veil {
   background: var(--sd-wall-veil);
 }
-html[data-wallpaper] :is(.panel, .panel-glass, .glass, .wall-surface) {
+html[data-wallpaper] :is(.panel, .glass, .wall-surface) {
   -webkit-backdrop-filter: blur(20px) saturate(1.1);
   backdrop-filter: blur(20px) saturate(1.1);
 }
-html[data-wallpaper] .panel,
-html[data-wallpaper] .panel-glass {
+html[data-wallpaper] .panel {
   background: var(--sd-wall-card);
   border-color: var(--sd-wall-border);
   box-shadow:

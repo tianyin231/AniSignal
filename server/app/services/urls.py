@@ -6,9 +6,13 @@
 `data:` / `file:` 更不是 http(s)，这些都挡不住 startsWith('/') 式判据。
 """
 
+import asyncio
 import ipaddress
 import logging
-from urllib.parse import urlparse
+import socket
+from urllib.parse import urlparse, urlsplit
+
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -144,3 +148,46 @@ def safe_link_list(values: object) -> list[str]:
     if not isinstance(values, (list, tuple)):
         return []
     return [item for item in (safe_media_url(v) for v in values) if item]
+
+
+def is_permitted_egress_ip(raw_ip: str, allow_networks: tuple[ipaddress._BaseNetwork, ...]) -> bool:
+    """判定 DNS 解析出的目标 IP 是否允许出站访问（始终拒绝回环/链路本地/未指定/组播）。"""
+    ip = ipaddress.ip_address(raw_ip)
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        return False
+    return ip.is_global or any(ip in net for net in allow_networks)
+
+
+async def resolve_public_http_url(value: str, *, label: str = "地址") -> str:
+    """出站前逐跳 DNS/IP SSRF 校验：拒绝非 http(s)、含内嵌凭据、无法解析或指向私网的地址。"""
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or "\\" in value
+    ):
+        raise ValueError(f"{label}必须是公开 HTTP(S) 地址")
+    try:
+        addresses = await asyncio.to_thread(
+            socket.getaddrinfo,
+            parsed.hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
+    except OSError as exc:
+        raise ValueError(f"{label}无法解析") from exc
+    if not addresses:
+        raise ValueError(f"{label}无法解析")
+    allow_networks = get_settings().egress_allow_networks
+    for row in addresses:
+        addr = row[4][0]
+        if not is_permitted_egress_ip(addr, allow_networks):
+            raise ValueError(
+                f"{label}不能指向私有网络（解析到 {addr}；若使用 fake-ip 代理可设置 ANISIGNAL_EGRESS_ALLOW_CIDRS=198.18.0.0/15）"
+            )
+    return value

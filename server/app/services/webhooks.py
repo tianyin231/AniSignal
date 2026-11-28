@@ -24,7 +24,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow
-from app.collectors.rss import _is_permitted_egress_ip
 from app.communities import get_community
 from app.config import get_settings
 from app.models import ContentVersion, Event, EventRevision, Evidence, NotificationDelivery, RawContent, Source, User, UserWebhook
@@ -33,7 +32,7 @@ from app.services.hidden_communities import account_blocks
 from app.services.instant_notifications import _business_revision, _important, _matching_items
 from app.services.notifications import _plain, _safe_url, beijing_today
 from app.services.revision_notifications import load_official_revision_events, revision_webhook_payload
-from app.services.urls import is_public_http_url
+from app.services.urls import is_permitted_egress_ip as _is_permitted_egress_ip, is_public_http_url
 
 logger = logging.getLogger(__name__)
 

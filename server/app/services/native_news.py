@@ -10,22 +10,12 @@ from app.db import SessionLocal
 from app.models import ContentVersion, NewsArchive
 from app.services.news_editorial import load_news_records
 from app.services.news_import import date
-from app.services.news_publication import list_stories, selected_score, source_item
+from app.services.news_publication import available, list_stories, resolve_article, selected_score, source_item
 from app.services.editorial_calls import get_policy
 
 
 def publication_time(row):
     return row.raw.published_at or row.raw.collected_at
-
-
-def available(row, now=None, *, listed=True):
-    now = now or utcnow()
-    imported = row.news.get("imported_publication") or {}
-    release = date(imported.get("visible_after"))
-    mode = (row.source.raw_json or {}).get("participation_mode", "editorial") if row.source else "editorial"
-    return (mode == "editorial" and (not listed or imported.get("eligible", True))
-        and not (row.current and row.event and not row.event.is_active)
-        and (not imported.get("selected") or bool(release and release <= now)))
 
 
 async def article_aliases(session, ids):
@@ -159,7 +149,6 @@ async def bot_items(keywords, start_at, end_at, *, collected_after=None):
 
 
 async def validate_bot_items(items):
-    from app.services.news_details import resolve_article
     async with SessionLocal() as session:
         result = set()
         policy = await get_policy(session)

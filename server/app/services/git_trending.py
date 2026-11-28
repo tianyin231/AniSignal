@@ -10,10 +10,9 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
-from app.clock import utcnow
+from app.clock import BJ_TZ as BEIJING_TZ, utcnow
 from app.models import ContentVersion, GitTrendingEdition, RawContent
 
-BEIJING_TZ = timezone(timedelta(hours=8))
 TRENDING_PERIOD_ORDER = ("daily", "weekly", "monthly")
 TRENDING_PERIOD_LABELS = {
     "daily": "日刊",

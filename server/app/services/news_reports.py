@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.models import NewsArchive, NewsEdition
 from app.services import native_news
-from app.services.news_details import resolve_article
+from app.services.news_publication import resolve_article
 
 
 async def issues(session, kind):

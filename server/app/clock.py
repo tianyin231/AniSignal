@@ -1,9 +1,10 @@
 """时间约定：数据库一律存 naive UTC，边界处自行转换时区。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
-BJ_TZ = timezone(timedelta(hours=8))
+BJ_OFFSET = timedelta(hours=8)
+BJ_TZ = timezone(BJ_OFFSET)
 
 
 def utcnow() -> datetime:
@@ -30,8 +31,13 @@ def now_beijing() -> datetime:
     return datetime.now(BJ_TZ)
 
 
+def beijing_date(value: datetime | None = None) -> date:
+    """返回指定时刻（默认当前时刻）对应的北京日历日。"""
+    return to_beijing(value or utcnow()).date()
+
+
 def format_beijing(value: datetime, fmt: str = "%Y/%m/%d %H:%M") -> str:
-    return (to_naive_utc(value) + timedelta(hours=8)).strftime(fmt)
+    return (to_naive_utc(value) + BJ_OFFSET).strftime(fmt)
 
 
 def feed_time(value: str) -> datetime | None:

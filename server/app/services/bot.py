@@ -21,6 +21,7 @@ from app.services.settings import get_setting, set_setting
 from app.services.views import product_to_out
 from app.services.bot_calendar import calendar_brief, upcoming_entries, refresh_calendar, scheduled_at, normalized_title
 from app.services.bot_policy import delivery_congested, reserve_delivery
+from app.services.bot_channels import subscribed_communities
 from app.services import bot_channels, bot_custom
 from app.services.bot_preferences import resolve_target
 from app.services.bot_access import matches_keywords, target_error
@@ -115,22 +116,6 @@ def classify_item(item: dict) -> str:
     if item.get("importance"):
         return "critical"
     return "normal"
-
-
-def subscribed_communities(target: BotTarget) -> list[str]:
-    if "_communities" in target.config:
-        return target.config["_communities"]
-    if target.config.get("scope_mode") == "custom":
-        return []
-    if target.config.get("channels"):
-        return bot_channels.selected_communities(target.config["channels"])
-    if target.config.get("scope_mode") == "channels":
-        return []
-    if selected := target.config.get("communities"):
-        return selected
-    # 兼容多选上线前的单分区配置。
-    community = target.config.get("community", "all")
-    return list(COMMUNITIES) if community == "all" else [community]
 
 
 def matches_target_scope(target: BotTarget, item: dict) -> bool:

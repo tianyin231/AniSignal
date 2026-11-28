@@ -15,10 +15,9 @@ from datetime import datetime, timedelta, timezone
 import logging
 import re
 from typing import Any
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote
 from xml.etree import ElementTree as ET
 
-import html2text
 import httpx
 
 from app.clock import feed_time
@@ -27,8 +26,9 @@ from app.collectors.rss import child as xml_child, plain as xml_plain, tag as xm
 from app.config import get_settings
 from app.models.enums import Platform
 from app.schemas.content import FetchResult
-from app.schemas.ids import git_item_id
+from app.schemas.ids import git_item_id, normalize_github_repo
 from app.services.collector_proxy import http_proxy_kwargs
+from app.services.html import html_to_markdown_text
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,6 @@ GITHUB_WEB_ROOT = "https://github.com"
 GITHUB_API_VERSION = "2022-11-28"
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 
-_GITHUB_HOSTS = {"github.com", "www.github.com"}
-_SEGMENT_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?$|^[A-Za-z0-9]$")
 _PRERELEASE_HINT_RE = re.compile(r"(?:^|[.\-_+])(?:alpha|beta|rc|pre|preview|dev|nightly|canary|snapshot)\b", re.I)
 _RELEASE_TAG_PATH_RE = re.compile(r"/releases/tag/([^/?#]+)")
 
@@ -47,40 +45,6 @@ def fail_fast(message: str) -> CollectorError:
     err = CollectorError(message)
     err.stop_fallback = True  # type: ignore[attr-defined]
     return err
-
-
-def normalize_github_repo(raw: str) -> str:
-    """将用户输入规整为 `owner/repo`；支持裸路径与公开 GitHub 仓库链接。"""
-    value = str(raw or "").strip()
-    if not value:
-        raise ValueError("请填写 GitHub 仓库（如 owner/repo）")
-    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value) or any(ch.isspace() for ch in value):
-        raise ValueError("GitHub 仓库标识不能包含空白或控制字符")
-
-    path = value
-    lower = value.lower()
-    if "://" in value or lower.startswith(("github.com/", "www.github.com/")):
-        candidate = value if "://" in value else f"https://{value}"
-        parsed = urlsplit(candidate)
-        host = (parsed.hostname or "").lower()
-        if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password:
-            raise ValueError("请填写有效的公开 GitHub 仓库地址或 owner/repo")
-        if host not in _GITHUB_HOSTS:
-            raise ValueError("该链接不属于 GitHub，请填写 GitHub 仓库地址或 owner/repo")
-        path = parsed.path
-
-    parts = [seg for seg in path.strip("/").split("/") if seg]
-    if len(parts) < 2:
-        raise ValueError("请填写完整的 GitHub 仓库（如 owner/repo 或仓库链接）")
-    owner, repo = parts[0], parts[1]
-    if repo.endswith(".git"):
-        repo = repo[:-4]
-    if ".." in owner or ".." in repo or not _SEGMENT_RE.fullmatch(owner) or not _SEGMENT_RE.fullmatch(repo):
-        raise ValueError("GitHub 仓库格式无效，请使用 owner/repo 形式")
-    full = f"{owner}/{repo}"
-    if len(full) > 128:
-        raise ValueError("GitHub 仓库路径过长（最多 128 字符）")
-    return full
 
 
 def normalize_repo_config(raw: dict | None, *, target_type: str = "releases") -> dict:
@@ -98,21 +62,6 @@ def normalize_repo_config(raw: dict | None, *, target_type: str = "releases") ->
 def repo_web_url(repo: str, kind: str = "releases") -> str:
     suffix = "releases" if kind in {"releases", "gh_releases"} else ""
     return f"{GITHUB_WEB_ROOT}/{repo}/{suffix}" if suffix else f"{GITHUB_WEB_ROOT}/{repo}"
-
-
-def html_to_markdown_text(html_body: str) -> str:
-    raw = (html_body or "").strip()
-    if not raw:
-        return ""
-    converter = html2text.HTML2Text()
-    converter.body_width = 0
-    converter.ignore_images = True
-    converter.ignore_emphasis = False
-    converter.unicode_snob = True
-    converter.protect_links = True
-    text = converter.handle(raw)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text or xml_plain(raw)
 
 
 def retry_at_from_headers(headers: httpx.Headers, *, default_minutes: int = 15) -> datetime:

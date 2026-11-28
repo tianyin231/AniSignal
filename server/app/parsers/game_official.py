@@ -3,8 +3,9 @@
 import html
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
+from app.clock import BJ_TZ
 from app.communities import get_community
 from app.models.enums import Identity, Platform
 from app.schemas.content import ContentType, NormalizedAuthor, NormalizedContent
@@ -17,7 +18,7 @@ def parse_notice(raw: dict) -> NormalizedContent:
     if game == "genshin":
         cid, title, text = str(article["iInfoId"]), article["sTitle"], article.get("sContent") or ""
         value = article.get("dtStartTime")
-        published = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone(timedelta(hours=8))).astimezone(timezone.utc) if value else None
+        published = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=BJ_TZ).astimezone(timezone.utc) if value else None
         url = f"https://ys.mihoyo.com/main/news/detail/{cid}"
         extra = json.loads(article.get("sExt") or "{}")
         covers = [item["url"] for values in extra.values() if isinstance(values, list)

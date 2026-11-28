@@ -10,14 +10,13 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from app.clock import utcnow
+from app.clock import BJ_TZ as _SHANGHAI, utcnow
 from app.config import get_settings
 from app.db import SessionLocal
 from app.services.collect import get_redis_pool, load_due_targets, next_run_with_jitter
 
 logger = logging.getLogger(__name__)
 
-_SHANGHAI = timezone(timedelta(hours=8))
 _local_morning_date = None
 _local_reports_date = None
 _local_custom_sweep_at = None

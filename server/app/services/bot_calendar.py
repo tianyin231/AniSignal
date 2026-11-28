@@ -112,8 +112,7 @@ def calendar_brief(entries: list[dict], due: datetime) -> tuple[str, dict]:
 
 
 async def refresh_calendar(session, brief: dict, now: datetime, *, channels=None, target=None) -> tuple[str, dict] | None:
-    from app.services.bot_channels import allowed_content_ids
-    from app.services.bot import subscribed_communities
+    from app.services.bot_channels import allowed_content_ids, subscribed_communities
     from app.services.bot_access import matches_keywords
     entries = [entry for item in brief.get("items", []) for entry in item.get("calendar_entries", [])]
     ids = {sid for entry in entries for sid in entry.get("schedule_ids", [])}

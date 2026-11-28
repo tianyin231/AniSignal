@@ -49,13 +49,13 @@ test('管理端页面禁止使用原生 alert() 弹窗', () => {
   assert.deepEqual(violations, [], `以下管理端页面违规使用了 alert()：${violations.join(', ')}`)
 })
 
-test('Vue 模板不得重新引入已淘汰的 .panel-glass 样式类', () => {
+test('前端源码与样式表不得重新引入已淘汰的 .panel-glass 样式类', () => {
   const violations: string[] = []
-  for (const file of walkFiles(WEB_APP_DIR, ['.vue'])) {
+  for (const file of walkFiles(WEB_APP_DIR, ['.vue', '.css'])) {
     const text = readFileSync(file, 'utf-8')
     if (/\bpanel-glass\b/.test(text)) {
       violations.push(relative(WEB_APP_DIR, file))
     }
   }
-  assert.deepEqual(violations, [], `以下模板使用了历史同义类 .panel-glass，请统一使用 .panel：${violations.join(', ')}`)
+  assert.deepEqual(violations, [], `以下文件使用了历史同义类 .panel-glass，请统一使用 .panel：${violations.join(', ')}`)
 })

@@ -27,15 +27,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # 历史存量两节点循环依赖（棘轮清单：只允许减少，不允许新增；清理任意一对后必须同步移除此处）
 KNOWN_LEGACY_CYCLES: frozenset[tuple[str, str]] = frozenset({
-    ("app.collectors.github", "app.collectors.github_trending"),
-    ("app.services.ai_news", "app.services.news_editorial"),
-    ("app.services.bot", "app.services.bot_calendar"),
     ("app.services.bot", "app.services.bot_policy"),
     ("app.services.collect", "app.services.queue"),
     ("app.services.events", "app.services.fulfillment"),
     ("app.services.extract", "app.services.redeem_codes"),
-    ("app.services.native_news", "app.services.news_publication"),
-    ("app.services.news_details", "app.services.news_reports"),
 })
 
 

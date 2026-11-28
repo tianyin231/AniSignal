@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from app.clock import utcnow
+from app.clock import to_beijing, utcnow
 from app.models import BotClient, BotDelivery, BotTarget
 from app.services.account_limits import QUOTA_EXHAUSTED, claim_notification
 
@@ -15,7 +15,7 @@ _target_locks = defaultdict(asyncio.Lock)
 
 
 def is_quiet(now: datetime, config: dict) -> bool:
-    hour = (now + timedelta(hours=8)).hour
+    hour = to_beijing(now).hour
     start, end = config.get("quiet_start", 23), config.get("quiet_end", 8)
     return start <= hour < end if start < end else (hour >= start or hour < end) if start != end else False
 

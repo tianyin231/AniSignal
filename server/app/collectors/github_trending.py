@@ -13,16 +13,13 @@ from parsel import Selector
 
 from app.clock import utcnow
 from app.collectors.base import USER_AGENT
-from app.collectors.github import (
-    GITHUB_WEB_ROOT,
-    html_to_markdown_text,
-    normalize_github_repo,
-)
-from app.schemas.ids import git_item_id
+from app.schemas.ids import git_item_id, normalize_github_repo
 from app.services.collector_proxy import http_proxy_kwargs
+from app.services.html import html_to_markdown_text
 
 logger = logging.getLogger(__name__)
 
+GITHUB_WEB_ROOT = "https://github.com"
 GITHUB_RAW_ROOT = "https://raw.githubusercontent.com"
 TRENDING_PERIODS = ("daily", "weekly", "monthly")
 MAX_README_BYTES = 512 * 1024

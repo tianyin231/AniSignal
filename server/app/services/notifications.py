@@ -12,7 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
-from app.clock import utcnow
+from app.clock import BJ_TZ as SHANGHAI, utcnow
 from app.communities import feed_community_keys
 from app.services.feed_preferences import preference_conditions
 from app.models import (
@@ -33,7 +33,6 @@ from app.services.account_limits import reserve_email
 
 logger = logging.getLogger(__name__)
 
-SHANGHAI = timezone(timedelta(hours=8))
 MAX_ITEMS = 5
 
 _LOW_SIGNAL_NOTIFICATION_PATTERNS = (

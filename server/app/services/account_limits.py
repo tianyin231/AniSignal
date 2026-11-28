@@ -5,7 +5,7 @@ from datetime import timedelta
 from fastapi import HTTPException
 from sqlalchemy import func, select
 
-from app.clock import utcnow
+from app.clock import beijing_date, utcnow
 from app.models import BotClient, BotTarget, CustomFeed, NotificationDelivery, SiteSetting, User
 from app.services.custom_policy import insert_ignoring_duplicate, user_limits
 
@@ -13,7 +13,7 @@ QUOTA_EXHAUSTED = "今日通知额度已用完，明日恢复（北京时间）"
 
 
 def notification_day(now):
-    return (now + timedelta(hours=8)).date().isoformat()
+    return beijing_date(now).isoformat()
 
 
 async def quota_view(session, user_id, *, now=None):

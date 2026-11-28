@@ -13,7 +13,7 @@ from app.models import ContentTranslation, ContentVersion, NewsArchive, NewsGrou
 from app.services.html import sanitize_html
 from app.services.news_editorial import load_news_records, representative
 from app.services.editorial_calls import get_policy
-from app.services.news_publication import participant, selected_score
+from app.services.news_publication import participant, resolve_article, selected_score
 from app.services import native_news
 
 
@@ -93,18 +93,6 @@ async def raw_article(session, raw_id: int) -> dict:
         "story": None,
         "relatedStories": [],
     }
-
-
-async def resolve_article(session, key, *, require_news=False):
-    alias = await session.get(NewsArchive, ("article", key))
-    match = re.fullmatch(r"(?:as|content)-(\d+)", key)
-    rid = alias.raw_content_id if alias else int(match[1]) if match else None
-    if rid is None:
-        raise HTTPException(404, "资讯不存在")
-    rows = await load_news_records(session, content_ids=[rid], include_archived=not require_news)
-    if not rows or not native_news.available(rows[0], listed=require_news):
-        raise HTTPException(404, "资讯已撤下或尚未发布")
-    return rows[0], alias
 
 
 async def article(session, key, *, original=False):
